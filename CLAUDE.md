@@ -6,6 +6,10 @@ Assume another agent is working in this repo right now.
 - Leave the main checkout's branch and working tree as you found them.
 - Other agents may be editing shared GitHub issue bodies, such as the wayfinder map. Re-fetch the body right before you edit it and change only your part. Then re-fetch it to confirm everyone's edits survived.
 
+## Merging to main
+
+`main` is protected: every change reaches it through a PR, and PRs merge by squash (`gh pr merge <pr> --squash`). Don't push to `main` directly.
+
 ## Wayfinder artifacts
 
 When work on a wayfinder ticket (or on a skill the ticket kicks off) leaves commits on a branch, keep that branch as a closed PR. The PR preserves the diff even after the branch is deleted:
