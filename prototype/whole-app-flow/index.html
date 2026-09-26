@@ -87,6 +87,14 @@ input, textarea { font: inherit; color: var(--ink); background: var(--surface); 
 .va-tabs button.on { color: var(--accent); font-weight: 700; }
 .va-tabs svg, .va-rail svg { width: 22px; height: 22px; }
 .va-rail { display: none; }
+.wday { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.wday:last-child { border-bottom: 0; }
+.wday.past .wlbl, .dayopt.past .wlbl { opacity: .55; }
+.wday.today .wlbl { background: var(--accent); color: var(--accent-ink); }
+.wlbl { width: 46px; flex: none; display: flex; flex-direction: column; align-items: center; border-radius: 8px; padding: 4px 0; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; background: var(--surface2); }
+.wlbl .tnum { font-size: 1.05rem; letter-spacing: 0; }
+.dayopt { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); background: var(--surface); padding: 8px 12px 8px 8px; text-align: left; width: 100%; }
+.dayopt.on { border: 2px solid var(--accent); background: var(--accent-soft); }
 .va-fab { position: fixed; right: 16px; bottom: calc(124px + env(safe-area-inset-bottom, 0px)); z-index: 6; border-radius: 999px; padding: 13px 18px; box-shadow: var(--shadow); }
 .a-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .a-card { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column; position: relative; text-align: left; border: 0; padding: 0; }
@@ -258,12 +266,22 @@ const S = {
   role: "visitor",
   stack: [{ s: "home" }],
   q: "", tags: [], maxDiff: 9, maxTime: 0, easyCleanup: false,
-  week: [1, 5], checked: {}, fridge: ["chicken thigh", "rice", "green onion"],
-  pick: false, sheet: null, menu: false, drawer: false, preview: 1, sitesEdit: false,
+  weekOff: 0, plans: { "2026-09-14": [[3], [], [8], [], [9], [6], []], "2026-09-21": [[5], [], [1], [], [4], [], []] }, ticks: {}, fridge: ["chicken thigh", "rice", "green onion"],
+  pick: false, sheet: null, dayFor: null, pickDay: null, pickQ: "", editing: null, menu: false, drawer: false, preview: 1, sitesEdit: false,
   ingest: { stage: "url", url: "", steps: [], draft: null },
   showState: false, toast: "",
 };
 const cur = () => S.stack[S.stack.length - 1];
+// Prototype "today" is Fri 25 Sep 2026; weeks run Monday to Sunday.
+const BASE = Date.UTC(2026, 8, 21), TODAY = 4, DAYN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const dayDate = (off, i) => new Date(BASE + (off * 7 + i) * 864e5);
+const wkKey = (off = S.weekOff) => dayDate(off, 0).toISOString().slice(0, 10);
+const dayLabel = (off, i) => { const d = dayDate(off, i); return `${DAYN[i]} ${d.getUTCDate()} ${d.toLocaleString("en", { month: "short", timeZone: "UTC" })}`; };
+const plan = (off = S.weekOff) => S.plans[wkKey(off)] || (S.plans[wkKey(off)] = [[], [], [], [], [], [], []]);
+const wk = (off = S.weekOff) => [...new Set(plan(off).flat())];
+const ticks = () => S.ticks[wkKey()] || (S.ticks[wkKey()] = {});
+const weekName = off => off === 0 ? "This week" : off === 1 ? "Next week" : off === -1 ? "Last week" : off > 0 ? `In ${off} weeks` : `${-off} weeks ago`;
+const isPast = (off, i) => off < 0 || (off === 0 && i < TODAY);
 const isEditor = () => S.role === "editor";
 const byId = id => RECIPES.find(r => r.id === id);
 const allTags = () => [...new Set(RECIPES.flatMap(r => r.tags))].sort();
@@ -288,7 +306,7 @@ const filterCount = () => S.tags.length + (S.maxDiff < 9) + (S.maxTime > 0) + S.
 
 function grocery() {
   const map = new Map(); const hidden = new Set();
-  S.week.map(byId).filter(r => r && !r.pending).forEach(r => r.ing.forEach(i => {
+  wk().map(byId).filter(r => r && !r.pending).forEach(r => r.ing.forEach(i => {
     if (STAPLES.includes(i.c)) { hidden.add(i.c); return; }
     const k = i.c + "|" + i.u;
     const e = map.get(k) || { ...i, q: 0, from: [] };
@@ -323,7 +341,8 @@ const thumb = (r, cls = "", st = "") => `<div class="thumb ${cls}" style="--h:${
 const meter = n => `<span class="m">${[1, 2, 3].map(i => `<i class="${i <= n ? "f" : ""}"></i>`).join("")}</span>`;
 const diff = r => `<span class="diff" title="Prep ${r.d[0]} · Cook ${r.d[1]} · Cleanup ${r.d[2]}">${meter(r.d[0])}${meter(r.d[1])}${meter(r.d[2])}<b>${totalD(r)}</b></span>`;
 const pend = r => r.pending ? `<span class="pending">Enrichment pending</span>` : "";
-const inWeek = id => S.week.includes(id);
+const inWeek = id => wk().includes(id);
+const daysOf = id => plan().map((d, i) => d.includes(id) ? i : -1).filter(i => i >= 0);
 
 function filterControls() {
   return `
@@ -341,48 +360,81 @@ function filterControls() {
 // ---------------- shared screens (not what the variants disagree on) ----------------
 function recipeScreen(id, compact) {
   const r = byId(id); if (!r) return "";
-  const ed = isEditor();
+  const ed = isEditor(), e = S.editing && S.editing.id === r.id ? S.editing : null;
+  const view = e ? { ...r, d: e.d, tags: e.tags } : r;
+  const changes = e ? e.d.filter((v, i) => v !== r.d[i]).length + e.tags.filter(t => !r.tags.includes(t)).length + r.tags.filter(t => !e.tags.includes(t)).length : 0;
+  const days = daysOf(r.id);
   return `<div class="stack">
     ${thumb(r, "recipe-hero")}
     <div class="stack" style="gap:6px"><h1>${esc(r.title)}</h1>
       <div class="small muted">From <a href="https://${r.host}" target="_blank" rel="noopener">${esc(r.site)}</a> · ${pend(r)}</div></div>
     ${r.pending ? `<div class="banner">Ingredients aren't parsed yet, so this recipe doesn't show up in the grocery list or fridge matches.</div>` : ""}
     <div class="row small tnum"><span><b>Prep</b> ${fmtT(r.t.prep)}</span><span><b>Cook</b> ${fmtT(r.t.cook)}</span><span><b>Total</b> ${fmtT(r.t.total)}</span><span class="muted">(stated by the source)</span></div>
-    <div class="panel stack">
-      <div class="row"><h3>Difficulty</h3><span class="spacer"></span>${diff(r)}</div>
-      ${ed ? ["Prep", "Cook", "Cleanup"].map((p, i) => `<div class="drow"><span>${p}</span>${meter(r.d[i]).replace('class="m"', 'class="diff"><span class="m"') + "</span>"}<span class="stepper"><button data-act="rdiff" data-id="${r.id}" data-i="${i}" data-v="-1" aria-label="Lower ${p}">−</button><b class="tnum">${r.d[i]}</b><button data-act="rdiff" data-id="${r.id}" data-i="${i}" data-v="1" aria-label="Raise ${p}">+</button></span></div>`).join("") : `<div class="small muted">Prep ${r.d[0]} · Cook ${r.d[1]} · Cleanup ${r.d[2]}</div>`}
+    ${ed && !e ? `<div class="row"><button class="btn" data-act="editStart" data-id="${r.id}">Edit difficulty and tags</button>
+      <button class="btn ${inWeek(r.id) ? "" : "primary"}" data-act="week" data-id="${r.id}">${days.length ? "✓ " + days.map(i => DAYN[i]).join(", ") + " · change" : "Add to a day"}</button></div>` : ""}
+    ${!ed && days.length ? `<div class="small muted">Planned for ${days.map(i => DAYN[i]).join(", ")}.</div>` : ""}
+    <div class="panel stack" ${e ? 'style="border:2px solid var(--accent)"' : ""}>
+      ${e ? `<div class="eyebrow" style="color:var(--accent)">Editing · nothing is saved until you press Save</div>` : ""}
+      <div class="row"><h3>Difficulty</h3><span class="spacer"></span>${diff(view)}</div>
+      ${e ? ["Prep", "Cook", "Cleanup"].map((p, i) => `<div class="drow"><span>${p}</span><span class="diff">${meter(e.d[i])}</span><span class="stepper"><button data-act="rdiff" data-i="${i}" data-v="-1" aria-label="Lower ${p}">−</button><b class="tnum">${e.d[i]}</b><button data-act="rdiff" data-i="${i}" data-v="1" aria-label="Raise ${p}">+</button></span></div>`).join("") : `<div class="small muted">Prep ${r.d[0]} · Cook ${r.d[1]} · Cleanup ${r.d[2]}</div>`}
+      <h3>Tags</h3>
+      ${e ? `<div class="chips">${[...new Set([...allTags(), ...e.tags])].sort().map(t => `<button class="chip ${e.tags.includes(t) ? "on" : ""}" data-act="rtag" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>
+      <form class="row" data-form="newtag" style="flex-wrap:nowrap"><input id="newtag-${r.id}" placeholder="New tag"><button class="btn small">Add tag</button></form>
+      <div class="row"><button class="btn primary" data-act="editSave" ${changes ? "" : "disabled"}>Save ${changes} change${changes === 1 ? "" : "s"}</button><button class="btn" data-act="editCancel">Cancel</button></div>`
+      : `<div class="chips">${r.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("") || `<span class="small muted">No tags</span>`}</div>`}
     </div>
-    <div class="panel stack"><h3>Tags</h3>
-      ${ed ? `<div class="chips">${allTags().map(t => `<button class="chip ${r.tags.includes(t) ? "on" : ""}" data-act="rtag" data-id="${r.id}" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>
-      <form class="row" data-form="newtag" data-id="${r.id}"><input id="newtag-${r.id}" placeholder="New tag" style="flex:1"><button class="btn small">Add tag</button></form>`
-      : `<div class="chips">${r.tags.map(t => `<span class="tag">${esc(t)}</span>`).join("")}</div>`}
-    </div>
-    ${ed ? `<div class="row"><button class="btn ${inWeek(r.id) ? "" : "primary"}" data-act="week" data-id="${r.id}">${inWeek(r.id) ? "✓ In this week · remove" : "Add to this week"}</button></div>` : inWeek(r.id) ? `<div class="small muted">On this week's plan.</div>` : ""}
     <div class="stub">The inside of the recipe view (ingredients, steps, Our Version, cooking mode) belongs to “Prototype: mobile recipe view”.${compact ? "" : " This page only shows what the whole-app flow needs."}</div>
   </div>`;
 }
 
 function weekScreen(pickHint) {
-  const ed = isEditor(); const g = grocery();
-  const rs = S.week.map(byId).filter(Boolean);
+  const ed = isEditor(), g = grocery(), off = S.weekOff, p = plan();
   return `<div class="stack">
-    <div class="row"><h1>This week</h1><span class="spacer"></span><span class="muted small tnum">${rs.length} recipes</span></div>
+    <div class="row" style="flex-wrap:nowrap"><button class="icon-btn" data-act="wkNav" data-v="-1" aria-label="Previous week">‹</button>
+      <div style="flex:1;text-align:center"><h1 style="font-size:1.3rem">${weekName(off)}</h1><div class="small muted">${dayLabel(off, 0)} – ${dayLabel(off, 6)}</div></div>
+      <button class="icon-btn" data-act="wkNav" data-v="1" aria-label="Next week">›</button></div>
     ${!ed ? `<div class="banner info">You're viewing the household's plan. Sign in as an editor to change it.</div>` : ""}
-    ${rs.length ? `<div class="stack">${rs.map(r => `<div class="row panel" style="padding:10px;flex-wrap:nowrap">${thumb(r, "", "width:44px;height:44px;flex:none")}<button class="btn ghost" style="text-align:left;flex:1;min-width:0" data-act="go" data-s="recipe" data-id="${r.id}">${esc(r.title)}</button>${pend(r)}${ed ? `<button class="btn small" data-act="week" data-id="${r.id}">Remove</button>` : ""}</div>`).join("")}</div>`
-      : `<div class="panel muted">No recipes chosen yet.</div>`}
-    ${ed ? `<div class="row">${pickHint}</div>` : ""}
-    <button class="btn primary" data-act="go" data-s="grocery" ${rs.length ? "" : "disabled"}>Grocery list · ${g.count} items</button>
+    ${off < 0 ? `<div class="small muted">Past weeks are kept, so you can see what you cooked.</div>` : ""}
+    <div class="panel" style="padding-block:4px">${p.map((ids, i) => `<div class="wday ${off === 0 && i === TODAY ? "today" : ""} ${isPast(off, i) ? "past" : ""}">
+      <div class="wlbl">${DAYN[i]}<span class="tnum">${dayDate(off, i).getUTCDate()}</span></div>
+      <div class="stack" style="gap:6px;flex:1;min-width:0">${ids.map(id => { const r = byId(id); return `<div class="row" style="flex-wrap:nowrap">${thumb(r, "", "width:36px;height:36px;flex:none;font-size:.75rem")}<button class="btn ghost" style="text-align:left;flex:1;min-width:0;padding-inline:0" data-act="go" data-s="recipe" data-id="${r.id}">${esc(r.title)}</button>${pend(r)}${ed ? `<button class="btn ghost small" data-act="unassign" data-i="${i}" data-id="${r.id}" aria-label="Remove">×</button>` : ""}</div>`; }).join("") || `<span class="small muted">${off === 0 && i === TODAY ? "Nothing planned tonight" : "—"}</span>`}</div>
+      ${ed ? `<button class="btn ghost small" data-act="dayAdd" data-i="${i}">+ Add</button>` : ""}</div>`).join("")}</div>
+    ${ed ? `<div class="small muted">${pickHint}</div>` : ""}
+    <button class="btn primary" data-act="go" data-s="grocery" ${wk().length ? "" : "disabled"}>Grocery list for ${weekName(off).toLowerCase()} · ${g.count} items</button>
   </div>`;
+}
+
+function sheets() {
+  if (S.sheet === "day") {
+    const r = byId(S.dayFor), off = S.weekOff, p = plan();
+    return `<div class="sheet-bg" data-act="closeSheet"><div class="sheet" data-stop>
+      <div class="stack" style="gap:2px"><div class="eyebrow">Add to a day</div><h2>${esc(r.title)}</h2></div>
+      <div class="row" style="flex-wrap:nowrap"><button class="icon-btn" data-act="wkNav" data-v="-1" aria-label="Previous week">‹</button><div style="flex:1;text-align:center"><b>${weekName(off)}</b><div class="small muted">${dayLabel(off, 0)} – ${dayLabel(off, 6)}</div></div><button class="icon-btn" data-act="wkNav" data-v="1" aria-label="Next week">›</button></div>
+      <div class="stack" style="gap:6px">${p.map((ids, i) => { const on = ids.includes(r.id); return `<button class="dayopt ${on ? "on" : ""} ${isPast(off, i) ? "past" : ""}" data-act="assign" data-i="${i}">
+        <span class="wlbl">${DAYN[i]}<span class="tnum">${dayDate(off, i).getUTCDate()}</span></span>
+        <span class="small" style="flex:1;min-width:0">${ids.filter(x => x !== r.id).map(x => esc(byId(x).title)).join(", ") || `<span class="muted">Free</span>`}</span>
+        <b class="small">${on ? "✓ Remove" : isPast(off, i) ? "Log" : "Add"}</b></button>`; }).join("")}</div>
+      <button class="btn" data-act="closeSheet">Cancel</button></div></div>`;
+  }
+  if (S.sheet === "pickRecipe") {
+    const q = S.pickQ.toLowerCase(), list = RECIPES.filter(r => !q || (r.title + " " + r.tags.join(" ")).toLowerCase().includes(q)).sort((a, b) => b.added - a.added);
+    return `<div class="sheet-bg" data-act="closeSheet"><div class="sheet" data-stop>
+      <div class="stack" style="gap:2px"><div class="eyebrow">${weekName(S.weekOff)}</div><h2>Pick a recipe for ${dayLabel(S.weekOff, S.pickDay)}</h2></div>
+      <input id="pick-q" type="search" placeholder="Search" value="${esc(S.pickQ)}" data-in="pickQ">
+      <div class="b-list">${list.map(r => `<button class="b-row" data-act="pickFor" data-id="${r.id}">${thumb(r)}<span class="t"><div>${esc(r.title)}</div><div class="small muted">${r.tags.slice(0, 3).map(esc).join(", ")}</div></span><span class="r tnum">${fmtT(r.t.total)}${diff(r)}</span></button>`).join("")}</div>
+      <button class="btn" data-act="closeSheet">Cancel</button></div></div>`;
+  }
+  return "";
 }
 
 function groceryScreen() {
   const g = grocery(); const ed = isEditor();
-  const pendings = S.week.map(byId).filter(r => r && r.pending);
+  const pendings = wk().map(byId).filter(r => r && r.pending);
   return `<div class="stack">
-    <div class="row"><h1>Grocery list</h1><span class="spacer"></span><span class="small muted tnum">${Object.values(S.checked).filter(Boolean).length}/${g.count} got</span></div>
-    <div class="small muted">Combined from ${S.week.length} recipes this week. ${ed ? "" : "Sign in to tick items off."}</div>
+    <div class="row"><h1>Grocery list</h1><span class="spacer"></span><span class="small muted tnum">${Object.values(ticks()).filter(Boolean).length}/${g.count} got</span></div>
+    <div class="small muted">Combined from ${wk().length} recipes this week. ${ed ? "" : "Sign in to tick items off."}</div>
     ${pendings.map(r => `<div class="banner">${esc(r.title)} isn't enriched yet, so its ingredients are missing here.</div>`).join("")}
-    ${g.groups.map(gr => `<div class="stack" style="gap:0"><div class="eyebrow" style="padding-top:8px">${gr.cat}</div><div class="glist">${gr.items.map(i => { const k = i.c + "|" + i.u; return `<button class="gitem ${S.checked[k] ? "done" : ""}" data-act="check" data-k="${esc(k)}" ${ed ? "" : "disabled"}><span class="b-check ${S.checked[k] ? "on" : ""}">${S.checked[k] ? "✓" : ""}</span><span class="stack" style="gap:0"><span class="n">${esc(i.c)}</span><span class="small muted">${i.from.map(esc).join(", ")}</span></span><span class="q">${fmtQ(i.q)} ${i.u}</span></button>`; }).join("")}</div></div>`).join("")}
+    ${g.groups.map(gr => `<div class="stack" style="gap:0"><div class="eyebrow" style="padding-top:8px">${gr.cat}</div><div class="glist">${gr.items.map(i => { const k = i.c + "|" + i.u; return `<button class="gitem ${ticks()[k] ? "done" : ""}" data-act="check" data-k="${esc(k)}" ${ed ? "" : "disabled"}><span class="b-check ${ticks()[k] ? "on" : ""}">${ticks()[k] ? "✓" : ""}</span><span class="stack" style="gap:0"><span class="n">${esc(i.c)}</span><span class="small muted">${i.from.map(esc).join(", ")}</span></span><span class="q">${fmtQ(i.q)} ${i.u}</span></button>`; }).join("")}</div></div>`).join("")}
     ${g.hidden.length ? `<div class="small muted">Pantry staples left out: ${g.hidden.join(", ")}.</div>` : ""}
     ${ed ? `<button class="btn small" style="align-self:start" data-act="go" data-s="settings">Edit store categories and pantry staples</button>` : ""}
   </div>`;
@@ -494,7 +546,7 @@ function sharedScreen(s) {
   const c = cur();
   switch (s) {
     case "recipe": return recipeScreen(c.id);
-    case "week": return weekScreen(S.variant === "A" ? `<span class="small muted">Tap “+ Week” on any recipe to add it.</span>` : S.variant === "B" ? `<button class="btn" data-act="plan">Choose recipes</button>` : `<button class="btn" data-act="pickStart">Add recipes</button>`);
+    case "week": return weekScreen(S.variant === "A" ? "Tap “+ Add” on a day, or “+ Week” on any recipe card." : S.variant === "B" ? `<button class="btn small" data-act="plan">Choose recipes</button>` : `<button class="btn small" data-act="pickStart">Add recipes</button>`);
     case "grocery": return groceryScreen();
     case "fridge": return fridgeScreen();
     case "sites": return sitesScreen();
@@ -525,8 +577,8 @@ function A() {
   const body = s === "home" ? `
     <div class="row" style="flex-wrap:nowrap"><input id="a-q" type="search" placeholder="Search ${RECIPES.length} recipes" value="${esc(S.q)}" data-in="q"><button class="btn" data-act="sheet" data-v="filters">Filters${filterCount() ? ` · ${filterCount()}` : ""}</button></div>
     <div class="chips scroll">${allTags().map(t => `<button class="chip ${S.tags.includes(t) ? "on" : ""}" data-act="tag" data-v="${esc(t)}">${esc(t)}</button>`).join("")}</div>
-    <div class="a-grid">${list.map(r => `<div class="a-card"><button style="all:unset;cursor:pointer;display:flex;flex-direction:column" data-act="go" data-s="recipe" data-id="${r.id}">${thumb(r)}<div class="body"><h3>${esc(r.title)}</h3><div class="small muted">${esc(r.site)}</div><div class="row small tnum" style="justify-content:space-between">${fmtT(r.t.total)} ${diff(r)}</div>${pend(r)}</div></button>
-      ${isEditor() ? `<button class="wk ${inWeek(r.id) ? "on" : ""}" data-act="week" data-id="${r.id}" aria-label="Toggle this week">${inWeek(r.id) ? "✓ Week" : "+ Week"}</button>` : ""}</div>`).join("") || `<div class="muted">Nothing matches.</div>`}</div>`
+    <div class="a-grid">${list.map(r => `<div class="a-card"><button style="all:unset;cursor:pointer;display:flex;flex-direction:column" data-act="go" data-s="recipe" data-id="${r.id}">${thumb(r)}<div class="body"><h3>${esc(r.title)}</h3><div class="small muted">${esc(r.site)}</div><div class="row small tnum" style="justify-content:space-between">${fmtT(r.t.total)} ${diff(r)}</div><div class="chips" style="gap:4px">${r.tags.slice(0, 4).map(t => `<span class="tag">${esc(t)}</span>`).join("")}${r.tags.length > 4 ? `<span class="tag">+${r.tags.length - 4}</span>` : ""}</div>${pend(r)}</div></button>
+      ${isEditor() ? `<button class="wk ${inWeek(r.id) ? "on" : ""}" data-act="week" data-id="${r.id}" aria-label="Toggle this week">${inWeek(r.id) ? "✓ " + daysOf(r.id).map(i => DAYN[i]).join(" ") : "+ Week"}</button>` : ""}</div>`).join("") || `<div class="muted">Nothing matches.</div>`}</div>`
     : sharedScreen(s);
   const topTitle = S.stack.length > 1 ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button><h1>${TITLES[s]}</h1>` : `<h1>${tab === "home" ? "Our Recipes" : TITLES[tab]}</h1>`;
   return `<div class="va">
@@ -541,8 +593,7 @@ function A() {
       <main class="screen">${body}</main>
     </div>
     <nav class="va-tabs">${tabs.map(([k, l, ic]) => `<button class="${tab === k ? "on" : ""}" data-act="tab" data-v="${k}">${ic}${l}</button>`).join("")}</nav>
-    ${isEditor() && s === "home" ? `<button class="btn primary va-fab" data-act="go" data-s="ingest">+ Add recipe</button>` : ""}
-    ${filterSheet()}
+    ${filterSheet()}${sheets()}
   </div>`;
 }
 
@@ -565,7 +616,7 @@ function B() {
     </div>
     ${S.sheet === "filters" ? `<div class="panel stack">${filterControls()}</div>` : ""}
     ${!searching && !S.pick ? `<div class="b-tools">
-      <button data-act="go" data-s="week"><b>This week</b><span>${S.week.length} recipes · list</span></button>
+      <button data-act="go" data-s="week"><b>This week</b><span>${wk().length} recipes · list</span></button>
       <button data-act="go" data-s="fridge"><b>Fridge</b><span>What can I make?</span></button>
       <button data-act="go" data-s="sites"><b>Sites</b><span>${SITES.length} favorites</span></button></div>` : ""}
     ${S.pick ? `<div class="banner info">Choosing this week's recipes. Tap to add or remove.</div>` : ""}
@@ -577,8 +628,8 @@ function B() {
       <span class="brand">${S.stack.length > 1 ? TITLES[s] : "Our Recipes"}</span><span class="spacer"></span>
       ${isEditor() ? `<button class="icon-btn" data-act="go" data-s="ingest" aria-label="Add a recipe">${ICON.plus}</button>` : `<button class="btn small" data-act="go" data-s="signin">Sign in</button>`}</header>
     <main class="screen">${body}</main>
-    ${S.pick && s === "home" ? `<div class="b-actionbar"><span class="tnum">${S.week.length} chosen</span><button class="btn small" data-act="plan">Done</button><button class="btn small primary" data-act="go" data-s="grocery">Grocery list</button></div>` : ""}
-    ${S.drawer ? `<div class="drawer-bg" data-act="drawer"></div><nav class="drawer">
+    ${S.pick && s === "home" ? `<div class="b-actionbar"><span class="tnum">${wk().length} chosen</span><button class="btn small" data-act="plan">Done</button><button class="btn small primary" data-act="go" data-s="grocery">Grocery list</button></div>` : ""}
+    ${sheets()}${S.drawer ? `<div class="drawer-bg" data-act="drawer"></div><nav class="drawer">
       <div class="brand" style="font-family:var(--display);font-weight:700;font-size:1.2rem;padding:0 12px 10px">Our Recipes</div>
       <button data-act="nav" data-s="home">Search recipes</button><button data-act="nav" data-s="week">This week</button><button data-act="nav" data-s="grocery">Grocery list</button><button data-act="nav" data-s="fridge">What can I make?</button><button data-act="nav" data-s="sites">Favorite Sites</button><hr>
       ${isEditor() ? `<button data-act="nav" data-s="ingest">Add a recipe</button><button data-act="nav" data-s="settings">Kitchen settings</button><button data-act="signout">Sign out</button>` : `<button data-act="nav" data-s="signin">Editor sign-in</button>`}</nav>` : ""}
@@ -592,8 +643,8 @@ function C() {
   const tile = r => `<div class="c-tile"><button style="all:unset;cursor:pointer;display:block" data-act="${S.pick ? "week" : "go"}" data-s="recipe" data-id="${r.id}">${thumb(r)}<div class="cap"><b style="font-family:var(--display);font-size:1.15rem">${esc(r.title)}</b><div class="row small tnum">${fmtT(r.t.total)} · ${diff(r)} · ${esc(r.site)} ${pend(r)}</div></div></button>
     ${S.pick ? `<span class="pick b-check ${inWeek(r.id) ? "on" : ""}" style="background:${inWeek(r.id) ? "" : "rgba(255,255,255,.9)"}">${inWeek(r.id) ? "✓" : ""}</span>` : ""}</div>`;
   const dash = `<div class="c-dash">
-    <section class="c-box hero"><div class="row"><h2>This week</h2><span class="spacer"></span><span class="small tnum">${S.week.length} recipes</span></div>
-      <div class="c-strip">${S.week.map(byId).map(r => `<button class="it" data-act="go" data-s="recipe" data-id="${r.id}">${thumb(r)}${esc(r.title)}</button>`).join("") || `<span class="muted">Nothing planned.</span>`}</div>
+    <section class="c-box hero"><div class="row"><h2>This week</h2><span class="spacer"></span><span class="small tnum">${wk().length} recipes</span></div>
+      <div class="c-strip">${wk().map(byId).map(r => `<button class="it" data-act="go" data-s="recipe" data-id="${r.id}">${thumb(r)}${esc(r.title)}</button>`).join("") || `<span class="muted">Nothing planned.</span>`}</div>
       <div class="row"><button class="btn" data-act="go" data-s="grocery">Grocery list · ${g.count}</button>${ed ? `<button class="btn" data-act="pickStart">Add recipes</button>` : ""}</div></section>
     <section class="c-box"><h2>What can I make?</h2><div class="small muted">Tell it what's in the fridge.</div>
       <form class="row" data-form="fridge" style="flex-wrap:nowrap"><input id="c-fridge" list="c-ing" placeholder="e.g. spinach" autocomplete="off"><button class="btn primary">Add</button></form><datalist id="c-ing">${ALL_ING.map(c => `<option value="${esc(c)}">`).join("")}</datalist>
@@ -609,31 +660,29 @@ function C() {
   </div>`;
   const browse = `<div class="stack">
     <div class="row" style="flex-wrap:nowrap"><input id="c-q" type="search" placeholder="Search" value="${esc(S.q)}" data-in="q"><button class="btn c-filterbtn" data-act="sheet" data-v="filters">Filters${filterCount() ? ` · ${filterCount()}` : ""}</button></div>
-    ${S.pick ? `<div class="banner info row">Choosing this week's recipes: ${S.week.length} chosen <span class="spacer"></span><button class="btn small primary" data-act="pickDone">Done</button></div>` : ""}
+    ${S.pick ? `<div class="banner info row">Choosing this week's recipes: ${wk().length} chosen <span class="spacer"></span><button class="btn small primary" data-act="pickDone">Done</button></div>` : ""}
     <div class="c-browse"><aside class="c-filters panel stack">${filterControls()}</aside><div class="c-tiles">${filtered().map(tile).join("") || `<div class="muted">Nothing matches.</div>`}</div></div></div>`;
   const body = s === "home" ? dash : s === "browse" ? browse : sharedScreen(s);
   return `<div style="position:relative">
     <header class="vc-top">${S.stack.length > 1 ? `<button class="icon-btn" data-act="back" aria-label="Back">${ICON.back}</button><span class="brand">${TITLES[s]}</span>` : `<span class="brand">Our Recipes</span>`}
       <span class="spacer"></span>${S.stack.length > 1 ? `<button class="btn ghost small" data-act="homeC">Home</button>` : ""}<button class="icon-btn" data-act="menu" aria-label="Account">${ICON.user}</button>${accountMenu()}</header>
-    <main class="screen">${body}</main>${filterSheet()}
+    <main class="screen">${body}</main>${filterSheet()}${sheets()}
   </div>`;
 }
 
 // ---------------- prototype chrome + state readout ----------------
 function proto() {
   const keys = Object.keys(VARIANTS);
-  const snapshot = { variant: S.variant, role: S.role, stack: S.stack.map(x => x.s + (x.id ? `:${x.id}` : "")), query: S.q, filters: { tags: S.tags, maxTotalDifficulty: S.maxDiff, easyCleanup: S.easyCleanup, maxStatedTotal: S.maxTime || null }, week: S.week, groceryTicked: Object.keys(S.checked).filter(k => S.checked[k]), fridge: S.fridge, choosing: S.pick, ingest: S.ingest.stage, favoriteSites: SITES.length, recipes: RECIPES.length };
+  const snapshot = { variant: S.variant, role: S.role, stack: S.stack.map(x => x.s + (x.id ? `:${x.id}` : "")), query: S.q, filters: { tags: S.tags, maxTotalDifficulty: S.maxDiff, easyCleanup: S.easyCleanup, maxStatedTotal: S.maxTime || null }, week: { monday: wkKey(), days: Object.fromEntries(plan().map((d, i) => [DAYN[i], d])) }, weeksKept: Object.keys(S.plans).length, groceryTicked: Object.keys(ticks()).filter(k => ticks()[k]), editing: S.editing, fridge: S.fridge, choosing: S.pick, ingest: S.ingest.stage, favoriteSites: SITES.length, recipes: RECIPES.length };
   return `<div class="pbar" role="toolbar" aria-label="Prototype controls">
       <button data-act="variant" data-v="-1" aria-label="Previous variant">←</button><span class="lbl">${S.variant} · ${VARIANTS[S.variant]}</span><button data-act="variant" data-v="1" aria-label="Next variant">→</button>
       <button class="${isEditor() ? "role-editor" : ""}" data-act="role">${isEditor() ? "Editor" : "Visitor"}</button>
       <button data-act="state">${S.showState ? "Hide" : "State"}</button></div>
     ${S.showState ? `<div class="pstate"><pre>${esc(JSON.stringify(snapshot, null, 1))}</pre>
       <h4>React to</h4><ul>
-      <li>Which navigation model: A, B or C? Or which parts of each?</li>
-      <li>Visitors can see the week and grocery list but can't change them. Right?</li>
-      <li>Is "This week" one flat list, or recipes placed on days?</li>
-      <li>Does ticking grocery items need to sync between phones?</li>
-      <li>Is the fridge helper a top-level place, or a mode of search?</li></ul></div>` : ""}`;
+      <li>A v2: “+ Week” on a card opens a day sheet. Keep it, or plan only from the week screen's “+ Add”?</li>
+      <li>More than one recipe on a day (e.g. a main and a dessert): allowed here. OK?</li>
+      <li>Past days can be logged (“Log”) so history shows what was cooked. Wanted?</li></ul></div>` : ""}`;
 }
 
 // ---------------- render + events ----------------
@@ -645,12 +694,12 @@ function render() {
   pr.innerHTML = proto();
   if (fid) { const el = document.getElementById(fid); if (el) { el.focus(); try { sel && el.setSelectionRange(...sel); } catch (e) {} } }
 }
-function go(s, id) { S.menu = S.drawer = false; S.stack.push({ s, id }); window.scrollTo(0, 0); }
+function go(s, id) { S.menu = S.drawer = false; S.editing = null; S.stack.push({ s, id }); window.scrollTo(0, 0); }
 
 const ACT = {
-  go: d => go(d.s, d.id && +d.id),
-  back: () => { if (S.stack.length > 1) S.stack.pop(); if (S.variant === "C" && cur().s !== "browse") S.pick = false; },
-  tab: d => { S.stack = [{ s: d.v }]; S.menu = false; window.scrollTo(0, 0); },
+  go: d => { if (d.s === "ingest") ACT.ingestReset(); go(d.s, d.id && +d.id); },
+  back: () => { S.editing = null; if (S.stack.length > 1) S.stack.pop(); if (S.variant === "C" && cur().s !== "browse") S.pick = false; },
+  tab: d => { S.editing = null; S.stack = [{ s: d.v }]; S.menu = false; window.scrollTo(0, 0); },
   nav: d => { S.stack = d.s === "home" ? [{ s: "home" }] : [{ s: "home" }, { s: d.s }]; S.drawer = false; },
   homeC: () => { S.stack = [{ s: "home" }]; S.pick = false; },
   open: d => { if (matchMedia("(min-width: 900px)").matches) S.preview = +d.id; else go("recipe", +d.id); },
@@ -671,14 +720,27 @@ const ACT = {
   easyCleanup: () => { S.easyCleanup = !S.easyCleanup; },
   resetDiff: () => { S.maxDiff = 9; },
   clearFilters: () => { S.tags = []; S.maxDiff = 9; S.maxTime = 0; S.easyCleanup = false; },
-  week: d => { if (!isEditor()) return; const id = +d.id; S.week = inWeek(id) ? S.week.filter(x => x !== id) : [...S.week, id]; },
+  week: d => {
+    if (!isEditor()) return; const id = +d.id;
+    if (S.variant === "A") { S.sheet = "day"; S.dayFor = id; return; }
+    const p = plan(); if (inWeek(id)) p.forEach((day, i) => p[i] = day.filter(x => x !== id));
+    else { const i = p.findIndex((day, i) => !day.length && !isPast(S.weekOff, i)); p[i < 0 ? 6 : i].push(id); }
+  },
+  assign: d => { const p = plan(), i = +d.i, id = S.dayFor; p[i] = p[i].includes(id) ? p[i].filter(x => x !== id) : [...p[i], id]; S.sheet = null; },
+  unassign: d => { const p = plan(); p[+d.i] = p[+d.i].filter(x => x !== +d.id); },
+  wkNav: d => { S.weekOff += +d.v; },
+  dayAdd: d => { S.sheet = "pickRecipe"; S.pickDay = +d.i; S.pickQ = ""; },
+  pickFor: d => { plan()[S.pickDay].push(+d.id); S.sheet = null; },
+  editStart: d => { const r = byId(+d.id); S.editing = { id: r.id, d: [...r.d], tags: [...r.tags] }; },
+  editCancel: () => { S.editing = null; },
+  editSave: () => { const e = S.editing, r = byId(e.id); r.d = e.d; r.tags = e.tags; S.editing = null; },
   plan: () => { if (!isEditor()) return; S.pick = !S.pick; if (S.pick) S.stack = [{ s: "home" }]; },
   pickStart: () => { S.pick = true; S.tags = []; go("browse"); },
   pickDone: () => { S.pick = false; S.stack = [{ s: "home" }, { s: "week" }]; },
-  check: d => { if (isEditor()) S.checked[d.k] = !S.checked[d.k]; },
+  check: d => { if (isEditor()) { const t = ticks(); t[d.k] = !t[d.k]; } },
   unfridge: d => { S.fridge = S.fridge.filter(c => c !== d.v); },
-  rdiff: d => { const r = byId(+d.id); r.d[+d.i] = Math.min(3, Math.max(1, r.d[+d.i] + +d.v)); },
-  rtag: d => { const r = byId(+d.id); r.tags = r.tags.includes(d.v) ? r.tags.filter(t => t !== d.v) : [...r.tags, d.v]; },
+  rdiff: d => { const e = S.editing; e.d[+d.i] = Math.min(3, Math.max(1, e.d[+d.i] + +d.v)); },
+  rtag: d => { const e = S.editing; e.tags = e.tags.includes(d.v) ? e.tags.filter(t => t !== d.v) : [...e.tags, d.v]; },
   sitesEdit: () => { S.sitesEdit = !S.sitesEdit; },
   siteDel: d => { SITES.splice(+d.i, 1); },
   siteMove: d => { const i = +d.i, j = i + +d.v; [SITES[i], SITES[j]] = [SITES[j], SITES[i]]; },
@@ -729,6 +791,7 @@ document.addEventListener("click", e => {
 document.addEventListener("input", e => {
   const k = e.target.dataset.in; if (!k) return;
   if (k === "q") S.q = e.target.value;
+  if (k === "pickQ") S.pickQ = e.target.value;
   if (k === "maxDiff") { S.maxDiff = +e.target.value; document.querySelectorAll("#f-diff-v").forEach(x => x.textContent = S.maxDiff); return; }
   if (k === "draftTitle") { S.ingest.draft.title = e.target.value; return; }
   render();
@@ -738,7 +801,7 @@ document.addEventListener("submit", e => {
   e.preventDefault();
   const f = e.target, kind = f.dataset.form, fd = new FormData(f);
   if (kind === "fridge") { const v = f.querySelector("input").value.trim().toLowerCase(); if (v && !S.fridge.includes(v)) S.fridge.push(v); }
-  if (kind === "newtag") { const v = f.querySelector("input").value.trim().toLowerCase(); const r = byId(+f.dataset.id); if (v && !r.tags.includes(v)) r.tags.push(v); }
+  if (kind === "newtag") { const v = f.querySelector("input").value.trim().toLowerCase(); const e = S.editing; if (v && !e.tags.includes(v)) e.tags.push(v); }
   if (kind === "ingest") { const v = f.querySelector("input").value.trim(); if (v) { if (cur().s !== "ingest") go("ingest"); startIngest(v); return; } }
   if (kind === "paste") { const g = S.ingest; g.steps.push({ label: "Read pasted page with the LLM", st: "ok" }); g.draft = { title: "Lasagna", via: "llm", t: { prep: 30, cook: 60, total: 90 }, lines: ["12 lasagna noodles", "1 lb ground beef", "24 oz marinara", "15 oz ricotta", "2 cups mozzarella"], steps: 8, d: [2, 2, 3], tags: [] }; g.stage = "review"; }
   if (kind === "site") { Object.assign(SITES[+f.dataset.i], { name: fd.get("name"), url: fd.get("url"), note: fd.get("note") }); }
