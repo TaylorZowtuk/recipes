@@ -75,8 +75,12 @@ _Avoid_: Normalized ingredient, food item
 A canonical ingredient the household always has on hand. Pantry staples are left out of grocery lists and ignored in fridge matching.
 _Avoid_: Basics, essentials
 
+**Week Plan**:
+The recipes the household places on each day of one Monday-to-Sunday week. A day can be empty or hold several recipes, such as a main and a side. Past Week Plans are kept, and past days can be logged, so the plan also records what was cooked.
+_Avoid_: Meal plan, menu, schedule
+
 **Grocery List**:
-The single shared list of ingredients to buy, combined from the recipes chosen for the week.
+The shared list of ingredients to buy, combined from the recipes in one Week Plan. Items ticked off are shared by the household.
 _Avoid_: Shopping list
 
 **Store Category**:
