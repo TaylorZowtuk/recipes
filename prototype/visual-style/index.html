@@ -134,8 +134,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pending { font-size: var(--fs-tiny); color: var(--warn-ink); background: var(--warn-bg); border-radius: var(--r-chip); padding: 1px 8px; font-weight: 700; justify-self: start; }
 
 /* Difficulty meters */
-.diff { display: flex; align-items: center; gap: 8px; font-size: var(--fs-tiny); color: var(--muted); }
-.meter { display: inline-flex; align-items: center; gap: 3px; }
+.diff { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: var(--fs-tiny); color: var(--muted); }
+.meter { display: inline-flex; align-items: center; gap: 2px; }
 .meter i { display: inline-flex; gap: 2px; }
 .meter b { display: block; width: 7px; height: 7px; border-radius: 2px; background: var(--line); }
 .meter b.f { background: var(--accent); }
@@ -178,6 +178,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .device.desk .rview { max-width: 760px; margin: 0 auto; width: 100%; }
 .device.desk .rhead { grid-template-columns: 240px minmax(0, 1fr); align-items: end; column-gap: 24px; padding-top: 28px; }
 .device.desk .rhead .ph { grid-row: span 3; }
+.device.desk .dock { left: calc(50% - 370px); right: calc(50% - 370px); }
 
 /* Cooking mode */
 .cookmode { position: absolute; inset: 0; z-index: 20; background: var(--cook-bg); color: var(--cook-ink); display: flex; flex-direction: column; }
@@ -240,7 +241,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .app[data-dir="B"] .ph.noimg .np-initial { font-style: italic; font-size: 64px; font-weight: 400; }
 .app[data-dir="B"] .meter b { width: 6px; height: 6px; border-radius: 50%; }
 .app[data-dir="B"] .tag { background: none; padding: 0; color: var(--muted); font-weight: 400; font-style: italic; }
-.app[data-dir="B"] .tag + .tag::before { content: "· "; }
+.app[data-dir="B"] .tag:not(:last-child)::after { content: ","; }
 .app[data-dir="B"] .step .n { font-style: italic; font-weight: 400; font-size: 22px; }
 .app[data-dir="B"] .gcat h2 { font-style: italic; font-weight: 600; }
 /* C Kitchen Tool: dense, heavy borders, photo as a strip */
@@ -249,7 +250,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .app[data-dir="C"] .ph.noimg { background: repeating-linear-gradient(135deg, var(--noimg-bg) 0 8px, var(--surface) 8px 16px); }
 .app[data-dir="C"] .ph.noimg .np-initial { display: none; }
 .app[data-dir="C"] .ph.noimg .np-label { display: block; background: var(--surface); border: 2px solid var(--ink); padding: 1px 6px; color: var(--ink); }
-.app[data-dir="C"] .meter b { width: 10px; height: 7px; border-radius: 0; border: 1.5px solid var(--ink); background: none; }
+.app[data-dir="C"] .meter b { width: 8px; height: 7px; border-radius: 0; border: 1.5px solid var(--ink); background: none; }
 .app[data-dir="C"] .meter b.f { background: var(--ink); }
 .app[data-dir="C"] .rhead { grid-template-columns: 104px minmax(0, 1fr); align-items: start; column-gap: 14px; }
 .app[data-dir="C"] .rhead .ph { grid-row: span 3; border: 2px solid var(--ink); }
@@ -479,7 +480,7 @@ function photo(r) {
 function meters(d) {
   const lab = ['Prep', 'Cook', 'Cleanup'];
   return `<div class="diff" aria-label="Difficulty ${d.map((v, i) => lab[i] + ' ' + v).join(', ')}">${d.map((v, i) =>
-    `<span class="meter" title="${lab[i]} ${v} of 3">${lab[i][0]}<i>${[1, 2, 3].map(k => `<b class="${k <= v ? 'f' : ''}"></b>`).join('')}</i></span>`).join('')}<span class="tot">${d[0] + d[1] + d[2]}</span></div>`;
+    `<span class="meter" title="${lab[i]} ${v} of 3">${['P', 'C', 'Cl'][i]}<i>${[1, 2, 3].map(k => `<b class="${k <= v ? 'f' : ''}"></b>`).join('')}</i></span>`).join('')}<span class="tot">${d[0] + d[1] + d[2]}</span></div>`;
 }
 function card(r) {
   const shown = r.tags.slice(0, 4), more = r.tags.length - shown.length;
@@ -613,7 +614,7 @@ function panel(mode) {
     <div>${badge(ratio(c['on-accent'], acc))} Button label on accent</div>
     <div>${badge(ratio(c['cook-ink'], c['cook-bg']))} Cooking mode text</div>
     <div><span class="badge ${sh.tap >= 48 ? 'good' : 'ok'}">${sh.tap}px</span> Smallest tap target (step ticks, grocery ticks, Adjust, Cook); cooking Back/Next are ${sh.tap + 20}px tall</div>
-    <div><span class="badge ok" id="fit">\u2026</span> Recipe cards fully visible on the first phone screen</div>
+    <div><span class="badge ok" id="fit">\u2026</span> Recipe cards visible on the first phone screen, counting part-shown cards as fractions</div>
   </div>
   <p style="font-size:12.5px;color:var(--c-muted);margin-top:8px">Try Kitchen check: Bright light washes the screen out, Arm\u2019s length shows it at half size.</p>
   <h3>Color roles</h3>
@@ -674,11 +675,11 @@ function countFit() {
   const app = probe.firstElementChild, vars = tokenVars(D, 'light');
   for (const k in vars) app.style.setProperty(k, vars[k]);
   const sc = probe.querySelector('.scroll').getBoundingClientRect();
-  const n = [...probe.querySelectorAll('.card')].filter(c => c.getBoundingClientRect().bottom <= sc.bottom + 1).length;
-  const part = [...probe.querySelectorAll('.card')].filter(c => { const b = c.getBoundingClientRect(); return b.top < sc.bottom && b.bottom > sc.bottom + 1; }).length;
+  // Sum each card's visible fraction, so a half-shown row counts as half.
+  const n = [...probe.querySelectorAll('.card')].reduce((a, c) => { const r = c.getBoundingClientRect(); return a + Math.max(0, Math.min(r.bottom, sc.bottom) - Math.max(r.top, sc.top)) / r.height; }, 0);
   probe.remove();
-  el.textContent = `${n} full${part ? ' + ' + part + ' partly' : ''}`;
-  el.className = 'badge ' + (n >= 4 ? 'good' : n >= 2 ? 'ok' : 'bad');
+  el.textContent = `${n.toFixed(1)} cards`;
+  el.className = 'badge ' + (n >= 4 ? 'good' : n >= 3 ? 'ok' : 'bad');
 }
 function segs() {
   const mk = (id, key, opts) => {
@@ -701,7 +702,7 @@ function toast(m) { const t = document.getElementById('toast'); t.textContent = 
 document.addEventListener('click', e => {
   const b = e.target.closest('button, [role="button"]'); if (!b) return;
   const ds = b.dataset;
-  if (ds.seg) { S[ds.seg] = ds.v; render(); return; }
+  if (ds.seg) { S[ds.seg] = ds.v; render(); if (ds.seg === 'screen' && ds.v === 'recipe') toSteps(); return; }
   if (b.id === 'prev') return go(-1);
   if (b.id === 'next') return go(1);
   if (!b.closest('.app')) return;
@@ -722,6 +723,7 @@ document.addEventListener('click', e => {
     S.cookStep = Math.max(0, Math.min(n - 1, S.cookStep + d)); render(); return; }
 });
 function patchTick(b, on, sel) { b.closest(sel).classList.toggle('done', on); b.setAttribute('aria-pressed', on); const cook = document.querySelector('.cook'); if (cook) cook.lastChild.textContent = S.ticks.size ? 'Resume' : 'Cook'; }
+function toSteps() { const s = document.getElementById('scroll'), st = s && s.querySelector('.sticky'); if (st) s.scrollTop = st.offsetTop; }
 function restore(y) { const s = document.getElementById('scroll'); if (s) s.scrollTop = y; }
 document.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, [contenteditable]')) return;
