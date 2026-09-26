@@ -1,6 +1,6 @@
 # Separate prod and staging stacks in one AWS account, with an approval gate between them
 
-The app runs as two stacks: **prod** (stable, tested releases) and **staging** (development and pre-release checks). Both live in the **same AWS account**. A separate staging account was rejected because a new account would land on the post-2025 AWS Free plan, which ends in closure or a paid upgrade, can't get the CloudFront Free plan, and within an Organization shares the Free Tier allowances anyway. The two stacks together stay well under the $1-a-month alarm set in ADR 0001.
+The app runs as two stacks: **prod** (stable, tested releases) and **staging** (development and pre-release checks). Both live in the **same AWS account**. A separate staging account was rejected because a new account would land on the post-2025 AWS Free plan, which ends in closure or a paid upgrade, can't get the CloudFront Free plan, and within an Organization shares the Free Tier allowances anyway. The two stacks together stay well under the $1-a-month alarm set in [the hosting ADR](2026-09-26-aws-hosting-fastapi-react.md).
 
 ## How the account is shared
 

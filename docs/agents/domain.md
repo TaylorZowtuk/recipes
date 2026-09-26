@@ -18,8 +18,8 @@ Single-context repo (most repos):
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
+│   ├── 2026-03-14-event-sourced-orders.md
+│   └── 2026-04-02-postgres-for-write-model.md
 └── src/
 ```
 
@@ -38,6 +38,12 @@ Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
         └── docs/adr/
 ```
 
+## Naming ADRs
+
+Name ADRs `YYYY-MM-DD-<slug>.md`, dated the day the decision was made, e.g. `docs/adr/2026-09-26-aws-hosting-fastapi-react.md`. **Don't number them sequentially**, even if a skill says to: parallel sessions branching from the same commit would each pick the same next number and collide. If two ADRs share a date, the slugs keep them apart.
+
+Refer to an ADR by its title or file name (linked where possible), never by a number.
+
 ## Use the glossary's vocabulary
 
 When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
@@ -48,4 +54,4 @@ If the concept you need isn't in the glossary yet, that's a signal: either you'r
 
 If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
 
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+> _Contradicts the event-sourced orders ADR (`2026-03-14-event-sourced-orders.md`), but worth reopening because…_
