@@ -1,0 +1,765 @@
+<title>Recipe View Prototype</title>
+<!--
+  PROTOTYPE, throwaway. Answers "Prototype: mobile recipe view" (TaylorZowtuk/recipes#8):
+  three structurally different layouts of one recipe on a phone, switchable with #A / #B / #C
+  (the artifact viewer drops query strings, so the hash stands in for ?variant=).
+  A: one long page.  B: tabs plus an Adjust sheet.  C: each step carries its own ingredients.
+  Shared across variants: amounts inline in steps, Original / Our Version, substitutions,
+  unit swap (recipe-wide and tap-to-cycle), scaling, floating timers, cooking mode.
+  Hosted inside variant A of "Prototype: whole-app flow" (tab bar, back button).
+  All state is in memory. The recipe is invented; the source site is fictional.
+  Open this file directly in a browser.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap">
+<style>
+:root {
+  --bg: #EEF2EE; --surface: #FFFFFF; --surface2: #E2E9E4; --ink: #1B2420; --muted: #56655E;
+  --line: #CCD6D0; --accent: #2D6A55; --accent-ink: #FFFFFF; --accent-soft: #D5E7DE;
+  --spice: #B85A26; --spice-soft: #F5E0D2; --warn-soft: #FBEFC8; --warn-ink: #6B4E00;
+  --alarm: #C0392B; --alarm-ink: #FFFFFF; --frame: #D8E0DA;
+  --cook-bg: #121815; --cook-ink: #F2F5F3; --cook-amt: #FFD9A8;
+  --shadow: 0 1px 2px rgba(20,40,30,.08), 0 4px 14px rgba(20,40,30,.08);
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --r: 10px; --pbar: 48px; --tabs: 58px; --top: 52px; --cbar: 0px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111614; --surface: #1A211E; --surface2: #243029; --ink: #E3EBE6; --muted: #97A69F;
+    --line: #34423B; --accent: #7CC3A7; --accent-ink: #0E1A14; --accent-soft: #1F3A30;
+    --spice: #E89C66; --spice-soft: #3B2A1F; --warn-soft: #3A3218; --warn-ink: #F0D78A;
+    --alarm: #E5604F; --alarm-ink: #1A0B08; --frame: #0A0D0C;
+    --cook-bg: #0B0F0D; --cook-ink: #EEF3F0; --cook-amt: #FFC98A;
+    --shadow: 0 1px 2px rgba(0,0,0,.45), 0 4px 14px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111614; --surface: #1A211E; --surface2: #243029; --ink: #E3EBE6; --muted: #97A69F;
+  --line: #34423B; --accent: #7CC3A7; --accent-ink: #0E1A14; --accent-soft: #1F3A30;
+  --spice: #E89C66; --spice-soft: #3B2A1F; --warn-soft: #3A3218; --warn-ink: #F0D78A;
+  --alarm: #E5604F; --alarm-ink: #1A0B08; --frame: #0A0D0C;
+  --cook-bg: #0B0F0D; --cook-ink: #EEF3F0; --cook-amt: #FFC98A;
+  --shadow: 0 1px 2px rgba(0,0,0,.45), 0 4px 14px rgba(0,0,0,.3);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--frame); color: var(--ink); font: 16px/1.5 var(--body); -webkit-tap-highlight-color: transparent; }
+body.cooking { overflow: hidden; }
+body[data-v="C"] { --cbar: 60px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 1.7rem; } h2 { font-size: 1.2rem; } h3 { font-size: 1rem; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.muted { color: var(--muted); } .small { font-size: .85rem; } .tnum { font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: .72rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 9px 14px; font-weight: 700; border-radius: 8px; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.block { width: 100%; padding: 13px; font-size: 1.05rem; }
+.tag { display: inline-block; font-size: .78rem; background: var(--surface2); border-radius: 999px; padding: 2px 9px; color: var(--muted); }
+.banner { border-radius: var(--r); padding: 10px 12px; font-size: .9rem; background: var(--accent-soft); color: var(--ink); }
+.banner.plain { background: var(--surface2); }
+.flag { display: inline-block; font-size: .72rem; font-weight: 700; border-radius: 999px; padding: 1px 8px; background: var(--surface2); color: var(--muted); vertical-align: 1px; }
+.flag.ours { background: var(--accent-soft); color: var(--accent); }
+.flag.sub { background: var(--spice-soft); color: var(--spice); }
+.was { font-size: .78rem; color: var(--muted); text-decoration: line-through; }
+
+/* phone frame: the question is the phone, so wide screens get a phone-width column */
+.phone { max-width: 430px; margin-inline: auto; min-height: 100%; background: var(--bg); position: relative; }
+@media (min-width: 520px) { .phone { box-shadow: 0 0 0 1px var(--line), 0 10px 40px rgba(0,0,0,.18); } }
+.fx { position: fixed; left: 50%; transform: translateX(-50%); width: min(100%, 430px); }
+
+/* shell from "Prototype: whole-app flow", variant A */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 8; background: var(--bg); height: var(--top); display: flex; align-items: center; gap: 6px; padding-inline: 8px 16px; border-bottom: 1px solid var(--line); }
+.top .back { border: 0; background: none; color: var(--accent); font-weight: 700; padding: 8px; display: flex; align-items: center; gap: 2px; }
+.top .ttl { font-family: var(--display); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.top .acct { width: 32px; height: 32px; border-radius: 50%; background: var(--surface2); border: 0; font-weight: 700; font-size: .8rem; color: var(--muted); }
+.tabs { bottom: var(--pbar); z-index: 9; height: var(--tabs); background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, 1fr); }
+.tabs button { background: none; border: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: .74rem; color: var(--muted); }
+.tabs button.on { color: var(--accent); font-weight: 700; }
+.tabs svg { width: 22px; height: 22px; }
+.screen { padding: 16px 16px calc(var(--pbar) + var(--tabs) + var(--cbar) + 140px); display: flex; flex-direction: column; gap: 18px; }
+
+/* recipe pieces */
+.thumb { background: linear-gradient(135deg, hsl(var(--h) 55% 58%), hsl(calc(var(--h) + 25) 60% 36%)); color: rgba(255,255,255,.92); display: grid; place-items: center; font-family: var(--display); font-weight: 700; overflow: hidden; }
+.hero { aspect-ratio: 16/9; width: 100%; font-size: 2.4rem; }
+.diff { display: inline-flex; gap: 10px; align-items: center; font-size: .82rem; color: var(--muted); flex-wrap: wrap; }
+.diff .d { display: inline-flex; gap: 5px; align-items: center; }
+.diff .m { display: inline-flex; gap: 2px; }
+.diff .m i { width: 6px; height: 13px; background: var(--line); border-radius: 1px; }
+.diff .m i.f { background: var(--spice); }
+.diff b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.times div { background: var(--surface); padding: 8px 10px; display: flex; flex-direction: column; }
+.times b { font-variant-numeric: tabular-nums; }
+.seg { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--line); border-radius: 9px; background: var(--surface2); padding: 2px; gap: 2px; }
+.seg button { border: 0; background: none; padding: 6px 10px; border-radius: 7px; font-size: .88rem; white-space: nowrap; }
+.seg button.on { background: var(--surface); color: var(--ink); font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+.seg.full { display: grid; width: 100%; }
+.amt { border: 0; background: var(--accent-soft); color: var(--ink); font-weight: 700; border-radius: 6px; padding: 0 5px; font-variant-numeric: tabular-nums; text-decoration: underline dotted var(--accent); text-underline-offset: 3px;  white-space: nowrap; }
+.a-ing .amt { white-space: normal; }
+.amt.plain { background: none; text-decoration: none; padding: 0; }
+.subbed { color: var(--spice); font-weight: 700; }
+.tmr { border: 1px solid var(--spice); background: var(--spice-soft); color: var(--spice); font-weight: 700; border-radius: 999px; padding: 0 10px 0 6px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.tmr svg { width: 15px; height: 15px; }
+.tmr.live { background: var(--spice); color: var(--surface); }
+.swap { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; width: 36px; height: 36px; flex: none; color: var(--spice); font-weight: 700; }
+.swap.on { background: var(--spice-soft); border-color: var(--spice); }
+.subs { list-style: none; background: var(--spice-soft); border-radius: var(--r); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.subopt { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; text-align: left; display: flex; flex-direction: column; gap: 2px; }
+.subopt.on { border: 2px solid var(--spice); }
+.nut { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.nut div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 4px; text-align: center; display: flex; flex-direction: column; }
+.nut b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.nut span { font-size: .7rem; color: var(--muted); }
+.steptext { margin: 0; line-height: 1.9; }
+
+/* ---------- Variant A: one long page ---------- */
+.a-ctl { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--top)); z-index: 6; background: var(--bg); margin-inline: -16px; padding: 8px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.a-ctl .row { flex-wrap: nowrap; justify-content: space-between; }
+.a-ings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.a-ing { display: grid; grid-template-columns: 92px 1fr auto; gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.a-ing .amt { justify-self: start; font-size: .95rem; padding: 2px 6px; text-align: left; }
+.a-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; counter-reset: s; }
+.a-steps li { display: grid; grid-template-columns: 30px 1fr; gap: 8px; scroll-margin-top: 150px; }
+.a-steps .n { font-family: var(--display); font-weight: 700; font-size: 1.3rem; color: var(--spice); line-height: 1.5; }
+
+/* ---------- Variant B: tabs + Adjust sheet ---------- */
+.b-head { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: center; }
+.b-head .thumb { aspect-ratio: 1; border-radius: 12px; font-size: 1.6rem; }
+.b-sticky { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--top)); z-index: 6; background: var(--bg); margin-inline: -16px; padding: 8px 16px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.b-sum { display: flex; align-items: center; gap: 8px; }
+.b-sum .pill { flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 12px; text-align: left; font-size: .88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.b-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
+.b-tabs button { border: 0; background: none; padding: 10px 0; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 700; }
+.b-tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+.b-ings { list-style: none; margin: 0; padding: 0; background: var(--surface); border-radius: var(--r); border: 1px solid var(--line); }
+.b-ing { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--line); align-items: baseline; }
+.b-ing:last-child { border-bottom: 0; }
+.b-ing .amt { font-size: 1rem; text-align: right; }
+.b-ing .sw { border: 0; background: none; color: var(--spice); font-weight: 700; padding: 0; font-size: .82rem; }
+.b-ings .subs { margin: 0 8px 8px; }
+.b-steps { display: flex; flex-direction: column; gap: 12px; }
+.b-step { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 170px; }
+.b-step.done { opacity: .5; }
+.b-step .hd { display: flex; align-items: center; gap: 10px; }
+.b-step .big { font-family: var(--display); font-size: 2rem; font-weight: 700; color: var(--spice); line-height: 1; }
+.b-step .chk { margin-left: auto; border: 1px solid var(--line); background: var(--surface2); border-radius: 999px; padding: 4px 12px; font-size: .82rem; font-weight: 700; }
+.sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { background: var(--surface); width: 100%; max-width: 430px; border-radius: 16px 16px 0 0; padding: 18px 16px calc(var(--pbar) + 20px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 16px; }
+.sheet .grp { display: flex; flex-direction: column; gap: 6px; }
+
+/* ---------- Variant C: steps carry their ingredients ---------- */
+.c-head { display: flex; flex-direction: column; gap: 10px; }
+.c-facts { display: flex; gap: 6px; overflow-x: auto; margin-inline: -16px; padding-inline: 16px; scrollbar-width: none; }
+.c-facts span { flex: none; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 11px; font-size: .84rem; white-space: nowrap; }
+.c-mise { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); }
+.c-mise > button { width: 100%; border: 0; background: none; padding: 12px; display: flex; justify-content: space-between; align-items: center; text-align: left; }
+.c-mise ul { list-style: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; }
+.c-mise li { display: flex; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+.c-mise li.got .nm { text-decoration: line-through; color: var(--muted); }
+.c-mise input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.c-line { list-style: none; margin: 0; padding: 0; position: relative; }
+.c-line::before { content: ""; position: absolute; left: 15px; top: 8px; bottom: 8px; width: 2px; background: var(--line); }
+.c-step { display: grid; grid-template-columns: 32px 1fr; gap: 12px; padding-bottom: 20px; position: relative; scroll-margin-top: 80px; }
+.c-node { width: 32px; height: 32px; border-radius: 50%; background: var(--surface); border: 2px solid var(--spice); color: var(--spice); display: grid; place-items: center; font-weight: 700; font-family: var(--display); z-index: 1; }
+.c-uses { margin-top: 8px; background: var(--surface2); border-radius: 8px; padding: 6px 10px; display: flex; flex-direction: column; }
+.c-uses div { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: .92rem; }
+.c-uses .swap { width: 28px; height: 28px; margin-left: auto; font-size: .85rem; }
+.c-bar { bottom: calc(var(--pbar) + var(--tabs)); z-index: 9; height: var(--cbar); background: var(--surface); border-top: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto auto; gap: 6px; align-items: center; padding-inline: 10px; }
+.c-bar .btn { padding: 7px 10px; font-size: .86rem; white-space: nowrap; }
+.stepper { display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface2); }
+.stepper button { border: 0; background: none; width: 32px; height: 34px; font-weight: 700; font-size: 1.1rem; color: var(--accent); }
+.stepper span { font-size: .86rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.c-macro { display: flex; height: 12px; border-radius: 6px; overflow: hidden; }
+.c-macro i { display: block; }
+
+/* ---------- floating timers ---------- */
+#dock { bottom: calc(var(--pbar) + var(--tabs) + var(--cbar) + 8px); z-index: 25; display: flex; flex-direction: column; gap: 6px; padding-inline: 10px; pointer-events: none; }
+body.cooking #dock { bottom: calc(var(--pbar) + 96px); }
+.tm { pointer-events: auto; display: flex; align-items: center; gap: 6px; background: var(--ink); color: var(--bg); border-radius: 14px; padding: 6px 6px 6px 12px; box-shadow: var(--shadow); }
+.tm .lbl { border: 0; background: none; color: inherit; text-align: left; flex: 1; min-width: 0; padding: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.tm .lbl small { opacity: .7; font-size: .72rem; }
+.tm .lbl b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tm .time { font-size: 1.35rem; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+.tm > button:not(.lbl) { border: 0; background: rgba(127,127,127,.25); color: inherit; border-radius: 9px; height: 34px; min-width: 38px; font-size: .82rem; font-weight: 700; padding-inline: 8px; }
+.tm.check { background: var(--spice); color: #fff; }
+.tm.done { background: var(--alarm); color: var(--alarm-ink); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.02); } }
+@media (prefers-reduced-motion: reduce) { .tm.done { animation: none; } }
+
+/* ---------- cooking mode ---------- */
+.cook { position: fixed; top: 0; bottom: var(--pbar); left: 50%; transform: translateX(-50%); width: min(100%, 430px); z-index: 20; background: var(--cook-bg); color: var(--cook-ink); display: flex; flex-direction: column; padding-top: env(safe-area-inset-top, 0px); }
+.cook header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+.cook header button { border: 1px solid rgba(255,255,255,.25); background: none; color: inherit; border-radius: 8px; padding: 6px 12px; font-weight: 700; }
+.cook .prog { display: flex; gap: 4px; padding-inline: 16px; }
+.cook .prog i { flex: 1; height: 4px; border-radius: 2px; background: rgba(255,255,255,.2); }
+.cook .prog i.f { background: var(--cook-amt); }
+.cook .wake { font-size: .78rem; opacity: .75; padding: 6px 16px 0; }
+.cook main { flex: 1; overflow-y: auto; padding: 18px 16px 110px; display: flex; flex-direction: column; gap: 18px; }
+.cook .ct { font-size: 1.55rem; line-height: 1.55; margin: 0; }
+.cook.big .ct { font-size: 2rem; }
+.cook .amt { background: none; color: var(--cook-amt); font-size: inherit; padding: 0; text-decoration-color: var(--cook-amt); }
+.cook .subbed { color: var(--cook-amt); }
+.cook .tmr { font-size: 1.1rem; padding: 4px 14px 4px 10px; background: rgba(232,156,102,.18); border-color: var(--cook-amt); color: var(--cook-amt); }
+.cook .tmr.live { background: var(--cook-amt); color: var(--cook-bg); }
+.cook .uses { border-top: 1px solid rgba(255,255,255,.18); padding-top: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 1.05rem; }
+.cook .uses b { color: var(--cook-amt); }
+.cook nav { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 2fr; gap: 8px; padding: 10px; background: var(--cook-bg); }
+.cook nav button { height: 76px; border-radius: 14px; border: 0; font-size: 1.2rem; font-weight: 700; background: rgba(255,255,255,.1); color: inherit; }
+.cook nav button.next { background: var(--cook-amt); color: var(--cook-bg); }
+.cook nav button:disabled { opacity: .3; }
+
+/* ---------- prototype chrome (not part of the design) ---------- */
+#pbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: calc(var(--pbar) + env(safe-area-inset-bottom, 0px)); padding: 0 8px env(safe-area-inset-bottom, 0px); background: #2B1D3A; color: #F3E9FF; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: .82rem; }
+#pbar button { border: 1px solid rgba(243,233,255,.3); background: none; color: inherit; border-radius: 7px; padding: 5px 9px; font-weight: 700; }
+#pbar button.on { background: #F3E9FF; color: #2B1D3A; }
+#pbar .v { text-align: center; line-height: 1.15; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+#pbar .v small { display: block; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#state { position: fixed; right: 8px; bottom: calc(var(--pbar) + 8px); z-index: 41; width: min(360px, calc(100% - 16px)); max-height: 60vh; overflow: auto; background: #2B1D3A; color: #F3E9FF; border-radius: 10px; padding: 10px 12px; font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+#toast { position: fixed; top: calc(env(safe-area-inset-top, 0px) + 60px); left: 50%; transform: translateX(-50%); z-index: 50; width: min(calc(100% - 32px), 400px); background: var(--ink); color: var(--bg); border-radius: 10px; padding: 10px 14px; font-size: .9rem; box-shadow: var(--shadow); }
+</style>
+
+<div class="phone">
+  <div id="app"></div>
+</div>
+<div id="cook"></div>
+<div id="dock" class="fx"></div>
+<div id="toast" hidden></div>
+<div id="state" hidden></div>
+<div id="pbar"></div>
+
+<script>
+// ---------- the recipe (invented; the site is fictional) ----------
+// n = nutrition per 100 g: [kcal, protein g, fat g, carbs g, sodium mg], USDA FDC-style values.
+// dens = g per ml, each = g per count unit; dconf / econf = confidence of that number.
+const R = {
+  title: 'Chicken Tikka Masala', site: 'Salt & Simmer', url: 'https://saltandsimmer.example/chicken-tikka-masala',
+  captured: '2 Mar 2026', hue: 14, servings: 4,
+  stated: { prep: '20 mins', cook: '35 mins', total: '1 hr 25 mins', note: 'Total includes 30 minutes of marinating.' },
+  diff: { prep: 2, cook: 2, cleanup: 3 }, tags: ['weeknight', 'indian', 'make-ahead', 'freezes well'],
+  ings: [
+    { id: 'chk', qty: 1.5, unit: 'lb', name: 'boneless, skinless chicken thighs', short: 'chicken', prep: 'cut into 1½-inch pieces', n: [121, 19.7, 4.1, 0, 95],
+      subs: [ { name: 'boneless, skinless chicken breasts', short: 'chicken breast', ratio: 1, note: 'Leaner. Start checking 2 minutes early.', n: [120, 22.5, 2.6, 0, 45] },
+              { name: 'paneer', short: 'paneer', ratio: .75, note: 'Sear until golden, then add it with the cream.', n: [321, 21, 25, 3.6, 18] } ] },
+    { id: 'yog', qty: 1, unit: 'cup', name: 'plain whole-milk yogurt', short: 'yogurt', dens: 1.04, dconf: .95, n: [61, 3.5, 3.3, 4.7, 46],
+      subs: [ { name: 'Greek yogurt, thinned with 2 tbsp water', short: 'Greek yogurt', ratio: .85, dens: 1.1, n: [97, 9, 5, 3.9, 35] },
+              { name: 'sour cream', short: 'sour cream', ratio: 1, dens: 1.01, note: 'Richer and tangier.', n: [198, 2.4, 19.4, 4.6, 31] } ] },
+    { id: 'garlic', qty: 6, unit: 'clove', name: 'garlic', short: 'garlic', prep: 'grated', each: 3, econf: .85, n: [149, 6.4, .5, 33, 17] },
+    { id: 'ginger', qty: 1, unit: 'tbsp', name: 'fresh ginger', short: 'ginger', prep: 'grated', dens: .41, dconf: .6, why: 'grated ginger packs very differently from cook to cook', n: [80, 1.8, .75, 18, 13] },
+    { id: 'garam', qty: 2, unit: 'tsp', name: 'garam masala', short: 'garam masala', dens: .53, dconf: .5, why: 'spice blends vary too much in weight', n: [379, 14, 15, 50, 77] },
+    { id: 'salt', qty: 1.5, unit: 'tsp', name: 'kosher salt', short: 'salt', staple: true, dens: .57, dconf: .6, why: 'kosher salt weighs twice as much from one brand to the next', n: [0, 0, 0, 0, 38758],
+      subs: [ { name: 'table salt', short: 'table salt', ratio: .5, dens: 1.22, dconf: .95, note: 'Finer grains, so use half as much.', n: [0, 0, 0, 0, 38758] } ] },
+    { id: 'ghee', qty: 2, unit: 'tbsp', name: 'ghee', short: 'ghee', dens: .91, dconf: .9, n: [876, 0, 99.5, 0, 2],
+      subs: [ { name: 'unsalted butter', short: 'butter', ratio: 1, note: 'Can brown faster. Keep the heat at medium.', n: [717, .9, 81, .1, 11] },
+              { name: 'neutral oil', short: 'oil', ratio: 1, dens: .92, n: [884, 0, 100, 0, 0] } ] },
+    { id: 'onion', qty: 1, unit: 'large', name: 'yellow onion', short: 'onion', prep: 'finely chopped', each: 150, econf: .85, n: [40, 1.1, .1, 9.3, 4] },
+    { id: 'tpaste', qty: 2, unit: 'tbsp', name: 'tomato paste', short: 'tomato paste', dens: 1.09, dconf: .9, n: [82, 4.3, .5, 18.9, 59] },
+    { id: 'tom', qty: 1, unit: 'can', can: '14 oz', name: 'crushed tomatoes', short: 'crushed tomatoes', each: 397, econf: 1, n: [32, 1.6, .3, 7.3, 186] },
+    { id: 'cream', qty: .75, unit: 'cup', name: 'heavy cream', short: 'cream', dens: 1.01, dconf: .95, n: [340, 2.8, 36, 2.7, 27],
+      subs: [ { name: 'full-fat coconut milk', short: 'coconut milk', ratio: 1, dens: .96, note: 'Dairy-free, with a light coconut flavor.', n: [197, 2, 21, 2.8, 13] },
+              { name: 'half-and-half', short: 'half-and-half', ratio: 1, dens: 1.03, note: 'Thinner sauce. Simmer 3 minutes longer.', n: [131, 3.1, 11.5, 4.3, 61] } ] },
+    { id: 'cil', taste: true, name: 'fresh cilantro', short: 'cilantro', prep: 'chopped, for serving' },
+  ],
+  // [id] or [id@portion] = an ingredient (or part of it); {lo-hi|Label} = a duration in minutes
+  steps: [
+    'In a large bowl, stir together [yog], [garlic@.5], [ginger], [garam@.5] and [salt@.667]. Add [chk] and turn to coat. Marinate for at least {30|Marinate}.',
+    'Heat [ghee@.5] in a large skillet over medium-high heat. Shake the excess marinade off the chicken and sear it in two batches until browned, {3-4|Sear, per side} per side. Move it to a plate; it finishes cooking in the sauce.',
+    'Turn the heat to medium. Add [ghee@.5] and [onion], and cook until soft and golden, {8-10|Soften onion}.',
+    'Stir in [garlic@.5], [garam@.5] and [tpaste]. Cook, stirring, until fragrant and brick red, {2|Bloom spices}.',
+    'Pour in [tom] and [salt@.333]. Simmer for {10|Simmer sauce}, stirring now and then.',
+    'Stir in [cream], then return the chicken and its juices to the pan. Simmer until the chicken is cooked through, {10-12|Simmer chicken}.',
+    'Serve over basmati rice, topped with [cil].',
+  ],
+  ours: {
+    edited: '14 Aug 2026',
+    note: 'More garlic, less cream, and spinach for some greens. Marinate overnight when we can.',
+    ing: { garlic: { qty: 9 }, cream: { qty: .5 } },
+    addIng: [ { after: 'cream', ing: { id: 'spin', qty: 3, unit: 'cup', name: 'baby spinach', short: 'spinach', dens: .127, dconf: .85, n: [23, 2.9, .4, 3.6, 79] } } ],
+    step: { 0: 'In a large bowl, stir together [yog], [garlic@.5], [ginger], [garam@.5] and [salt@.667]. Add [chk] and turn to coat. Marinate for at least {30|Marinate}, or cover and refrigerate overnight.' },
+    addStep: [ { after: 5, t: 'Fold in [spin] and cook just until wilted, {1|Wilt spinach}.' } ],
+  },
+};
+
+// ---------- view state (in memory only) ----------
+const S = {
+  variant: 'A', version: 'ours', scale: 1, units: 'written', ovr: {}, subs: {}, subOpen: null,
+  timers: [], speed: 1, cook: false, cookIdx: 0, cookBig: false, wake: '', lock: null,
+  bTab: 'ingredients', bSheet: false, bDone: {}, cMise: false, got: {}, showState: false,
+};
+const SCALES = [.5, 1, 1.5, 2, 3];
+const TH = .8; // convert between volume/count and weight only above this confidence
+const VOL = { tsp: 4.929, tbsp: 14.787, cup: 236.59, ml: 1, l: 1000 };
+const MASS = { g: 1, kg: 1000, oz: 28.35, lb: 453.59 };
+const kindOf = u => u in VOL ? 'vol' : u in MASS ? 'mass' : 'count';
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const VARIANTS = { A: 'One long page', B: 'Tabs + Adjust sheet', C: 'Steps carry their ingredients' };
+
+// ---------- model: Original + Our Version layer + substitutions ----------
+function baseIng(id) { return R.ings.find(i => i.id === id) || R.ours.addIng.find(a => a.ing.id === id).ing; }
+function model() {
+  const ours = S.version === 'ours', O = R.ours;
+  let ings = [];
+  for (const i0 of R.ings) {
+    const i = { ...i0, was: null, added: false };
+    if (ours && O.ing[i.id]) { i.was = i.qty; i.qty = O.ing[i.id].qty; }
+    ings.push(i);
+    if (ours) for (const a of O.addIng) if (a.after === i.id) ings.push({ ...a.ing, added: true, was: null });
+  }
+  ings = ings.map(i => {
+    const k = S.subs[i.id];
+    if (k == null || !i.subs) return i;
+    const s = i.subs[k];
+    return { ...i, orig: i.name, name: s.name, short: s.short, qty: i.qty * s.ratio, was: i.was == null ? null : i.was * s.ratio,
+      dens: s.dens ?? i.dens, dconf: s.dconf ?? i.dconf, n: s.n, sub: s };
+  });
+  const by = {}; ings.forEach(i => by[i.id] = i);
+  const steps = R.steps.map((t, ix) => ({ t: ours && O.step[ix] ? O.step[ix] : t, changed: !!(ours && O.step[ix]), added: false }));
+  if (ours) for (const a of [...O.addStep].reverse()) steps.splice(a.after + 1, 0, { t: a.t, added: true, changed: false });
+  steps.forEach((s, ix) => {
+    s.n = ix + 1;
+    s.uses = [...s.t.matchAll(/\[(\w+)(?:@([\d.]+))?\]/g)].map(m => ({ id: m[1], p: +(m[2] || 1) }));
+  });
+  return { ings, by, steps };
+}
+
+// ---------- units ----------
+function sysUnit(i) {
+  const u = i.unit, k = kindOf(u);
+  if (S.units === 'written') return u;
+  if (S.units === 'metric') {
+    if (k === 'mass') return 'g';
+    if (k === 'vol') return (u === 'tsp' || u === 'tbsp') ? u : (i.dens && i.dconf >= TH ? 'g' : 'ml');
+    return u;
+  }
+  if (k === 'mass') return 'oz';
+  if (k === 'vol') return (u === 'tsp' || u === 'tbsp' || u === 'cup') ? u : 'cup';
+  return u;
+}
+function unitOptions(i) {
+  if (i.taste) return [];
+  const k = kindOf(i.unit), o = [i.unit];
+  if (k === 'vol') { if (i.unit === 'cup') o.push('ml'); if (i.dens && i.dconf >= TH) o.push('g'); }
+  if (k === 'mass') { if (i.unit !== 'g') o.push('g'); if (i.unit === 'g') o.push('oz'); }
+  if (k === 'count' && i.each && i.econf >= TH) { o.push('g'); if (i.unit === 'can') o.push('oz'); }
+  return o;
+}
+function convert(i, q, from, to) {
+  if (from === to) return { q, u: from, approx: false };
+  const f = kindOf(from), t = kindOf(to);
+  if (f === t && f !== 'count') { const T = f === 'vol' ? VOL : MASS; return { q: q * T[from] / T[to], u: to, approx: false }; }
+  if (f === 'vol' && t === 'mass' && i.dens && i.dconf >= TH) return { q: q * VOL[from] * i.dens / MASS[to], u: to, approx: i.dconf < .95 };
+  if (f === 'count' && t === 'mass' && i.each && i.econf >= TH) return { q: q * i.each / MASS[to], u: to, approx: i.econf < .95 };
+  return { q, u: from, approx: false };
+}
+function tidy(q, u) {
+  if (u === 'tsp' || u === 'tbsp' || u === 'cup') {
+    const ml = q * VOL[u];
+    if (ml < VOL.tbsp - .5) return { q: ml / VOL.tsp, u: 'tsp' };
+    if (ml < VOL.cup / 4 - 1) return { q: ml / VOL.tbsp, u: 'tbsp' };
+    return { q: ml / VOL.cup, u: 'cup' };
+  }
+  if (u === 'g' && q >= 1000) return { q: q / 1000, u: 'kg' };
+  if (u === 'ml' && q >= 1000) return { q: q / 1000, u: 'l' };
+  if (u === 'oz' && q >= 16) return { q: q / 16, u: 'lb' };
+  return { q, u };
+}
+const FR = [[0, ''], [1/8, '⅛'], [1/4, '¼'], [1/3, '⅓'], [3/8, '⅜'], [1/2, '½'], [5/8, '⅝'], [2/3, '⅔'], [3/4, '¾'], [7/8, '⅞'], [1, '']];
+function frac(q) {
+  let w = Math.floor(q), r = q - w, best = FR[0];
+  for (const f of FR) if (Math.abs(f[0] - r) < Math.abs(best[0] - r)) best = f;
+  if (best[0] === 1) w += 1;
+  if (w === 0 && best[1] === '') return '⅛';
+  return (w || '') + best[1];
+}
+function fmtQ(q, u) {
+  if (u === 'g' || u === 'ml') return String(q < 10 ? Math.max(1, Math.round(q)) : q < 100 ? Math.round(q / 5) * 5 : Math.round(q / 10) * 10);
+  if (u === 'kg' || u === 'l') return String(Math.round(q * 100) / 100);
+  if (u === 'oz' && q >= 3) return String(Math.round(q * 2) / 2).replace('.5', '½');
+  return frac(q);
+}
+function uLabel(i, u, q) {
+  const many = q > 1.01;
+  if (u === 'cup') return many ? 'cups' : 'cup';
+  if (u in VOL || u in MASS) return u;
+  if (u === 'clove') return many ? 'cloves' : 'clove';
+  if (u === 'can') return (many ? 'cans' : 'can') + ` (${i.can}${many ? ' each' : ''})`;
+  return u;
+}
+function amount(i, p = 1, qtyOverride) {
+  if (i.taste) return { txt: 'to taste', taste: true };
+  const q0 = (qtyOverride ?? i.qty) * S.scale * p;
+  const target = S.ovr[i.id] || sysUnit(i);
+  let { q, u, approx } = convert(i, q0, i.unit, target);
+  ({ q, u } = tidy(q, u));
+  return { txt: (approx ? '≈ ' : '') + fmtQ(q, u) + ' ' + uLabel(i, u, q), approx, u };
+}
+function grams(i) {
+  const k = kindOf(i.unit);
+  if (k === 'mass') return i.qty * MASS[i.unit];
+  if (k === 'vol') return i.dens ? i.qty * VOL[i.unit] * i.dens : null;
+  return i.each ? i.qty * i.each : null;
+}
+function nutrition(M) {
+  const t = [0, 0, 0, 0, 0];
+  for (const i of M.ings) { if (i.taste || !i.n) continue; const g = grams(i); if (g == null) continue; i.n.forEach((v, k) => t[k] += v * g / 100); }
+  return t.map(v => v / R.servings);
+}
+
+// ---------- shared rendering pieces ----------
+const clock = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>';
+function servings() { const s = R.servings * S.scale; return Number.isInteger(s) ? s : s.toFixed(1); }
+function scaleLabel(x) { return x === .5 ? '½×' : x === 1.5 ? '1½×' : x + '×'; }
+function inlineIng(M, id, p) {
+  const i = M.by[id];
+  if (!i) return '';
+  const nm = `<span class="${i.sub ? 'subbed' : ''}">${esc(i.short)}</span>`;
+  if (i.taste) return `${nm} (to taste)`;
+  return `<button class="amt" data-act="cycle" data-id="${i.id}">${amount(i, p).txt}</button> ${nm}`;
+}
+function timerBtn(lo, hi, label, n) {
+  const txt = lo === hi ? `${lo} minute${lo === 1 ? '' : 's'}` : `${lo}–${hi} minutes`;
+  const live = S.timers.some(t => t.label === label && !t.gone);
+  return `<button class="tmr ${live ? 'live' : ''}" data-act="timer" data-lo="${lo}" data-hi="${hi}" data-label="${esc(label)}" data-step="${n}">${clock}${txt}</button>`;
+}
+function stepText(s, M) {
+  return esc(s.t)
+    .replace(/\[(\w+)(?:@([\d.]+))?\]/g, (_, id, p) => inlineIng(M, id, +(p || 1)))
+    .replace(/\{([\d.]+)(?:-([\d.]+))?\|([^}]+)\}/g, (_, lo, hi, label) => timerBtn(+lo, +(hi || lo), label, s.n));
+}
+function stepFlag(s) { return s.added ? '<span class="flag ours">added in Our Version</span>' : s.changed ? '<span class="flag ours">changed in Our Version</span>' : ''; }
+function marks(i) {
+  const m = [];
+  if (i.was != null && S.version === 'ours') m.push(`<span class="was">${amount(i, 1, i.was).txt}</span> <span class="flag ours">Our Version</span>`);
+  if (i.added) m.push('<span class="flag ours">added in Our Version</span>');
+  if (i.sub) m.push(`<span class="flag sub">swapped for ${esc(i.orig)}</span>`);
+  if (i.staple) m.push('<span class="flag">pantry staple</span>');
+  return m.length ? `<div class="row" style="gap:4px;margin-top:2px">${m.join(' ')}</div>` : '';
+}
+function amtBtn(i, cls = '') {
+  const a = amount(i);
+  return a.taste ? `<span class="amt plain ${cls}">to taste</span>` : `<button class="amt ${cls}" data-act="cycle" data-id="${i.id}">${a.txt}</button>`;
+}
+function subChooser(i, tag = 'li') {
+  const b = baseIng(i.id), cur = S.subs[i.id];
+  const opts = [{ name: b.name, note: 'As the recipe is written.', ratio: 1, k: '' }, ...b.subs.map((s, k) => ({ ...s, k }))];
+  return `<${tag} class="subs"><div class="eyebrow">Swap ${esc(b.short)}</div>
+    ${opts.map(o => `<button class="subopt ${String(cur ?? '') === String(o.k) ? 'on' : ''}" data-act="sub" data-id="${i.id}" data-k="${o.k}">
+      <b>${esc(o.name)}</b><span class="small muted">${o.ratio !== 1 ? `Use ${Math.round(o.ratio * 100)}% as much. ` : ''}${esc(o.note || '')}</span></button>`).join('')}
+    <span class="small muted">A swap changes the amounts, the steps and the nutrition on this screen only. Nothing is saved.</span></${tag}>`;
+}
+function swapBtn(i) { return i.subs ? `<button class="swap ${i.sub ? 'on' : ''}" data-act="subopen" data-id="${i.id}" aria-label="Swap ${esc(i.short)}" aria-expanded="${S.subOpen === i.id}">⇄</button>` : ''; }
+function diffMeters() {
+  const d = R.diff, m = v => `<span class="m">${[1, 2, 3].map(k => `<i class="${k <= v ? 'f' : ''}"></i>`).join('')}</span>`;
+  return `<span class="diff"><span class="d">Prep ${m(d.prep)}</span><span class="d">Cook ${m(d.cook)}</span><span class="d">Cleanup ${m(d.cleanup)}</span><span>Difficulty <b>${d.prep + d.cook + d.cleanup}</b>/9</span></span>`;
+}
+function statedTimes() {
+  return `<div class="times"><div><span class="eyebrow">Prep</span><b>${R.stated.prep}</b></div><div><span class="eyebrow">Cook</span><b>${R.stated.cook}</b></div><div><span class="eyebrow">Total</span><b>${R.stated.total}</b></div></div>
+  <span class="small muted">Times as ${esc(R.site)} states them. ${R.stated.note}</span>`;
+}
+function versionSeg(cls = '') {
+  return `<div class="seg ${cls}" role="group" aria-label="Version"><button data-act="version" data-v="ours" class="${S.version === 'ours' ? 'on' : ''}">Our Version</button><button data-act="version" data-v="orig" class="${S.version === 'orig' ? 'on' : ''}">Original</button></div>`;
+}
+function versionNote() {
+  return S.version === 'ours'
+    ? `<div class="banner"><b>Our Version</b>, edited ${R.ours.edited}. ${esc(R.ours.note)}</div>`
+    : `<div class="banner plain"><b>Original</b>, exactly as captured from ${esc(R.site)} on ${R.captured}.</div>`;
+}
+function scaleChips() { return `<div class="seg" role="group" aria-label="Scale">${[.5, 1, 2, 3].map(x => `<button data-act="scale" data-x="${x}" class="${S.scale === x ? 'on' : ''}">${scaleLabel(x)}</button>`).join('')}</div>`; }
+function unitsSeg(cls = '') { return `<div class="seg ${cls}" role="group" aria-label="Units">${[['written', 'As written'], ['metric', 'Metric'], ['us', 'US']].map(([k, l]) => `<button data-act="units" data-u="${k}" class="${S.units === k ? 'on' : ''}">${l}</button>`).join('')}</div>`; }
+function nutriGrid(M) {
+  const n = nutrition(M);
+  return `<div class="nut">${[['kcal', n[0], ''], ['protein', n[1], ' g'], ['fat', n[2], ' g'], ['carbs', n[3], ' g'], ['sodium', n[4], ' mg']].map(([l, v, u]) => `<div><b>${Math.round(v)}${u}</b><span>${l}</span></div>`).join('')}</div>
+  <span class="small muted">Estimated per serving from USDA FoodData Central, for 1 of ${R.servings} servings. Rice isn't included. Swaps and Our Version change these numbers; scaling doesn't.</span>`;
+}
+function ctlSummary() { return `Serves ${servings()} · ${{ written: 'As written', metric: 'Metric', us: 'US' }[S.units]} · ${S.version === 'ours' ? 'Our Version' : 'Original'}`; }
+
+function topbar() {
+  return `<div class="top"><button class="back" data-act="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M15 5l-7 7 7 7"/></svg>Recipes</button><span class="ttl">${R.title}</span><button class="acct" aria-label="Account">TZ</button></div>`;
+}
+function tabbar() {
+  const ic = { Recipes: '<path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3z"/><path d="M5 17a3 3 0 013-3h11"/>', Week: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>', Fridge: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M5 10h14M9 5v2M9 13v3"/>', Sites: '<path d="M6 3h12v18l-6-4-6 4z"/>' };
+  return `<nav class="tabs fx">${Object.keys(ic).map(k => `<button class="${k === 'Recipes' ? 'on' : ''}" data-act="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ic[k]}</svg>${k}</button>`).join('')}</nav>`;
+}
+
+// ---------- Variant A: one long page ----------
+function vA(M) {
+  return `<div class="thumb hero" style="--h:${R.hue}">CTM</div>
+  <div class="screen">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <a class="eyebrow" style="color:var(--accent)" href="${R.url}" target="_blank" rel="noopener">${esc(R.site)} ↗</a>
+      <h1>${R.title}</h1>
+      <div class="row" style="gap:4px">${R.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+    </div>
+    ${statedTimes()}
+    ${diffMeters()}
+    <div style="display:flex;flex-direction:column;gap:8px">${versionSeg('full')}${versionNote()}</div>
+    <button class="btn primary block" data-act="cook">Start cooking mode</button>
+    <div class="a-ctl">
+      <div class="row"><span class="small"><b>Serves ${servings()}</b></span>${scaleChips()}</div>
+      <div class="row"><span class="small muted">Units</span>${unitsSeg()}</div>
+    </div>
+    <section style="display:flex;flex-direction:column;gap:6px">
+      <h2>Ingredients</h2>
+      <span class="small muted">Tap an amount to switch its unit. Tap ⇄ for swaps.</span>
+      <ul class="a-ings">${M.ings.map(i => `<li class="a-ing">${amtBtn(i)}<div><span>${esc(i.name)}</span>${i.prep ? `<span class="muted">, ${esc(i.prep)}</span>` : ''}${marks(i)}</div>${swapBtn(i) || '<span></span>'}</li>${S.subOpen === i.id ? subChooser(i) : ''}`).join('')}</ul>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:10px">
+      <h2>Steps</h2>
+      <ol class="a-steps">${M.steps.map(s => `<li id="step-${s.n}"><span class="n">${s.n}</span><div><p class="steptext">${stepText(s, M)}</p>${stepFlag(s)}</div></li>`).join('')}</ol>
+    </section>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2>Nutrition per serving</h2>${nutriGrid(M)}</section>
+  </div>`;
+}
+
+// ---------- Variant B: tabs + Adjust sheet ----------
+function vB(M) {
+  const n = nutrition(M);
+  const tab = S.bTab;
+  let body = '';
+  if (tab === 'ingredients') {
+    body = `<ul class="b-ings">${M.ings.map(i => `<li class="b-ing"><div><div>${esc(i.name)}${i.prep ? `<span class="muted">, ${esc(i.prep)}</span>` : ''}</div>${marks(i)}${i.subs ? `<button class="sw" data-act="subopen" data-id="${i.id}">⇄ ${i.sub ? 'Swapped' : 'Swap'}</button>` : ''}</div>${amtBtn(i)}</li>${S.subOpen === i.id ? subChooser(i) : ''}`).join('')}</ul>
+      <span class="small muted">Tap an amount to switch just that ingredient's unit.</span>`;
+  } else if (tab === 'steps') {
+    body = `<div class="b-steps">${M.steps.map(s => `<article class="b-step ${S.bDone[s.n] ? 'done' : ''}" id="step-${s.n}">
+      <div class="hd"><span class="big">${s.n}</span>${stepFlag(s)}<button class="chk" data-act="bdone" data-n="${s.n}">${S.bDone[s.n] ? '✓ Done' : 'Mark done'}</button></div>
+      <p class="steptext">${stepText(s, M)}</p></article>`).join('')}</div>`;
+  } else {
+    body = `<div style="display:flex;flex-direction:column;gap:16px">${versionNote()}
+      <section style="display:flex;flex-direction:column;gap:8px"><h3>Stated times</h3>${statedTimes()}</section>
+      <section style="display:flex;flex-direction:column;gap:8px"><h3>Difficulty</h3>${diffMeters()}</section>
+      <section style="display:flex;flex-direction:column;gap:8px"><h3>Nutrition per serving</h3>${nutriGrid(M)}</section>
+      <div class="row" style="gap:4px">${R.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+      <a href="${R.url}" target="_blank" rel="noopener">Open on ${esc(R.site)} ↗</a></div>`;
+  }
+  return `<div class="screen">
+    <div class="b-head"><div class="thumb" style="--h:${R.hue}">CTM</div>
+      <div style="display:flex;flex-direction:column;gap:4px"><span class="eyebrow">${esc(R.site)}</span><h1 style="font-size:1.4rem">${R.title}</h1>
+      <span class="small muted tnum">${R.stated.total} total · Difficulty ${R.diff.prep + R.diff.cook + R.diff.cleanup}/9 · ${Math.round(n[0])} kcal</span></div></div>
+    <div class="b-sticky">
+      <div class="b-sum"><button class="pill" data-act="bsheet" aria-label="Adjust servings, units and version">⚙ ${ctlSummary()}</button><button class="btn primary" data-act="cook">Cook</button></div>
+      <div class="b-tabs" role="tablist">${[['ingredients', `Ingredients`], ['steps', 'Steps'], ['about', 'About']].map(([k, l]) => `<button role="tab" data-act="btab" data-t="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    </div>
+    ${body}
+  </div>`;
+}
+function sheetB() {
+  return `<div class="sheet-bg" data-act="bsheet-close"><div class="sheet" role="dialog" aria-label="Adjust">
+    <div class="row"><h2>Adjust</h2><span class="spacer"></span><button class="btn" data-act="bsheet-close">Done</button></div>
+    <div class="grp"><span class="eyebrow">Version</span>${versionSeg('full')}</div>
+    <div class="grp"><span class="eyebrow">Servings: ${servings()}</span><div class="seg full">${SCALES.map(x => `<button data-act="scale" data-x="${x}" class="${S.scale === x ? 'on' : ''}">${scaleLabel(x)}</button>`).join('')}</div></div>
+    <div class="grp"><span class="eyebrow">Units</span>${unitsSeg('full')}<span class="small muted">You can also tap any amount to switch just that ingredient.</span></div>
+  </div></div>`;
+}
+
+// ---------- Variant C: steps carry their ingredients ----------
+function vC(M) {
+  const n = nutrition(M), kcal = n[1] * 4 + n[2] * 9 + n[3] * 4;
+  const swappable = M.ings.filter(i => i.subs).length;
+  return `<div class="screen">
+    <div class="c-head">
+      <div class="row" style="flex-wrap:nowrap;gap:12px"><div class="thumb" style="--h:${R.hue};width:64px;height:64px;border-radius:12px;flex:none">CTM</div>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0"><h1 style="font-size:1.35rem">${R.title}</h1><a class="small" href="${R.url}" target="_blank" rel="noopener">${esc(R.site)} ↗</a></div></div>
+      <div class="c-facts tnum"><span>Prep ${R.stated.prep}</span><span>Cook ${R.stated.cook}</span><span>Total ${R.stated.total}</span><span>Difficulty ${R.diff.prep}·${R.diff.cook}·${R.diff.cleanup} = ${R.diff.prep + R.diff.cook + R.diff.cleanup}</span><span>${Math.round(n[0])} kcal</span>${R.tags.map(t => `<span>${t}</span>`).join('')}</div>
+      ${versionNote()}
+    </div>
+    <div class="c-mise">
+      <button data-act="cmise" aria-expanded="${S.cMise}"><span><b>Get it all out first</b><br><span class="small muted">${M.ings.length} ingredients · ${swappable} can be swapped · serves ${servings()}</span></span><span>${S.cMise ? '▴' : '▾'}</span></button>
+      ${S.cMise ? `<ul>${M.ings.map(i => `<li class="${S.got[i.id] ? 'got' : ''}"><input type="checkbox" id="got-${i.id}" data-act="got" data-id="${i.id}" ${S.got[i.id] ? 'checked' : ''}><label for="got-${i.id}" class="nm" style="flex:1">${esc(i.name)}</label>${amtBtn(i)}</li>`).join('')}</ul>` : ''}
+    </div>
+    <ol class="c-line">${M.steps.map(s => `<li class="c-step" id="step-${s.n}"><span class="c-node">${s.n}</span><div>
+      <p class="steptext">${stepText(s, M)}</p>${stepFlag(s)}
+      <div class="c-uses">${s.uses.map(u => { const i = M.by[u.id]; if (!i) return ''; const a = amount(i, u.p);
+        return `<div>${a.taste ? '<span class="muted">to taste</span>' : `<button class="amt" data-act="cycle" data-id="${i.id}">${a.txt}</button>`}<span class="${i.sub ? 'subbed' : ''}">${esc(i.name)}</span>${swapBtn(i)}</div>${S.subOpen === i.id && S.subStep === s.n ? subChooser(i, 'div') : ''}`; }).join('')}</div>
+    </div></li>`).join('')}</ol>
+    <section style="display:flex;flex-direction:column;gap:8px"><h2>Per serving</h2>
+      <div class="c-macro" aria-hidden="true"><i style="flex:${n[1] * 4};background:var(--accent)"></i><i style="flex:${n[2] * 9};background:var(--spice)"></i><i style="flex:${n[3] * 4};background:var(--warn-ink)"></i></div>
+      <span class="small tnum"><b>${Math.round(n[0])} kcal</b> · <span style="color:var(--accent)">■</span> protein ${Math.round(n[1])} g (${Math.round(n[1] * 400 / kcal)}%) · <span style="color:var(--spice)">■</span> fat ${Math.round(n[2])} g (${Math.round(n[2] * 900 / kcal)}%) · <span style="color:var(--warn-ink)">■</span> carbs ${Math.round(n[3])} g · sodium ${Math.round(n[4])} mg</span>
+      <span class="small muted">Estimated from USDA FoodData Central. Rice isn't included. Swaps and Our Version change these; scaling doesn't.</span>
+    </section>
+  </div>
+  <div class="c-bar fx">
+    <button class="btn" data-act="version" data-v="${S.version === 'ours' ? 'orig' : 'ours'}" title="Switch version">${S.version === 'ours' ? 'Ours' : 'Original'} ⇄</button>
+    <div class="stepper"><button data-act="sstep" data-d="-1" aria-label="Fewer servings">−</button><span>Serves ${servings()}</span><button data-act="sstep" data-d="1" aria-label="More servings">+</button></div>
+    <button class="btn" data-act="ucycle">${{ written: 'As written', metric: 'Metric', us: 'US' }[S.units]}</button>
+    <button class="btn primary" data-act="cook">Cook</button>
+  </div>`;
+}
+
+// ---------- cooking mode ----------
+function cookHTML(M) {
+  const s = M.steps[S.cookIdx], last = S.cookIdx === M.steps.length - 1;
+  const uses = s.uses.map(u => M.by[u.id]).filter(Boolean);
+  return `<div class="cook ${S.cookBig ? 'big' : ''}" role="dialog" aria-label="Cooking mode">
+    <header><button data-act="cookexit">✕ Exit</button><span class="spacer"></span><b class="tnum">Step ${s.n} of ${M.steps.length}</b><span class="spacer"></span><button data-act="cookbig" aria-label="Text size">${S.cookBig ? 'A−' : 'A+'}</button></header>
+    <div class="prog">${M.steps.map((_, k) => `<i class="${k <= S.cookIdx ? 'f' : ''}"></i>`).join('')}</div>
+    <div class="wake">${esc(S.wake)} · ${ctlSummary()}</div>
+    <main>
+      <p class="ct">${stepText(s, M)}</p>
+      ${uses.length ? `<div class="uses"><span class="eyebrow" style="color:inherit;opacity:.7">In this step</span>${s.uses.map(u => { const i = M.by[u.id]; if (!i) return ''; return `<div><b>${amount(i, u.p).txt}</b> ${esc(i.name)}</div>`; }).join('')}</div>` : ''}
+    </main>
+    <nav><button data-act="cookprev" ${S.cookIdx === 0 ? 'disabled' : ''}>‹ Back</button><button class="next" data-act="${last ? 'cookexit' : 'cooknext'}">${last ? 'Finish' : 'Next step ›'}</button></nav>
+  </div>`;
+}
+async function requestWake() {
+  S.wake = 'Asking to keep the screen on…';
+  try { S.lock = await navigator.wakeLock.request('screen'); S.wake = 'Screen stays on'; }
+  catch (e) { S.wake = 'This browser refused the wake lock, so the screen may dim'; }
+  render();
+}
+
+// ---------- timers ----------
+let tid = 0, lastT = performance.now(), lastBeep = 0, AC = null;
+function ac() { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} return AC; }
+function beep(f = 880, d = .18) {
+  const a = ac(); if (!a) return;
+  try {
+    const o = a.createOscillator(), g = a.createGain();
+    o.frequency.value = f; g.gain.setValueAtTime(.001, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(.3, a.currentTime + .02); g.gain.exponentialRampToValueAtTime(.001, a.currentTime + d);
+    o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + d + .05);
+  } catch (e) {}
+}
+function startTimer(lo, hi, label, step) {
+  if (S.timers.some(t => t.label === label)) { toast(`The ${label.toLowerCase()} timer is already running.`); return; }
+  S.timers.push({ id: ++tid, label, step, lo, hi, total: hi * 60, check: lo < hi ? lo * 60 : null, el: 0, run: true, checkHit: false, done: false });
+  toast(lo < hi ? `${label}: runs ${hi} minutes, with a chime at ${lo} to check.` : `${label}: ${hi} minute timer started.`);
+  render();
+}
+const mmss = s => { s = Math.max(0, Math.ceil(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+let dockSig = '';
+function renderDock() {
+  const dock = document.getElementById('dock');
+  const sig = S.timers.map(t => `${t.id}${t.run ? 'r' : 'p'}${t.done ? 'd' : ''}${t.checkHit ? 'c' : ''}`).join(',');
+  if (sig !== dockSig) {
+    dockSig = sig;
+    dock.innerHTML = S.timers.map(t => `<div class="tm ${t.done ? 'done' : t.checkHit ? 'check' : ''}" role="timer">
+      <button class="lbl" data-act="jump" data-step="${t.step}"><small>Step ${t.step}${t.check != null ? ` · check at ${t.lo} min` : ''}</small><b>${esc(t.done ? t.label + ': done' : t.checkHit ? t.label + ': check now' : t.label)}</b></button>
+      <span class="time" id="tt${t.id}"></span>
+      ${t.done ? `<button data-act="tclose" data-id="${t.id}">Stop</button>` : `<button data-act="tpause" data-id="${t.id}">${t.run ? 'Pause' : 'Go'}</button><button data-act="tplus" data-id="${t.id}">+1</button><button data-act="tclose" data-id="${t.id}" aria-label="Cancel timer">✕</button>`}
+    </div>`).join('');
+  }
+  for (const t of S.timers) { const el = document.getElementById('tt' + t.id); if (el) el.textContent = t.done ? '0:00' : mmss(t.total - t.el); }
+}
+setInterval(() => {
+  const now = performance.now(), dt = (now - lastT) / 1000 * S.speed; lastT = now;
+  for (const t of S.timers) {
+    if (!t.run || t.done) continue;
+    t.el += dt;
+    if (t.check != null && !t.checkHit && t.el >= t.check) { t.checkHit = true; beep(660, .25); }
+    if (t.el >= t.total) { t.el = t.total; t.done = true; t.run = false; }
+  }
+  if (S.timers.some(t => t.done) && now - lastBeep > 1400) { beep(); setTimeout(() => beep(1100), 200); lastBeep = now; }
+  renderDock();
+  if (S.showState) renderState();
+}, 200);
+
+// ---------- prototype chrome ----------
+function renderProto() {
+  document.getElementById('pbar').innerHTML = `<button data-act="prev" aria-label="Previous variant">‹</button>
+    <span class="v"><b>${S.variant}</b> <small>${VARIANTS[S.variant]}</small></span>
+    <button data-act="next" aria-label="Next variant">›</button>
+    <button data-act="speed" class="${S.speed > 1 ? 'on' : ''}" title="Run timers 60 times faster">Timers ${S.speed}×</button>
+    <button data-act="state" class="${S.showState ? 'on' : ''}">State</button>`;
+}
+function renderState() {
+  const el = document.getElementById('state');
+  el.hidden = !S.showState;
+  if (!S.showState) return;
+  const M = model();
+  el.textContent = 'PROTOTYPE STATE (in memory)\n' + JSON.stringify({
+    variant: S.variant, version: S.version, scale: S.scale, servings: servings(), units: S.units,
+    unitOverrides: S.ovr, substitutions: Object.fromEntries(Object.entries(S.subs).map(([k, v]) => [k, baseIng(k).subs[v].name])),
+    timers: S.timers.map(t => ({ step: t.step, label: t.label, left: mmss(t.total - t.el), running: t.run, done: t.done })),
+    cooking: S.cook ? { step: S.cookIdx + 1, wakeLock: S.wake } : false,
+    view: { ingredients: M.ings.length, steps: M.steps.length, kcalPerServing: Math.round(nutrition(M)[0]) },
+  }, null, 2);
+}
+let toastT;
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3200); }
+
+function render() {
+  const M = model();
+  document.body.dataset.v = S.variant;
+  document.getElementById('app').innerHTML = topbar() + (S.variant === 'A' ? vA(M) : S.variant === 'B' ? vB(M) : vC(M)) + tabbar() + (S.variant === 'B' && S.bSheet ? sheetB() : '');
+  document.getElementById('cook').innerHTML = S.cook ? cookHTML(M) : '';
+  document.body.classList.toggle('cooking', S.cook);
+  dockSig = '';
+  renderDock(); renderProto(); renderState();
+}
+function setVariant(v) { S.variant = v; S.subOpen = null; S.bSheet = false; try { if (location.hash.slice(1) !== v) history.replaceState(null, '', '#' + v); } catch (e) {} render(); }
+function cycleVariant(d) { const k = Object.keys(VARIANTS); setVariant(k[(k.indexOf(S.variant) + d + k.length) % k.length]); }
+
+// ---------- events ----------
+document.addEventListener('click', e => {
+  ac();
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  const a = b.dataset.act, d = b.dataset;
+  if (a === 'bsheet-close' && e.target !== b && b.classList.contains('sheet-bg')) return; // clicks inside the sheet
+  switch (a) {
+    case 'prev': cycleVariant(-1); return;
+    case 'next': cycleVariant(1); return;
+    case 'speed': S.speed = S.speed === 1 ? 60 : 1; toast(S.speed > 1 ? 'Timers now run 60 times faster.' : 'Timers run in real time.'); break;
+    case 'state': S.showState = !S.showState; break;
+    case 'back': toast('Back returns to the Recipes list. "Prototype: whole-app flow" owns that screen.'); return;
+    case 'tab': toast('The tab bar comes from "Prototype: whole-app flow".'); return;
+    case 'version': S.version = d.v; S.subOpen = null; toast(S.version === 'ours' ? 'Showing Our Version.' : 'Showing the Original.'); break;
+    case 'scale': S.scale = +d.x; break;
+    case 'sstep': { const k = SCALES.indexOf(S.scale) + +d.d; if (k >= 0 && k < SCALES.length) S.scale = SCALES[k]; else toast(`Scaling goes from ½× to 3×.`); break; }
+    case 'units': S.units = d.u; S.ovr = {}; break;
+    case 'ucycle': { const u = ['written', 'metric', 'us']; S.units = u[(u.indexOf(S.units) + 1) % 3]; S.ovr = {}; toast(`Units: ${{ written: 'as written', metric: 'metric', us: 'US' }[S.units]}.`); break; }
+    case 'cycle': {
+      const i = model().by[d.id], opts = unitOptions(i);
+      if (opts.length < 2) { toast(`${i.short[0].toUpperCase() + i.short.slice(1)} stays in ${i.unit}: ${i.why || 'there is no trustworthy weight for it'}.`); return; }
+      const cur = S.ovr[i.id] || sysUnit(i);
+      let idx = opts.indexOf(cur); if (idx < 0) idx = Math.max(0, opts.findIndex(o => kindOf(o) === kindOf(cur)));
+      const next = opts[(idx + 1) % opts.length];
+      if (next === sysUnit(i)) delete S.ovr[i.id]; else S.ovr[i.id] = next;
+      const r = amount(i);
+      toast(`${i.short[0].toUpperCase() + i.short.slice(1)}: ${r.txt}${r.approx ? ' (estimated from USDA FoodData Central)' : ''}. Only this ingredient changed.`);
+      break;
+    }
+    case 'subopen': S.subOpen = S.subOpen === d.id ? null : d.id; S.subStep = +(b.closest('.c-step')?.id.split('-')[1] || 0); break;
+    case 'sub': if (d.k === '') delete S.subs[d.id]; else S.subs[d.id] = +d.k; S.subOpen = null; break;
+    case 'timer': startTimer(+d.lo, +d.hi, d.label, +d.step); return;
+    case 'tpause': { const t = S.timers.find(t => t.id === +d.id); t.run = !t.run; renderDock(); return; }
+    case 'tplus': { const t = S.timers.find(t => t.id === +d.id); t.total += 60; renderDock(); return; }
+    case 'tclose': S.timers = S.timers.filter(t => t.id !== +d.id); break;
+    case 'jump': {
+      const n = +d.step;
+      if (S.cook) { S.cookIdx = n - 1; break; }
+      if (S.variant === 'B') S.bTab = 'steps';
+      render(); document.getElementById('step-' + n)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+    }
+    case 'cook': S.cook = true; S.cookIdx = 0; S.subOpen = null; S.bSheet = false; render(); requestWake(); return;
+    case 'cookexit': S.cook = false; try { S.lock && S.lock.release(); } catch (e) {} S.lock = null; break;
+    case 'cooknext': S.cookIdx++; break;
+    case 'cookprev': S.cookIdx = Math.max(0, S.cookIdx - 1); break;
+    case 'cookbig': S.cookBig = !S.cookBig; break;
+    case 'btab': S.bTab = d.t; S.subOpen = null; break;
+    case 'bsheet': S.bSheet = true; break;
+    case 'bsheet-close': S.bSheet = false; break;
+    case 'bdone': S.bDone[d.n] = !S.bDone[d.n]; break;
+    case 'cmise': S.cMise = !S.cMise; break;
+    case 'got': S.got[d.id] = b.checked; break;
+    default: return;
+  }
+  render();
+});
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, [contenteditable]')) return;
+  if (e.key === 'ArrowLeft') cycleVariant(-1);
+  if (e.key === 'ArrowRight') cycleVariant(1);
+});
+window.addEventListener('hashchange', () => { const v = location.hash.slice(1).toUpperCase(); if (VARIANTS[v] && v !== S.variant) setVariant(v); });
+document.addEventListener('visibilitychange', () => { if (S.cook && document.visibilityState === 'visible') requestWake(); });
+S.variant = VARIANTS[location.hash.slice(1).toUpperCase()] ? location.hash.slice(1).toUpperCase() : 'A';
+render();
+</script>
