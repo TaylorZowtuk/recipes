@@ -155,6 +155,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sheet { background: var(--surface); width: 100%; max-width: 430px; border-radius: 16px 16px 0 0; padding: 18px 16px calc(var(--pbar) + 20px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 16px; }
 .sheet .grp { display: flex; flex-direction: column; gap: 6px; }
 
+.b-list li { grid-template-columns: 30px 1fr 34px; }
+.b-list li.done .steptext, .b-list li.done .n { opacity: .45; }
+.tick { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); background: var(--surface); color: transparent; font-weight: 700; padding: 0; margin-top: 4px; }
+.tick.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
 /* ---------- Variant C: steps carry their ingredients ---------- */
 .c-head { display: flex; flex-direction: column; gap: 10px; }
 .c-facts { display: flex; gap: 6px; overflow-x: auto; margin-inline: -16px; padding-inline: 16px; scrollbar-width: none; }
@@ -299,7 +304,7 @@ const VOL = { tsp: 4.929, tbsp: 14.787, cup: 236.59, ml: 1, l: 1000 };
 const MASS = { g: 1, kg: 1000, oz: 28.35, lb: 453.59 };
 const kindOf = u => u in VOL ? 'vol' : u in MASS ? 'mass' : 'count';
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const VARIANTS = { A: 'One long page', B: 'Tabs + Adjust sheet', C: 'Steps carry their ingredients' };
+const VARIANTS = { A: 'One long page', B: 'Tabs + Adjust sheet (winner)', C: 'Steps carry their ingredients' };
 
 // ---------- model: Original + Our Version layer + substitutions ----------
 function baseIng(id) { return R.ings.find(i => i.id === id) || R.ours.addIng.find(a => a.ing.id === id).ing; }
@@ -527,9 +532,8 @@ function vB(M) {
     body = `<ul class="b-ings">${M.ings.map(i => `<li class="b-ing"><div><div>${esc(i.name)}${i.prep ? `<span class="muted">, ${esc(i.prep)}</span>` : ''}</div>${marks(i)}${i.subs ? `<button class="sw" data-act="subopen" data-id="${i.id}">⇄ ${i.sub ? 'Swapped' : 'Swap'}</button>` : ''}</div>${amtBtn(i)}</li>${S.subOpen === i.id ? subChooser(i) : ''}`).join('')}</ul>
       <span class="small muted">Tap an amount to switch just that ingredient's unit.</span>`;
   } else if (tab === 'steps') {
-    body = `<div class="b-steps">${M.steps.map(s => `<article class="b-step ${S.bDone[s.n] ? 'done' : ''}" id="step-${s.n}">
-      <div class="hd"><span class="big">${s.n}</span>${stepFlag(s)}<button class="chk" data-act="bdone" data-n="${s.n}">${S.bDone[s.n] ? '✓ Done' : 'Mark done'}</button></div>
-      <p class="steptext">${stepText(s, M)}</p></article>`).join('')}</div>`;
+    body = `<ol class="a-steps b-list">${M.steps.map(s => `<li id="step-${s.n}" class="${S.bDone[s.n] ? 'done' : ''}"><span class="n">${s.n}</span><div><p class="steptext">${stepText(s, M)}</p>${stepFlag(s)}</div>
+      <button class="tick ${S.bDone[s.n] ? 'on' : ''}" data-act="bdone" data-n="${s.n}" aria-pressed="${!!S.bDone[s.n]}" aria-label="Step ${s.n} done">✓</button></li>`).join('')}</ol>`;
   } else {
     body = `<div style="display:flex;flex-direction:column;gap:16px">${versionNote()}
       <section style="display:flex;flex-direction:column;gap:8px"><h3>Stated times</h3>${statedTimes()}</section>
@@ -543,7 +547,7 @@ function vB(M) {
       <div style="display:flex;flex-direction:column;gap:4px"><span class="eyebrow">${esc(R.site)}</span><h1 style="font-size:1.4rem">${R.title}</h1>
       <span class="small muted tnum">${R.stated.total} total · Difficulty ${R.diff.prep + R.diff.cook + R.diff.cleanup}/9 · ${Math.round(n[0])} kcal</span></div></div>
     <div class="b-sticky">
-      <div class="b-sum"><button class="pill" data-act="bsheet" aria-label="Adjust servings, units and version">⚙ ${ctlSummary()}</button><button class="btn primary" data-act="cook">Cook</button></div>
+      <div class="b-sum"><button class="pill" data-act="bsheet" aria-label="Adjust servings, units and version">⚙ ${ctlSummary()}</button><button class="btn primary" data-act="cook">${Object.values(S.bDone).some(Boolean) ? 'Resume' : 'Cook'}</button></div>
       <div class="b-tabs" role="tablist">${[['ingredients', `Ingredients`], ['steps', 'Steps'], ['about', 'About']].map(([k, l]) => `<button role="tab" data-act="btab" data-t="${k}" class="${tab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     </div>
     ${body}
@@ -604,7 +608,7 @@ function cookHTML(M) {
       <p class="ct">${stepText(s, M)}</p>
       ${uses.length ? `<div class="uses"><span class="eyebrow" style="color:inherit;opacity:.7">In this step</span>${s.uses.map(u => { const i = M.by[u.id]; if (!i) return ''; return `<div><b>${amount(i, u.p).txt}</b> ${esc(i.name)}</div>`; }).join('')}</div>` : ''}
     </main>
-    <nav><button data-act="cookprev" ${S.cookIdx === 0 ? 'disabled' : ''}>‹ Back</button><button class="next" data-act="${last ? 'cookexit' : 'cooknext'}">${last ? 'Finish' : 'Next step ›'}</button></nav>
+    <nav><button data-act="cookprev" ${S.cookIdx === 0 ? 'disabled' : ''}>‹ Back</button><button class="next" data-act="${last ? 'cookexit' : 'cooknext'}" ${last ? 'data-fin="1"' : ''}>${last ? 'Finish' : 'Next step ›'}</button></nav>
   </div>`;
 }
 async function requestWake() {
@@ -738,9 +742,9 @@ document.addEventListener('click', e => {
       if (S.variant === 'B') S.bTab = 'steps';
       render(); document.getElementById('step-' + n)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
     }
-    case 'cook': S.cook = true; S.cookIdx = 0; S.subOpen = null; S.bSheet = false; render(); requestWake(); return;
-    case 'cookexit': S.cook = false; try { S.lock && S.lock.release(); } catch (e) {} S.lock = null; break;
-    case 'cooknext': S.cookIdx++; break;
+    case 'cook': { const M = model(), k = M.steps.findIndex(s => !S.bDone[s.n]); S.cook = true; S.cookIdx = k < 0 ? 0 : k; } S.subOpen = null; S.bSheet = false; render(); requestWake(); return;
+    case 'cookexit': if (d.fin) S.bDone[S.cookIdx + 1] = true; S.cook = false; try { S.lock && S.lock.release(); } catch (e) {} S.lock = null; break;
+    case 'cooknext': S.bDone[S.cookIdx + 1] = true; S.cookIdx++; break;
     case 'cookprev': S.cookIdx = Math.max(0, S.cookIdx - 1); break;
     case 'cookbig': S.cookBig = !S.cookBig; break;
     case 'btab': S.bTab = d.t; S.subOpen = null; break;
