@@ -36,8 +36,24 @@ Bringing a recipe from its source into the collection.
 _Avoid_: Import, scrape (scraping is only one way to ingest)
 
 **Enrichment**:
-Structured facts added to a recipe once, when it is ingested, and stored with it. This includes parsed ingredients, substitutions, nutrition estimates and grocery categories.
+Structured facts added to a recipe once, after it is ingested, and stored with it. This includes parsed ingredients, substitutions, nutrition estimates and grocery categories.
 _Avoid_: AI processing, augmentation
+
+**Enrichment Status**:
+Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. Only a Ready recipe is used for the grocery list and fridge matching.
+_Avoid_: Processing state
+
+**Enrichment Issue**:
+Something enrichment corrected or was unsure about, and which an editor should check.
+_Avoid_: Warning, error
+
+**Needs Review**:
+The list of open enrichment issues and unconfirmed facts, across all recipes.
+_Avoid_: Inbox, queue
+
+**Confirmed**:
+Describes an enriched fact that an editor has accepted or corrected. Confirmed facts are never changed when enrichment runs again.
+_Avoid_: Approved, verified
 
 **Original**:
 The recipe exactly as captured from its source. It never changes after ingest, except through a manual re-ingest that an editor has reviewed.
