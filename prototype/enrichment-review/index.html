@@ -1,0 +1,761 @@
+<title>Enrichment Review Prototype</title>
+<!--
+  PROTOTYPE, throwaway. Answers "Prototype: enrichment review screen" (TaylorZowtuk/recipes#30):
+  how an editor checks a recipe's enrichment on a phone, how items are confirmed in bulk,
+  and how Needs Review is reached from the tab bar. Three variants, switchable with #A / #B / #C
+  (the artifact viewer drops query strings, so the hash stands in for ?variant=).
+    A "Checklist":   banner on Recipes -> list by recipe -> one long sectioned checklist.
+    B "One at a time": badge on the account button -> list grouped by kind -> a triage card per item.
+    C "In the recipe": Needs Review chip on Recipes -> the recipe view itself in review mode.
+  Shared rule in every variant: bulk confirm never includes an item with an open Enrichment Issue.
+  Hosted inside "Prototype: whole-app flow" variant A (tab bar) with the "Plateful" tokens.
+  All state is in memory; the editor is always signed in. Recipes and sites are invented.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700;6..12,800&display=swap">
+<style>
+:root {
+  --bg: #F7F8F5; --surface: #FFFFFF; --ink: #1B2420; --muted: #58645E; --line: #D9DFDA; --outline: #7D8A83;
+  --accent: #2E5E45; --accent-text: #2E5E45; --on-accent: #FFFFFF; --soft: #E3ECE6; --soft-ink: #24513A;
+  --red: #C2362B; --red-text: #B02E24; --warn: #F6EBD2; --warn-ink: #6E5210;
+  --plate: rgba(30,60,45,.22); --proto: #1B2420; --proto-ink: #F7F8F5;
+  --card-shadow: 0 1px 2px rgba(30,60,45,.08), 0 4px 12px rgba(30,60,45,.06);
+  --float-shadow: 0 10px 28px rgba(20,50,35,.25);
+  --display: "Baloo 2", "Trebuchet MS", system-ui, sans-serif;
+  --body: "Nunito Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --tabs: 64px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #121715; --surface: #1A201D; --ink: #ECEFEC; --muted: #A3ADA7; --line: #2E3833; --outline: #6E7C75;
+    --accent: #8CC5A2; --accent-text: #9ED2B2; --on-accent: #0F1A14; --soft: #22312A; --soft-ink: #BFE0CB;
+    --red: #F07B6B; --red-text: #F59486; --warn: #352C17; --warn-ink: #EBCF8A;
+    --plate: rgba(0,0,0,.5); --proto: #ECEFEC; --proto-ink: #121715;
+    --card-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+    --float-shadow: 0 10px 28px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #121715; --surface: #1A201D; --ink: #ECEFEC; --muted: #A3ADA7; --line: #2E3833; --outline: #6E7C75;
+  --accent: #8CC5A2; --accent-text: #9ED2B2; --on-accent: #0F1A14; --soft: #22312A; --soft-ink: #BFE0CB;
+  --red: #F07B6B; --red-text: #F59486; --warn: #352C17; --warn-ink: #EBCF8A;
+  --plate: rgba(0,0,0,.5); --proto: #ECEFEC; --proto-ink: #121715;
+  --card-shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.25);
+  --float-shadow: 0 10px 28px rgba(0,0,0,.55);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); -webkit-tap-highlight-color: transparent; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; margin: 0; line-height: 1.15; text-wrap: balance; }
+h1 { font-size: 23px; } h2 { font-size: 19px; } h3 { font-size: 17px; }
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; padding: 0; }
+input, select { font: inherit; color: var(--ink); background: var(--bg); border: 0; border-radius: 14px; padding: 10px 12px; width: 100%; min-height: 44px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+svg { flex: none; }
+.muted { color: var(--muted); } .small { font-size: 13.5px; } .tiny { font-size: 12px; } .tnum { font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.grow { flex: 1; min-width: 0; }
+
+/* prototype chrome */
+.proto { background: var(--proto); color: var(--proto-ink); display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 16px; font-size: 13.5px; font-weight: 700; flex-wrap: wrap; }
+.proto button { padding: 4px 10px; border-radius: 999px; }
+.proto button:hover { background: color-mix(in srgb, var(--proto-ink) 15%, transparent); }
+.proto .lbl { min-width: 160px; text-align: center; }
+
+/* app shell */
+.app { max-width: 430px; margin: 0 auto; min-height: calc(100% - 34px); position: relative; padding-bottom: calc(var(--tabs) + 24px + env(safe-area-inset-bottom, 0px)); }
+.app.has-bar { padding-bottom: calc(var(--tabs) + 110px + env(safe-area-inset-bottom, 0px)); }
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 16px; min-height: 58px; }
+.top.pushed { padding-left: 4px; }
+.top h1 { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iconbtn { width: 48px; height: 48px; border-radius: 999px; display: grid; place-items: center; position: relative; }
+.iconbtn:hover { background: var(--soft); }
+.badge { position: absolute; top: 5px; right: 3px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: var(--red); color: var(--on-accent); font-size: 12px; font-weight: 800; display: grid; place-items: center; }
+.content { padding: 4px 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+.tabbar { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: min(430px, 100%); z-index: 6; background: var(--surface); display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: env(safe-area-inset-bottom, 0px); box-shadow: 0 -1px 0 var(--line); }
+.tab { height: var(--tabs); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 12px; font-weight: 700; color: var(--muted); position: relative; }
+.tab.on { color: var(--accent-text); }
+.tab .dot { position: absolute; top: 9px; left: calc(50% + 9px); width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+
+/* shared pieces */
+.card { background: var(--surface); border-radius: 24px; box-shadow: var(--card-shadow); }
+.pad { padding: 14px; }
+.pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.pill.soft { background: var(--soft); color: var(--soft-ink); }
+.pill.warn { background: var(--warn); color: var(--warn-ink); }
+.pill.red { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red-text); }
+.pill.line { box-shadow: inset 0 0 0 1.5px var(--line); color: var(--muted); }
+.prov { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--bg); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.btn { min-height: 50px; padding: 0 18px; border-radius: 18px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.soft { background: var(--soft); color: var(--soft-ink); }
+.btn.ghost { color: var(--accent-text); }
+.btn.small { min-height: 40px; padding: 0 14px; border-radius: 14px; font-size: 13.5px; }
+.btn:disabled { opacity: .45; cursor: default; }
+.plate { width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 50%; display: grid; place-items: center; background: radial-gradient(circle, var(--surface) 0 52%, var(--line) 53% 54%, var(--surface) 55% 100%); box-shadow: 0 6px 14px var(--plate); font-family: var(--display); font-weight: 700; color: var(--muted); }
+.meters { display: inline-flex; gap: 10px; align-items: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+.meter { display: inline-flex; gap: 2px; align-items: center; }
+.meter i { width: 6px; height: 12px; border-radius: 3px; background: var(--line); }
+.meter i.on { background: var(--accent); }
+.tick { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 999px; flex: none; }
+.tick span { width: 28px; height: 28px; border-radius: 50%; box-shadow: inset 0 0 0 2.25px var(--outline); display: grid; place-items: center; color: transparent; transition: transform 320ms cubic-bezier(.34,1.8,.64,1); }
+.tick.on span { background: var(--accent); box-shadow: none; color: var(--on-accent); transform: scale(1.06); }
+.tick:disabled { cursor: default; }
+.tick:disabled span { box-shadow: inset 0 0 0 2.25px var(--line); }
+.issuebox { background: var(--warn); color: var(--warn-ink); border-radius: 16px; padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; }
+.issuebox b { font-weight: 800; }
+.diff { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-weight: 700; }
+.diff s { color: var(--muted); font-weight: 600; }
+.canon { font-weight: 800; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13.5px; }
+.kv dt { color: var(--muted); font-weight: 700; }
+.kv dd { margin: 0; min-width: 0; }
+.linkchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.linkchip { background: var(--soft); color: var(--soft-ink); border-radius: 999px; padding: 2px 10px; font-size: 13.5px; font-weight: 700; }
+.linkchip em { font-style: normal; color: var(--red-text); }
+.timerchip { display: inline-flex; gap: 4px; align-items: center; color: var(--red-text); font-weight: 800; font-size: 13.5px; }
+.progress { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 320ms; }
+.divider { height: 1px; background: var(--line); }
+.empty { text-align: center; padding: 32px 16px; color: var(--muted); }
+
+/* home grid */
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rcard { padding: 12px 10px 14px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.rcard .plate { width: 78%; font-size: 30px; margin-bottom: 4px; }
+.rcard h3 { font-size: 17px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.chip { white-space: nowrap; border-radius: 999px; padding: 0 14px; min-height: 40px; display: inline-flex; align-items: center; gap: 6px; background: var(--surface); box-shadow: var(--card-shadow); font-weight: 700; font-size: 13.5px; }
+.chip.on { background: var(--accent); color: var(--on-accent); }
+.chip.review { box-shadow: inset 0 0 0 2px var(--red); color: var(--red-text); background: var(--surface); }
+.chip.review.on { background: var(--red); color: var(--on-accent); box-shadow: none; }
+.search { background: var(--surface); border-radius: 999px; min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 16px; color: var(--muted); box-shadow: var(--card-shadow); }
+
+/* A: checklist */
+.banner { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--warn); color: var(--warn-ink); border-radius: 24px; text-align: left; width: 100%; }
+.banner b { font-family: var(--display); font-size: 17px; display: block; }
+.rrow { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; text-align: left; width: 100%; }
+.rrow .plate { width: 56px; font-size: 20px; }
+.sec { display: flex; flex-direction: column; }
+.sechead { display: flex; align-items: center; gap: 8px; padding: 14px 14px 6px; }
+.sechead h2 { flex: 1; }
+.aitem { display: flex; gap: 4px; padding: 8px 8px 8px 0; align-items: flex-start; }
+.aitem + .aitem { border-top: 1px solid var(--line); }
+.aitem .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-top: 10px; }
+.aitem.flag { background: color-mix(in srgb, var(--warn) 60%, transparent); }
+.aitem .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.sticky-sum { position: sticky; top: calc(58px + env(safe-area-inset-top, 0px)); z-index: 4; background: var(--bg); padding: 4px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+
+/* B: triage */
+.kindrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; width: 100%; text-align: left; min-height: 60px; }
+.kindrow + .kindrow { border-top: 1px solid var(--line); }
+.kindrow .n { font-family: var(--display); font-size: 23px; min-width: 32px; text-align: right; }
+.tcard { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; min-height: 360px; }
+.tcard .orig { font-family: var(--display); font-size: 23px; line-height: 1.2; font-weight: 600; }
+.tacts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tacts .btn.primary { grid-column: 1 / -1; min-height: 70px; font-size: 18px; border-radius: 22px; }
+.menu { display: flex; flex-direction: column; }
+.menu button { min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 8px; text-align: left; font-weight: 700; border-radius: 14px; }
+.menu button:hover { background: var(--soft); }
+
+/* C: in the recipe */
+.hero { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding-top: 4px; }
+.hero .plate { width: 44%; font-size: 48px; }
+.hero h1 { font-size: 30px; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--surface); border-radius: 999px; padding: 4px; box-shadow: var(--card-shadow); }
+.seg button { min-height: 44px; border-radius: 999px; font-weight: 800; font-size: 13.5px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.seg button.on { background: var(--accent); color: var(--on-accent); }
+.seg .cnt { font-size: 12px; min-width: 20px; height: 20px; border-radius: 999px; background: var(--red); color: var(--on-accent); display: grid; place-items: center; padding: 0 5px; }
+.cline { display: flex; align-items: center; gap: 10px; padding: 10px 12px; width: 100%; text-align: left; min-height: 56px; border-radius: 16px; }
+.cline + .cline { margin-top: 2px; }
+.cline .txt { flex: 1; min-width: 0; }
+.cline.pending .txt { text-decoration: underline dotted var(--outline) 2px; text-underline-offset: 5px; }
+.cline.flag { background: var(--warn); color: var(--warn-ink); }
+.cline .mark { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.cline.pending .mark { box-shadow: inset 0 0 0 2.25px var(--outline); }
+.cline.ok .mark { background: var(--accent); color: var(--on-accent); }
+.cline.flag .mark { background: var(--red); color: var(--on-accent); box-shadow: none; }
+.cstep { display: grid; grid-template-columns: 36px 1fr 28px; gap: 10px; align-items: start; padding: 12px; text-align: left; width: 100%; border-radius: 16px; }
+.cstep .num { width: 32px; height: 32px; border-radius: 50%; background: var(--soft); color: var(--soft-ink); display: grid; place-items: center; font-family: var(--display); font-weight: 700; }
+.reviewbar { position: fixed; left: 50%; transform: translateX(-50%); width: min(430px, 100%); bottom: calc(var(--tabs) + env(safe-area-inset-bottom, 0px)); z-index: 6; padding: 10px 16px; background: var(--surface); box-shadow: 0 -1px 0 var(--line), 0 -8px 20px rgba(20,50,35,.08); display: flex; flex-direction: column; gap: 8px; }
+
+/* sheet + toast */
+.scrim { position: fixed; inset: 0; background: rgba(10,20,15,.45); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: min(430px, 100%); max-height: 88%; overflow-y: auto; background: var(--surface); border-radius: 24px 24px 0 0; padding: 10px 16px calc(20px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--float-shadow); display: flex; flex-direction: column; gap: 14px; }
+.grab { width: 40px; height: 5px; border-radius: 999px; background: var(--line); margin: 0 auto; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13.5px; font-weight: 700; color: var(--muted); }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fields .wide { grid-column: 1 / -1; }
+.segpick { display: flex; gap: 6px; }
+.segpick button { width: 44px; height: 44px; border-radius: 14px; background: var(--bg); font-weight: 800; }
+.segpick button.on { background: var(--accent); color: var(--on-accent); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabs) + 16px + env(safe-area-inset-bottom, 0px)); z-index: 30; width: min(398px, calc(100% - 32px)); background: var(--ink); color: var(--bg); border-radius: 18px; padding: 10px 10px 10px 16px; display: flex; align-items: center; gap: 10px; box-shadow: var(--float-shadow); font-size: 13.5px; font-weight: 700; }
+body.has-bar .toast { bottom: calc(var(--tabs) + 124px + env(safe-area-inset-bottom, 0px)); }
+.toast button { color: var(--bg); font-weight: 800; padding: 8px 12px; border-radius: 12px; text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="proto" id="proto" role="toolbar" aria-label="Prototype controls">
+  <button id="prev" aria-label="Previous variant">&#8249;</button>
+  <span class="lbl" id="vlabel">A</span>
+  <button id="next" aria-label="Next variant">&#8250;</button>
+  <button id="reset">Reset data</button>
+</div>
+<div class="app" id="app"></div>
+<div id="overlay"></div>
+
+<script>
+const VARIANTS = { A: "Checklist", B: "One at a time", C: "In the recipe" };
+const HIGH = 0.8; // confidence threshold for bulk confirm (B) and weight conversion
+
+const ic = {
+  back: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
+  user: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>',
+  check: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  flag: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4h11l-2 4 2 4H5"/></svg>',
+  chev: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+  timer: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>',
+  search: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+  recipes: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/></svg>',
+  week: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  fridge: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="3"/><path d="M5 10h14M9 6v1M9 13v3"/></svg>',
+  sites: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
+};
+
+// ---------- data ----------
+function seed() {
+  const recipes = [
+    { id: "r1", title: "Lemon chicken traybake", site: "Sheet Pan Supper", status: "Awaiting Review", channel: "Add a recipe", total: "55 min" },
+    { id: "r2", title: "Weeknight red lentil dal", site: "Dal Days", status: "Ready", channel: "Bulk import", total: "35 min" },
+    { id: "r3", title: "Shawarma blend", site: "Spice blends (sheet)", status: "Ready", channel: "Bulk import", total: "" },
+    { id: "r4", title: "Miso-glazed salmon", site: "Tidewater Kitchen", status: "Ready", channel: "Bulk import", total: "25 min", done: true, d: [1, 2, 1] },
+    { id: "r5", title: "Brown butter cookies", site: "Crumb Club", status: "Ready", channel: "Bulk import", total: "1 hr 10 min", done: true, d: [2, 2, 2] },
+    { id: "r6", title: "Tomato galette", site: "Sheet Pan Supper", status: "Pending", channel: "Add a recipe", total: "1 hr 30 min", done: true },
+  ];
+  const L = (id, r, conf, o) => ({ id, r, kind: "line", conf, ok: false, prov: "parser", ...o });
+  const items = [
+    L("a1", "r1", .97, { orig: "1½ lb boneless skinless chicken thighs", q: "1½", u: "lb", name: "chicken thighs", prep: "boneless skinless", canon: "chicken thigh", cat: "Meat & Fish", conv: { g: "680 g", est: false, prov: "pint", conf: .99 } }),
+    L("a2", "r1", .62, { orig: "2 cups baby potatoes, halved", q: "2", u: "cup", name: "baby potatoes", prep: "halved", canon: "potato", cat: "Produce", conv: { g: "300 g", est: true, prov: "fdc", conf: .62, below: true } }),
+    L("a3", "r1", .9, { orig: "3 tbsp olive oil, divided", q: "3", u: "tbsp", name: "olive oil", prep: "divided", canon: "olive oil", cat: "Oils & Vinegars", staple: true, conv: { g: "40 g", est: true, prov: "fdc", conf: .9 } }),
+    L("a4", "r1", .88, { orig: "1 lemon, zested and juiced", q: "1", u: "", name: "lemon", prep: "zested and juiced", canon: "lemon", cat: "Produce", conv: { g: "84 g", est: true, prov: "fdc", conf: .88 } }),
+    L("a5", "r1", .93, { orig: "4 cloves garlic, smashed", q: "4", u: "clove", name: "garlic", prep: "smashed", canon: "garlic", cat: "Produce", conv: { g: "12 g", est: true, prov: "fdc", conf: .93 } }),
+    L("a6", "r1", .84, { orig: "1 tsp smoked paprika", q: "1", u: "tsp", name: "smoked paprika", prep: "", canon: "smoked paprika", cat: "Spices", conv: { g: "2.3 g", est: true, prov: "fdc", conf: .84 } }),
+    L("a7", "r1", .71, { orig: "½ cup Castelvetrano olives, pitted", q: "½", u: "cup", name: "Castelvetrano olives", prep: "pitted", canon: "castelvetrano olive", cat: "Canned & Jarred", prov: "llm", conv: { g: "67 g", est: true, prov: "fdc", conf: .71, below: true } }),
+    L("a8", "r1", .9, { orig: "1 (14 oz) can chickpeas, drained", q: "1", u: "can (14 oz)", name: "chickpeas", prep: "drained", canon: "chickpea", cat: "Canned & Jarred", prov: "llm", conv: { g: "397 g", est: false, prov: "pint", conf: .99 } }),
+    L("a9", "r1", .75, { orig: "Salt and pepper to taste", q: "", u: "", name: "salt; black pepper", prep: "to taste", canon: "salt + black pepper", cat: "Spices", staple: true, prov: "llm", conv: null }),
+    L("a10", "r1", .86, { orig: "2 tbsp chopped fresh parsley", q: "2", u: "tbsp", name: "fresh parsley", prep: "chopped", canon: "parsley", cat: "Produce", conv: { g: "7.6 g", est: true, prov: "fdc", conf: .86 } }),
+    { id: "s1", r: "r1", kind: "step", conf: .98, ok: false, prov: "llm", n: 1, text: "Heat the oven to 425°F (220°C) with a rack in the middle.", links: [], timer: "" },
+    { id: "s2", r: "r1", kind: "step", conf: .9, ok: false, prov: "llm", n: 2, text: "Toss the potatoes and chickpeas with 2 tbsp of the oil, salt and pepper on a sheet pan. Roast for 15 minutes.", links: [["potatoes", "all"], ["chickpeas", "all"], ["olive oil", "⅔"], ["salt + pepper", "½"]], timer: "15 min" },
+    { id: "s3", r: "r1", kind: "step", conf: .87, ok: false, prov: "llm", n: 3, text: "Rub the chicken with the garlic, paprika and lemon zest, then nestle it among the potatoes.", links: [["chicken thighs", "all"], ["garlic", "all"], ["smoked paprika", "all"], ["lemon", "½"]], timer: "" },
+    { id: "s4", r: "r1", kind: "step", conf: .9, ok: false, prov: "llm", n: 4, text: "Roast 25 to 30 minutes, until the chicken reaches 165°F.", links: [], timer: "25–30 min" },
+    { id: "s5", r: "r1", kind: "step", conf: .85, ok: false, prov: "llm", n: 5, text: "Squeeze over the lemon juice, scatter the olives and parsley, and drizzle with the last tablespoon of oil.", links: [["lemon", "½"], ["olives", "all"], ["parsley", "all"], ["olive oil", "⅓"], ["salt + pepper", "½"]], timer: "" },
+    { id: "x1", r: "r1", kind: "sub", conf: .8, ok: false, prov: "llm", from: "chicken thigh", to: "chicken breast", ratio: "1 : 1", note: "Leaner. Check it 5 minutes early." },
+    { id: "x2", r: "r1", kind: "sub", conf: .85, ok: false, prov: "llm", from: "castelvetrano olive", to: "kalamata olive", ratio: "1 : 1", note: "Saltier and darker." },
+    { id: "x3", r: "r1", kind: "sub", conf: .82, ok: false, prov: "llm", from: "smoked paprika", to: "sweet paprika", ratio: "1 : 1", note: "Loses the smoky note." },
+    { id: "x4", r: "r1", kind: "sub", conf: .9, ok: false, prov: "llm", from: "chickpea", to: "cannellini bean", ratio: "1 : 1", note: "" },
+    { id: "d1", r: "r1", kind: "diff", conf: .8, ok: false, prov: "llm", d: [1, 2, 1], why: "Little knife work; two roasting stages; one sheet pan." },
+
+    L("b1", "r2", .95, { orig: "1 cup red lentils, rinsed", q: "1", u: "cup", name: "red lentils", prep: "rinsed", canon: "red lentil", cat: "Dry Goods", conv: { g: "192 g", est: true, prov: "fdc", conf: .95 } }),
+    L("b2", "r2", .98, { orig: "1 can (400 ml) coconut milk", q: "1", u: "can (400 ml)", name: "coconut milk", prep: "", canon: "coconut milk", cat: "Canned & Jarred", conv: { g: "400 ml", est: false, prov: "pint", conf: .99 } }),
+    L("b3", "r2", .82, { orig: "1 tbsp garam masala", q: "1", u: "tbsp", name: "garam masala", prep: "", canon: "garam masala", cat: "Spices", conv: { g: "6 g", est: true, prov: "fdc", conf: .82 } }),
+    L("b4", "r2", .9, { orig: "1 onion, finely chopped", q: "1", u: "", name: "onion", prep: "finely chopped", canon: "onion", cat: "Produce", conv: { g: "110 g", est: true, prov: "fdc", conf: .9 } }),
+    L("b5", "r2", .7, { orig: "Juice of ½ lime", q: "½", u: "", name: "lime", prep: "juice of", canon: "lime", cat: "Produce", prov: "llm", conv: { g: "33 g", est: true, prov: "fdc", conf: .7, below: true } }),
+    { id: "b6", r: "r2", kind: "step", conf: .92, ok: false, prov: "llm", n: 1, text: "Simmer the lentils and onion in 3 cups of water until soft, about 20 minutes.", links: [["red lentils", "all"], ["onion", "all"]], timer: "20 min" },
+    { id: "b7", r: "r2", kind: "step", conf: .9, ok: false, prov: "llm", n: 2, text: "Stir in the coconut milk and garam masala, warm through, then finish with the lime juice.", links: [["coconut milk", "all"], ["garam masala", "all"], ["lime", "all"]], timer: "" },
+    { id: "b8", r: "r2", kind: "sub", conf: .8, ok: false, prov: "llm", from: "coconut milk", to: "heavy cream", ratio: "1 : 1", note: "Not dairy-free." },
+    { id: "b9", r: "r2", kind: "diff", conf: .85, ok: false, prov: "llm", d: [1, 1, 1], why: "One pot, one chopped onion." },
+
+    L("c1", "r3", .9, { orig: "2 parts ground cumin", q: "2", u: "part", name: "ground cumin", prep: "", canon: "cumin", cat: "Spices", conv: null, ratio: true }),
+    L("c2", "r3", .88, { orig: "1 part smoked paprika", q: "1", u: "part", name: "smoked paprika", prep: "", canon: "smoked paprika", cat: "Spices", conv: null, ratio: true }),
+    L("c3", "r3", .66, { orig: ".125 cardamom", q: "⅛", u: "part", name: "ground cardamom", prep: "", canon: "cardamom", cat: "Spices", prov: "llm", conv: null, ratio: true }),
+    { id: "c4", r: "r3", kind: "diff", conf: .9, ok: false, prov: "llm", d: [1, 1, 1], why: "Measure and stir." },
+  ];
+  const issues = [
+    { id: "i1", item: "a8", title: "Quantity corrected", before: "14 oz", after: "1 can (14 oz)", why: "The parser read the can size as the amount. The line says “1 … can”.", open: true },
+    { id: "i2", item: "a9", title: "Line split in two", before: "salt and pepper", after: "salt + black pepper", why: "One line names two ingredients. Both are Pantry Staples.", open: true },
+    { id: "i3", item: "a7", title: "New canonical ingredient", before: "green olive (existing)", after: "castelvetrano olive (new)", why: "Castelvetrano is a green olive. Unsure whether the household wants them apart.", open: true },
+    { id: "i4", item: "a2", title: "Kept in cups", before: "≈ 300 g", after: "2 cups", why: "Weight confidence 62% is under the 80% threshold. FDC has no row for halved baby potatoes.", open: true },
+    { id: "i5", item: "b5", title: "Whole fruit, not juice", before: "lime juice", after: "½ lime", why: "You buy the lime, so the grocery list asks for ½ lime.", open: true },
+    { id: "i6", item: "c3", title: "Amount read as a ratio", before: ".125", after: "⅛ part", why: "The sheet gives no unit. The other lines are parts.", open: true },
+  ];
+  const canon = { "smoked paprika": { isNew: true, ok: false, fam: "paprika" }, "castelvetrano olive": { isNew: true, ok: false, fam: "olive" } };
+  return { recipes, items, issues, canon };
+}
+
+let S;
+function fresh() {
+  S = { ...seed(), v: "A", stack: [{ s: "home" }], sheet: null, toast: null, cFilter: false, cTab: "ing", oneByOne: false, hist: [] };
+}
+fresh();
+
+// ---------- queries ----------
+const R = id => S.recipes.find(r => r.id === id);
+const I = id => S.items.find(i => i.id === id);
+const issueOf = it => S.issues.find(x => x.item === it.id && x.open);
+const itemsOf = rid => S.items.filter(i => i.r === rid);
+const unchecked = rid => itemsOf(rid).filter(i => !i.ok);
+const openIssues = rid => S.issues.filter(x => x.open && I(x.item).r === rid);
+const reviewRecipes = () => S.recipes.filter(r => unchecked(r.id).length).sort((a, b) =>
+  (a.status === "Awaiting Review" ? 0 : 1) - (b.status === "Awaiting Review" ? 0 : 1) || openIssues(b.id).length - openIssues(a.id).length);
+const allOpenIssues = () => S.issues.filter(x => x.open);
+const isNewCanon = it => it.kind === "line" && S.canon[it.canon] && !S.canon[it.canon].ok;
+const bulkable = list => list.filter(i => !i.ok && !issueOf(i));
+const cur = () => S.stack[S.stack.length - 1];
+
+// ---------- mutations ----------
+function snap() { S.hist.push(JSON.stringify({ recipes: S.recipes, items: S.items, issues: S.issues, canon: S.canon })); }
+function undo() { const h = S.hist.pop(); if (!h) return; Object.assign(S, JSON.parse(h)); S.toast = { msg: "Undone" }; render(); }
+function confirmIds(ids, msg) {
+  if (!ids.length) return;
+  snap();
+  ids.forEach(id => {
+    const it = I(id); it.ok = true;
+    S.issues.forEach(x => { if (x.item === id) x.open = false; });
+    if (it.kind === "line" && S.canon[it.canon]) S.canon[it.canon].ok = true;
+  });
+  S.toast = { msg: msg || (ids.length === 1 ? "Confirmed" : `Confirmed ${ids.length} items`), undo: true };
+  settle();
+}
+function settle() {
+  S.recipes.forEach(r => {
+    if (r.status === "Awaiting Review" && !unchecked(r.id).length) {
+      r.status = "Ready";
+      S.toast = { msg: `${r.title} is Ready. It now joins the grocery list and fridge matching.`, undo: true };
+    }
+  });
+  render();
+}
+function go(s) { S.stack.push(s); S.sheet = null; render(); window.scrollTo(0, 0); }
+function back() { if (S.stack.length > 1) S.stack.pop(); S.sheet = null; render(); window.scrollTo(0, 0); }
+function home() { S.stack = [{ s: "home" }]; S.sheet = null; render(); }
+
+// ---------- item rendering (shared) ----------
+const pct = c => Math.round(c * 100) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function meters(d) {
+  const m = (lab, n) => `<span class="meter" title="${lab} ${n} of 3">${lab} ${[1, 2, 3].map(k => `<i class="${k <= n ? "on" : ""}"></i>`).join("")}</span>`;
+  return `<span class="meters">${m("Prep", d[0])}${m("Cook", d[1])}${m("Cleanup", d[2])}<b class="tnum">${d[0] + d[1] + d[2]}</b></span>`;
+}
+function kindName(it) { return { line: "Ingredient line", step: "Step " + (it.n || ""), sub: "Substitution", diff: "Difficulty" }[it.kind]; }
+function headline(it) {
+  if (it.kind === "line") return esc(it.orig);
+  if (it.kind === "step") return esc(it.text);
+  if (it.kind === "sub") return `${esc(it.from)} → ${esc(it.to)}`;
+  return "Suggested Difficulty";
+}
+function amount(it) { return [it.q, it.u].filter(Boolean).join(" "); }
+function convText(it) {
+  const c = it.conv;
+  if (it.ratio) return `<span class="muted">Ratio, so no weight until a batch size is chosen</span>`;
+  if (!c) return `<span class="muted">No amount, so no conversion</span>`;
+  if (c.below) return `Stays in ${esc(it.u)}s <span class="muted">(≈ ${c.g} at ${pct(c.conf)}, under ${pct(HIGH)})</span>`;
+  return `${c.est ? "≈ " : ""}${c.g} <span class="prov">${c.prov}</span>`;
+}
+function detail(it) {
+  if (it.kind === "line") {
+    const nc = isNewCanon(it);
+    return `<dl class="kv">
+      <dt>Parsed</dt><dd>${esc(amount(it) || "no amount")} · <b>${esc(it.name)}</b>${it.prep ? ` · ${esc(it.prep)}` : ""} <span class="prov">${it.prov}</span></dd>
+      <dt>Ingredient</dt><dd><span class="canon">${esc(it.canon)}</span> ${nc ? `<span class="pill red">new</span>` : ""}${it.staple ? ` <span class="pill line">pantry staple</span>` : ""}<br><span class="muted small">${esc(it.cat)}${S.canon[it.canon] ? " · family " + S.canon[it.canon].fam : ""}</span></dd>
+      <dt>Weight</dt><dd>${convText(it)}</dd>
+    </dl>${nc ? `<p class="small muted" style="margin:0">Confirming adds <b>${esc(it.canon)}</b> to the household's ingredients, for every recipe that uses it.</p>` : ""}`;
+  }
+  if (it.kind === "step") {
+    return `<div class="stack" style="gap:8px">
+      ${it.links.length ? `<div class="linkchips">${it.links.map(([n, p]) => `<span class="linkchip">${esc(n)} <em>${p}</em></span>`).join("")}</div>` : `<span class="small muted">No ingredients linked</span>`}
+      ${it.timer ? `<span class="timerchip">${ic.timer} Timer ${it.timer}${it.timer.includes("–") ? " (chime, then alarm)" : ""}</span>` : ""}
+    </div>`;
+  }
+  if (it.kind === "sub") {
+    return `<dl class="kv"><dt>Ratio</dt><dd><b class="tnum">≈ ${esc(it.ratio)}</b> <span class="prov">llm</span></dd>${it.note ? `<dt>Note</dt><dd>${esc(it.note)}</dd>` : ""}</dl>
+      <p class="small muted" style="margin:0">Hidden from the recipe until confirmed.</p>`;
+  }
+  return `<div class="stack" style="gap:6px">${meters(it.d)}<span class="small muted">${esc(it.why)} <span class="prov">${it.prov}</span></span></div>`;
+}
+function issueBox(it) {
+  const x = issueOf(it);
+  if (!x) return "";
+  return `<div class="issuebox"><div class="row" style="gap:6px">${ic.flag}<b>${esc(x.title)}</b></div>
+    <div><s>${esc(x.before)}</s> → <b>${esc(x.after)}</b></div><div>${esc(x.why)}</div></div>`;
+}
+function tickBtn(it) {
+  return `<button class="tick ${it.ok ? "on" : ""}" data-act="confirm" data-id="${it.id}" ${it.ok ? "disabled" : ""} aria-label="${it.ok ? "Confirmed" : "Confirm"}"><span>${ic.check}</span></button>`;
+}
+function statusPill(r) {
+  if (r.status === "Awaiting Review") return `<span class="pill warn">Awaiting Review</span>`;
+  if (r.status === "Pending") return `<span class="pill warn">Enrichment pending</span>`;
+  return `<span class="pill soft">Ready</span>`;
+}
+function progress(rid) {
+  const all = itemsOf(rid), done = all.filter(i => i.ok).length;
+  return { done, all: all.length, w: all.length ? (done / all.length) * 100 : 100 };
+}
+
+// ---------- shell ----------
+function topbar(title, pushed, extra = "") {
+  const badge = S.v === "B" && allOpenIssues().length ? `<span class="badge">${allOpenIssues().length}</span>` : "";
+  return `<header class="top ${pushed ? "pushed" : ""}">
+    ${pushed ? `<button class="iconbtn" data-act="back" aria-label="Back">${ic.back}</button>` : ""}
+    <h1>${title}</h1>${extra}
+    <button class="iconbtn" data-act="account" aria-label="Account">${ic.user}${badge}</button>
+  </header>`;
+}
+function tabbar() {
+  const dot = S.v === "C" && reviewRecipes().length ? `<span class="dot"></span>` : "";
+  const t = (k, lab, i, d = "") => `<button class="tab ${k === "recipes" ? "on" : ""}" data-act="${k === "recipes" ? "home" : "stub"}" data-lab="${lab}">${i}${d}${lab}</button>`;
+  return `<nav class="tabbar">${t("recipes", "Recipes", ic.recipes, dot)}${t("week", "Week", ic.week)}${t("fridge", "Fridge", ic.fridge)}${t("sites", "Sites", ic.sites)}</nav>`;
+}
+function rcard(r, extra = "") {
+  const d = r.done ? r.d : (itemsOf(r.id).find(i => i.kind === "diff") || {}).d;
+  return `<button class="card rcard" data-act="open" data-id="${r.id}">
+    <div class="plate">${r.title[0]}</div><h3>${esc(r.title)}</h3>
+    <span class="small muted">${esc(r.site)}${r.total ? " · " + r.total : ""}</span>
+    ${d && r.status !== "Pending" ? meters(d) : ""}${extra}
+  </button>`;
+}
+
+// ---------- variant A: checklist ----------
+function A_home() {
+  const rr = reviewRecipes(), n = allOpenIssues().length;
+  return topbar("Recipes") + `<main class="content">
+    <div class="search">${ic.search} Search recipes</div>
+    ${rr.length ? `<button class="banner" data-act="go" data-s="list">
+      <span class="grow"><b>Needs Review</b><span class="small">${rr.length} recipe${rr.length > 1 ? "s" : ""} · ${n} issue${n === 1 ? "" : "s"} to check</span></span>${ic.chev}</button>` : ""}
+    <div class="grid">${S.recipes.map(r => rcard(r, r.status !== "Ready" ? statusPill(r) : "")).join("")}</div>
+  </main>`;
+}
+function A_list() {
+  const rr = reviewRecipes();
+  return topbar("Needs Review", true) + `<main class="content">
+    <p class="small muted" style="margin:0">Awaiting Review recipes are left out of the grocery list and fridge matching until checked. Ready recipes work now and use safe defaults until checked.</p>
+    ${rr.length ? `<div class="card">${rr.map((r, k) => `${k ? '<div class="divider"></div>' : ""}<button class="rrow" data-act="go" data-s="review" data-id="${r.id}">
+      <div class="plate">${r.title[0]}</div>
+      <span class="grow"><b>${esc(r.title)}</b><br>${statusPill(r)} <span class="small muted">${openIssues(r.id).length} issues · ${unchecked(r.id).length} to check</span></span>${ic.chev}</button>`).join("")}</div>`
+      : `<div class="empty">Nothing needs review.</div>`}
+  </main>`;
+}
+function A_review(rid) {
+  const r = R(rid), p = progress(rid), its = itemsOf(rid);
+  const flagged = its.filter(i => issueOf(i));
+  const sec = (key, title, list) => {
+    if (!list.length) return "";
+    const b = bulkable(list);
+    return `<section class="card sec">
+      <div class="sechead"><h2>${title}</h2>${b.length ? `<button class="btn soft small" data-act="bulk" data-ids="${b.map(i => i.id).join(",")}">Confirm ${b.length}</button>` : `<span class="pill soft">${ic.check} Done</span>`}</div>
+      ${list.map(it => A_item(it)).join("")}
+    </section>`;
+  };
+  return topbar(esc(r.title), true) + `<main class="content">
+    <div class="sticky-sum">
+      <div class="row">${statusPill(r)}<span class="small muted grow">${r.channel}</span><b class="small tnum">${p.done} of ${p.all} checked</b></div>
+      <div class="progress"><i style="width:${p.w}%"></i></div>
+    </div>
+    ${flagged.length ? `<section class="card sec"><div class="sechead"><h2>Issues</h2><span class="pill red">${flagged.length}</span></div>
+      <p class="small muted" style="margin:0;padding:0 14px 8px">Check these one by one. “Confirm” buttons below skip them.</p>
+      ${flagged.map(it => A_item(it, true)).join("")}</section>` : ""}
+    ${sec("line", "Ingredients", its.filter(i => i.kind === "line"))}
+    ${sec("step", "Steps", its.filter(i => i.kind === "step"))}
+    ${sec("sub", "Substitutions", its.filter(i => i.kind === "sub"))}
+    ${sec("diff", "Difficulty", its.filter(i => i.kind === "diff"))}
+  </main>`;
+}
+function A_item(it, inIssues) {
+  const x = issueOf(it);
+  if (x && !inIssues) return `<div class="aitem"><span class="tick"><span style="box-shadow:inset 0 0 0 2.25px var(--red);color:var(--red)">${ic.flag}</span></span>
+    <div class="body"><span>${headline(it)}</span><span class="small" style="color:var(--red-text);font-weight:700">In Issues above</span></div></div>`;
+  return `<div class="aitem ${x ? "flag" : ""}">${tickBtn(it)}
+    <div class="body">
+      ${it.kind === "diff" ? "" : `<span style="font-weight:${it.kind === "line" ? 700 : 400}">${headline(it)}</span>`}
+      ${x ? issueBox(it) : ""}
+      ${detail(it)}
+      <div class="acts">${x ? `<button class="btn primary small" data-act="confirm" data-id="${it.id}">Accept</button>` : ""}
+        <button class="btn ghost small" data-act="edit" data-id="${it.id}">Edit</button></div>
+    </div></div>`;
+}
+
+// ---------- variant B: one at a time ----------
+const KINDS = [
+  ["issues", "Enrichment Issues", "Corrections and doubts to check one by one", l => l.filter(i => issueOf(i))],
+  ["newcanon", "New ingredients", "Proposed canonical ingredients", l => l.filter(i => !issueOf(i) && isNewCanon(i))],
+  ["line", "Ingredient lines", "Parse, ingredient and weight", l => l.filter(i => !issueOf(i) && !isNewCanon(i) && i.kind === "line")],
+  ["step", "Steps", "Linked ingredients, portions, timers", l => l.filter(i => !issueOf(i) && i.kind === "step")],
+  ["sub", "Substitutions", "Ratios proposed by enrichment", l => l.filter(i => !issueOf(i) && i.kind === "sub")],
+  ["diff", "Difficulty", "Suggested Prep, Cook, Cleanup", l => l.filter(i => !issueOf(i) && i.kind === "diff")],
+];
+function B_home() {
+  return topbar("Recipes") + `<main class="content">
+    <div class="search">${ic.search} Search recipes</div>
+    <div class="chips"><span class="chip">weeknight</span><span class="chip">one pan</span><span class="chip">baking</span><span class="chip">spice blend</span></div>
+    <div class="grid">${S.recipes.map(r => rcard(r, r.status !== "Ready" ? statusPill(r) : "")).join("")}</div>
+  </main>`;
+}
+function B_list() {
+  const open = S.items.filter(i => !i.ok && R(i.r).status !== "Pending");
+  const rr = reviewRecipes();
+  return topbar("Needs Review", true) + `<main class="content">
+    <div><div class="eyebrow" style="padding:0 4px 6px">By kind, across recipes</div>
+    <div class="card">${KINDS.map(([k, t, sub, f]) => { const n = f(open).length; return `<button class="kindrow" data-act="queue" data-kind="${k}" ${n ? "" : "disabled"} style="${n ? "" : "opacity:.5"}">
+      <span class="n tnum" style="${k === "issues" && n ? "color:var(--red-text)" : ""}">${n}</span><span class="grow"><b>${t}</b><br><span class="small muted">${sub}</span></span>${n ? ic.chev : ic.check}</button>`; }).join("")}</div></div>
+    <div><div class="eyebrow" style="padding:0 4px 6px">By recipe</div>
+    <div class="card">${rr.map(r => `<button class="kindrow" data-act="queue" data-rid="${r.id}">
+      <span class="grow"><b>${esc(r.title)}</b><br>${statusPill(r)} <span class="small muted">${unchecked(r.id).length} to check</span></span>${ic.chev}</button>`).join("") || `<div class="empty">Nothing needs review.</div>`}</div></div>
+  </main>`;
+}
+function buildQueue(kind, rid) {
+  let l = S.items.filter(i => !i.ok && R(i.r).status !== "Pending");
+  if (rid) l = l.filter(i => i.r === rid);
+  if (kind) l = KINDS.find(k => k[0] === kind)[3](l);
+  const rank = i => (issueOf(i) ? 0 : i.conf < HIGH ? 1 : 2);
+  return l.sort((a, b) => rank(a) - rank(b) || S.items.indexOf(a) - S.items.indexOf(b)).map(i => i.id);
+}
+function B_triage(c) {
+  const title = c.rid ? esc(R(c.rid).title) : KINDS.find(k => k[0] === c.kind)[1];
+  const left = c.q.filter(id => !I(id).ok && !c.skipped.includes(id));
+  const total = c.q.length, done = c.q.filter(id => I(id).ok).length;
+  const head = `<div class="stack" style="gap:6px"><div class="row"><span class="small muted grow">${c.rid ? statusPill(R(c.rid)) + " " + R(c.rid).channel : "Across all recipes"}</span><b class="small tnum">${done} of ${total}</b></div>
+    <div class="progress"><i style="width:${total ? done / total * 100 : 100}%"></i></div></div>`;
+  let body;
+  const easy = left.filter(id => !issueOf(I(id)) && I(id).conf >= HIGH);
+  if (!left.length) {
+    const sk = c.q.filter(id => !I(id).ok);
+    body = `<div class="card tcard" style="align-items:center;justify-content:center;text-align:center">
+      <div class="plate" style="width:120px;font-size:40px;color:var(--accent-text)">${ic.check}</div>
+      <h2>${sk.length ? `${sk.length} skipped` : "All checked"}</h2>
+      <p class="muted" style="margin:0">${sk.length ? "Skipped items stay in Needs Review." : "Nothing left in this list."}</p>
+      <div class="row" style="justify-content:center">${sk.length ? `<button class="btn soft" data-act="unskip">Go through skipped</button>` : ""}<button class="btn primary" data-act="back">Back to Needs Review</button></div></div>`;
+  } else if (!c.oneByOne && easy.length === left.length && left.length >= 3) {
+    const kinds = {}; easy.forEach(id => { const k = kindName(I(id)).replace(/ \d+$/, "") + "s"; kinds[k] = (kinds[k] || 0) + 1; });
+    body = `<div class="card tcard">
+      <div class="eyebrow">The rest</div>
+      <h2 style="font-size:23px">${easy.length} items left, all ${pct(HIGH)} confidence or higher, no issues</h2>
+      <div class="linkchips">${Object.entries(kinds).map(([k, n]) => `<span class="linkchip">${n} ${k.toLowerCase()}</span>`).join("")}</div>
+      <p class="small muted" style="margin:0">Flagged and low-confidence items were shown one by one first.</p>
+      <div class="grow"></div>
+      <div class="tacts"><button class="btn primary" data-act="bulk" data-ids="${easy.join(",")}">Confirm all ${easy.length}</button>
+        <button class="btn soft" data-act="onebyone" style="grid-column:1/-1">Check them one by one</button></div></div>`;
+  } else {
+    const it = I(left[0]), x = issueOf(it);
+    body = `<div class="card tcard">
+      <div class="row"><span class="eyebrow grow">${kindName(it)}${c.rid ? "" : " · " + esc(R(it.r).title)}</span><span class="prov">confidence ${pct(it.conf)}</span></div>
+      <div class="orig">${it.kind === "diff" ? "Suggested Difficulty" : headline(it)}</div>
+      ${x ? issueBox(it) : ""}
+      ${detail(it)}
+      <div class="grow"></div>
+      <div class="tacts"><button class="btn primary" data-act="confirm" data-id="${it.id}">${x ? "Accept correction" : "Confirm"}</button>
+        <button class="btn soft" data-act="edit" data-id="${it.id}">Edit</button><button class="btn soft" data-act="skip" data-id="${it.id}">Skip</button></div></div>
+      <p class="small muted" style="margin:0;text-align:center">${left.length - 1} more after this</p>`;
+  }
+  return topbar(title, true) + `<main class="content">${head}${body}</main>`;
+}
+
+// ---------- variant C: in the recipe ----------
+function C_home() {
+  const rr = reviewRecipes(), f = S.cFilter;
+  const list = f ? rr : S.recipes;
+  return topbar("Recipes") + `<main class="content">
+    <div class="search">${ic.search} Search recipes</div>
+    <div class="chips">${rr.length ? `<button class="chip review ${f ? "on" : ""}" data-act="cfilter">${ic.flag} Needs Review · ${rr.length}</button>` : ""}
+      <span class="chip">weeknight</span><span class="chip">one pan</span><span class="chip">spice blend</span></div>
+    ${f ? `<p class="small muted" style="margin:0">Awaiting Review first, then the most issues.</p>` : ""}
+    <div class="grid">${list.map(r => {
+      const n = unchecked(r.id).length, x = openIssues(r.id).length;
+      const tag = r.status === "Awaiting Review" ? statusPill(r) : r.status === "Pending" ? statusPill(r) : n && f ? `<span class="pill soft">Ready</span>` : "";
+      return rcard(r, tag + (n && r.status !== "Pending" ? `<span class="pill ${x ? "red" : "line"}">${x ? x + " flagged · " : ""}${n} to check</span>` : ""));
+    }).join("")}</div>
+  </main>`;
+}
+function C_line(it) {
+  const x = issueOf(it), cls = it.ok ? "ok" : x ? "flag" : "pending";
+  const amt = it.conv && !it.conv.below && !it.ratio ? `${esc(amount(it))} <span class="muted small">(${it.conv.est ? "≈ " : ""}${it.conv.g})</span>` : esc(amount(it));
+  return `<button class="cline ${cls}" data-act="sheet" data-id="${it.id}"><span class="txt"><b>${amt}</b> ${esc(it.name.replace("; ", " and "))}${it.prep ? `, <span class="muted">${esc(it.prep)}</span>` : ""}
+    ${isNewCanon(it) ? ` <span class="pill red">new</span>` : ""}</span>
+    <span class="mark">${it.ok ? ic.check : x ? ic.flag : ""}</span></button>`;
+}
+function C_review(rid) {
+  const r = R(rid), its = itemsOf(rid), tab = S.cTab;
+  const byTab = { ing: its.filter(i => i.kind === "line" || i.kind === "sub"), steps: its.filter(i => i.kind === "step"), about: its.filter(i => i.kind === "diff") };
+  const cnt = k => byTab[k].filter(i => !i.ok).length;
+  const seg = [["ing", "Ingredients"], ["steps", "Steps"], ["about", "About"]].map(([k, l]) => `<button class="${tab === k ? "on" : ""}" data-act="ctab" data-tab="${k}">${l}${cnt(k) ? `<span class="cnt">${cnt(k)}</span>` : ""}</button>`).join("");
+  const flagged = openIssues(rid).length;
+  let body = "";
+  if (tab === "ing") {
+    const lines = its.filter(i => i.kind === "line"), subs = its.filter(i => i.kind === "sub");
+    body = `<div class="card" style="padding:6px">${lines.map(C_line).join("")}</div>
+      ${subs.length ? `<div><div class="eyebrow" style="padding:0 4px 6px">Substitutions · hidden until confirmed</div><div class="card" style="padding:6px">${subs.map(s => {
+        const cls = s.ok ? "ok" : "pending";
+        return `<button class="cline ${cls}" data-act="sheet" data-id="${s.id}"><span class="txt">${esc(s.to)} <span class="muted">for ${esc(s.from)}, ≈ ${s.ratio}</span></span><span class="mark">${s.ok ? ic.check : ""}</span></button>`;
+      }).join("")}</div></div>` : ""}`;
+  } else if (tab === "steps") {
+    const st = byTab.steps;
+    body = st.length ? `<div class="card" style="padding:6px">${st.map(s => `<button class="cstep" data-act="sheet" data-id="${s.id}">
+      <span class="num">${s.n}</span><span class="stack" style="gap:6px"><span>${esc(s.text)}</span>${detail(s)}</span>
+      <span class="cline ${s.ok ? "ok" : "pending"}" style="padding:0;min-height:0;background:none"><span class="mark">${s.ok ? ic.check : ""}</span></span></button>`).join("")}</div>` : `<div class="empty">This recipe has no steps.</div>`;
+  } else {
+    const d = byTab.about[0];
+    body = `<div class="card pad stack">
+      ${d ? `<button class="cline ${d.ok ? "ok" : "pending"}" data-act="sheet" data-id="${d.id}" style="padding:4px 0"><span class="txt" style="text-decoration:none"><span class="eyebrow">Difficulty ${d.ok ? "" : "· suggested"}</span><br>${meters(d.d)}</span><span class="mark">${d.ok ? ic.check : ""}</span></button>` : ""}
+      <div class="divider"></div>
+      <dl class="kv"><dt>Source</dt><dd>${esc(r.site)}</dd><dt>Stated total</dt><dd>${r.total || "Not given"}</dd><dt>Added by</dt><dd>${r.channel}</dd></dl></div>`;
+  }
+  const tabItems = byTab[tab], b = bulkable(tabItems), left = unchecked(rid).length, p = progress(rid);
+  const bar = `<div class="reviewbar">
+    <div class="row"><span class="small grow">${left ? `<b>${left} to check</b> <span class="muted">· ${flagged} flagged</span>` : "<b>All checked</b>"}</span>${statusPill(r)}</div>
+    <div class="progress"><i style="width:${p.w}%"></i></div>
+    ${b.length ? `<button class="btn primary" data-act="bulk" data-ids="${b.map(i => i.id).join(",")}">Confirm ${b.length} on this tab${tabItems.some(i => issueOf(i)) ? " (not flagged)" : ""}</button>`
+      : `<button class="btn soft" disabled>${tabItems.some(i => !i.ok) ? "Only flagged items left here. Tap one." : "This tab is checked"}</button>`}
+  </div>`;
+  return topbar("", true) + `<main class="content">
+    <div class="hero"><div class="plate">${r.title[0]}</div><h1>${esc(r.title)}</h1><span class="small muted">${esc(r.site)}</span></div>
+    ${flagged ? `<div class="issuebox" style="flex-direction:row;align-items:center;gap:8px">${ic.flag}<span><b>${flagged} flagged by enrichment.</b> Tap a flagged item to check it.</span></div>` : ""}
+    <div class="seg">${seg}</div>${body}</main>` + bar;
+}
+
+// ---------- sheets ----------
+function sheetHTML() {
+  const sh = S.sheet;
+  if (!sh) return "";
+  let inner = "";
+  if (sh.t === "account") {
+    const n = allOpenIssues().length;
+    inner = `<div class="menu">
+      ${S.v === "B" ? `<button data-act="go" data-s="list">${ic.flag}<span class="grow">Needs Review</span>${n ? `<span class="pill red">${n} issues</span>` : ""}</button>` : ""}
+      <button data-act="stub" data-lab="Add a recipe">＋<span class="grow">Add a recipe</span></button>
+      <button data-act="stub" data-lab="Kitchen settings">⚙<span class="grow">Kitchen settings</span></button>
+      <button data-act="stub" data-lab="Sign out">↩<span class="grow">Sign out</span></button></div>`;
+  } else if (sh.t === "item") {
+    const it = I(sh.id), x = issueOf(it);
+    inner = `<div class="row"><span class="eyebrow grow">${kindName(it)}</span><span class="prov">confidence ${pct(it.conf)}</span></div>
+      <h2>${it.kind === "diff" ? "Suggested Difficulty" : headline(it)}</h2>
+      ${x ? issueBox(it) : ""}${detail(it)}
+      ${it.ok ? `<span class="pill soft" style="align-self:flex-start">${ic.check} Confirmed</span><button class="btn soft" data-act="edit" data-id="${it.id}">Edit</button>` :
+        `<div class="stack" style="gap:8px"><button class="btn primary" data-act="confirm" data-id="${it.id}">${x ? "Accept correction" : "Confirm"}</button><button class="btn soft" data-act="edit" data-id="${it.id}">Edit</button></div>`}`;
+  } else if (sh.t === "edit") {
+    const it = I(sh.id);
+    let f = "";
+    if (it.kind === "line") f = `<div class="fields">
+      <label class="field">Amount<input id="e-q" value="${esc(it.q)}"></label><label class="field">Unit<input id="e-u" value="${esc(it.u)}"></label>
+      <label class="field wide">Ingredient as written<input id="e-name" value="${esc(it.name)}"></label>
+      <label class="field wide">Preparation<input id="e-prep" value="${esc(it.prep)}"></label>
+      <label class="field wide">Canonical ingredient<input id="e-canon" list="canons" value="${esc(it.canon)}"></label>
+      ${it.conv && !it.ratio ? `<label class="field wide">Weight<select id="e-conv"><option value="keep" ${it.conv.below ? "selected" : ""}>Keep in ${esc(it.u || "count")}</option><option value="conv" ${it.conv.below ? "" : "selected"}>Convert to ${it.conv.est ? "≈ " : ""}${it.conv.g}</option></select></label>` : ""}
+      <datalist id="canons"><option value="green olive"><option value="castelvetrano olive"><option value="chickpea"><option value="potato"><option value="salt"><option value="black pepper"></datalist></div>
+      <p class="small muted" style="margin:0">A canonical ingredient change applies to every recipe with the same wording.</p>`;
+    else if (it.kind === "step") f = `<div class="fields">${it.links.map(([n, p], k) => `<label class="field">${esc(n)}<input id="e-p${k}" value="${esc(p)}"></label>`).join("")}
+      <label class="field wide">Timer<input id="e-timer" value="${esc(it.timer)}" placeholder="none"></label></div>
+      <p class="small muted" style="margin:0">Portions of one ingredient add up to at most all of it.</p>`;
+    else if (it.kind === "sub") f = `<div class="fields"><label class="field wide">Ratio (${esc(it.to)} : ${esc(it.from)})<input id="e-ratio" value="${esc(it.ratio)}"></label>
+      <label class="field wide">Note<input id="e-note" value="${esc(it.note)}"></label></div>
+      <button class="btn ghost" data-act="dropsub" data-id="${it.id}">Remove this substitution</button>`;
+    else f = ["Prep", "Cook", "Cleanup"].map((lab, k) => `<div class="row"><span class="grow"><b>${lab}</b></span><div class="segpick">${[1, 2, 3].map(n => `<button class="${sh.d[k] === n ? "on" : ""}" data-act="dpick" data-k="${k}" data-n="${n}">${n}</button>`).join("")}</div></div>`).join("");
+    inner = `<div class="eyebrow">Edit ${kindName(it).toLowerCase()}</div><h2>${it.kind === "diff" ? "Difficulty" : headline(it)}</h2>${f}
+      <p class="small muted" style="margin:0">Saving marks it Confirmed, with provenance “editor”.</p>
+      <div class="row"><button class="btn soft grow" data-act="close">Cancel</button><button class="btn primary grow" data-act="save" data-id="${it.id}">Save and confirm</button></div>`;
+  } else if (sh.t === "stub") {
+    inner = `<h2>${esc(sh.lab)}</h2><p class="muted" style="margin:0">Not part of this prototype. See “Prototype: whole-app flow”.</p><button class="btn soft" data-act="close">Close</button>`;
+  }
+  return `<div class="scrim" data-act="scrim"><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div></div>`;
+}
+function saveEdit(id) {
+  const it = I(id), v = k => (document.getElementById(k) || {}).value;
+  snap();
+  if (it.kind === "line") {
+    Object.assign(it, { q: v("e-q"), u: v("e-u"), name: v("e-name"), prep: v("e-prep") });
+    const c = v("e-canon").trim();
+    if (c !== it.canon) { it.canon = c; if (!S.canon[c] && c === "green olive") it.cat = "Canned & Jarred"; }
+    if (it.conv && v("e-conv")) it.conv.below = v("e-conv") === "keep";
+  } else if (it.kind === "step") {
+    it.links = it.links.map(([n], k) => [n, v("e-p" + k)]); it.timer = v("e-timer");
+  } else if (it.kind === "sub") { it.ratio = v("e-ratio"); it.note = v("e-note"); }
+  else it.d = S.sheet.d.slice();
+  it.prov = "editor"; it.ok = true; it.conf = 1;
+  S.issues.forEach(x => { if (x.item === id) x.open = false; });
+  if (it.kind === "line" && S.canon[it.canon]) S.canon[it.canon].ok = true;
+  S.sheet = null; S.toast = { msg: "Saved and confirmed", undo: true };
+  settle();
+}
+
+// ---------- render ----------
+function screen() {
+  const c = cur(), v = S.v;
+  if (c.s === "home") return v === "A" ? A_home() : v === "B" ? B_home() : C_home();
+  if (c.s === "list") return v === "B" ? B_list() : A_list();
+  if (c.s === "review") return v === "A" ? A_review(c.id) : v === "C" ? C_review(c.id) : B_triage(c);
+  if (c.s === "triage") return B_triage(c);
+  return "";
+}
+function render() {
+  const c = cur();
+  const app = document.getElementById("app");
+  const bar = S.v === "C" && c.s === "review";
+  app.className = "app" + (bar ? " has-bar" : "");
+  document.body.classList.toggle("has-bar", bar);
+  app.innerHTML = screen() + tabbar();
+  const t = S.toast;
+  document.getElementById("overlay").innerHTML = sheetHTML() + (t ? `<div class="toast" role="status"><span class="grow">${esc(t.msg)}</span>${t.undo ? `<button data-act="undo">Undo</button>` : ""}</div>` : "");
+  document.getElementById("vlabel").textContent = `${S.v} · ${VARIANTS[S.v]}`;
+  clearTimeout(render.tt);
+  if (t) render.tt = setTimeout(() => { S.toast = null; const el = document.querySelector(".toast"); if (el) el.remove(); }, 4500);
+}
+
+function openRecipe(id) {
+  const r = R(id);
+  if (r.status === "Pending" || !unchecked(id).length) { S.sheet = { t: "stub", lab: r.title }; render(); return; }
+  if (S.v === "B") go({ s: "triage", rid: id, q: buildQueue(null, id), skipped: [] });
+  else { S.cTab = "ing"; go({ s: "review", id }); }
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el) return;
+  const a = el.dataset.act, id = el.dataset.id;
+  if (a === "scrim") { if (e.target === el) { S.sheet = null; render(); } return; }
+  e.stopPropagation();
+  switch (a) {
+    case "back": back(); break;
+    case "home": home(); break;
+    case "account": S.sheet = { t: "account" }; render(); break;
+    case "stub": S.sheet = { t: "stub", lab: el.dataset.lab }; render(); break;
+    case "close": S.sheet = null; render(); break;
+    case "go": el.dataset.s === "review" ? openRecipe(id) : go({ s: el.dataset.s, id }); break;
+    case "open": openRecipe(id); break;
+    case "confirm": S.sheet = null; confirmIds([id]); break;
+    case "bulk": confirmIds(el.dataset.ids.split(",")); break;
+    case "undo": undo(); break;
+    case "edit": { const it = I(id); S.sheet = { t: "edit", id, d: it.d ? it.d.slice() : null }; render(); break; }
+    case "save": saveEdit(id); break;
+    case "dpick": S.sheet.d[+el.dataset.k] = +el.dataset.n; render(); break;
+    case "dropsub": snap(); S.items = S.items.filter(i => i.id !== id); S.sheet = null; S.toast = { msg: "Substitution removed", undo: true }; settle(); break;
+    case "sheet": S.sheet = { t: "item", id }; render(); break;
+    case "queue": { const k = el.dataset.kind, rid = el.dataset.rid; S.oneByOne = false; go({ s: "triage", kind: k, rid, q: buildQueue(k, rid), skipped: [] }); break; }
+    case "skip": cur().skipped.push(id); render(); break;
+    case "unskip": cur().skipped = []; render(); break;
+    case "onebyone": cur().oneByOne = true; render(); break;
+    case "cfilter": S.cFilter = !S.cFilter; render(); break;
+    case "ctab": S.cTab = el.dataset.tab; render(); break;
+  }
+});
+
+function setVariant(v) {
+  S.v = v; S.stack = [{ s: "home" }]; S.sheet = null; S.cFilter = false;
+  if (location.hash !== "#" + v) history.replaceState(null, "", "#" + v);
+  render(); window.scrollTo(0, 0);
+}
+const keys = Object.keys(VARIANTS);
+const step = d => setVariant(keys[(keys.indexOf(S.v) + d + keys.length) % keys.length]);
+document.getElementById("prev").onclick = () => step(-1);
+document.getElementById("next").onclick = () => step(1);
+document.getElementById("reset").onclick = () => { const v = S.v; fresh(); setVariant(v); };
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") step(-1);
+  if (e.key === "ArrowRight") step(1);
+  if (e.key === "Escape" && S.sheet) { S.sheet = null; render(); }
+});
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (VARIANTS[h] && h !== S.v) setVariant(h); });
+setVariant(VARIANTS[location.hash.slice(1)] ? location.hash.slice(1) : "A");
+</script>
