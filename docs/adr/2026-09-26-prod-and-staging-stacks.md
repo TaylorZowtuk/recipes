@@ -4,14 +4,14 @@ The app runs as two stacks: **prod** (stable, tested releases) and **staging** (
 
 ## How the account is shared
 
-- Each stack has its own CloudFront Free plan distribution (the account may hold 3), function URL, buckets, tables, Cognito user pool and Terraform state.
-- Lambda, DynamoDB and Cognito free allowances are account-wide, so Terraform keeps the combined DynamoDB provisioned capacity at or below 25 RCU/WCU, for example prod 10/10, staging 5/5 and the rest in reserve for indexes.
+- Each stack has its own CloudFront Free plan distribution (the account may hold 3), function URL, buckets, tables, sign-in secrets (see [the sign-in ADR](2026-09-29-editor-sign-in.md)) and Terraform state.
+- Lambda and DynamoDB free allowances are account-wide, so Terraform keeps the combined DynamoDB provisioned capacity at or below 25 RCU/WCU, for example prod 10/10, staging 5/5 and the rest in reserve for indexes.
 - The $1 budget, the alarms and the kill switch cover both stacks.
 
 ## Testing layers
 
 1. **Automated tests** (the one fast command and CI) use local fakes for AWS (moto / DynamoDB Local). They never touch a real stack.
-2. **Local development** runs the Vite dev server and FastAPI on the laptop, pointed at **staging's** data stores and user pool through a dev AWS profile. Nothing local ever holds prod credentials.
+2. **Local development** runs the Vite dev server and FastAPI on the laptop, pointed at **staging's** data stores through a dev AWS profile, signing in with staging's Google client or service token. Nothing local ever holds prod credentials.
 3. **Pre-release checks** happen on the staging URL: Playwright end-to-end tests plus a manual check on a phone.
 
 ## Staging data
