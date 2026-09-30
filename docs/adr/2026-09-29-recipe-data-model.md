@@ -89,7 +89,7 @@ We rejected two alternatives. A full copy of the lists duplicates every fact, an
   - A day holds any number of entries, and only their order is recorded.
   - An entry on a day that has passed counts as cooked. History is corrected by adding or removing entries.
   - `recipe_title` is copied into the entry so history survives a deleted recipe.
-  - Grocery tick keys are opaque strings that grocery aggregation defines.
+  - Grocery tick keys are opaque strings that grocery aggregation defines, and `grocery_extras` holds hand-added items. Both are set out in the [grocery list ADR](2026-09-29-grocery-list-aggregation.md).
 - **Canonical Ingredients:** one item each (`CANON`, one partition), `{id, name, family, store_category_id, pantry_staple, confirmed, version}`. Recipes point at the opaque id, so a rename touches no recipe. The **wording cache** is one item per normalized wording (`WORDING`, one partition), pointing at a canonical id. One big item for each was rejected, because every change would rewrite it and it would approach the 400 KB item limit.
 - **Kitchen settings:** the ordered Store Categories, with ids. **Favorite Sites:** one item.
 
