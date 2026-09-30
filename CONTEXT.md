@@ -15,8 +15,12 @@ A household member who is signed in and can change the collection.
 _Avoid_: Admin, owner
 
 **Visitor**:
-Anyone viewing the collection without signing in. A visitor can read but cannot change anything.
+Anyone viewing the collection without signing in. A visitor can read but cannot change anything. A visitor sees the household's recipes and settings as they are, but not its Week Plans or Grocery Lists: they see a Demo instead.
 _Avoid_: Guest, anonymous user
+
+**Demo**:
+A made-up Week Plan and Grocery List that a visitor sees in place of the household's own, built from recipes in the collection. A visitor can change it, but the changes are never saved.
+_Avoid_: Guest mode, preview, sample data
 
 ### Recipes and where they come from
 
