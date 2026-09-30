@@ -27,8 +27,20 @@ _Avoid_: Library, cookbook
 **Recipe**:
 One dish in the collection, together with everything the household has recorded about it.
 
+**Component**:
+A named part of a recipe with its own ingredients and steps, such as "For the marinade" or "For the sauce". A recipe without components has one unnamed part.
+_Avoid_: Section (that word belongs to store categories), group
+
+**Ratio Recipe**:
+A recipe whose amounts are relative parts rather than quantities, such as a spice blend of 2 parts garlic powder to 1 part cumin. Its parts only become amounts once a batch size is chosen.
+_Avoid_: Blend recipe, proportional recipe
+
+**Batch Size**:
+How much of a ratio recipe to make, e.g. 3 tbsp. It turns the recipe's parts into amounts.
+_Avoid_: Yield (that word is for ordinary recipes), scale
+
 **Source**:
-Where a recipe originally came from. A source can be a website, a video or a printed book or page.
+Where a recipe originally came from. A source can be a website, a spreadsheet, a video or a printed book or page. One source can hold several recipes, such as a spreadsheet of spice blends.
 _Avoid_: Origin, provider
 
 **Ingest**:
@@ -79,7 +91,7 @@ _Avoid_: Category (that word belongs to store categories), label
 
 **Favorite Site**:
 A recipe website the household trusts and returns to when looking for new recipes.
-_Avoid_: Bookmark, source (a source belongs to one recipe)
+_Avoid_: Bookmark, source (a source is where particular recipes came from)
 
 ### Cooking and shopping
 
@@ -92,7 +104,7 @@ A canonical ingredient the household always has on hand. Pantry staples are left
 _Avoid_: Basics, essentials
 
 **Week Plan**:
-The recipes the household places on each day of one Monday-to-Sunday week. A day can be empty or hold several recipes, such as a main and a side. Past Week Plans are kept, and past days can be logged, so the plan also records what was cooked.
+The recipes the household places on each day of one Monday-to-Sunday week. A day can be empty or hold several recipes, such as a main, a side and a sauce. Past Week Plans are kept, and a recipe on a day that has passed counts as cooked, so the plan also records what was cooked. The household corrects that record by adding or removing recipes on past days.
 _Avoid_: Meal plan, menu, schedule
 
 **Grocery List**:
