@@ -112,9 +112,17 @@ The recipes the household places on each day of one Monday-to-Sunday week. A day
 _Avoid_: Meal plan, menu, schedule
 
 **Grocery List**:
-The shared list of ingredients to buy, combined from the recipes in one Week Plan. Items ticked off are shared by the household.
+The shared list of ingredients to buy, combined from the recipes in one Week Plan, plus any extras. Items ticked off are shared by the household.
 _Avoid_: Shopping list
 
+**Grocery Item**:
+One row on a Grocery List, and the thing that's ticked off. It combines every recipe's need for one canonical ingredient, including recipes that say only "to taste". A recipe line that couldn't be matched to a canonical ingredient becomes its own item under "Other", as written.
+_Avoid_: Line (a line belongs to a recipe), entry (an entry belongs to a Week Plan)
+
+**Extra**:
+A Grocery Item an editor adds by hand to one week's Grocery List, such as paper towels or a pantry staple that has run out.
+_Avoid_: Custom item, manual item
+
 **Store Category**:
-The aisle-style group an item appears under on the grocery list, e.g. Baking or Produce. The household can edit these groups.
+The aisle-style group a Grocery Item appears under on the grocery list, e.g. Produce or Spices. The household can edit these groups.
 _Avoid_: Section, aisle
