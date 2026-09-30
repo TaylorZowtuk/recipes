@@ -8,10 +8,11 @@ One table per stack, with **no secondary indexes**, because an index would need 
 
 - **Card items:** one small item per recipe (title, source site, stated total time, Difficulty, tags, Enrichment Status, image), all in a single collection partition. The Recipes grid is one Query of about 60 RCU. A Scan of full recipes would cost about 2,000 RCU.
 - **Recipe items:** the full recipe (Original, Our Version, enrichment) sits in its own partition and is read when the recipe is opened. The API serves it with the recipe's version in the cache key, so CloudFront answers repeat reads and the offline cache fill without touching DynamoDB.
-- **Household items:** one item per **Week Plan** (keyed by its Monday, with its entries, scales, logging and grocery ticks), one for **Favorite Sites** and one for Kitchen settings (**Store Categories** and **Pantry Staples**).
+- **Household items:** one item per **Week Plan** (keyed by its Monday, with its entries, their scale or batch size, and grocery ticks), one for **Favorite Sites**, one for Kitchen settings (**Store Categories**), and one per **Canonical Ingredient** (which carries its **Pantry Staple** flag) and per wording in the wording cache.
 - A change that alters both a card and its recipe is written in one transaction.
+- A `SOURCE#<dedupe_key>` guard item per source entry, written in the same transaction as its recipe, keeps a source from being ingested twice, and a `META#schema` item records the table's schema version.
 
-The exact attributes are set by the recipe data model.
+The exact attributes are set by the [recipe data model ADR](2026-09-29-recipe-data-model.md).
 
 ## Writes
 
