@@ -107,6 +107,10 @@ _Avoid_: Normalized ingredient, food item
 A canonical ingredient the household always has on hand. Pantry staples are left out of grocery lists and ignored in fridge matching.
 _Avoid_: Basics, essentials
 
+**Fridge**:
+The canonical ingredients someone has said they have right now, used to find recipes they can cook. Each phone keeps its own, and it isn't shared with the household.
+_Avoid_: Inventory, pantry
+
 **Week Plan**:
 The recipes the household places on each day of one Monday-to-Sunday week. A day can be empty or hold several recipes, such as a main, a side and a sauce. Past Week Plans are kept, and a recipe on a day that has passed counts as cooked, so the plan also records what was cooked. The household corrects that record by adding or removing recipes on past days.
 _Avoid_: Meal plan, menu, schedule
