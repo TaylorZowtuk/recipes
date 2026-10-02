@@ -14,7 +14,7 @@ help: ## List the commands
 setup: ## Install dependencies, the Playwright browser and the pre-commit hook
 	cd backend && uv sync --locked
 	cd frontend && pnpm install --frozen-lockfile && pnpm exec playwright install chromium
-	uv tool run pre-commit install
+	uv tool install pre-commit && pre-commit install
 
 check: ## Lint, type-check, unit-test, validate Terraform, check links and API-client drift (in parallel)
 	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
@@ -49,7 +49,7 @@ ts-test:
 tf:
 	terraform fmt -check -recursive infra
 	for s in $(STACKS); do \
-		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color; \
+		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
 links:
 	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'

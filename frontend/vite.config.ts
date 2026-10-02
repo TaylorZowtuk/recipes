@@ -3,7 +3,7 @@ import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
 // FastAPI runs locally on this port, both in development and under `make e2e`.
-const api = { "/api": process.env.API_URL ?? "http://127.0.0.1:8787" };
+const api = { "/api": "http://127.0.0.1:8787" };
 
 export default defineConfig({
   plugins: [

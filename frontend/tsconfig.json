@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "e2e", "*.config.ts"]
+  "include": ["src", "e2e", "screenshots", "*.config.ts"]
 }

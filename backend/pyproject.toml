@@ -34,7 +34,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["INP001", "PLR2004", "S101"]
+"tests/**" = [
+    "INP001",  # tests aren't a package
+    "PLR2004", # expected values are clearer inline
+    "S101",    # pytest asserts
+]
 
 [tool.pyright]
 typeCheckingMode = "strict"
