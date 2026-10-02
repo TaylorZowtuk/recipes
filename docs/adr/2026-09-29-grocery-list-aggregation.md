@@ -47,7 +47,7 @@ We rejected keying ticks on the item alone. It's simpler, but a tick would survi
 
 ## Extras
 
-The Week Plan item gains `grocery_extras: [{id, text, canonical_id | null, store_category_id}]`, written conditionally on the plan's `version` like the rest of the plan.
+The Week Plan item gains `grocery_extras: {<extra_id>: {text, canonical_id | null, store_category_id}}`, a map keyed by Extra id. Adding or removing an Extra is an atomic map update, like a tick, and doesn't depend on the plan's `version`, so phones can queue it offline (amended by the [offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)).
 
 - The text is matched through the wording cache. If it matches a Canonical Ingredient, the Extra takes that ingredient's category and merges into its item, shown as "+ added".
 - Otherwise the category comes from the enum-constrained LLM call, then the dropdown, as the [free-LLM research](https://github.com/TaylorZowtuk/recipes/issues/5) set out.

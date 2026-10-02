@@ -17,7 +17,7 @@ For about 500 recipes, 2 editors and light reads, everything is within Always Fr
 
 - An AWS Budget (actual cost > $1) and a CloudWatch `EstimatedCharges > 1` alarm in us-east-1, both sending to SNS.
 - SNS emails the household **and** invokes a kill-switch Lambda that sets every API function's reserved concurrency to 0. The app then becomes read-only (the PWA, images and offline cache still work) until someone re-enables the API by hand.
-- The controls that bound spend during the 6–12 hour alarm lag: reserved concurrency of about 3 per API function, a WAF rate-limit rule, DynamoDB throttling, and long-lived content-hashed cache keys. At 3 concurrent 200 ms calls, a flood running for 12 hours stays inside Lambda's free 1M requests.
+- The controls that bound spend during the 6–12 hour alarm lag: reserved concurrency of about 3 per API function, a WAF rate-limit rule, DynamoDB throttling, and long-lived content-hashed cache keys. At 3 concurrent 200 ms calls, a flood running for 12 hours stays inside Lambda's free 1M requests. The WAF limit is about 1,000 requests per 5 minutes per IP, set above the phones' 3 s sync poll ([offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)); change the two together.
 - AWS's automatic Free Tier usage emails (at 85% of each limit) stay on.
 
 ## Considered options
