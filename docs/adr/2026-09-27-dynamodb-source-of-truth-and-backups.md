@@ -18,7 +18,7 @@ The exact attributes are set by the [recipe data model ADR](2026-09-29-recipe-da
 
 - **The API is the only writer.** The app on the phones, the local `enrich` CLI, the bulk import and `backup pull` all sign in as an editor and call the API. Nothing local ever holds prod AWS credentials, so validation and card upkeep happen in one place, and the kill switch really does make the whole app read-only. Editor sign-in must therefore support a non-browser client.
 - **The API takes operations, not documents,** for example "tick item X", "add this recipe to Wednesday" or "set tags". Two editors seldom touch the same thing.
-- **Grocery ticks** are atomic add and remove operations on a set, so two phones ticking at the same moment never conflict.
+- **Grocery ticks** are atomic add and remove operations on a set, so two phones ticking at the same moment never conflict. Grocery Extras work the same way, as atomic updates to a map ([offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)).
 - **Every other item carries a version** and is written only if the version hasn't changed. On a conflict the API returns 409, and the app reloads and shows the newer state. Nothing is merged silently.
 
 ## What stays on the device

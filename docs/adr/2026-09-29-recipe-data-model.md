@@ -76,13 +76,13 @@ We rejected two alternatives. A full copy of the lists duplicates every fact, an
   - for a website, the normalized URL (https, lower-case host, no fragment or tracking parameters, no trailing slash);
   - for a spreadsheet, `sheet_id` + `entry_name`.
 - **Original:** title, description, author, `extractor` (which fallback produced it), ingredient lines, steps, `yield {text, servings, unit}` and stated times `{prep, cook, total}`, each `{text, seconds}`. The raw HTML and JSON-LD are **not** kept: they're the site's whole copyrighted page, and a re-ingest fetches the page again. Cuisine, category, keywords and the source's own ratings are dropped, since tags belong to the household.
-- **Editor fields:** tags (strings, matched case-insensitively, keeping the first spelling), Difficulty, `images [{id (content hash), width, height, origin}]` and `preview {image_id, focal_x, focal_y}`. Images live at `images/<hash>.webp` in S3.
+- **Editor fields:** tags (strings, matched case-insensitively, keeping the first spelling), Difficulty, `images [{id (content hash), width, height, origin}]` and `preview {image_id, focal_x, focal_y}`. Images live at `images/<hash>.webp` in S3, with a card-size copy (about 400 px wide) next to each for the grid and the offline prefetch ([offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)).
 - **Enrichment:** `status` (*Pending* / *Awaiting Review* / *Ready*), `ingest_channel`, `enrichment_version`, `fdc_release`, pending flags on lines, and `issues [{id, fact_id, before, after, reason, model, status, confirm_batch}]`.
 - **Not stored:** per-serving nutrition, scaled and converted amounts, grocery totals, and a "cooked N times" count. They are all derived when read.
 
 ## Other items in the table
 
-- **Card** (`CARD`, one partition): title, site name, stated total (or prep + cook), Difficulty, tags, Enrichment Status, preview, and `needs_review {open_issues, unconfirmed}` for the "Needs Review · N" chip. It also holds the `fridge` index that fridge matching reads, set out in the [fridge matching ADR](2026-10-01-fridge-matching.md). A change that alters both the card and its recipe is written in one transaction.
+- **Card** (`CARD`, one partition): title, site name, stated total (or prep + cook), Difficulty, tags, Enrichment Status, preview, `needs_review {open_issues, unconfirmed}` for the "Needs Review · N" chip, and `recipe_version`, so a phone refetches only the recipes that changed ([offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)). It also holds the `fridge` index that fridge matching reads, set out in the [fridge matching ADR](2026-10-01-fridge-matching.md). A change that alters both the card and its recipe is written in one transaction.
 - **Source guard** `SOURCE#<dedupe_key>`: written in the same transaction as the recipe, so a source can't be ingested twice even without an index.
 - **Week Plan** `WEEK#<monday>`, created the first time something is placed in that week: `{week_start, days[7]: [{entry_id, recipe_id, recipe_title, amount}], grocery_ticks, version}`.
   - `amount` is `{kind: "scale", factor}` or, for a Ratio Recipe, `{kind: "batch", quantity, unit}`, starting from its `default_batch`.
@@ -92,6 +92,7 @@ We rejected two alternatives. A full copy of the lists duplicates every fact, an
   - Grocery tick keys are opaque strings that grocery aggregation defines, and `grocery_extras` holds hand-added items. Both are set out in the [grocery list ADR](2026-09-29-grocery-list-aggregation.md).
 - **Canonical Ingredients:** one item each (`CANON`, one partition), `{id, name, family, store_category_id, pantry_staple, confirmed, version}`. Recipes point at the opaque id, so a rename touches no recipe. The **wording cache** is one item per normalized wording (`WORDING`, one partition), pointing at a canonical id. One big item for each was rejected, because every change would rewrite it and it would approach the 400 KB item limit.
 - **Kitchen settings:** the ordered Store Categories, with ids. **Favorite Sites:** one item.
+- **Collection counter** `META#collection`: bumped in the same transaction as every write to shared collection data, so phones can tell when to refetch the collection ([offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md)).
 
 Deleting a recipe removes the recipe, its card and its source guard in one transaction. Nightly snapshots are the undo.
 
