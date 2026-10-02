@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: make check
+
+  e2e:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # `make screenshots` checks out the base branch
+      - uses: ./.github/actions/setup
+      - run: cd frontend && pnpm exec playwright install --with-deps chromium
+      - run: make e2e
+      - run: make screenshots BASE=origin/${{ github.base_ref || 'main' }}
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-and-screenshots
+          path: |
+            frontend/playwright-report/
+            .screenshots/
+          include-hidden-files: true
+          if-no-files-found: ignore

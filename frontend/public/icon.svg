@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Plateful</title>
+  <rect width="512" height="512" fill="#fbf7f0"/>
+  <circle cx="256" cy="256" r="200" fill="#ffffff" stroke="#d9cfc0" stroke-width="16"/>
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#ece4d8" stroke-width="8"/>
+  <circle cx="256" cy="268" r="72" fill="#d2452b"/>
+  <path d="M256 196 l-18 -22 M256 196 l18 -22 M256 196 v-30" stroke="#3f7d3a" stroke-width="12" stroke-linecap="round"/>
+</svg>
