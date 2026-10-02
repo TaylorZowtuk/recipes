@@ -12,7 +12,7 @@ A recipe is stored as one JSON document, defined once as Pydantic v2 models in `
 
 Every enriched fact carries `provenance` (`source` / `parser` / `fdc` / `llm` / `editor`), `confidence`, `estimated`, `confirmed`, `confirmed_by`, `confirmed_at` and `confirm_batch`. A fact is the unit an editor confirms in one tap, and its id is its **path**, so it needs no stored id:
 
-- **Per ingredient line:** `i3.parse` (quantity, unit, unit kind, name, short name, preparation), `i3.match` (canonical ingredient id, FDC id, portion row), `i3.conversion` (density g/ml, grams per count unit, or the reason conversion is refused), `i3.substitutions`.
+- **Per ingredient line:** `i3.parse` (quantity, unit, unit kind, name, short name, preparation, `optional` for "optional", "for garnish" or "to serve"), `i3.match` (canonical ingredient id, FDC id, portion row), `i3.conversion` (density g/ml, grams per count unit, or the reason conversion is refused), `i3.substitutions`.
 - **Per step:** `s2.uses` (ingredient ids with portions, adding up to at most 1 per ingredient) and `s2.segments`.
 - **Per recipe:** `difficulty`, `servings`, `ratio_basis` and the parsed stated times.
 
@@ -82,7 +82,7 @@ We rejected two alternatives. A full copy of the lists duplicates every fact, an
 
 ## Other items in the table
 
-- **Card** (`CARD`, one partition): title, site name, stated total (or prep + cook), Difficulty, tags, Enrichment Status, preview, and `needs_review {open_issues, unconfirmed}` for the "Needs Review · N" chip. A change that alters both the card and its recipe is written in one transaction.
+- **Card** (`CARD`, one partition): title, site name, stated total (or prep + cook), Difficulty, tags, Enrichment Status, preview, and `needs_review {open_issues, unconfirmed}` for the "Needs Review · N" chip. It also holds the `fridge` index that fridge matching reads, set out in the [fridge matching ADR](2026-10-01-fridge-matching.md). A change that alters both the card and its recipe is written in one transaction.
 - **Source guard** `SOURCE#<dedupe_key>`: written in the same transaction as the recipe, so a source can't be ingested twice even without an index.
 - **Week Plan** `WEEK#<monday>`, created the first time something is placed in that week: `{week_start, days[7]: [{entry_id, recipe_id, recipe_title, amount}], grocery_ticks, version}`.
   - `amount` is `{kind: "scale", factor}` or, for a Ratio Recipe, `{kind: "batch", quantity, unit}`, starting from its `default_batch`.
