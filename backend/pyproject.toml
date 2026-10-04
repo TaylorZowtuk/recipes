@@ -1,0 +1,49 @@
+[project]
+name = "recipes"
+version = "0.1.0"
+description = "Plateful's API, ingest and enrich CLI."
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.142.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.13.1",
+    "moto[dynamodb]>=5.2.3",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+    "uvicorn>=0.54.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812", # conflicts with the formatter
+    "CPY001", # no copyright headers
+    "D",      # docstrings where they help, not everywhere
+    "T201",   # CLIs print
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "INP001",  # tests aren't a package
+    "PLR2004", # expected values are clearer inline
+    "S101",    # pytest asserts
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest]
+testpaths = ["tests"]

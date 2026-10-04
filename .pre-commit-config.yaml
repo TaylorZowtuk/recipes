@@ -1,0 +1,6 @@
+# Only gitleaks runs here. Formatting and linting live in `make fix` / `make check` and CI.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

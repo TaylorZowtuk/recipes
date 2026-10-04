@@ -1,0 +1,25 @@
+name: Set up the toolchain
+description: uv, Node + pnpm, Terraform and lychee, with dependencies installed.
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v10.2.0 # no moving major tag; Dependabot bumps it
+      with:
+        enable-cache: true
+        cache-dependency-glob: backend/uv.lock
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+    - shell: bash
+      run: corepack enable
+    - uses: hashicorp/setup-terraform@v4
+      with:
+        terraform_version: 1.16.4
+        terraform_wrapper: false
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: lychee
+    - shell: bash
+      run: |
+        cd backend && uv sync --locked
+        cd ../frontend && pnpm install --frozen-lockfile
