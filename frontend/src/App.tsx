@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { api } from "./api/client";
+import { api, type Sync } from "./api/client";
 import { syncStatus } from "./syncStatus";
 
 export function App() {
   const [status, setStatus] = useState("Checking…");
 
   useEffect(() => {
+    const show = (sync: Sync | null) => setStatus(syncStatus({ sync, online: navigator.onLine }));
     api.GET("/api/sync").then(
-      ({ data }) => setStatus(data ? syncStatus(data) : "Editing is paused."),
-      () => setStatus("Editing is paused."),
+      ({ data }) => show(data ?? null),
+      () => show(null),
     );
   }, []);
 
