@@ -3,7 +3,7 @@ description: uv, Node + pnpm, Terraform and lychee, with dependencies installed.
 runs:
   using: composite
   steps:
-    - uses: astral-sh/setup-uv@v10
+    - uses: astral-sh/setup-uv@v10.2.0 # no moving major tag; Dependabot bumps it
       with:
         enable-cache: true
         cache-dependency-glob: backend/uv.lock
