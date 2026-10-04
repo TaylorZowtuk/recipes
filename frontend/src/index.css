@@ -1,23 +1,26 @@
+/* Color tokens from direction F of "Prototype: visual style" (#26). */
 :root {
   color-scheme: light dark;
-  --bg: #fbf7f0;
-  --fg: #2b2620;
-  --accent: #d2452b;
+  --bg: #f7f8f5;
+  --text: #1b2420;
+  --text-secondary: #58645e;
+  --accent: #2e5e45;
   font-family: system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1d1a16;
-    --fg: #f1ebe2;
-    --accent: #ef6a4f;
+    --bg: #121715;
+    --text: #ecefec;
+    --text-secondary: #a3ada7;
+    --accent: #9ed2b2;
   }
 }
 
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
 }
 
 main {
@@ -27,4 +30,8 @@ main {
 
 h1 {
   color: var(--accent);
+}
+
+[role="status"] {
+  color: var(--text-secondary);
 }
