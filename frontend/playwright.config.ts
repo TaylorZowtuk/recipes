@@ -33,7 +33,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "vite build && vite preview --host 127.0.0.1 --strictPort",
+      command: "pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --strictPort",
       cwd: path.join(root, "frontend"),
       url: "http://127.0.0.1:4173",
       reuseExistingServer: false,

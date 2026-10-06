@@ -13,12 +13,11 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
-| `make pnpm ARGS="add -D <package>"` | Run pnpm on the frontend and write `package.json` and the lockfile back |
 | `make shell` | A shell in the toolchain container |
 
 Prerequisites: Docker with Compose v2, git, GNU make and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), CI runs the same `make` commands, and the pre-commit hook runs gitleaks from the same image.
 
-- Containers run as your user, so files they write into the checkout are yours. `node_modules`, the backend's virtualenv and the tool caches live in Docker volumes, never in the checkout.
+- Containers run as your user, so files they write into the checkout are yours. `frontend/node_modules` and `backend/.venv` are Docker volumes mounted into the checkout (on the host they're empty directories), and the tool caches are a volume shared by every worktree. To add a dependency, run `pnpm add` or `uv add` from `make shell`.
 - Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own `DEV_PORT`.
 - Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, and every image tag (Terraform, uv, lychee, gitleaks, Playwright) from `docker/Dockerfile`. The Playwright image must match the `@playwright/test` version in `frontend/pnpm-lock.yaml`. `make e2e` stops early if they differ.
 - To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys.

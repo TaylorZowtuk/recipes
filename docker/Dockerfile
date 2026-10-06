@@ -27,24 +27,12 @@ COPY --from=lychee /usr/local/bin/lychee /usr/local/bin/
 COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/
 
 # Containers run as the host user, whose UID the image doesn't know, so these are world-writable.
-# Docker copies their mode into each new named volume mounted on them.
-#   /work/repo          the bind-mounted checkout
-#   /work/node_modules  a volume. `make deps` installs the frontend from copies of its package.json
-#                       and lockfile in /work. Node, Vite and tsc find it by walking up from
-#                       /work/repo/frontend, so no node_modules directory lands in the checkout.
-#   /work/venv          the backend's virtualenv, a volume
-#   /work/terraform     each stack's .terraform data dir (providers), a volume
-#   /work/cache         uv, Python, pnpm, corepack and pyright caches, a volume shared by every
-#                       worktree. Each of those tools locks its cache against concurrent use.
-RUN mkdir -p -m 1777 /work /work/repo /work/home /work/node_modules /work/venv /work/terraform /work/cache
-ENV PATH=/work/node_modules/.bin:$PATH \
-    HOME=/work/home \
+# Docker copies their mode into each new named volume mounted on them (compose.yaml).
+RUN mkdir -p -m 1777 /work/home /work/cache /work/repo/frontend/node_modules /work/repo/backend/.venv
+ENV HOME=/work/home \
     XDG_CACHE_HOME=/work/cache \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     pnpm_config_store_dir=/work/cache/pnpm-store \
-    pnpm_config_verify_deps_before_run=false \
-    VITE_CACHE_DIR=/work/node_modules/.vite \
-    UV_PROJECT_ENVIRONMENT=/work/venv \
     UV_CACHE_DIR=/work/cache/uv \
     UV_PYTHON_INSTALL_DIR=/work/cache/python \
     UV_LINK_MODE=copy \
