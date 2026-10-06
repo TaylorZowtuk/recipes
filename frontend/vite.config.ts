@@ -2,10 +2,13 @@ import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
-// FastAPI runs locally on this port, both in development and under `make e2e`.
-const api = { "/api": "http://127.0.0.1:8787" };
+// FastAPI runs on this port in the same container under `make e2e`; `make dev` points API_URL at its
+// own container.
+const api = { "/api": process.env.API_URL ?? "http://127.0.0.1:8787" };
 
 export default defineConfig({
+  // The toolchain image keeps node_modules out of the checkout, and Vite's cache with it.
+  cacheDir: process.env.VITE_CACHE_DIR || undefined,
   plugins: [
     react(),
     VitePWA({

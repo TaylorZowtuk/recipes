@@ -1,6 +1,10 @@
-# Only gitleaks runs here. Formatting and linting live in `make fix` / `make check` and CI.
+# Only gitleaks runs here, from the toolchain image (pinned in docker/Dockerfile), so the host needs
+# no gitleaks. Formatting and linting live in `make fix` / `make check` and CI.
 repos:
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
+  - repo: local
     hooks:
       - id: gitleaks
+        name: gitleaks
+        language: unsupported
+        entry: scripts/gitleaks.sh
+        pass_filenames: false

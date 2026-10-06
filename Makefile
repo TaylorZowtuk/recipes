@@ -1,38 +1,101 @@
-# Run `make help` for the list of commands.
+# Run `make help` for the list of commands. On the host, each command runs in the toolchain
+# container (docker/Dockerfile, compose.yaml); inside it, IN_CONTAINER is set and the recipes
+# below the `else` do the work.
 SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-STACKS := $(wildcard infra/stacks/*)
-
-.PHONY: help setup check fix e2e screenshots api-client \
-	py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
+.PHONY: help setup check fix e2e screenshots api-client dev pnpm shell gitleaks playwright-image \
+	deps backend-deps frontend-deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
 
 help: ## List the commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
 
-setup: ## Install dependencies, the Playwright browser and the pre-commit hook
-	cd backend && uv sync --locked
-	cd frontend && pnpm install --frozen-lockfile && pnpm exec playwright install chromium
-	uv tool install pre-commit && pre-commit install
+ifndef IN_CONTAINER
+
+# One Compose project per worktree, so worktrees never share containers, volumes or ports.
+export COMPOSE_PROJECT_NAME := recipes-$(shell printf %s '$(CURDIR)' | sha1sum | cut -c1-8)
+export NODE_VERSION := $(patsubst v%,%,$(file < .nvmrc))
+export HOST_UID := $(shell id -u)
+export HOST_GID := $(shell id -g)
+export GIT_COMMON_DIR := $(abspath $(shell git rev-parse --git-common-dir))
+COMPOSE := docker compose
+RUN := $(COMPOSE) --progress quiet run --rm --build tools
+
+setup: ## Build the toolchain image, install dependencies and the pre-commit hook
+	$(COMPOSE) build tools
+	$(RUN) make deps
+	uv tool install --quiet pre-commit && uv tool run pre-commit install
 
 check: ## Lint, type-check, unit-test, validate Terraform, check links and API-client drift (in parallel)
+	$(RUN) make check
+
+fix: ## Auto-format and apply safe lint fixes
+	$(RUN) make fix
+
+e2e: playwright-image ## Run Playwright against a local build (Vite preview + FastAPI on moto)
+	$(RUN) make e2e
+
+screenshots: playwright-image ## Before/after screenshots for a UI PR (BASE=origin/main by default)
+	$(RUN) make screenshots BASE=$(or $(BASE),origin/main)
+
+api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
+	$(RUN) make api-client
+
+dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); AWS_PROFILE=<profile> for staging
+	$(COMPOSE) $(if $(AWS_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
+
+pnpm: ## Run pnpm on the frontend, e.g. ARGS="add -D <package>"
+	$(RUN) make pnpm ARGS='$(ARGS)'
+
+shell: ## A shell in the toolchain container
+	$(RUN) bash
+
+gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
+	@$(COMPOSE) --progress quiet run --rm --build -T tools gitleaks stdin --redact --verbose --no-banner
+
+playwright-image:
+	@scripts/check-playwright-image.sh
+
+else
+
+STACKS := $(wildcard infra/stacks/*)
+# pnpm works on copies of these in /work, so node_modules lands in the volume there.
+PNPM_FILES := $(wildcard $(addprefix frontend/,package.json pnpm-lock.yaml pnpm-workspace.yaml))
+
+deps: backend-deps frontend-deps
+backend-deps:
+	cd backend && uv sync --locked --quiet
+frontend-deps:
+	cp $(PNPM_FILES) /work/
+	cd /work && pnpm install --frozen-lockfile --silent
+
+pnpm: frontend-deps
+	cd /work && pnpm $(ARGS)
+	cd /work && cp package.json pnpm-lock.yaml $$(ls pnpm-workspace.yaml 2>/dev/null) /work/repo/frontend/
+
+check: deps
 	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
 	@echo "make check: all passed"
 
-fix: ## Auto-format and apply safe lint fixes
+fix: deps
 	cd backend && uv run --locked ruff check --fix . && uv run --locked ruff format .
-	cd frontend && pnpm exec biome check --write .
+	cd frontend && biome check --write .
 	terraform fmt -recursive infra
 
-e2e: ## Run Playwright against a local build (Vite preview + FastAPI on moto)
-	cd frontend && pnpm exec playwright test
+e2e: deps
+	cd frontend && playwright test
 
-screenshots: ## Before/after screenshots for a UI PR (BASE=origin/main by default)
+screenshots: deps
 	scripts/screenshots.sh
 
-api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
+api-client: deps
 	scripts/api-client.sh frontend/src/api/schema.ts
+
+dev-api:
+	cd backend && uv run --locked uvicorn recipes.api:app --host 0.0.0.0 --port 8787 --reload
+dev-web: frontend-deps
+	cd frontend && vite --host 0.0.0.0 --port 5173 --strictPort
 
 py-lint:
 	cd backend && uv run --locked ruff check . && uv run --locked ruff format --check .
@@ -41,18 +104,21 @@ py-types:
 py-test:
 	cd backend && uv run --locked pytest -q
 ts-lint:
-	cd frontend && pnpm exec biome check .
+	cd frontend && biome check .
 ts-types:
-	cd frontend && pnpm exec tsc -p .
+	cd frontend && tsc -p .
 ts-test:
-	cd frontend && pnpm exec vitest run
+	cd frontend && vitest run
 tf:
+	mkdir -p "$$TF_PLUGIN_CACHE_DIR"
 	terraform fmt -check -recursive infra
 	for s in $(STACKS); do \
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
 links:
-	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'
+	lychee --offline --no-progress --include-fragments --exclude-path .claude '**/*.md'
 api-drift:
 	tmp=$$(mktemp) && trap 'rm -f $$tmp' EXIT && scripts/api-client.sh $$tmp && \
 	diff -u frontend/src/api/schema.ts $$tmp || { echo "API client is stale: run make api-client"; exit 1; }
+
+endif

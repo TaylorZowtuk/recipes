@@ -4,9 +4,10 @@ import { defineConfig, devices } from "@playwright/test";
 // `make screenshots` points APP_ROOT at a checkout of the base branch to take "before" shots.
 const root = path.resolve(process.env.APP_ROOT ?? "..");
 
-// Every viewport runs in Chromium so the suite needs no system packages; WebKit's would need root.
+// Runs in the toolchain container (`make e2e`), built on Microsoft's Playwright image, so each
+// device gets its own engine: WebKit for the iPhone, Chromium for the Pixel and desktop.
 const viewports = {
-  iphone: { ...devices["iPhone 15"], defaultBrowserType: "chromium" as const },
+  iphone: devices["iPhone 15"],
   pixel: devices["Pixel 7"],
   desktop: devices["Desktop Chrome"],
 };
@@ -32,7 +33,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --strictPort",
+      command: "vite build && vite preview --host 127.0.0.1 --strictPort",
       cwd: path.join(root, "frontend"),
       url: "http://127.0.0.1:4173",
       reuseExistingServer: false,

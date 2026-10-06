@@ -14,22 +14,19 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20 # a cold run builds the toolchain image
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
-      - run: make check
+      - run: make check # in the toolchain container, like every make command
 
   e2e:
     needs: check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # `make screenshots` checks out the base branch
-      - uses: ./.github/actions/setup
-      - run: cd frontend && pnpm exec playwright install --with-deps chromium
       - run: make e2e
       - id: ui
         run: |

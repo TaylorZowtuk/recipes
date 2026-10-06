@@ -8,4 +8,4 @@ schema=$(mktemp --suffix=.json)
 trap 'rm -f "$schema"' EXIT
 
 (cd "$repo/backend" && uv run --locked --quiet python -m recipes.openapi) >"$schema"
-(cd "$repo/frontend" && pnpm exec openapi-typescript "$schema" --output "$out" >/dev/null)
+(cd "$repo/frontend" && openapi-typescript "$schema" --output "$out" >/dev/null)

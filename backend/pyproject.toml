@@ -42,8 +42,6 @@ ignore = [
 
 [tool.pyright]
 typeCheckingMode = "strict"
-venvPath = "."
-venv = ".venv"
 
 [tool.pytest]
 testpaths = ["tests"]
