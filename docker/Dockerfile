@@ -33,9 +33,10 @@ COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/
 #                       and lockfile in /work. Node, Vite and tsc find it by walking up from
 #                       /work/repo/frontend, so no node_modules directory lands in the checkout.
 #   /work/venv          the backend's virtualenv, a volume
-#   /work/cache         uv, Python, pnpm, corepack, pyright and Terraform caches, a volume shared by
-#                       every worktree
-RUN mkdir -p -m 1777 /work /work/repo /work/home /work/node_modules /work/venv /work/cache
+#   /work/terraform     each stack's .terraform data dir (providers), a volume
+#   /work/cache         uv, Python, pnpm, corepack and pyright caches, a volume shared by every
+#                       worktree. Each of those tools locks its cache against concurrent use.
+RUN mkdir -p -m 1777 /work /work/repo /work/home /work/node_modules /work/venv /work/terraform /work/cache
 ENV PATH=/work/node_modules/.bin:$PATH \
     HOME=/work/home \
     XDG_CACHE_HOME=/work/cache \
@@ -47,7 +48,6 @@ ENV PATH=/work/node_modules/.bin:$PATH \
     UV_CACHE_DIR=/work/cache/uv \
     UV_PYTHON_INSTALL_DIR=/work/cache/python \
     UV_LINK_MODE=copy \
-    TF_PLUGIN_CACHE_DIR=/work/cache/terraform \
     PYTHONDONTWRITEBYTECODE=1 \
     IN_CONTAINER=1
 WORKDIR /work/repo

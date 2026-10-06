@@ -7,12 +7,13 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | Command | What it does |
 | --- | --- |
 | `make setup` | Build the toolchain image, install dependencies and the pre-commit hook |
-| `make check` | Lint, type-check, unit tests, Terraform validation, markdown links and API-client drift, in parallel. Aim for under 60 s warm |
+| `make check` | Lint, type-check, unit tests, Terraform validation, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
 | `make fix` | Auto-format and apply safe lint fixes |
 | `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark |
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
+| `make pnpm ARGS="add -D <package>"` | Run pnpm on the frontend and write `package.json` and the lockfile back |
 | `make shell` | A shell in the toolchain container |
 
 Prerequisites: Docker with Compose v2, git, GNU make and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), CI runs the same `make` commands, and the pre-commit hook runs gitleaks from the same image.
@@ -20,7 +21,7 @@ Prerequisites: Docker with Compose v2, git, GNU make and uv. Nothing else goes o
 - Containers run as your user, so files they write into the checkout are yours. `node_modules`, the backend's virtualenv and the tool caches live in Docker volumes, never in the checkout.
 - Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own `DEV_PORT`.
 - Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, and every image tag (Terraform, uv, lychee, gitleaks, Playwright) from `docker/Dockerfile`. The Playwright image must match the `@playwright/test` version in `frontend/pnpm-lock.yaml`. `make e2e` stops early if they differ.
-- To run locally against staging, use `make dev AWS_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys.
+- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys.
 
 ## Layout
 

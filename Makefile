@@ -5,7 +5,7 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client dev pnpm shell gitleaks playwright-image \
+.PHONY: help setup check fix e2e screenshots api-client dev pnpm shell gitleaks check-playwright-image \
 	deps backend-deps frontend-deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
 
 help: ## List the commands
@@ -14,13 +14,13 @@ help: ## List the commands
 ifndef IN_CONTAINER
 
 # One Compose project per worktree, so worktrees never share containers, volumes or ports.
-export COMPOSE_PROJECT_NAME := recipes-$(shell printf %s '$(CURDIR)' | sha1sum | cut -c1-8)
+export COMPOSE_PROJECT_NAME := recipes-$(shell printf %s '$(CURDIR)' | git hash-object --stdin | cut -c1-8)
 export NODE_VERSION := $(patsubst v%,%,$(file < .nvmrc))
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 export GIT_COMMON_DIR := $(abspath $(shell git rev-parse --git-common-dir))
 COMPOSE := docker compose
-RUN := $(COMPOSE) --progress quiet run --rm --build tools
+RUN = $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
 
 setup: ## Build the toolchain image, install dependencies and the pre-commit hook
 	$(COMPOSE) build tools
@@ -33,17 +33,17 @@ check: ## Lint, type-check, unit-test, validate Terraform, check links and API-c
 fix: ## Auto-format and apply safe lint fixes
 	$(RUN) make fix
 
-e2e: playwright-image ## Run Playwright against a local build (Vite preview + FastAPI on moto)
+e2e: check-playwright-image ## Run Playwright against a local build (Vite preview + FastAPI on moto)
 	$(RUN) make e2e
 
-screenshots: playwright-image ## Before/after screenshots for a UI PR (BASE=origin/main by default)
+screenshots: check-playwright-image ## Before/after screenshots for a UI PR (BASE=origin/main by default)
 	$(RUN) make screenshots BASE=$(or $(BASE),origin/main)
 
 api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
 	$(RUN) make api-client
 
-dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); AWS_PROFILE=<profile> for staging
-	$(COMPOSE) $(if $(AWS_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
+dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
+	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
 
 pnpm: ## Run pnpm on the frontend, e.g. ARGS="add -D <package>"
 	$(RUN) make pnpm ARGS='$(ARGS)'
@@ -51,28 +51,30 @@ pnpm: ## Run pnpm on the frontend, e.g. ARGS="add -D <package>"
 shell: ## A shell in the toolchain container
 	$(RUN) bash
 
+gitleaks: RUN_FLAGS := -T
 gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
-	@$(COMPOSE) --progress quiet run --rm --build -T tools gitleaks stdin --redact --verbose --no-banner
+	@$(RUN) gitleaks stdin --redact --verbose --no-banner
 
-playwright-image:
+check-playwright-image:
 	@scripts/check-playwright-image.sh
 
 else
 
 STACKS := $(wildcard infra/stacks/*)
-# pnpm works on copies of these in /work, so node_modules lands in the volume there.
-PNPM_FILES := $(wildcard $(addprefix frontend/,package.json pnpm-lock.yaml pnpm-workspace.yaml))
+# pnpm works on copies of these in /work, so node_modules lands in the volume there. pnpm may
+# create pnpm-workspace.yaml (for build-script approvals), so it's copied whenever it exists.
+PNPM_FILES = package.json pnpm-lock.yaml $$(ls pnpm-workspace.yaml 2>/dev/null)
 
 deps: backend-deps frontend-deps
 backend-deps:
 	cd backend && uv sync --locked --quiet
 frontend-deps:
-	cp $(PNPM_FILES) /work/
+	cd frontend && cp $(PNPM_FILES) /work/
 	cd /work && pnpm install --frozen-lockfile --silent
 
 pnpm: frontend-deps
 	cd /work && pnpm $(ARGS)
-	cd /work && cp package.json pnpm-lock.yaml $$(ls pnpm-workspace.yaml 2>/dev/null) /work/repo/frontend/
+	cd /work && cp $(PNPM_FILES) /work/repo/frontend/
 
 check: deps
 	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
@@ -110,9 +112,9 @@ ts-types:
 ts-test:
 	cd frontend && vitest run
 tf:
-	mkdir -p "$$TF_PLUGIN_CACHE_DIR"
 	terraform fmt -check -recursive infra
 	for s in $(STACKS); do \
+		export TF_DATA_DIR=/work/terraform/$$(basename $$s); \
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
 links:

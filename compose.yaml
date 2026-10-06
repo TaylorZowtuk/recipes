@@ -18,6 +18,7 @@ x-toolchain: &toolchain
     - ${GIT_COMMON_DIR:?run through make}:${GIT_COMMON_DIR:?run through make}
     - node_modules:/work/node_modules
     - venv:/work/venv
+    - terraform:/work/terraform
     - cache:/work/cache
 
 services:
@@ -33,7 +34,7 @@ services:
   web:
     <<: *toolchain
     command: make dev-web
-    environment:
+    environment: # replaces the anchor's environment rather than merging, so repeat CI
       CI: ${CI:-}
       API_URL: http://api:8787
     ports:
@@ -43,5 +44,6 @@ services:
 volumes:
   node_modules:
   venv:
+  terraform:
   cache:
     name: recipes-cache # shared by every worktree: downloads only, nothing per-checkout

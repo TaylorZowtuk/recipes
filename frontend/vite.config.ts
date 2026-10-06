@@ -8,6 +8,7 @@ const api = { "/api": process.env.API_URL ?? "http://127.0.0.1:8787" };
 
 export default defineConfig({
   // The toolchain image keeps node_modules out of the checkout, and Vite's cache with it.
+  // `||`, not `??`: `make screenshots` sets it empty for the base branch's own node_modules.
   cacheDir: process.env.VITE_CACHE_DIR || undefined,
   plugins: [
     react(),
