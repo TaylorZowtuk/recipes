@@ -1,5 +1,6 @@
 # Only gitleaks runs here, from the toolchain image (pinned in docker/Dockerfile), so the host needs
 # no gitleaks. Formatting and linting live in `make fix` / `make check` and CI.
+minimum_pre_commit_version: 4.4.0 # for `language: unsupported`
 repos:
   - repo: local
     hooks:

@@ -5,20 +5,41 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client dev shell gitleaks check-playwright-image \
+.PHONY: help setup check fix e2e screenshots api-client dev shell clean gitleaks \
 	deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
 
+ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
+$(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
+endif
+
 help: ## List the commands
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
 
 ifndef IN_CONTAINER
 
+# The commands share the dependency volumes, so they run one at a time.
+.NOTPARALLEL:
+
 # One Compose project per worktree, so worktrees never share containers, volumes or ports.
-export COMPOSE_PROJECT_NAME := recipes-$(shell printf %s '$(CURDIR)' | git hash-object --stdin | cut -c1-8)
+# The worktree's name comes first so `docker volume ls` shows whose volumes are whose.
+top := $(shell git rev-parse --show-toplevel)
+export COMPOSE_PROJECT_NAME := recipes-$(shell basename "$(top)" | tr A-Z a-z | tr -c 'a-z0-9\n' - | cut -c1-30)-$(shell printf %s "$(top)" | git hash-object --stdin | cut -c1-7)
 export NODE_VERSION := $(patsubst v%,%,$(file < .nvmrc))
+# The image's Playwright and browsers follow the version the lockfile resolves.
+export PLAYWRIGHT_VERSION := $(shell sed -n "s|^  '@playwright/test@\([^']*\)':$$|\1|p" frontend/pnpm-lock.yaml | sort -u)
+ifneq ($(words $(PLAYWRIGHT_VERSION)),1)
+$(error Expected one @playwright/test version in frontend/pnpm-lock.yaml, found "$(PLAYWRIGHT_VERSION)")
+endif
+# Containers run as the host user, so the files they write are the host user's. Rootless Docker
+# already maps the container's root to the host user.
+ifneq ($(findstring rootless,$(shell docker info -f '{{.SecurityOptions}}' 2>/dev/null)),)
+export HOST_UID := 0
+export HOST_GID := 0
+else
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
-export GIT_COMMON_DIR := $(abspath $(shell git rev-parse --git-common-dir))
+endif
+export GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir)
 COMPOSE := docker compose
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
@@ -27,7 +48,7 @@ RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) to
 setup: ## Build the toolchain image, install dependencies and the pre-commit hook
 	$(COMPOSE) build tools
 	$(RUN) make deps
-	uv tool install --quiet pre-commit && uv tool run pre-commit install
+	uv tool install --quiet --upgrade pre-commit && uv tool run pre-commit install
 
 check: ## Lint, type-check, unit-test, validate Terraform, check links and API-client drift (in parallel)
 	$(RUN) make check
@@ -35,11 +56,11 @@ check: ## Lint, type-check, unit-test, validate Terraform, check links and API-c
 fix: ## Auto-format and apply safe lint fixes
 	$(RUN) make fix
 
-e2e: check-playwright-image ## Run Playwright against a local build (Vite preview + FastAPI on moto)
+e2e: ## Run Playwright against a local build (Vite preview + FastAPI on moto)
 	$(RUN) make e2e
 
-screenshots: check-playwright-image ## Before/after screenshots for a UI PR (BASE=origin/main by default)
-	$(RUN) make screenshots BASE=$(or $(BASE),origin/main)
+screenshots: ## Before/after screenshots for a UI PR (BASE=origin/main by default)
+	$(RUN) make screenshots BASE='$(or $(BASE),origin/main)'
 
 api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
 	$(RUN) make api-client
@@ -48,15 +69,15 @@ dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PR
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
 
-shell: ## A shell in the toolchain container
-	$(RUN) bash
+shell: ## A shell in the toolchain container, with dependencies installed
+	$(RUN) bash -c 'make deps && exec bash'
+
+clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
+	$(COMPOSE) down --volumes --remove-orphans --rmi all
 
 gitleaks: RUN_FLAGS := -T
 gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
 	@$(RUN) gitleaks stdin --redact --verbose --no-banner
-
-check-playwright-image:
-	@scripts/check-playwright-image.sh
 
 else
 

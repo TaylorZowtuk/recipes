@@ -13,14 +13,17 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
-| `make shell` | A shell in the toolchain container |
+| `make shell` | A shell in the toolchain container, with dependencies installed |
+| `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
 
-Prerequisites: Docker with Compose v2, git, GNU make and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), CI runs the same `make` commands, and the pre-commit hook runs gitleaks from the same image.
+Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew install make` and run `gmake`) and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), and CI runs the same `make` commands. The pre-commit hook runs gitleaks from the same image, so commits need Docker running, and the first commit in a fresh worktree waits for the image to build.
 
-- Containers run as your user, so files they write into the checkout are yours. `frontend/node_modules` and `backend/.venv` are Docker volumes mounted into the checkout (on the host they're empty directories), and the tool caches are a volume shared by every worktree. To add a dependency, run `pnpm add` or `uv add` from `make shell`.
-- Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own `DEV_PORT`.
-- Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, and every image tag (Terraform, uv, lychee, gitleaks, Playwright) from `docker/Dockerfile`. The Playwright image must match the `@playwright/test` version in `frontend/pnpm-lock.yaml`. `make e2e` stops early if they differ.
-- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys.
+- **Never run uv, pnpm, pytest or Node on the host.** uv is there only for pre-commit. Running them on the host installs a second, host copy of the dependencies over the volumes. Host editors and language servers see empty `node_modules` and `.venv` directories, so trust `make check` over their unresolved-import errors.
+- For anything without a `make` command, use `make shell`. For example: a single test (`cd backend && uv run pytest tests/test_sync.py`, `cd frontend && pnpm exec vitest run src/syncStatus.test.ts`, `cd frontend && pnpm exec playwright test --project iphone-light`), or adding a dependency (`pnpm add` in `frontend/`, `uv add` in `backend/`; restart `make dev` afterwards).
+- Containers run as your user, so files they write into the checkout are yours. `frontend/node_modules` and `backend/.venv` are Docker volumes mounted into the checkout (on the host they're empty directories), and the tool caches are a volume shared by every worktree. If a volume goes stale, `make clean` and rerun.
+- Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own, for example `make dev DEV_PORT=5174`.
+- Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, the Playwright image from the `@playwright/test` version in `frontend/pnpm-lock.yaml`, and every other image tag (Terraform, uv, lychee, gitleaks) from `docker/Dockerfile`.
+- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys and set a region. Name the staging profile, never prod's: the whole of `~/.aws` is visible to the container.
 
 ## Layout
 

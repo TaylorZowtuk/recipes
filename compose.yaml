@@ -1,11 +1,12 @@
 # The toolchain every `make` command runs in. Run it through `make`, which sets the variables below:
-# a project name per worktree, Node's version from .nvmrc, the host user and the git common dir.
+# a project name per worktree, the Node and Playwright versions, the host user and the git common dir.
 x-toolchain: &toolchain
   image: ${COMPOSE_PROJECT_NAME:?run through make}-toolchain
   build:
     context: docker
     args:
       NODE_VERSION: ${NODE_VERSION:?run through make}
+      PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:?run through make}
   # Files written into the checkout belong to the host user.
   user: ${HOST_UID:?run through make}:${HOST_GID:?run through make}
   init: true
