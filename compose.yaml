@@ -1,0 +1,51 @@
+# The toolchain every `make` command runs in. Run it through `make`, which sets the variables below:
+# a project name per worktree, the Node and Playwright versions, the host user and the git common dir.
+x-toolchain: &toolchain
+  image: ${COMPOSE_PROJECT_NAME:?run through make}-toolchain
+  build:
+    context: docker
+    args:
+      NODE_VERSION: ${NODE_VERSION:?run through make}
+      PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:?run through make}
+  # Files written into the checkout belong to the host user.
+  user: ${HOST_UID:?run through make}:${HOST_GID:?run through make}
+  init: true
+  shm_size: 1gb # Chromium runs out of Docker's default 64 MB
+  environment:
+    CI: ${CI:-}
+  volumes:
+    - .:/work/repo
+    # A worktree's .git file points into the main checkout's .git, so mount it at the same path.
+    - ${GIT_COMMON_DIR:?run through make}:${GIT_COMMON_DIR:?run through make}
+    # Linux builds of the dependencies stay in volumes. make creates the mountpoints first, so
+    # they belong to the host user.
+    - node_modules:/work/repo/frontend/node_modules
+    - venv:/work/repo/backend/.venv
+    - cache:/work/cache
+
+services:
+  # `make <command>` runs `make <command>` in here.
+  tools:
+    <<: *toolchain
+    profiles: [tools]
+
+  # `make dev`: FastAPI and the Vite dev server, both reloading on edits.
+  api:
+    <<: *toolchain
+    command: make dev-api
+  web:
+    <<: *toolchain
+    command: make dev-web
+    environment: # replaces the anchor's environment rather than merging, so repeat CI
+      CI: ${CI:-}
+      API_URL: http://api:8787
+    ports:
+      - 127.0.0.1:${DEV_PORT:-5173}:5173
+    depends_on: [api]
+
+volumes:
+  node_modules:
+  venv:
+  cache: # downloads only, shared by every worktree; each tool locks its own cache
+    name: recipes-cache
+    external: true # make creates it, so no one worktree's project owns it

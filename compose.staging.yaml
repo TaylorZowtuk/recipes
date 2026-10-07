@@ -1,0 +1,15 @@
+# `make dev STAGING_PROFILE=<staging dev profile>` adds this: the API reads that profile from ~/.aws,
+# mounted read-only. The profile must use static keys, since SSO would need to write its cache.
+services:
+  api:
+    environment:
+      AWS_PROFILE: ${STAGING_PROFILE:?}
+      AWS_CONFIG_FILE: /work/aws/config
+      AWS_SHARED_CREDENTIALS_FILE: /work/aws/credentials
+    volumes:
+      - type: bind
+        source: ${HOME}/.aws
+        target: /work/aws
+        read_only: true
+        bind:
+          create_host_path: false
