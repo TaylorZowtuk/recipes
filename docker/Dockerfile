@@ -7,7 +7,7 @@ ARG PLAYWRIGHT_VERSION
 FROM node:${NODE_VERSION}-bookworm-slim AS node
 FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
 # Terraform's one pin. The stacks' `required_version` must allow it.
-FROM hashicorp/terraform:1.16.4 AS terraform
+FROM hashicorp/terraform:1.16.5 AS terraform
 FROM lycheeverse/lychee:0.24.2 AS lychee
 FROM ghcr.io/gitleaks/gitleaks:v8.30.1 AS gitleaks
 
