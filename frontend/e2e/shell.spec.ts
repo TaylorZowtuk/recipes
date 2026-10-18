@@ -92,6 +92,15 @@ test("back goes to Recipes when sign-in was opened directly", async ({ page }) =
   await expect(page).toHaveURL(/\/recipes$/);
 });
 
+test("back stays in the app after re-opening sign-in from sign-in", async ({ page }) => {
+  await page.goto("/sign-in");
+  // Following a link to the current path replaces the history entry instead of pushing one.
+  await page.getByRole("link", { name: "Sign in" }).filter({ visible: true }).click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/recipes$/);
+});
+
 test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) => {
   const scheme = testInfo.project.use.colorScheme === "dark" ? "dark" : "light";
   await page.goto("/recipes");

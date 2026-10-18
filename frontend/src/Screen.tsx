@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { backTarget } from "./back";
 import { AccountIcon, BackIcon } from "./icons";
 
@@ -14,14 +14,14 @@ type ScreenProps = {
 // screen's content.
 export function Screen({ title, pushed = false, children }: ScreenProps) {
   const navigate = useNavigate();
-  const { key } = useLocation();
 
   useEffect(() => {
     document.title = `${title} · Plateful`;
   }, [title]);
 
   const back = () => {
-    const target = backTarget(key);
+    // React Router keeps the history index in the entry's state, which survives a reload.
+    const target = backTarget(window.history.state?.idx);
     if (target === -1) navigate(-1);
     else navigate(target, { replace: true });
   };
