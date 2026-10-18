@@ -143,6 +143,24 @@ test("each tab opens from the navigation, which stays in place", async ({ page }
   }
 });
 
+test("focus moves to the new screen's title, but not on the first page load", async ({ page }) => {
+  await page.goto("/recipes");
+  await expect(page.locator("body")).toBeFocused();
+
+  await places(page).getByRole("link", { name: "Fridge", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Fridge" })).toBeFocused();
+});
+
+test("the account button is current on the sign-in screen", async ({ page }) => {
+  await page.goto("/sign-in");
+  const account = accountButton(page).filter({ visible: true });
+  await expect(account).toHaveAttribute("aria-current", "page");
+  // Both account links, the rail's and the top bar's, whichever is hidden in this layout.
+  const links = page.locator('a[href="/sign-in"]');
+  await expect(links).toHaveCount(2);
+  for (const link of await links.all()) await expect(link).toHaveAttribute("aria-current", "page");
+});
+
 test("the current place stands out in its layout's colours", async ({ page }, testInfo) => {
   const scheme = schemeOf(testInfo);
   await page.goto("/week");

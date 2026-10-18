@@ -144,6 +144,11 @@ button {
   flex: 1;
 }
 
+/* The title takes focus after navigation only to be announced; it isn't a control. */
+.top-bar h1:focus {
+  outline: none;
+}
+
 .top-bar .icon-button:first-child {
   margin-left: calc(var(--space) * -3);
 }
@@ -164,8 +169,13 @@ button {
   transition: background-color var(--motion);
 }
 
-.icon-button:hover {
+.icon-button:hover,
+.icon-button[aria-current="page"] {
   background: var(--accent-soft);
+}
+
+.icon-button[aria-current="page"] {
+  color: var(--accent-soft-text);
 }
 
 /* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */

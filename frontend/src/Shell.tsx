@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
 import { api, type Sync } from "./api/client";
 import { AccountIcon, FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
 import { syncStatus } from "./syncStatus";
@@ -15,6 +15,8 @@ const tabs = [
 // around whichever screen is open.
 export function Shell() {
   const [status, setStatus] = useState("Checking…");
+  const { key } = useLocation();
+  const shownKey = useRef(key);
 
   useEffect(() => {
     const show = (sync: Sync | null) => setStatus(syncStatus({ sync, online: navigator.onLine }));
@@ -23,6 +25,14 @@ export function Shell() {
       () => show(null),
     );
   }, []);
+
+  // After each navigation, focus moves to the new screen's title so screen readers announce it.
+  // The first screen opened leaves focus where the browser put it.
+  useEffect(() => {
+    if (shownKey.current === key) return;
+    shownKey.current = key;
+    document.querySelector<HTMLElement>(".top-bar h1")?.focus();
+  }, [key]);
 
   return (
     <div className="shell">
@@ -33,10 +43,10 @@ export function Shell() {
             <span>{label}</span>
           </NavLink>
         ))}
-        <Link to="/sign-in" className="place account-rail">
+        <NavLink to="/sign-in" className="place account-rail">
           <AccountIcon />
           <span>Sign in</span>
-        </Link>
+        </NavLink>
       </nav>
       <Outlet />
       <p role="status" className="sync-status">

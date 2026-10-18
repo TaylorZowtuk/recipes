@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect } from "react";
-import { Link, useNavigate } from "react-router";
+import { NavLink, useNavigate } from "react-router";
 import { backTarget } from "./back";
 import { AccountIcon, BackIcon } from "./icons";
 
@@ -34,10 +34,10 @@ export function Screen({ title, pushed = false, children }: ScreenProps) {
             <BackIcon />
           </button>
         )}
-        <h1>{title}</h1>
-        <Link to="/sign-in" className="icon-button account-top" aria-label="Sign in">
+        <h1 tabIndex={-1}>{title}</h1>
+        <NavLink to="/sign-in" className="icon-button account-top" aria-label="Sign in">
           <AccountIcon />
-        </Link>
+        </NavLink>
       </header>
       <main className="screen-body">{children}</main>
     </>
