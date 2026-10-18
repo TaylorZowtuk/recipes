@@ -309,6 +309,40 @@ stack_secrets() {
   note "A running Lambda reads them at cold start, so a change applies on the next deploy."
 }
 
+# bootstrap_step1: apply infra/bootstrap with local state, until step 2 moves that state into the
+# state bucket. A leftover backend_override.tf means step 1 is unfinished, and local state missing
+# from the bucket means step 2 is, so the bucket existing doesn't yet mean the account is bootstrapped.
+bootstrap_step1() {
+  local dir=infra/bootstrap
+  if [[ -f $dir/backend_override.tf ]]; then
+    say "An earlier run didn't finish this step, so it applies again with the local state."
+  elif [[ -f $dir/terraform.tfstate ]] &&
+    ! in_aws "aws s3api head-object --bucket $STATE_BUCKET --key bootstrap/terraform.tfstate" >/dev/null 2>&1; then
+    say "Step 1 is done, but its state is still in infra/bootstrap/terraform.tfstate: the next stage moves it."
+    return 0
+  elif in_aws "aws s3api head-bucket --bucket $STATE_BUCKET" >/dev/null 2>&1; then
+    say "${GREEN}✓${RESET} $STATE_BUCKET already exists, so the account is bootstrapped."
+    if confirm "Apply infra/bootstrap again from its S3 state, to pick up changes?"; then
+      in_aws "terraform -chdir=$dir init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET && terraform -chdir=$dir apply"
+    fi
+    return 0
+  fi
+  step "Read the plan Terraform prints, then type yes to apply it."
+  confirm "Apply infra/bootstrap now?" || exit 1
+  printf 'terraform {\n  backend "local" {}\n}\n' >$dir/backend_override.tf
+  # An account has one GitHub OIDC provider. If it already has one, bootstrap adopts it.
+  in_aws "
+    oidc=arn:aws:iam::$ACCOUNT:oidc-provider/token.actions.githubusercontent.com
+    terraform -chdir=$dir init -input=false -reconfigure &&
+    if ! terraform -chdir=$dir state list 2>/dev/null | grep -qx aws_iam_openid_connect_provider.github &&
+      aws iam get-open-id-connect-provider --open-id-connect-provider-arn \$oidc >/dev/null 2>&1; then
+      echo 'The account already has GitHub'\''s OIDC provider: importing it.'
+      terraform -chdir=$dir import -input=false aws_iam_openid_connect_provider.github \$oidc
+    fi &&
+    terraform -chdir=$dir apply
+  "
+}
+
 run_wizard() {
 
 TOTAL_STAGES=13
@@ -364,17 +398,7 @@ say "infra/bootstrap makes the Terraform state bucket ($STATE_BUCKET), GitHub's 
 say "each stack's deploy role and permissions boundary. The bucket must exist before state can"
 say "live in it, so the first apply keeps its state in a local file."
 printf '\n'
-if in_aws "aws s3api head-bucket --bucket $STATE_BUCKET" >/dev/null 2>&1; then
-  say "${GREEN}✓${RESET} $STATE_BUCKET already exists, so the account is bootstrapped."
-  if confirm "Apply infra/bootstrap again from its S3 state, to pick up changes?"; then
-    in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET && terraform -chdir=infra/bootstrap apply"
-  fi
-else
-  step "Read the plan Terraform prints, then type yes to apply it."
-  confirm "Apply infra/bootstrap now?" || exit 1
-  printf 'terraform {\n  backend "local" {}\n}\n' >infra/bootstrap/backend_override.tf
-  in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure && terraform -chdir=infra/bootstrap apply"
-fi
+bootstrap_step1
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "Bootstrap, step 2: move the state into its bucket"
