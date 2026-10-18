@@ -14,7 +14,9 @@ failed=0
 check() {
   local path=$1 status=$2 type=$3 pattern=${4:-} got problems attempt
   for attempt in 1 2 3 4 5 6; do
-    got=$(curl -sS --max-time 20 -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' "$url$path" || echo 000)
+    # curl writes 000 itself when it can't connect; empty files keep the checks below quiet.
+    : >"$tmp/headers" && : >"$tmp/body"
+    got=$(curl -sS --max-time 20 -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' "$url$path") || true
     problems=()
     [[ $got == "$status" ]] || problems+=("status $got, want $status")
     header content-type | grep -qi "^$type" || problems+=("Content-Type '$(header content-type)', want $type")
