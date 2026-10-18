@@ -17,9 +17,24 @@ export default defineConfig({
         display: "standalone",
         background_color: "#F7F8F5",
         theme_color: "#2E5E45",
-        icons: [{ src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+        icons: [
+          { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          {
+            src: "icon-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          { src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+        ],
       },
-      workbox: { navigateFallbackDenylist: [/^\/api\//] },
+      // The fonts are precached so the app keeps its look offline. robots.txt must reach crawlers
+      // as itself, never as the app's index.html.
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,woff2}"],
+        navigateFallbackDenylist: [/^\/api\//, /^\/robots\.txt$/],
+      },
     }),
   ],
   server: { proxy: api },

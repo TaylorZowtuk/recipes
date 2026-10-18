@@ -22,7 +22,8 @@ git -C "$repo" worktree add --detach "$before" "$base" >/dev/null
 if [[ -d "$before/frontend" ]]; then
   (cd "$before/backend" && uv sync --locked --quiet)
   (cd "$before/frontend" && pnpm install --frozen-lockfile --silent)
-  shoot before "$before"
+  # Pages new in this branch don't exist on BASE, so they get no before screenshot.
+  shoot before "$before" || echo "Some pages have no before screenshot: they are new or changed."
 else
   echo "$base has no frontend yet: no before screenshots."
 fi
