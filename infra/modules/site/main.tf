@@ -106,6 +106,15 @@ resource "aws_cloudfront_function" "spa" {
   code    = file("${path.module}/spa.js")
 }
 
+# X-Robots-Tag: noindex on every response. No managed response headers policy adds it, and the
+# Free plan forbids custom ones, so every behaviour runs this on viewer responses.
+resource "aws_cloudfront_function" "noindex" {
+  name    = "${var.prefix}-noindex"
+  runtime = "cloudfront-js-2.0"
+  publish = true
+  code    = file("${path.module}/noindex.js")
+}
+
 locals {
   api_origin    = "api"
   pwa_origin    = "pwa"
@@ -157,6 +166,11 @@ resource "aws_cloudfront_distribution" "this" {
     cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
     origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.noindex.arn
+    }
   }
 
   # Images have content-hashed keys and never change.
@@ -169,6 +183,11 @@ resource "aws_cloudfront_distribution" "this" {
     compress                   = true
     cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
     response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.noindex.arn
+    }
   }
 
   default_cache_behavior {
@@ -183,6 +202,11 @@ resource "aws_cloudfront_distribution" "this" {
     function_association {
       event_type   = "viewer-request"
       function_arn = aws_cloudfront_function.spa.arn
+    }
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.noindex.arn
     }
   }
 

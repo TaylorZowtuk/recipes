@@ -38,11 +38,6 @@ variable "lwa_layer_arn" {
   type = string
 }
 
-variable "reserved_concurrency" {
-  type    = number
-  default = 3
-}
-
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
@@ -69,7 +64,6 @@ module "api" {
   zip_path                 = var.lambda_zip
   runtime                  = var.lambda_runtime
   lwa_layer_arn            = var.lwa_layer_arn
-  reserved_concurrency     = var.reserved_concurrency
   data_policy_json         = module.access.data_policy_json
   permissions_boundary_arn = module.access.boundary_arn
   environment = {

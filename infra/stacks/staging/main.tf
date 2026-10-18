@@ -58,7 +58,7 @@ variable "lambda_runtime" {
 variable "lwa_layer_arn" {
   description = "AWS Lambda Web Adapter layer for arm64 in ca-west-1."
   type        = string
-  default     = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:25"
+  default     = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:30"
 }
 
 module "stack" {

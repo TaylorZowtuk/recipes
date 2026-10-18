@@ -36,12 +36,6 @@ variable "timeout" {
   default = 30
 }
 
-variable "reserved_concurrency" {
-  description = "Caps concurrent calls, so a flood stays inside Lambda's free requests during the alarm lag (hosting ADR). The kill switch sets it to 0."
-  type        = number
-  default     = 3
-}
-
 variable "log_retention_days" {
   type    = number
   default = 14
@@ -103,22 +97,23 @@ resource "aws_iam_role_policy" "logs" {
 }
 
 resource "aws_lambda_function" "this" {
-  function_name                  = var.function_name
-  role                           = aws_iam_role.this.arn
-  runtime                        = var.runtime
-  architectures                  = ["arm64"]
-  handler                        = "run.sh"
-  filename                       = var.zip_path
-  source_code_hash               = filebase64sha256(var.zip_path)
-  layers                         = [var.lwa_layer_arn]
-  memory_size                    = var.memory_size
-  timeout                        = var.timeout
-  reserved_concurrent_executions = var.reserved_concurrency
+  function_name    = var.function_name
+  role             = aws_iam_role.this.arn
+  runtime          = var.runtime
+  architectures    = ["arm64"]
+  handler          = "run.sh"
+  filename         = var.zip_path
+  source_code_hash = filebase64sha256(var.zip_path)
+  layers           = [var.lwa_layer_arn]
+  memory_size      = var.memory_size
+  timeout          = var.timeout
 
   environment {
     variables = merge(var.environment, {
       AWS_LAMBDA_EXEC_WRAPPER = "/opt/bootstrap"
       PORT                    = "8080"
+      # The adapter's readiness check defaults to /, which FastAPI 404s.
+      AWS_LWA_READINESS_CHECK_PATH = "/api/sync"
     })
   }
 
