@@ -151,6 +151,19 @@ test("focus moves to the new screen's title, but not on the first page load", as
   await expect(page.getByRole("heading", { level: 1, name: "Fridge" })).toBeFocused();
 });
 
+test("focus stays put when a navigation replaces the screen", async ({ page }) => {
+  // The first load's redirect from / to Collection.
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/recipes$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Collection" })).toBeVisible();
+  await expect(page.locator("body")).toBeFocused();
+
+  // A tap on the current place.
+  await page.goto("/fridge");
+  await places(page).getByRole("link", { name: "Fridge", exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Fridge" })).not.toBeFocused();
+});
+
 test("moving focus to the new screen's title doesn't scroll the window", async ({ page }) => {
   await page.goto("/recipes");
   // A filler outside the app keeps every screen long, and each focus() call logs the scroll it caused.

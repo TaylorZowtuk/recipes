@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigationType } from "react-router";
 import { api, type Sync } from "./api/client";
 import { AccountIcon, FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
 import { syncStatus } from "./syncStatus";
@@ -16,6 +16,7 @@ const tabs = [
 export function Shell() {
   const [status, setStatus] = useState("Checking…");
   const { key } = useLocation();
+  const navigationType = useNavigationType();
   const shownKey = useRef(key);
 
   useEffect(() => {
@@ -26,14 +27,15 @@ export function Shell() {
     );
   }, []);
 
-  // After each navigation, focus moves to the new screen's title so screen readers announce it,
-  // without scrolling the window.
-  // The first screen opened leaves focus where the browser put it.
+  // After each navigation, focus moves to the new screen's title, without scrolling the window, so
+  // screen readers announce it. The first screen opened, and a navigation that replaces the screen
+  // (the redirect from / or a tap on the current place), leave focus where it was.
   useEffect(() => {
     if (shownKey.current === key) return;
     shownKey.current = key;
+    if (navigationType === "REPLACE") return;
     document.querySelector<HTMLElement>(".top-bar h1")?.focus({ preventScroll: true });
-  }, [key]);
+  }, [key, navigationType]);
 
   return (
     <div className="shell">
