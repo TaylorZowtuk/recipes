@@ -5,8 +5,9 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client lambda dev shell clean gitleaks \
-	deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
+.PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke dev shell clean \
+	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links \
+	api-drift sh-lint workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
 $(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
@@ -44,6 +45,8 @@ COMPOSE := docker compose
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
 RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
+# The same, plus the AWS credentials in the caller's environment (compose.yaml's aws service).
+RUN_AWS = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build -T aws
 
 setup: ## Build the toolchain image, install dependencies and the pre-commit hook
 	$(COMPOSE) build tools
@@ -68,6 +71,15 @@ api-client: ## Regenerate the committed TypeScript API client from FastAPI's Ope
 lambda: ## Build the API's Lambda zip into backend/dist/lambda.zip
 	$(RUN) make lambda
 
+build: ## Build a release: the Lambda zip and the PWA bundle (frontend/dist) that `make deploy` ships
+	$(RUN) make build
+
+deploy: ## Apply STACK=staging|prod and upload its PWA bundle, with the AWS credentials in your env
+	$(RUN_AWS) make deploy STACK='$(STACK)'
+
+smoke: ## Check a deployed stack's responses through CloudFront (URL=https://<distribution domain>)
+	$(RUN) make smoke URL='$(URL)'
+
 dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
@@ -82,6 +94,9 @@ gitleaks: RUN_FLAGS := -T
 gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
 	@$(RUN) gitleaks stdin --redact --verbose --no-banner
 
+aws: # The setup wizard's way into AWS: run $$CMD in the toolchain with the AWS credentials in your env
+	@$(RUN_AWS) bash -c "$$CMD"
+
 else
 
 TF_ROOTS := infra/bootstrap $(wildcard infra/stacks/*)
@@ -91,7 +106,8 @@ deps:
 	cd frontend && pnpm install --frozen-lockfile --silent
 
 check: deps
-	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
+	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift \
+		sh-lint workflows
 	@echo "make check: all passed"
 
 fix: deps
@@ -110,6 +126,18 @@ api-client: deps
 
 lambda: deps
 	scripts/lambda.sh backend/dist/lambda.zip
+
+build: lambda
+	cd frontend && pnpm exec vite build
+
+# No deps: deploy runs only Terraform and the AWS CLI, on what `make build` already made.
+deploy: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+deploy:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	scripts/deploy.sh '$(STACK)'
+
+smoke:
+	scripts/smoke.sh '$(URL)'
 
 dev-api:
 	cd backend && uv run --locked uvicorn recipes.api:app --host 0.0.0.0 --port 8787 --reload
@@ -137,6 +165,12 @@ tf:
 	done
 links:
 	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'
+# The wizard library at the top of scripts/aws-setup.sh is kept as the wizard skill wrote it, and
+# its `$$e[Enter …` trips SC1087.
+sh-lint:
+	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
+workflows:
+	actionlint
 api-drift:
 	tmp=$$(mktemp) && trap 'rm -f $$tmp' EXIT && scripts/api-client.sh $$tmp && \
 	diff -u frontend/src/api/schema.ts $$tmp || { echo "API client is stale: run make api-client"; exit 1; }

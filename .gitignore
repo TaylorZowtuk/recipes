@@ -226,3 +226,5 @@ __marimo__/
 *.tfstate
 *.tfstate.*
 *_override.tf
+.deploy/
+.aws-setup.env
