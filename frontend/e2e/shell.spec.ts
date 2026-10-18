@@ -234,24 +234,32 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
   await page.goto("/recipes");
 
   await expect(page.locator("body")).toHaveCSS("background-color", rgb(scheme, "--bg"));
-  const tokens = await page.evaluate(() => {
-    const style = getComputedStyle(document.documentElement);
-    const get = (name: string) => style.getPropertyValue(name).trim().toLowerCase();
-    return {
-      accent: get("--accent"),
-      emphasis: get("--emphasis"),
-      card: get("--radius-card"),
-      button: get("--radius-button"),
-      pill: get("--radius-pill"),
+  await expect(page.locator("body")).toHaveCSS("color", rgb(scheme, "--text"));
+  await expect(places(page)).toHaveCSS("background-color", rgb(scheme, "--surface"));
+
+  // Every colour role, compared as the browser resolves it: the build may respell the hex values.
+  const expected: Record<string, string> = colours[scheme];
+  const roles = await page.evaluate((expected) => {
+    const probe = document.body.appendChild(document.createElement("i"));
+    const resolve = (colour: string) => {
+      probe.style.color = colour;
+      return getComputedStyle(probe).color;
     };
+    const entries = Object.entries(expected);
+    const actual = Object.fromEntries(entries.map(([name]) => [name, resolve(`var(${name})`)]));
+    const wanted = Object.fromEntries(entries.map(([name, value]) => [name, resolve(value)]));
+    probe.remove();
+    return { actual, wanted };
+  }, expected);
+  expect(roles.actual).toEqual(roles.wanted);
+
+  const shapes = await page.evaluate(() => {
+    const style = getComputedStyle(document.documentElement);
+    return ["--radius-card", "--radius-button", "--radius-pill"].map((name) =>
+      style.getPropertyValue(name).trim(),
+    );
   });
-  expect(tokens).toEqual({
-    accent: scheme === "dark" ? "#8cc5a2" : "#2e5e45",
-    emphasis: scheme === "dark" ? "#f07b6b" : "#c2362b",
-    card: "24px",
-    button: "18px",
-    pill: "999px",
-  });
+  expect(shapes).toEqual(["24px", "18px", "999px"]);
 
   await expect(page.getByRole("heading", { level: 1 })).toHaveCSS("font-family", /Baloo 2/);
   await expect(page.locator("body")).toHaveCSS("font-family", /Nunito Sans/);
