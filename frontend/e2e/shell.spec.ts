@@ -166,22 +166,17 @@ test("focus stays put when a navigation replaces the screen", async ({ page }) =
 
 test("moving focus to the new screen's title doesn't scroll the window", async ({ page }) => {
   await page.goto("/recipes");
-  // A filler outside the app keeps every screen long, and each focus() call logs the scroll it caused.
+  // A filler outside the app keeps every screen long, so the route change leaves the scroll alone.
+  // On phones the top bar scrolls away above it and the click scrolls back, so each click logs where
+  // the window sat when it landed, before the navigation and the focus.
   await page.evaluate(() => {
     const filler = document.createElement("div");
     filler.style.height = "3000px";
     document.body.append(filler);
-    const scrolls: number[] = [];
-    Object.assign(window, { focusScrolls: scrolls });
-    const focus = HTMLElement.prototype.focus;
-    HTMLElement.prototype.focus = function (options) {
-      const before = window.scrollY;
-      focus.call(this, options);
-      scrolls.push(window.scrollY - before);
-    };
+    addEventListener("click", () => Object.assign(window, { clickScrollY: scrollY }), true);
   });
-  const focusScrolls = () =>
-    page.evaluate(() => (window as unknown as { focusScrolls: number[] }).focusScrolls);
+  const clickScrollY = () =>
+    page.evaluate(() => (window as unknown as { clickScrollY: number }).clickScrollY);
 
   for (const { link, title } of [
     { link: places(page).getByRole("link", { name: "Fridge", exact: true }), title: "Fridge" },
@@ -191,8 +186,12 @@ test("moving focus to the new screen's title doesn't scroll the window", async (
     expect(await page.evaluate(() => window.scrollY)).toBe(1500);
     await link.click();
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeFocused();
+    // WebKit scrolls a focused element into view after focus() returns, so wait two frames.
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    expect(await page.evaluate(() => window.scrollY)).toBe(await clickScrollY());
   }
-  expect(await focusScrolls()).toEqual([0, 0]);
 });
 
 test("the account button is current on the sign-in screen", async ({ page }) => {
