@@ -415,7 +415,7 @@ elif confirm "Start a Deploy run on main now?"; then
   sleep 5
   RUN_ID=$(gh run list -R "$REPO_SLUG" --workflow deploy.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')
   open_url "https://github.com/$REPO_SLUG/actions/runs/$RUN_ID"
-  step "When staging and staging-e2e pass, click Review deployments → prod → Approve and deploy."
+  step "When the staging job passes (deploy, smoke and e2e), click Review deployments → prod → Approve and deploy."
   if gh run watch "$RUN_ID" -R "$REPO_SLUG" --exit-status; then
     say "${GREEN}✓${RESET} Both stacks are deployed."
   else
