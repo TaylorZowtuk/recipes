@@ -5,7 +5,7 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client dev shell clean gitleaks \
+.PHONY: help setup check fix e2e screenshots api-client lambda dev shell clean gitleaks \
 	deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
@@ -65,6 +65,9 @@ screenshots: ## Before/after screenshots for a UI PR (BASE=origin/main by defaul
 api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
 	$(RUN) make api-client
 
+lambda: ## Build the API's Lambda zip into backend/dist/lambda.zip
+	$(RUN) make lambda
+
 dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
@@ -104,6 +107,9 @@ screenshots: deps
 
 api-client: deps
 	scripts/api-client.sh frontend/src/api/schema.ts
+
+lambda: deps
+	scripts/lambda.sh backend/dist/lambda.zip
 
 dev-api:
 	cd backend && uv run --locked uvicorn recipes.api:app --host 0.0.0.0 --port 8787 --reload

@@ -12,6 +12,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark |
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
+| `make lambda` | Build the API's Lambda zip (arm64, run by the Lambda Web Adapter) into `backend/dist/lambda.zip` |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
 | `make shell` | A shell in the toolchain container, with dependencies installed |
 | `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
