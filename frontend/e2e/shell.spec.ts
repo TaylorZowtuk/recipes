@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 const tabs = [
   { name: "Recipes", path: "/recipes", title: "Collection" },
@@ -7,7 +7,66 @@ const tabs = [
   { name: "Sites", path: "/sites", title: "Favorite Sites" },
 ];
 
-const backgrounds = { light: "rgb(247, 248, 245)", dark: "rgb(18, 23, 21)" };
+// The colour roles from the Plateful design tokens, per scheme.
+const colours = {
+  light: {
+    "--bg": "#f7f8f5",
+    "--surface": "#ffffff",
+    "--text": "#1b2420",
+    "--text-secondary": "#58645e",
+    "--divider": "#d9dfda",
+    "--outline-strong": "#7d8a83",
+    "--accent": "#2e5e45",
+    "--accent-text": "#2e5e45",
+    "--on-accent": "#ffffff",
+    "--accent-soft": "#e3ece6",
+    "--accent-soft-text": "#24513a",
+    "--emphasis": "#c2362b",
+    "--emphasis-text": "#b02e24",
+    "--done": "#2e5e45",
+    "--warning": "#f6ebd2",
+    "--warning-text": "#6e5210",
+    "--cooking-bg": "#f7f8f5",
+    "--cooking-text": "#141b18",
+    "--cooking-progress": "#2e5e45",
+    "--plate-shadow": "rgba(30, 60, 45, 0.22)",
+  },
+  dark: {
+    "--bg": "#121715",
+    "--surface": "#1a201d",
+    "--text": "#ecefec",
+    "--text-secondary": "#a3ada7",
+    "--divider": "#2e3833",
+    "--outline-strong": "#6e7c75",
+    "--accent": "#8cc5a2",
+    "--accent-text": "#9ed2b2",
+    "--on-accent": "#0f1a14",
+    "--accent-soft": "#22312a",
+    "--accent-soft-text": "#bfe0cb",
+    "--emphasis": "#f07b6b",
+    "--emphasis-text": "#f59486",
+    "--done": "#8cc5a2",
+    "--warning": "#352c17",
+    "--warning-text": "#ebcf8a",
+    "--cooking-bg": "#101412",
+    "--cooking-text": "#eef1ee",
+    "--cooking-progress": "#8cc5a2",
+    "--plate-shadow": "rgba(0, 0, 0, 0.5)",
+  },
+};
+type Scheme = keyof typeof colours;
+type Role = keyof (typeof colours)["light"];
+
+const schemeOf = (testInfo: TestInfo): Scheme =>
+  testInfo.project.use.colorScheme === "dark" ? "dark" : "light";
+
+// A role's colour as getComputedStyle reports it, e.g. "#2e5e45" -> "rgb(46, 94, 69)".
+function rgb(scheme: Scheme, role: Role) {
+  const value = colours[scheme][role];
+  if (!value.startsWith("#")) return value;
+  const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(value.slice(i, i + 2), 16));
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 const isDesktop = (projectName: string) => projectName.startsWith("desktop");
 const places = (page: Page) => page.getByRole("navigation", { name: "Places" });
@@ -68,6 +127,24 @@ test("each tab opens from the navigation, which stays in place", async ({ page }
   }
 });
 
+test("the current place stands out in its layout's colours", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/week");
+  const current = places(page).getByRole("link", { name: "Week", exact: true });
+  await expect(current).toHaveAttribute("aria-current", "page");
+
+  if (isDesktop(testInfo.project.name)) {
+    // The rail's selected item is an Accent soft fill.
+    await expect(current).toHaveCSS("background-color", rgb(scheme, "--accent-soft"));
+    await expect(current).toHaveCSS("color", rgb(scheme, "--accent-soft-text"));
+  } else {
+    // The active tab is an Accent pill around the icon over an Accent label.
+    await expect(current.locator(".icon")).toHaveCSS("background-color", rgb(scheme, "--accent"));
+    await expect(current.locator(".icon")).toHaveCSS("color", rgb(scheme, "--on-accent"));
+    await expect(current.locator("span")).toHaveCSS("color", rgb(scheme, "--accent-text"));
+  }
+});
+
 test("the rail scrolls to the account button on a short, wide window", async ({ page }) => {
   // A phone in landscape is wide enough for the rail but too short for all of its items.
   await page.setViewportSize({ width: 844, height: 340 });
@@ -114,10 +191,10 @@ test("back stays in the app after re-opening sign-in from sign-in", async ({ pag
 });
 
 test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) => {
-  const scheme = testInfo.project.use.colorScheme === "dark" ? "dark" : "light";
+  const scheme = schemeOf(testInfo);
   await page.goto("/recipes");
 
-  await expect(page.locator("body")).toHaveCSS("background-color", backgrounds[scheme]);
+  await expect(page.locator("body")).toHaveCSS("background-color", rgb(scheme, "--bg"));
   const tokens = await page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
     const get = (name: string) => style.getPropertyValue(name).trim().toLowerCase();
