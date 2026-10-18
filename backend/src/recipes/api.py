@@ -1,13 +1,25 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
+from collections.abc import Awaitable, Callable
 from typing import Literal
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
 
 SCHEMA_VERSION = 1
 
 app = FastAPI(title="Plateful")
+
+
+@app.middleware("http")
+async def noindex(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    # CloudFront skips viewer-response functions when the origin answers 400 or
+    # more, so the API marks its own responses, errors included.
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noindex"
+    return response
 
 
 class Sync(BaseModel):

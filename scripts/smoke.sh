@@ -34,6 +34,7 @@ header() { sed -n "s/^$1: *//Ip" "$tmp/headers" | tr -d '\r' | tail -n1; }
 check /week 200 text/html
 check /robots.txt 200 text/plain
 # The API's own 404 (FastAPI's JSON), not index.html: the SPA fallback is on the default behaviour only.
+# CloudFront runs no viewer-response function on a 404, so its X-Robots-Tag comes from FastAPI.
 check /api/does-not-exist 404 application/json '"detail"'
 check /api/sync 200 application/json '"collection_version"'
 
