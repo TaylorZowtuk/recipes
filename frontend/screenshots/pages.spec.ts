@@ -11,11 +11,22 @@ const pages = [
 ];
 
 const outDir = process.env.SCREENSHOT_DIR ?? "screenshots-out";
+// Set for the base branch's run, which may predate some of the pages.
+const mayBeMissing = !!process.env.SCREENSHOT_MAY_BE_MISSING;
 
 for (const { name, path: url, ready } of pages) {
   test(name, async ({ page }, testInfo) => {
     await page.goto(url);
-    await expect(page.getByRole("heading", { name: ready })).toBeVisible();
+    const heading = page.getByRole("heading", { name: ready });
+    if (mayBeMissing) {
+      const shown = await heading.waitFor({ timeout: 3000 }).then(
+        () => true,
+        () => false,
+      );
+      test.skip(!shown, `no "${ready}" heading at ${url}: the page is new`);
+    } else {
+      await expect(heading).toBeVisible();
+    }
     await page.screenshot({
       path: path.join(outDir, testInfo.project.name, `${name}.png`),
       fullPage: true,
