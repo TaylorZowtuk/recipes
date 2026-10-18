@@ -226,6 +226,26 @@ set_env_var() {
   fi
 }
 
+# protect_env ENV [REVIEWER_ID]: ENV deploys from main only, with REVIEWER_ID (a GitHub user ID) as
+# its required reviewer when given. An environment that already has those rules keeps them, so a
+# re-run never resets reviewers or a wait timer set by hand, unless the human asks it to.
+protect_env() {
+  local env=$1 reviewer=${2:-} branch="" reviewers="" rules
+  IFS=$'\t' read -r branch reviewers < <(gh api "repos/$REPO_SLUG/environments/$env" --jq \
+    '[(.deployment_branch_policy.custom_branch_policies // false), ([.protection_rules[]? | select(.type == "required_reviewers")] | length > 0)] | @tsv' 2>/dev/null) || true
+  if [[ $branch == true && ( -z $reviewer || $reviewers == true ) ]] &&
+    ! confirm "$env already has its protection rules. Overwrite them (resets anything set by hand)?"; then
+    note "$env: kept its protection rules."
+  else
+    rules='"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}'
+    [[ -z $reviewer ]] || rules+=",\"reviewers\":[{\"type\":\"User\",\"id\":$reviewer}],\"prevent_self_review\":false"
+    printf '{%s}' "$rules" | gh api -X PUT "repos/$REPO_SLUG/environments/$env" --input - --silent
+  fi
+  if ! gh api "repos/$REPO_SLUG/environments/$env/deployment-branch-policies" --jq '.branch_policies[].name' | grep -qx main; then
+    gh api -X POST "repos/$REPO_SLUG/environments/$env/deployment-branch-policies" -f name=main -f type=branch --silent
+  fi
+}
+
 # load_outputs STACK reads the stack's Terraform outputs into DOMAIN_<stack>, DIST_ARN_<stack> and
 # ACL_ARN_<stack>. Fails when the stack has never been applied.
 load_outputs() {
@@ -377,17 +397,13 @@ pause
 # ── 5 ─────────────────────────────────────────────────────────────────────
 stage "GitHub environments: staging and prod"
 say "Each deploy job runs in its stack's environment, and only that environment can assume the"
-say "stack's role. prod gets you as its required reviewer (the approval gate) and deploys from"
-say "main only. staging deploys without approval."
+say "stack's role. Both deploy from main only. prod also gets you as its required reviewer (the"
+say "approval gate); staging deploys without approval."
 GH_LOGIN=$(gh api user --jq .login)
 GH_ID=$(gh api user --jq .id)
-gh api -X PUT "repos/$REPO_SLUG/environments/staging" --silent
-printf '{"reviewers":[{"type":"User","id":%s}],"prevent_self_review":false,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' "$GH_ID" |
-  gh api -X PUT "repos/$REPO_SLUG/environments/prod" --input - --silent
-if ! gh api "repos/$REPO_SLUG/environments/prod/deployment-branch-policies" --jq '.branch_policies[].name' | grep -qx main; then
-  gh api -X POST "repos/$REPO_SLUG/environments/prod/deployment-branch-policies" -f name=main -f type=branch --silent
-fi
-say "${GREEN}✓${RESET} staging, and prod (reviewer $GH_LOGIN, branch main)"
+protect_env staging
+protect_env prod "$GH_ID"
+say "${GREEN}✓${RESET} staging (branch main), and prod (reviewer $GH_LOGIN, branch main)"
 open_url "https://github.com/$REPO_SLUG/settings/environments"
 pause "Check both environments on that page, then press Enter"
 

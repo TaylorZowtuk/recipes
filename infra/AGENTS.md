@@ -26,7 +26,7 @@ Each root's S3 backend leaves out the bucket, so init with `terraform init -back
 
 ## Human steps
 
-Run [`scripts/aws-setup.sh`](../scripts/aws-setup.sh) on the host. It walks through every step only the human can do, in order, checks what is already done, and is safe to re-run: temporary admin credentials, the two-step `bootstrap/` apply, the `staging` and `prod` GitHub environments and their variables, the first deploy of each stack, the CloudFront Free plan subscription per distribution, the SSM SecureStrings, the staging dev user's access key in `~/.aws`, and a smoke check of both URLs. Every AWS and Terraform command runs in the toolchain container through `make aws`. The admin credentials stay in the wizard's memory, and no secret is printed or written to the repo.
+Run [`scripts/aws-setup.sh`](../scripts/aws-setup.sh) on the host. It walks through every step only the human can do, in order, checks what is already done, and is safe to re-run: temporary admin credentials, the two-step `bootstrap/` apply, the `staging` and `prod` GitHub environments (both deploy from `main` only, prod with you as required reviewer; a re-run keeps rules you changed by hand unless you say to overwrite) and their variables, the first deploy of each stack, the CloudFront Free plan subscription per distribution, the SSM SecureStrings, the staging dev user's access key in `~/.aws`, and a smoke check of both URLs. Every AWS and Terraform command runs in the toolchain container through `make aws`. The admin credentials stay in the wizard's memory, and no secret is printed or written to the repo.
 
 For reference, the bootstrap is two steps because the state bucket has to exist before any state can live in it:
 

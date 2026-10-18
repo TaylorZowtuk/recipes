@@ -39,7 +39,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 
 ## Deploys
 
-A push to `main` runs [`deploy.yml`](.github/workflows/deploy.yml): `make build` once, then `make deploy STACK=staging`, then `make smoke` and `make e2e` against staging's URL, then the same build to prod once the human approves the `prod` environment, followed by `make smoke` there. Each deploy job assumes its stack's deploy role through GitHub OIDC; the role ARN, state bucket and region are variables on the GitHub environment, and no AWS key is stored anywhere. Deploys run one at a time per stack and are never cancelled mid-apply. The one-time setup (account, bootstrap, GitHub environments, Free plan, SSM secrets, dev profile) is [`scripts/aws-setup.sh`](scripts/aws-setup.sh), run by the human on the host; see [`infra/AGENTS.md`](infra/AGENTS.md).
+A push to `main` runs [`deploy.yml`](.github/workflows/deploy.yml): `make build` once, then `make deploy STACK=staging`, then `make smoke` and `make e2e` against staging's URL, then the same build to prod once the human approves the `prod` environment, followed by `make smoke` there. Each deploy job assumes its stack's deploy role through GitHub OIDC; the role ARN, state bucket and region are variables on the GitHub environment, and no AWS key is stored anywhere. Both environments deploy from `main` only, so a manual run from another branch can't reach either stack; only `prod` has a required reviewer. Deploys run one at a time per stack and are never cancelled mid-apply. The one-time setup (account, bootstrap, GitHub environments, Free plan, SSM secrets, dev profile) is [`scripts/aws-setup.sh`](scripts/aws-setup.sh), run by the human on the host; see [`infra/AGENTS.md`](infra/AGENTS.md).
 
 ## Hard rules
 
