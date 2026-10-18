@@ -10,6 +10,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 failed=0
 
+# header <name>: the last response's value for that header.
+header() { sed -n "s/^$1: *//Ip" "$tmp/headers" | tr -d '\r' | tail -n1; }
+
 # check <path> <status> <content-type prefix> [body pattern]
 check() {
   local path=$1 status=$2 type=$3 pattern=${4:-} got problems attempt
@@ -21,15 +24,13 @@ check() {
     [[ $got == "$status" ]] || problems+=("status $got, want $status")
     header content-type | grep -qi "^$type" || problems+=("Content-Type '$(header content-type)', want $type")
     header x-robots-tag | grep -qi noindex || problems+=("X-Robots-Tag '$(header x-robots-tag)', want noindex")
-    [[ -z $pattern ]] || grep -q "$pattern" "$tmp/body" || problems+=("body lacks $pattern")
+    [[ -z $pattern ]] || grep -qF "$pattern" "$tmp/body" || problems+=("body lacks $pattern")
     ((${#problems[@]})) || { echo "ok   $path ($got $(header content-type))"; return; }
     ((attempt == 6)) || sleep 10
   done
   printf 'FAIL %s: %s\n' "$path" "$(IFS=';'; echo "${problems[*]}")"
   failed=1
 }
-
-header() { sed -n "s/^$1: *//Ip" "$tmp/headers" | tr -d '\r' | tail -n1; }
 
 check /week 200 text/html
 check /robots.txt 200 text/plain
