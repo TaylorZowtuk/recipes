@@ -332,3 +332,23 @@ test("the service worker leaves robots.txt alone", async ({ page, browserName })
   await expect(page.locator("body")).toContainText("Disallow: /");
   await expect(page.locator("#root")).toHaveCount(0);
 });
+
+test("the fonts load offline from the service worker's cache", async ({
+  page,
+  context,
+  browserName,
+}) => {
+  test.skip(browserName !== "chromium", "Playwright's WebKit has no service workers");
+  await page.goto("/week");
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1, name: "Week Plan" })).toBeVisible();
+  const loaded = await page.evaluate(async () => {
+    const fonts = ['700 23px "Baloo 2"', '400 16px "Nunito Sans"'];
+    await Promise.allSettled(fonts.map((font) => document.fonts.load(font)));
+    return fonts.map((font) => document.fonts.check(font));
+  });
+  expect(loaded).toEqual([true, true]);
+});
