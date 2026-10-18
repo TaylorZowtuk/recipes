@@ -389,10 +389,12 @@ test("the fonts load offline from the service worker's cache", async ({
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Week Plan" })).toBeVisible();
+  // load() resolves with the faces it loaded, none when no face matches, and rejects when a fetch
+  // fails, so each family must come back with at least one face.
   const loaded = await page.evaluate(async () => {
     const fonts = ['700 23px "Baloo 2"', '400 16px "Nunito Sans"'];
-    await Promise.allSettled(fonts.map((font) => document.fonts.load(font)));
-    return fonts.map((font) => document.fonts.check(font));
+    return Promise.all(fonts.map(async (font) => (await document.fonts.load(font)).length));
   });
-  expect(loaded).toEqual([true, true]);
+  expect(loaded[0]).toBeGreaterThan(0);
+  expect(loaded[1]).toBeGreaterThan(0);
 });
