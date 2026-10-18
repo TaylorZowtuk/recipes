@@ -29,11 +29,11 @@ export default defineConfig({
           { src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
         ],
       },
-      // The fonts are precached so the app keeps its look offline. robots.txt must reach crawlers
-      // as itself, never as the app's index.html.
+      // The fonts are precached so the app keeps its look offline. The API, recipe images and
+      // robots.txt come from the server as themselves, never as the app's index.html.
       workbox: {
         globPatterns: ["**/*.{js,css,html,woff2}"],
-        navigateFallbackDenylist: [/^\/api\//, /^\/robots\.txt$/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/images\//, /^\/robots\.txt$/],
       },
     }),
   ],
