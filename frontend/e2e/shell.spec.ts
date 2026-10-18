@@ -79,13 +79,25 @@ async function expectTapTarget(target: Locator) {
   expect(box?.height).toBeGreaterThanOrEqual(50);
 }
 
+// Makes the screen far taller than the window and scrolls to its foot.
+async function scrollLongScreen(page: Page) {
+  await page.getByRole("main").evaluate((main) => {
+    const filler = document.createElement("div");
+    filler.style.height = "3000px";
+    main.append(filler);
+  });
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+}
+
 async function expectNavPlacement(page: Page, projectName: string) {
   const viewport = page.viewportSize();
   const box = await places(page).boundingBox();
   if (!viewport || !box) throw new Error("no viewport or navigation box");
   if (isDesktop(projectName)) {
-    // A left rail: flush with the left edge and as tall as the window.
+    // A left rail: flush with the window's left and top edges and as tall as the window.
     expect(box.x).toBe(0);
+    expect(box.y).toBe(0);
     expect(box.height).toBeCloseTo(viewport.height, 0);
     expect(box.width).toBeLessThan(viewport.width / 4);
   } else {
@@ -108,6 +120,10 @@ test("each tab opens from the navigation, which stays in place", async ({ page }
     await expect(link).toHaveAttribute("aria-current", "page");
     await expectNavPlacement(page, testInfo.project.name);
   }
+
+  // The navigation never scrolls away with the screen.
+  await scrollLongScreen(page);
+  await expectNavPlacement(page, testInfo.project.name);
 
   for (const tab of tabs) {
     await expectTapTarget(places(page).getByRole("link", { name: tab.name, exact: true }));
@@ -168,6 +184,11 @@ test("the sign-in screen adds a back button beside the navigation", async ({ pag
   await expect(back).toBeVisible();
   await expectTapTarget(back);
   await expect(places(page)).toBeVisible();
+  await expectNavPlacement(page, testInfo.project.name);
+
+  // Back stays in reach on a long screen.
+  await scrollLongScreen(page);
+  await expect(back).toBeInViewport({ ratio: 1 });
   await expectNavPlacement(page, testInfo.project.name);
 
   await back.click();
