@@ -44,6 +44,8 @@
   --tap: 50px;
   --cooking-button: 70px;
   --rail-width: 96px;
+  --nav-height: 68px;
+  --top-bar-height: calc(var(--tap) + var(--space) * 4);
 
   --elevation-card: 0 1px 2px rgba(30, 60, 45, 0.08), 0 4px 12px rgba(30, 60, 45, 0.06);
   --elevation-float: 0 10px 28px rgba(20, 50, 35, 0.25);
@@ -89,6 +91,12 @@
   box-sizing: border-box;
 }
 
+/* Scrolling to a focused control keeps it clear of the sticky top bar and the fixed tab bar. */
+html {
+  scroll-padding: calc(var(--top-bar-height) + env(safe-area-inset-top)) 0
+    calc(var(--nav-height) + env(safe-area-inset-bottom));
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -123,7 +131,7 @@ button {
 /* Phones: a top bar, the screen, and a bottom tab bar that never scrolls away. */
 .shell {
   min-height: 100dvh;
-  padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom));
 }
 
 .top-bar {
@@ -133,7 +141,7 @@ button {
   display: flex;
   align-items: center;
   gap: calc(var(--space) * 2);
-  min-height: calc(var(--tap) + var(--space) * 4);
+  min-height: var(--top-bar-height);
   padding: calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-right))
     calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-left));
   padding-top: calc(var(--space) * 2 + env(safe-area-inset-top));
@@ -212,7 +220,7 @@ button {
   justify-content: center;
   gap: 2px;
   min-width: var(--tap);
-  min-height: 60px;
+  min-height: calc(var(--nav-height) - var(--space) * 2); /* the bar's padding makes up the rest */
   border-radius: var(--radius-button);
   color: var(--text-secondary);
   font-size: var(--text-tiny);
@@ -247,6 +255,11 @@ button {
 
 /* Desktop: the one breakpoint. The places become a left rail with the account button at its foot. */
 @media (min-width: 768px) {
+  /* The rail doesn't cover the screen; the top bar is at most Back and its padding tall. */
+  html {
+    scroll-padding: calc(var(--tap) + var(--space) * 8) 0 0;
+  }
+
   .shell {
     padding-bottom: 0;
     padding-left: calc(var(--rail-width) + env(safe-area-inset-left));
