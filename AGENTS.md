@@ -29,7 +29,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 
 - `backend/`: one uv project, one `recipes` package. The API, ingest and the `enrich` CLI are modules in it. See [`backend/AGENTS.md`](backend/AGENTS.md).
 - `frontend/`: one pnpm package, the PWA. Playwright tests are in `e2e/`, the generated API client in `src/api/`. See [`frontend/AGENTS.md`](frontend/AGENTS.md).
-- `infra/`: Terraform `modules/` plus `stacks/prod` and `stacks/staging`. See [`infra/AGENTS.md`](infra/AGENTS.md).
+- `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup. See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.
 - `scripts/`: helpers the Makefile calls.
 

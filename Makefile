@@ -81,7 +81,7 @@ gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
 
 else
 
-STACKS := $(wildcard infra/stacks/*)
+TF_ROOTS := infra/bootstrap $(wildcard infra/stacks/*)
 
 deps:
 	cd backend && uv sync --locked --quiet
@@ -122,9 +122,11 @@ ts-types:
 	cd frontend && pnpm exec tsc -p .
 ts-test:
 	cd frontend && pnpm exec vitest run
+tf: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
 tf:
 	terraform fmt -check -recursive infra
-	for s in $(STACKS); do \
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	for s in $(TF_ROOTS); do \
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
 links:
