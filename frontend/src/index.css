@@ -169,13 +169,16 @@ button {
   transition: background-color var(--motion);
 }
 
-.icon-button:hover,
 .icon-button[aria-current="page"] {
   background: var(--accent-soft);
+  color: var(--accent-soft-text);
 }
 
-.icon-button[aria-current="page"] {
-  color: var(--accent-soft-text);
+/* Only where there is a real pointer: on a touch screen the hover fill sticks after a tap. */
+@media (hover: hover) {
+  .icon-button:hover {
+    background: var(--accent-soft);
+  }
 }
 
 /* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */
@@ -197,7 +200,8 @@ button {
   display: flex;
   padding: var(--space) calc(var(--space) * 2) calc(var(--space) + env(safe-area-inset-bottom));
   background: var(--surface);
-  box-shadow: var(--elevation-card);
+  /* The card shadow falls below the screen's edge, so the bar gets a divider along its top. */
+  box-shadow: 0 -1px 0 var(--divider);
 }
 
 .place {
@@ -258,6 +262,7 @@ button {
     padding: calc(var(--space) * 6) calc(var(--space) * 3);
     padding-left: calc(var(--space) * 3 + env(safe-area-inset-left));
     overflow-y: auto;
+    box-shadow: var(--elevation-card);
   }
 
   .place {
@@ -271,8 +276,10 @@ button {
     background: none;
   }
 
-  .place:hover {
-    background: var(--accent-soft);
+  @media (hover: hover) {
+    .place:hover {
+      background: var(--accent-soft);
+    }
   }
 
   /* The selected rail item: an Accent soft fill, with the icon in the label's colour. */
