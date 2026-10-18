@@ -18,13 +18,14 @@ dist=$repo/frontend/dist
 [[ -f $dist/index.html ]] || die "no frontend/dist/index.html: run make build first"
 [[ -n ${TF_STATE_BUCKET:-} ]] || die "set TF_STATE_BUCKET to infra/bootstrap's state_bucket output"
 
-# In CI the reviewer approved the environment, so apply without asking. By hand, Terraform asks.
-approve=()
-[[ -n ${CI:-} ]] && approve=(-auto-approve) && export TF_IN_AUTOMATION=1
+# In CI the reviewer approved the environment, so apply without asking or prompting. By hand,
+# Terraform shows the plan and asks before applying it.
+apply=()
+[[ -n ${CI:-} ]] && apply=(-input=false -auto-approve) && export TF_IN_AUTOMATION=1
 
 tf() { terraform -chdir="$root" "$@"; }
 tf init -input=false -reconfigure -backend-config="bucket=$TF_STATE_BUCKET"
-tf apply -input=false "${approve[@]}"
+tf apply "${apply[@]}"
 bucket=$(tf output -raw pwa_bucket)
 domain=$(tf output -raw distribution_domain)
 
