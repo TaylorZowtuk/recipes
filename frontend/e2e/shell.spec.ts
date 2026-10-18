@@ -151,6 +151,37 @@ test("focus moves to the new screen's title, but not on the first page load", as
   await expect(page.getByRole("heading", { level: 1, name: "Fridge" })).toBeFocused();
 });
 
+test("moving focus to the new screen's title doesn't scroll the window", async ({ page }) => {
+  await page.goto("/recipes");
+  // A filler outside the app keeps every screen long, and each focus() call logs the scroll it caused.
+  await page.evaluate(() => {
+    const filler = document.createElement("div");
+    filler.style.height = "3000px";
+    document.body.append(filler);
+    const scrolls: number[] = [];
+    Object.assign(window, { focusScrolls: scrolls });
+    const focus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function (options) {
+      const before = window.scrollY;
+      focus.call(this, options);
+      scrolls.push(window.scrollY - before);
+    };
+  });
+  const focusScrolls = () =>
+    page.evaluate(() => (window as unknown as { focusScrolls: number[] }).focusScrolls);
+
+  for (const { link, title } of [
+    { link: places(page).getByRole("link", { name: "Fridge", exact: true }), title: "Fridge" },
+    { link: accountButton(page).filter({ visible: true }), title: "Editor sign-in" },
+  ]) {
+    await page.evaluate(() => window.scrollTo(0, 1500));
+    expect(await page.evaluate(() => window.scrollY)).toBe(1500);
+    await link.click();
+    await expect(page.getByRole("heading", { level: 1, name: title })).toBeFocused();
+  }
+  expect(await focusScrolls()).toEqual([0, 0]);
+});
+
 test("the account button is current on the sign-in screen", async ({ page }) => {
   await page.goto("/sign-in");
   const account = accountButton(page).filter({ visible: true });

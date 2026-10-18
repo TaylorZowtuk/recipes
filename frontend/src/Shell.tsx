@@ -26,12 +26,13 @@ export function Shell() {
     );
   }, []);
 
-  // After each navigation, focus moves to the new screen's title so screen readers announce it.
+  // After each navigation, focus moves to the new screen's title so screen readers announce it,
+  // without scrolling the window.
   // The first screen opened leaves focus where the browser put it.
   useEffect(() => {
     if (shownKey.current === key) return;
     shownKey.current = key;
-    document.querySelector<HTMLElement>(".top-bar h1")?.focus();
+    document.querySelector<HTMLElement>(".top-bar h1")?.focus({ preventScroll: true });
   }, [key]);
 
   return (
