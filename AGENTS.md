@@ -27,7 +27,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 - Containers run as your user, so files they write into the checkout are yours. `frontend/node_modules` and `backend/.venv` are Docker volumes mounted into the checkout (on the host they're empty directories), and the tool caches are a volume shared by every worktree. If a volume goes stale, `make clean` and rerun.
 - Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own, for example `make dev DEV_PORT=5174`.
 - Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, the Playwright image from the `@playwright/test` version in `frontend/pnpm-lock.yaml`, and every other image tag (Terraform, uv, lychee, gitleaks, actionlint, shellcheck, the AWS CLI) from `docker/Dockerfile`.
-- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys and set a region. Name the staging profile, never prod's: the whole of `~/.aws` is visible to the container.
+- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys and set a region, and points FastAPI at staging's table, images bucket and SSM parameters. The bucket name ends in the account ID, which comes from `STAGING_ACCOUNT_ID` or else the setup wizard's `.aws-setup.env` (in this checkout or the main one); with neither, `make dev` stops and says so. Name the staging profile, never prod's: the whole of `~/.aws` is visible to the container.
 
 ## Layout
 

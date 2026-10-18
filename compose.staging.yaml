@@ -6,6 +6,10 @@ services:
       AWS_PROFILE: ${STAGING_PROFILE:?}
       AWS_CONFIG_FILE: /work/aws/config
       AWS_SHARED_CREDENTIALS_FILE: /work/aws/credentials
+      # Staging's resources, named as infra/modules/stack-access names them. make sets the account ID.
+      TABLE_NAME: plateful-staging
+      IMAGES_BUCKET: plateful-staging-images-${STAGING_ACCOUNT_ID:?set STAGING_ACCOUNT_ID or run scripts/aws-setup.sh}
+      SSM_PREFIX: /plateful/staging/
     volumes:
       - type: bind
         source: ${HOME}/.aws

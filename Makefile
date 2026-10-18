@@ -42,6 +42,11 @@ export HOST_GID := $(shell id -g)
 endif
 export GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir)
 COMPOSE := docker compose
+# `make dev STAGING_PROFILE=…` names staging's buckets, which end in the account ID: STAGING_ACCOUNT_ID,
+# else AWS_ACCOUNT_ID from the setup wizard's .aws-setup.env, here or in the main checkout.
+STAGING_ACCOUNT_ID ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
+	sed -n "s/^AWS_ACCOUNT_ID='\{0,1\}\([0-9]\{12\}\)'\{0,1\}$$/\1/p" | head -n1)
+export STAGING_ACCOUNT_ID
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
 RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
