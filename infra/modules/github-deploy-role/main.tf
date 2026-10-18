@@ -91,15 +91,12 @@ resource "aws_iam_role" "deploy" {
 }
 
 data "aws_iam_policy_document" "deploy" {
+  # Unconditioned: without ListBucket, S3 answers a read of the not-yet-written state with 403, not
+  # 404, and `init` lists workspaces under env:/. Object reads and writes stay on this stack's key.
   statement {
     sid       = "StateList"
     actions   = ["s3:ListBucket"]
     resources = ["arn:aws:s3:::${var.state_bucket}"]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["${var.stack}/*"]
-    }
   }
 
   statement {
