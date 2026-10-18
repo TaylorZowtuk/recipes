@@ -307,11 +307,12 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
 
   await expect(page.getByRole("heading", { level: 1 })).toHaveCSS("font-family", /Baloo 2/);
   await expect(page.locator("body")).toHaveCSS("font-family", /Nunito Sans/);
-  const loaded = await page.evaluate(async () => {
-    await document.fonts.ready;
-    return document.fonts.check('700 23px "Baloo 2"') && document.fonts.check('16px "Nunito Sans"');
+  // Each family loads a face of its own: check() alone also passes when no face matches at all.
+  const faces = await page.evaluate(async () => {
+    const fonts = ['700 23px "Baloo 2"', '400 16px "Nunito Sans"'];
+    return Promise.all(fonts.map(async (font) => (await document.fonts.load(font)).length));
   });
-  expect(loaded).toBe(true);
+  expect(faces.map((count) => count > 0)).toEqual([true, true]);
   await expect(page.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
 });
 
