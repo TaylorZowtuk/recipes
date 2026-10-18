@@ -169,6 +169,9 @@ links:
 # its `$$e[Enter …` trips SC1087.
 sh-lint:
 	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
+	@# make and the workflows exec these directly, so git must record them as executable.
+	@bad=$$(git ls-files -s -- 'scripts/*.sh' | awk '$$1 != "100755" {print $$4}'); \
+	[ -z "$$bad" ] || { echo "Not executable (git update-index --chmod=+x): $$bad"; exit 1; }
 workflows:
 	actionlint
 api-drift:
