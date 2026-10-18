@@ -134,7 +134,8 @@ button {
   align-items: center;
   gap: calc(var(--space) * 2);
   min-height: calc(var(--tap) + var(--space) * 4);
-  padding: calc(var(--space) * 2) var(--gutter);
+  padding: calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-right))
+    calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-left));
   padding-top: calc(var(--space) * 2 + env(safe-area-inset-top));
   background: var(--bg);
 }
@@ -167,12 +168,14 @@ button {
   background: var(--accent-soft);
 }
 
-.screen-body {
-  padding: 0 var(--gutter);
+/* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */
+.screen-body,
+.sync-status {
+  padding: 0 calc(var(--gutter) + env(safe-area-inset-right)) 0
+    calc(var(--gutter) + env(safe-area-inset-left));
 }
 
 .sync-status {
-  padding: 0 var(--gutter);
   color: var(--text-secondary);
   font-size: var(--text-small);
 }
@@ -230,15 +233,19 @@ button {
 @media (min-width: 768px) {
   .shell {
     padding-bottom: 0;
-    padding-left: var(--rail-width);
+    padding-left: calc(var(--rail-width) + env(safe-area-inset-left));
   }
 
+  /* A phone in landscape gets the rail too: it clears the notch, and scrolls when the window is
+     too short for every place. */
   .places {
     inset: 0 auto 0 0;
-    width: var(--rail-width);
+    width: calc(var(--rail-width) + env(safe-area-inset-left));
     flex-direction: column;
     gap: calc(var(--space) * 2);
     padding: calc(var(--space) * 6) calc(var(--space) * 3);
+    padding-left: calc(var(--space) * 3 + env(safe-area-inset-left));
+    overflow-y: auto;
   }
 
   .place {
@@ -270,12 +277,14 @@ button {
     display: none;
   }
 
+  /* The rail already keeps the left inset clear. */
   .top-bar {
-    padding: calc(var(--space) * 6) calc(var(--space) * 8) calc(var(--space) * 2);
+    padding: calc(var(--space) * 6) calc(var(--space) * 8 + env(safe-area-inset-right))
+      calc(var(--space) * 2) calc(var(--space) * 8);
   }
 
   .screen-body,
   .sync-status {
-    padding: 0 calc(var(--space) * 8);
+    padding: 0 calc(var(--space) * 8 + env(safe-area-inset-right)) 0 calc(var(--space) * 8);
   }
 }

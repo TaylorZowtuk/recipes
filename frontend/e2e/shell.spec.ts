@@ -68,6 +68,18 @@ test("each tab opens from the navigation, which stays in place", async ({ page }
   }
 });
 
+test("the rail scrolls to the account button on a short, wide window", async ({ page }) => {
+  // A phone in landscape is wide enough for the rail but too short for all of its items.
+  await page.setViewportSize({ width: 844, height: 340 });
+  await page.goto("/recipes");
+
+  const account = places(page).getByRole("link", { name: "Sign in" });
+  await account.scrollIntoViewIfNeeded();
+  await expect(account).toBeInViewport({ ratio: 1 });
+  await account.click();
+  await expect(page).toHaveURL(/\/sign-in$/);
+});
+
 test("the sign-in screen adds a back button beside the navigation", async ({ page }, testInfo) => {
   await page.goto("/week");
   await accountButton(page).click();
