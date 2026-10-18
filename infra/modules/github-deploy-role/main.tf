@@ -218,7 +218,8 @@ data "aws_iam_policy_document" "deploy" {
   }
 
   # CloudFront distributions have generated IDs, so they are scoped by their Stack tag (the stacks'
-  # default tags) instead of by name.
+  # default tags) instead of by name. This covers UntagResource too, so a role can only untag its
+  # own stack's distribution.
   statement {
     sid       = "Distribution"
     actions   = ["cloudfront:*"]
@@ -230,15 +231,43 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
+  # CreateDistribution has no resource type, so it matches only "*". A create with tags is also
+  # authorized as TagResource on the new distribution.
   statement {
     sid       = "DistributionCreate"
-    actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateDistributionWithTags", "cloudfront:TagResource"]
+    actions   = ["cloudfront:CreateDistribution"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Stack"
+      values   = [var.stack]
+    }
+  }
+
+  # Tagging sets this stack's Stack tag, on a new distribution or one already tagged for this
+  # stack, so one stack's role can't retag another stack's distribution into its reach.
+  statement {
+    sid       = "DistributionTag"
+    actions   = ["cloudfront:TagResource"]
     resources = ["arn:aws:cloudfront::${local.acct}:distribution/*"]
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/Stack"
       values   = [var.stack]
     }
+    condition {
+      test     = "StringEqualsIfExists"
+      variable = "aws:ResourceTag/Stack"
+      values   = [var.stack]
+    }
+  }
+
+  # These create calls have no resource type, so they match only "*" and can't be scoped by name.
+  # Every later call on a function stays on the stack's prefix (CloudFrontNamed).
+  statement {
+    sid       = "CloudFrontCreate"
+    actions   = ["cloudfront:CreateFunction", "cloudfront:CreateOriginAccessControl"]
+    resources = ["*"]
   }
 
   statement {
