@@ -25,7 +25,7 @@ if [[ -d "$before/frontend" ]]; then
   (cd "$before/backend" && uv sync --locked --quiet)
   (cd "$before/frontend" && pnpm install --frozen-lockfile --silent)
   # Pages new in this branch don't exist on BASE: they are skipped and get no before screenshot.
-  # A failed build or server still fails the run.
+  # A failed build or server, or an app that throws or renders nothing, still fails the run.
   SCREENSHOT_MAY_BE_MISSING=1 shoot before "$before" --retries=0
 else
   echo "$base has no frontend yet: no before screenshots."
