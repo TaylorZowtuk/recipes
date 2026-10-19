@@ -54,3 +54,4 @@ def test_a_malformed_recipe_id_is_refused(client: TestClient) -> None:
     response = client.get("/api/recipes/not-a-ulid")
 
     assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"

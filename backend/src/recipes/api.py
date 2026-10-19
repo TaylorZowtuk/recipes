@@ -4,14 +4,14 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
 from recipes.models import SCHEMA_VERSION, Card, KitchenSettings, Recipe, Ulid
 from recipes.store import Store, VersionConflict
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, Callable
+    from collections.abc import AsyncGenerator, Awaitable, Callable
 
 # A versioned URL never changes what it serves, so CloudFront and phones keep it for good.
 IMMUTABLE = "public, max-age=31536000, immutable"
@@ -102,21 +102,39 @@ def version_conflict(_request: Request, _exc: Exception) -> JSONResponse:
     )
 
 
-def create_app(*, seed: Callable[[Store], None] | None = None) -> FastAPI:
-    """The API. On startup it bootstraps the table, or refuses to start on another schema."""
+async def no_store_by_default(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Every API response that doesn't say how to cache it is never cached, 422s included."""
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+def server_error(_request: Request, _exc: Exception) -> PlainTextResponse:
+    # Unhandled errors are answered outside every middleware, so this sets its own header:
+    # CloudFront would otherwise cache the 500 after DynamoDB has recovered.
+    return PlainTextResponse("Internal Server Error", status_code=500, headers=NO_STORE)
+
+
+def create_app(*, store: Callable[[], Store] = Store.from_env) -> FastAPI:
+    """The API on the table `store` opens. On startup it bootstraps the table, or refuses to start
+    on another schema.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        store = Store.from_env()
-        store.bootstrap()
-        if seed:
-            seed(store)
-        app.state.store = store
+        opened = store()
+        opened.bootstrap()
+        app.state.store = opened
         yield
 
     app = FastAPI(title="Plateful", lifespan=lifespan)
     app.include_router(router)
+    app.middleware("http")(no_store_by_default)
     app.add_exception_handler(VersionConflict, version_conflict)
+    app.add_exception_handler(Exception, server_error)
     return app
 
 
