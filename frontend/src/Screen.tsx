@@ -7,12 +7,14 @@ type ScreenProps = {
   title: string;
   /** A pushed screen gets a Back button beside the navigation. */
   pushed?: boolean;
+  /** Draws the title large at the top of the screen, between these, instead of in the top bar. */
+  hero?: { above?: ReactNode; below?: ReactNode };
   children?: ReactNode;
 };
 
 // The top bar (Back on pushed screens, the title, and on phones the account button) over a
 // screen's content.
-export function Screen({ title, pushed = false, children }: ScreenProps) {
+export function Screen({ title, pushed = false, hero, children }: ScreenProps) {
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -26,6 +28,12 @@ export function Screen({ title, pushed = false, children }: ScreenProps) {
     else navigate(target, { replace: true });
   };
 
+  const heading = (
+    <h1 tabIndex={-1} className={hero ? "hero-title" : undefined}>
+      {title}
+    </h1>
+  );
+
   return (
     <>
       <header className="top-bar">
@@ -34,12 +42,21 @@ export function Screen({ title, pushed = false, children }: ScreenProps) {
             <BackIcon />
           </button>
         )}
-        <h1 tabIndex={-1}>{title}</h1>
+        {!hero && heading}
         <NavLink to="/sign-in" className="icon-button account-top" aria-label="Sign in">
           <AccountIcon />
         </NavLink>
       </header>
-      <main className="screen-body">{children}</main>
+      <main className="screen-body">
+        {hero && (
+          <header className="hero">
+            {hero.above}
+            {heading}
+            {hero.below}
+          </header>
+        )}
+        {children}
+      </main>
     </>
   );
 }

@@ -60,3 +60,17 @@ export const BackIcon = () => (
     <path d="M14.5 5.5 8 12l6.5 6.5" />
   </Icon>
 );
+
+export const ClockIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="8.75" />
+    <path d="M12 7.5V12l3 2" />
+  </Icon>
+);
+
+export const SearchIcon = () => (
+  <Icon>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="m15.5 15.5 5 5" />
+  </Icon>
+);
