@@ -48,11 +48,11 @@ check() {
 }
 
 check /week 200 text/html
-check /robots.txt 200 text/plain
+check -c no-cache /robots.txt 200 text/plain
 check -c no-cache /sw.js 200 text/javascript
-check /manifest.webmanifest 200 application/manifest+json
+check -c no-cache /manifest.webmanifest 200 application/manifest+json
 # A content-hashed bundle script, named by the index.html that check leaves in $tmp/body.
-check /index.html 200 text/html
+check -c no-cache /index.html 200 text/html
 asset=$(grep -o '/assets/[^"]*\.js' "$tmp/body" | head -n1) || true
 if [[ -n $asset ]]; then
   check -c max-age=31536000 -c immutable "$asset" 200 text/javascript
