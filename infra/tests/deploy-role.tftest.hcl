@@ -104,4 +104,11 @@ run "deploy_policy" {
     )
     error_message = "The deploy role reads bootstrap's state, for the stack's OAC IDs, and nothing else of it."
   }
+  assert {
+    condition = (
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).State.Resource == "arn:aws:s3:::plateful-tfstate-123456789012/staging/terraform.tfstate" &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).StateLock.Resource == "arn:aws:s3:::plateful-tfstate-123456789012/staging/terraform.tfstate.tflock"
+    )
+    error_message = "The deploy role writes only its own stack's state key and lock file."
+  }
 }
