@@ -58,6 +58,16 @@ run "site" {
     origin_access_control_ids          = { api = "OACAPI", pwa = "OACPWA", images = "OACIMAGES" }
   }
 
+  # Distinct ARNs, so the function-association asserts can tell spa.js from noindex.js.
+  override_resource {
+    target = aws_cloudfront_function.spa
+    values = { arn = "arn:aws:cloudfront::123456789012:function/plateful-test-spa" }
+  }
+  override_resource {
+    target = aws_cloudfront_function.noindex
+    values = { arn = "arn:aws:cloudfront::123456789012:function/plateful-test-noindex" }
+  }
+
   assert {
     condition     = length(aws_cloudfront_distribution.this.custom_error_response) == 0
     error_message = "No distribution-wide custom_error_response: /api and /images errors must pass through."
@@ -84,7 +94,7 @@ run "site" {
   }
   assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :
-    anytrue([for f in b.function_association : f.event_type == "viewer-response" && f.function_arn == aws_cloudfront_function.noindex.arn])])
+    anytrue([for f in b.function_association : f.event_type == "viewer-response" && f.function_arn == "arn:aws:cloudfront::123456789012:function/plateful-test-noindex"])])
     error_message = "Every behaviour runs noindex.js on viewer responses."
   }
   assert {
@@ -94,7 +104,7 @@ run "site" {
   }
   assert {
     condition = anytrue([for f in aws_cloudfront_distribution.this.default_cache_behavior[0].function_association :
-    f.event_type == "viewer-request" && f.function_arn == aws_cloudfront_function.spa.arn])
+    f.event_type == "viewer-request" && f.function_arn == "arn:aws:cloudfront::123456789012:function/plateful-test-spa"])
     error_message = "The default behaviour runs spa.js on viewer requests."
   }
   assert {
