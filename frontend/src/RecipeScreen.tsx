@@ -64,11 +64,12 @@ export function RecipeScreen() {
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}
+        {missing && "There’s no recipe at this address."}
       </p>
       {failed && <LoadFailed what="The recipe" retry={failed.retry} status={status} />}
       {missing && (
         <p className="screen-note">
-          There’s no recipe at this address. <Link to="/recipes">Browse the Collection</Link>
+          <Link to="/recipes">Browse the Collection</Link>
         </p>
       )}
       {card && recipe.state === "ready" && (

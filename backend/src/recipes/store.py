@@ -327,15 +327,19 @@ class Store:
         self, model: BaseModel, key: Item, expected: int, unchanged: Iterable[str] = ()
     ) -> TransactWriteItemTypeDef:
         item = _to_item(model, key)
-        conditions = ["version = :expected", *(f"{name} = :{name}" for name in unchanged)]
+        # Placeholders, as a field name may be a DynamoDB reserved word such as `status`.
+        fields = list(unchanged)
+        names = {"#version": "version", **{f"#u{n}": name for n, name in enumerate(fields)}}
+        conditions = ["#version = :expected", *(f"#u{n} = :u{n}" for n in range(len(fields)))]
         return {
             "Put": {
                 "TableName": self.table,
                 "Item": item,
                 "ConditionExpression": " AND ".join(conditions),
+                "ExpressionAttributeNames": names,
                 "ExpressionAttributeValues": {
                     ":expected": {"N": str(expected)},
-                    **{f":{name}": item[name] for name in unchanged},
+                    **{f":u{n}": item[name] for n, name in enumerate(fields)},
                 },
             }
         }

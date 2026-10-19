@@ -165,6 +165,9 @@ for (const [what, url] of [
 test("an unknown recipe says it isn't there", async ({ page }) => {
   await page.goto("/recipes/01K7SEED000000000000000099/whatever");
   await expect(page.getByRole("heading", { level: 1, name: "Recipe not found" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("status")).toHaveText(
+    "There’s no recipe at this address.",
+  );
   await expect(page.getByRole("link", { name: "Browse the Collection" })).toBeVisible();
 });
 

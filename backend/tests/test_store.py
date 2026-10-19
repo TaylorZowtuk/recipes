@@ -4,7 +4,7 @@ import pytest
 
 from recipes.models import SCHEMA_VERSION, StatedTime, StatedTimes, card_for
 from recipes.seed import RECIPES
-from recipes.store import DuplicateSource, Store, VersionConflict
+from recipes.store import DuplicateSource, Store, VersionConflict, recipe_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -99,6 +99,32 @@ def test_a_recipe_cannot_change_its_source_identity(store: Store) -> None:
         store.update_recipe(added.model_copy(update={"dedupe_key": "https://example.com/other"}))
 
     assert store.get_recipe(added.id) == added
+    assert store.collection_version() == before
+
+
+def test_unchanged_fields_may_be_reserved_words(store: Store) -> None:
+    added = store.add_recipe(RECIPES[0])
+
+    saved = store._save_versioned(  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        added.model_copy(update={"tags": ["held"]}),
+        recipe_key(added.id),
+        shared=True,
+        unchanged=("status", "source"),
+    )
+
+    assert saved.version == 2
+    assert store.get_recipe(added.id) == saved
+
+
+def test_a_recipe_id_collision_is_not_a_duplicate_source(store: Store) -> None:
+    store.add_recipe(RECIPES[0])
+    before = store.collection_version()
+    collides = RECIPES[1].model_copy(update={"id": RECIPES[0].id})
+
+    with pytest.raises(Exception, match="ConditionalCheckFailed") as raised:
+        store.add_recipe(collides)
+
+    assert not isinstance(raised.value, DuplicateSource)
     assert store.collection_version() == before
 
 

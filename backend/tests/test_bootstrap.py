@@ -67,7 +67,9 @@ def test_a_bootstrapped_table_is_read_once_and_never_written(
 def test_a_start_that_loses_the_bootstrap_race_still_starts(
     table: str, monkeypatch: pytest.MonkeyPatch, cancellation: Callable[..., ClientError]
 ) -> None:
-    winner, loser = Store(table), Store(table, sleep=lambda _: None)
+    winner, loser = Store(table), Store(table)
+    sleeps: list[float] = []
+    loser.sleep = sleeps.append
     get_item = loser.client.get_item
     unseen = [1, 2]
 
@@ -92,6 +94,37 @@ def test_a_start_that_loses_the_bootstrap_race_still_starts(
 
     assert loser.schema_version() == SCHEMA_VERSION
     assert loser.collection_version() == 1
+    assert sleeps
+
+
+def test_a_start_cancelled_while_the_winner_commits_waits_for_it(
+    table: str, monkeypatch: pytest.MonkeyPatch, cancellation: Callable[..., ClientError]
+) -> None:
+    winner, loser = Store(table), Store(table)
+    sleeps: list[float] = []
+    loser.sleep = sleeps.append
+    get_item = loser.client.get_item
+    unseen = [1, 2]
+
+    def lagging_get_item(**kwargs: Any) -> Any:
+        if unseen:
+            unseen.pop()
+            return {}
+        return get_item(**kwargs)
+
+    mixed = cancellation("ConditionalCheckFailed", "TransactionConflict", "None")
+
+    def mixed_cancellation(**_kwargs: Any) -> Any:
+        winner.bootstrap()
+        raise mixed
+
+    monkeypatch.setattr(loser.client, "get_item", lagging_get_item)
+    monkeypatch.setattr(loser.client, "transact_write_items", mixed_cancellation)
+
+    loser.bootstrap()
+
+    assert loser.schema_version() == SCHEMA_VERSION
+    assert len(sleeps) == 1  # it waited for the schema once, after its first read missed
 
 
 def test_a_bootstrap_cancelled_for_another_reason_fails(
