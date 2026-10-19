@@ -51,10 +51,11 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
 }
 
-# Versioned, so an overwritten or deleted state can be recovered. Named as stack-access names it.
+# Versioned, so an overwritten or deleted state can be recovered. The name comes from stack-access
+# (the same for every stack), where each stack's terraform_remote_state gets it too.
 module "state" {
   source    = "../modules/private-bucket"
-  name      = "plateful-tfstate-${local.account_id}"
+  name      = one(distinct([for m in module.access : m.state_bucket]))
   versioned = true
 }
 
