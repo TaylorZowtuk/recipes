@@ -31,6 +31,10 @@ _Avoid_: Library, cookbook
 **Recipe**:
 One dish in the collection, together with everything the household has recorded about it.
 
+**Card**:
+A recipe's summary in the collection grid: its title, source site, Stated Time, Difficulty, tags, Enrichment Status and photo. A card is always derived from its recipe and changes whenever the recipe does.
+_Avoid_: Tile, summary, listing
+
 **Component**:
 A named part of a recipe with its own ingredients and steps, such as "For the marinade" or "For the sauce". A recipe without components has one unnamed part.
 _Avoid_: Section (that word belongs to store categories), group
@@ -130,3 +134,7 @@ _Avoid_: Custom item, manual item
 **Store Category**:
 The aisle-style group a Grocery Item appears under on the grocery list, e.g. Produce or Spices. The household can edit these groups.
 _Avoid_: Section, aisle
+
+**Kitchen settings**:
+The household's shared settings for its kitchen, such as the Store Categories and their order. A new collection starts with Household, Produce, Meat, Aisles, Spices, Dairy, Frozen and Bakery.
+_Avoid_: Preferences, config

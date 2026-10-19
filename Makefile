@@ -65,7 +65,7 @@ screenshots: ## Before/after screenshots for a UI PR (BASE=origin/main by defaul
 api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
 	$(RUN) make api-client
 
-dev: ## FastAPI + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
+dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
 
@@ -105,8 +105,9 @@ screenshots: deps
 api-client: deps
 	scripts/api-client.sh frontend/src/api/schema.ts
 
+# The API on a seeded fake table (recipes.local), or on staging's with STAGING_PROFILE.
 dev-api:
-	cd backend && uv run --locked uvicorn recipes.api:app --host 0.0.0.0 --port 8787 --reload
+	cd backend && uv run --locked uvicorn $(or $(API_APP),recipes.local:app) --host 0.0.0.0 --port 8787 --reload
 dev-web:
 	cd frontend && pnpm install --frozen-lockfile --silent && pnpm exec vite --host 0.0.0.0 --port 5173 --strictPort
 

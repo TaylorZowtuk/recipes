@@ -1,13 +1,24 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
-from typing import Literal
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from fastapi import FastAPI, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-SCHEMA_VERSION = 1
+from recipes.models import SCHEMA_VERSION, Card, KitchenSettings, Recipe, Ulid
+from recipes.store import Store, VersionConflict
 
-app = FastAPI(title="Plateful")
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Callable
+
+# A versioned URL never changes what it serves, so CloudFront and phones keep it for good.
+IMMUTABLE = "public, max-age=31536000, immutable"
+NO_STORE = {"Cache-Control": "no-store"}
+REDIRECT: dict[int | str, dict[str, Any]] = {
+    307: {"description": "Not the current version: redirects to it"}
+}
 
 
 class Sync(BaseModel):
@@ -19,14 +30,94 @@ class Sync(BaseModel):
     weeks: dict[str, int] | None
 
 
-@app.get("/api/sync")
-def get_sync(response: Response) -> Sync:
-    # Stub: the collection counter and Week Plan versions come from the table
-    # once it exists.
-    response.headers["Cache-Control"] = "no-store"
+class Collection(BaseModel):
+    """Everything a phone caches about the Collection, at one collection version."""
+
+    collection_version: int
+    cards: list[Card]
+    kitchen_settings: KitchenSettings
+
+
+def _store(request: Request) -> Store:
+    return request.app.state.store
+
+
+StoreDep = Annotated[Store, Depends(_store)]
+router = APIRouter(prefix="/api")
+
+
+@router.get("/sync")
+def get_sync(store: StoreDep, response: Response) -> Sync:
+    response.headers.update(NO_STORE)
     return Sync(
-        collection_version=0,
+        collection_version=store.collection_version(),
         schema_version=SCHEMA_VERSION,
         read_only=None,
         weeks=None,
     )
+
+
+@router.get("/collection", response_model=Collection, responses=REDIRECT)
+def get_collection(
+    store: StoreDep, response: Response, v: int | None = None
+) -> Collection | Response:
+    current = store.collection_version()
+    if v != current:
+        return RedirectResponse(f"/api/collection?v={current}", 307, headers=NO_STORE)
+    # Read after the counter, so the cards are never older than the version they're cached as.
+    response.headers["Cache-Control"] = IMMUTABLE
+    return Collection(
+        collection_version=current,
+        cards=store.cards(),
+        kitchen_settings=store.kitchen_settings(),
+    )
+
+
+@router.get(
+    "/recipes/{recipe_id}",
+    response_model=Recipe,
+    responses={**REDIRECT, 404: {"description": "No such recipe"}},
+)
+def get_recipe(
+    recipe_id: Annotated[Ulid, Path()],
+    store: StoreDep,
+    response: Response,
+    v: int | None = None,
+    s: int | None = None,
+) -> Recipe | Response:
+    """A recipe at its version (`v`) and schema version (`s`), which make up its cache key."""
+    recipe = store.get_recipe(recipe_id)
+    if recipe is None:
+        raise HTTPException(404, "No such recipe", headers=NO_STORE)
+    if (v, s) != (recipe.version, SCHEMA_VERSION):
+        url = f"/api/recipes/{recipe_id}?v={recipe.version}&s={SCHEMA_VERSION}"
+        return RedirectResponse(url, 307, headers=NO_STORE)
+    response.headers["Cache-Control"] = IMMUTABLE
+    return recipe
+
+
+def version_conflict(_request: Request, _exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        {"detail": "Version conflict: reload and try again"}, status_code=409, headers=NO_STORE
+    )
+
+
+def create_app(*, seed: Callable[[Store], None] | None = None) -> FastAPI:
+    """The API. On startup it bootstraps the table, or refuses to start on another schema."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        store = Store.from_env()
+        store.bootstrap()
+        if seed:
+            seed(store)
+        app.state.store = store
+        yield
+
+    app = FastAPI(title="Plateful", lifespan=lifespan)
+    app.include_router(router)
+    app.add_exception_handler(VersionConflict, version_conflict)
+    return app
+
+
+app = create_app()
