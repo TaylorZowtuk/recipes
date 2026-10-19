@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Plateful's API, ingest and enrich CLI."
 requires-python = ">=3.14"
 dependencies = [
+    "boto3>=1.43.107",
     "fastapi>=0.142.2",
 ]
 
@@ -18,6 +19,7 @@ dev = [
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
+    "types-boto3-lite[dynamodb]>=1.43.114",
     "uvicorn>=0.54.0",
 ]
 
