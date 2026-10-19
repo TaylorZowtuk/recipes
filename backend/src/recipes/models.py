@@ -14,6 +14,8 @@ SCHEMA_VERSION = 1
 # A ULID in Crockford base32. The first character is at most 7, since the timestamp is 48 bits.
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 Rating = Annotated[int, Field(ge=1, le=3)]
+# A Source's link: http(s) only, since it's rendered as a link. The string is kept exactly.
+WebUrl = Annotated[str, StringConstraints(pattern=r"^https?://\S+$")]
 
 
 class Model(BaseModel):
@@ -23,14 +25,14 @@ class Model(BaseModel):
 
 class WebsiteSource(Model):
     kind: Literal["website"] = "website"
-    url: str
+    url: WebUrl
     site_name: str
     captured_at: datetime
 
 
 class SpreadsheetSource(Model):
     kind: Literal["spreadsheet"] = "spreadsheet"
-    url: str
+    url: WebUrl
     sheet_id: str
     entry_name: str
     captured_at: datetime
@@ -188,6 +190,13 @@ class CollectionMeta(Model):
 
     schema_version: int
     collection_version: int
+
+
+class SourceGuard(Model):
+    """`SOURCE#<dedupe key>`: claims a Source for the one recipe taken from it."""
+
+    schema_version: int
+    recipe_id: Ulid
 
 
 class SchemaMeta(Model):

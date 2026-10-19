@@ -1,9 +1,12 @@
 from typing import TYPE_CHECKING
 
+from fastapi.testclient import TestClient
+
 from recipes.seed import RECIPES
 
 if TYPE_CHECKING:
-    from fastapi.testclient import TestClient
+    import pytest
+    from fastapi import FastAPI
 
     from recipes.store import Store
 
@@ -21,3 +24,16 @@ def test_sync_reports_the_collection_and_schema_versions(client: TestClient, sto
         "read_only": None,
         "weeks": None,
     }
+
+
+def test_a_failed_sync_is_never_cached(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreachable() -> int:
+        msg = "DynamoDB is unreachable"
+        raise ConnectionError(msg)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        monkeypatch.setattr(app.state.store, "collection_version", unreachable)
+        response = client.get("/api/sync")
+
+    assert response.status_code == 500
+    assert response.headers["cache-control"] == "no-store"

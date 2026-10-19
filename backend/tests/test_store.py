@@ -1,8 +1,15 @@
+from typing import TYPE_CHECKING, Any
+
 import pytest
 
-from recipes.models import StatedTime, StatedTimes, card_for
+from recipes.models import SCHEMA_VERSION, StatedTime, StatedTimes, card_for
 from recipes.seed import RECIPES
 from recipes.store import DuplicateSource, Store, VersionConflict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from botocore.exceptions import ClientError
 
 TWENTY_MINUTES = StatedTime(text="20 mins", seconds=1200)
 HALF_AN_HOUR = StatedTime(text="30 minutes", seconds=1800)
@@ -81,6 +88,28 @@ def test_a_stale_recipe_version_is_refused(store: Store) -> None:
 
     assert store.get_recipe(added.id) == current
     assert store.collection_version() == before
+    assert store.cards() == [card_for(current)]
+
+
+def test_a_recipe_cannot_change_its_source_identity(store: Store) -> None:
+    added = store.add_recipe(RECIPES[0])
+    before = store.collection_version()
+
+    with pytest.raises(VersionConflict):
+        store.update_recipe(added.model_copy(update={"dedupe_key": "https://example.com/other"}))
+
+    assert store.get_recipe(added.id) == added
+    assert store.collection_version() == before
+
+
+def test_an_item_at_another_schema_version_is_never_written(store: Store) -> None:
+    before = store.collection_version()
+
+    with pytest.raises(ValueError, match="schema version"):
+        store.add_recipe(RECIPES[0].model_copy(update={"schema_version": SCHEMA_VERSION + 1}))
+
+    assert store.get_recipe(RECIPES[0].id) is None
+    assert store.collection_version() == before
 
 
 def test_a_source_cannot_be_added_twice(store: Store) -> None:
@@ -112,11 +141,82 @@ def test_saving_kitchen_settings_bumps_their_version_and_the_collection(store: S
         store.save_kitchen_settings(settings)
 
 
-def test_cards_are_read_across_every_page(store: Store) -> None:
+def test_cards_are_read_across_every_page(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
     for recipe in RECIPES:
         store.add_recipe(recipe)
+    query = store.client.query
+    pages: list[object] = []
+
+    def counted_query(**kwargs: Any) -> Any:
+        pages.append(kwargs)
+        return query(**kwargs)
+
+    monkeypatch.setattr(store.client, "query", counted_query)
 
     assert [card.id for card in store.cards(page_size=2)] == sorted(r.id for r in RECIPES)
+    assert len(pages) > 1
+
+
+def test_a_recipe_is_read_consistently(store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
+    added = store.add_recipe(RECIPES[0])
+    get_item = store.client.get_item
+    reads: list[bool] = []
+
+    def recorded_get_item(**kwargs: Any) -> Any:
+        reads.append(kwargs["ConsistentRead"])
+        return get_item(**kwargs)
+
+    monkeypatch.setattr(store.client, "get_item", recorded_get_item)
+
+    assert store.get_recipe(added.id) == added
+    assert reads == [True]
+
+
+def test_a_transaction_conflict_is_retried(
+    store: Store, monkeypatch: pytest.MonkeyPatch, cancellation: Callable[..., ClientError]
+) -> None:
+    added = store.add_recipe(RECIPES[0])
+    transact = store.client.transact_write_items
+    conflicts = [cancellation("TransactionConflict", "None", "TransactionConflict")]
+    sleeps: list[float] = []
+
+    def conflicting_once(**kwargs: Any) -> Any:
+        if conflicts:
+            raise conflicts.pop()
+        return transact(**kwargs)
+
+    monkeypatch.setattr(store.client, "transact_write_items", conflicting_once)
+    store.sleep = sleeps.append
+
+    updated = store.update_recipe(added.model_copy(update={"tags": ["retried"]}))
+
+    assert store.get_recipe(added.id) == updated
+    assert updated.version == 2
+    assert len(sleeps) == 1
+
+
+def test_a_transaction_that_keeps_conflicting_is_a_version_conflict(
+    store: Store, monkeypatch: pytest.MonkeyPatch, cancellation: Callable[..., ClientError]
+) -> None:
+    added = store.add_recipe(RECIPES[0])
+    before = store.collection_version()
+    sleeps: list[float] = []
+
+    conflict = cancellation("TransactionConflict", "None", "None")
+
+    def always_conflicting(**_kwargs: Any) -> Any:
+        raise conflict
+
+    monkeypatch.setattr(store.client, "transact_write_items", always_conflicting)
+    store.sleep = sleeps.append
+
+    with pytest.raises(VersionConflict):
+        store.update_recipe(added.model_copy(update={"tags": ["never"]}))
+
+    assert store.get_recipe(added.id) == added
+    assert store.collection_version() == before
+    assert sleeps
+    assert all(0 <= delay <= 1 for delay in sleeps)
 
 
 def test_numbers_survive_the_round_trip(store: Store) -> None:
