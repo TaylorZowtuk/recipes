@@ -1,6 +1,6 @@
 # One whole stack: its data (store), the API and the CloudFront site. stacks/prod and
 # stacks/staging call this with their own values; infra/bootstrap must already have made the
-# stack's deploy role and permissions boundary.
+# stack's deploy role, permissions boundary and CloudFront OACs.
 terraform {
   required_providers {
     aws = {
@@ -47,6 +47,16 @@ module "access" {
   region     = data.aws_region.current.region
 }
 
+# The stack's OACs belong to infra/bootstrap; their IDs come from its state.
+data "terraform_remote_state" "bootstrap" {
+  backend = "s3"
+  config = {
+    bucket = module.access.state_bucket
+    key    = module.access.bootstrap_state_key
+    region = data.aws_region.current.region
+  }
+}
+
 module "store" {
   source              = "../store"
   table_name          = module.access.table_name
@@ -85,6 +95,7 @@ module "site" {
   images_bucket_regional_domain_name = module.store.images_bucket_regional_domain_name
   function_name                      = module.api.function_name
   function_url_domain                = module.api.function_url_domain
+  origin_access_control_ids          = data.terraform_remote_state.bootstrap.outputs.origin_access_control_ids[var.stack]
 }
 
 output "access" {

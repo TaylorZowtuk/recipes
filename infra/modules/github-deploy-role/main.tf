@@ -105,6 +105,14 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["arn:aws:s3:::${var.state_bucket}/${local.state_key}"]
   }
 
+  # The stack reads its OAC IDs from bootstrap's outputs. OACs carry no tags and have generated
+  # IDs, so bootstrap owns them and the deploy role can only read them (CloudFrontRead).
+  statement {
+    sid       = "BootstrapState"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${var.state_bucket}/${module.access.bootstrap_state_key}"]
+  }
+
   statement {
     sid       = "StateLock"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
@@ -262,21 +270,18 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
-  # These create calls have no resource type, so they match only "*" and can't be scoped by name.
-  # Every later call on a function stays on the stack's prefix (CloudFrontNamed).
+  # CreateFunction has no resource type, so it matches only "*" and can't be scoped by name. Every
+  # later call on a function stays on the stack's prefix.
   statement {
-    sid       = "CloudFrontCreate"
-    actions   = ["cloudfront:CreateFunction", "cloudfront:CreateOriginAccessControl"]
+    sid       = "EdgeFunctionCreate"
+    actions   = ["cloudfront:CreateFunction"]
     resources = ["*"]
   }
 
   statement {
-    sid     = "CloudFrontNamed"
-    actions = ["cloudfront:*"]
-    resources = [
-      "arn:aws:cloudfront::${local.acct}:function/${local.prefix}-*",
-      "arn:aws:cloudfront::${local.acct}:origin-access-control/*",
-    ]
+    sid       = "EdgeFunction"
+    actions   = ["cloudfront:*"]
+    resources = ["arn:aws:cloudfront::${local.acct}:function/${local.prefix}-*"]
   }
 
   statement {

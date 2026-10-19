@@ -35,6 +35,14 @@ locals {
   images_bucket_arn = "arn:aws:s3:::${local.images_bucket}"
   ssm_path_arn      = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/plateful/${var.stack}"
   boundary_name     = "${local.prefix}-boundary"
+  oac_names = {
+    api    = "${local.prefix}-api"
+    pwa    = "${local.prefix}-pwa"
+    images = "${local.prefix}-images"
+  }
+  # infra/bootstrap's state bucket and backend key, which hold the stack's OAC IDs.
+  state_bucket        = "plateful-tfstate-${var.account_id}"
+  bootstrap_state_key = "bootstrap/terraform.tfstate"
   # Outside the prefix on purpose: the deploy role may change only resources with the prefix.
   deploy_role_name = "plateful-deploy-${var.stack}"
 }
@@ -121,6 +129,19 @@ output "boundary_name" {
 output "boundary_arn" {
   description = "The permissions boundary (made by infra/bootstrap) that every IAM role and user the stack makes must carry."
   value       = "arn:aws:iam::${var.account_id}:policy/${local.boundary_name}"
+}
+
+output "oac_names" {
+  description = "The stack's CloudFront OAC names by origin (made by infra/bootstrap)."
+  value       = local.oac_names
+}
+
+output "state_bucket" {
+  value = local.state_bucket
+}
+
+output "bootstrap_state_key" {
+  value = local.bootstrap_state_key
 }
 
 output "deploy_role_name" {

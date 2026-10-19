@@ -1,6 +1,7 @@
-# The deploy role's CloudFront grants. Create calls have no resource type, so they only match
-# "*"; tagging a distribution needs this stack's Stack tag both on the request and on any
-# existing distribution, so one stack's role can't retag another stack's distribution.
+# The deploy role's CloudFront and state grants. Create calls have no resource type, so they only
+# match "*"; tagging a distribution needs this stack's Stack tag both on the request and on any
+# existing distribution, so one stack's role can't retag another stack's distribution. OACs
+# belong to infra/bootstrap, so the role may only read them.
 
 # A real but unauthenticated provider: aws_iam_policy_document renders locally, so the test checks
 # the policy JSON IAM would get, and the overridden resources make no calls.
@@ -22,7 +23,7 @@ variables {
   state_bucket      = "plateful-tfstate-123456789012"
 }
 
-run "cloudfront_grants" {
+run "deploy_policy" {
   command = apply # every resource is overridden, so nothing reaches AWS
 
   module {
@@ -43,18 +44,18 @@ run "cloudfront_grants" {
   assert {
     condition = (
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).DistributionCreate.Resource == "*" &&
-      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).DistributionCreate.Action])) == toset(["cloudfront:CreateDistribution"]) &&
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).DistributionCreate.Action]) == ["cloudfront:CreateDistribution"] &&
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).DistributionCreate.Condition == { StringEquals = { "aws:RequestTag/Stack" = "staging" } }
     )
     error_message = "CreateDistribution is granted on \"*\", only with this stack's Stack request tag."
   }
   assert {
     condition = (
-      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).CloudFrontCreate.Resource == "*" &&
-      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).CloudFrontCreate.Action])) == toset(["cloudfront:CreateFunction", "cloudfront:CreateOriginAccessControl"]) &&
-      !can(({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).CloudFrontCreate.Condition)
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).EdgeFunctionCreate.Resource == "*" &&
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).EdgeFunctionCreate.Action]) == ["cloudfront:CreateFunction"] &&
+      !can(({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).EdgeFunctionCreate.Condition)
     )
-    error_message = "CreateFunction and CreateOriginAccessControl are granted on \"*\"."
+    error_message = "CreateFunction is granted on \"*\"."
   }
   assert {
     condition = (
@@ -75,12 +76,27 @@ run "cloudfront_grants" {
     error_message = "Every other distribution call, UntagResource included, needs this stack's Stack tag on the distribution."
   }
   assert {
-    condition     = contains(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).CloudFrontNamed.Resource]), "arn:aws:cloudfront::123456789012:function/plateful-staging-*")
+    condition     = ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).EdgeFunction.Resource == "arn:aws:cloudfront::123456789012:function/plateful-staging-*"
     error_message = "Function updates, publishes and deletes stay on the stack's prefix."
   }
   assert {
     condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !contains(flatten([s.Action]), "cloudfront:TagResource")
-    if s.Sid != "DistributionTag" && s.Sid != "Distribution" && s.Sid != "CloudFrontNamed"])
-    error_message = "Only the tag-checked statements may grant TagResource."
+    if !contains(["DistributionTag", "Distribution", "EdgeFunction"], s.Sid)])
+    error_message = "Only the tag-checked statements and the stack's own functions may grant TagResource."
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : alltrue([
+      for r in flatten([s.Resource]) : !strcontains(r, "origin-access-control")
+      ]) && alltrue([
+      for a in flatten([s.Action]) : !strcontains(lower(a), "originaccesscontrol")
+    ])])
+    error_message = "OACs belong to infra/bootstrap: the deploy role only reads them, through CloudFrontRead."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).BootstrapState.Action]) == ["s3:GetObject"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).BootstrapState.Resource == "arn:aws:s3:::plateful-tfstate-123456789012/bootstrap/terraform.tfstate"
+    )
+    error_message = "The deploy role reads bootstrap's state, for the stack's OAC IDs, and nothing else of it."
   }
 }
