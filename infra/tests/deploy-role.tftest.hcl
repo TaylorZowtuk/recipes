@@ -121,10 +121,11 @@ run "deploy_policy" {
   }
   assert {
     condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
-      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:s3:::plateful-tfstate-123456789012/prod/terraform.tfstate"))]) &&
+      anytrue([for r in flatten([s.Resource]) : anytrue([for k in ["prod/terraform.tfstate", "bootstrap/terraform.tfstate"] :
+      can(regex("^${replace(r, "*", ".*")}$", "arn:aws:s3:::plateful-tfstate-123456789012/${k}"))])]) &&
       anytrue([for a in flatten([s.Action]) : can(regex("^${replace(lower(a), "*", ".*")}$", "s3:putobject"))])
     )])
-    error_message = "No statement lets the staging role write another stack's state, wildcards included."
+    error_message = "No statement lets the staging role write prod's or bootstrap's state, wildcards included."
   }
   assert {
     condition     = toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).State.Action])) == toset(["s3:GetObject", "s3:PutObject"])
