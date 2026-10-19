@@ -347,6 +347,52 @@ bootstrap_step1() {
   "
 }
 
+# verify_dev_profile PROFILE checks the ~/.aws profile's key from the container, with --profile:
+# it must be DEV_USER's, reach staging's table, images bucket and SSM parameters, and get
+# AccessDenied on prod's table and images bucket. Only that profile's section goes in, on stdin.
+verify_dev_profile() {
+  local p=$1 section label want got n=0 failed=0 expected=4
+  section=$(awk -v h="[$p]" '$0 == h { on = 1; print; next } /^\[/ { on = 0 } on' ~/.aws/credentials 2>/dev/null)
+  [[ -n $section ]] || { warn "$HOME/.aws/credentials has no [$p]."; return 1; }
+  if [[ -n ${TABLE_prod:-} && -n ${IMAGES_prod:-} ]]; then expected=6
+  else
+    warn "prod isn't deployed, so this can't check the key is denied prod's stores."
+    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 11 once prod is deployed")
+  fi
+  while IFS=$'\t' read -r label want got; do
+    n=$((n + 1))
+    if [[ $got == "$want" ]]; then say "${GREEN}✓${RESET} $label: $got"
+    else warn "$label: expected $want, got $got"; failed=1; fi
+  done < <(printf '%s\n' "$section" | in_aws "
+    creds=\$(mktemp) && cat >\$creds
+    export AWS_SHARED_CREDENTIALS_FILE=\$creds AWS_CONFIG_FILE=/dev/null
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    a() { aws --profile $(printf %q "$p") --region $REGION \"\$@\"; }
+    # probe LABEL WANT ARGS...: prints LABEL, WANT and what aws ARGS got: allowed, AccessDenied or its error.
+    probe() {
+      local label=\$1 want=\$2 err got=allowed; shift 2
+      if ! err=\$(a \"\$@\" 2>&1 >/dev/null); then
+        if [[ \$err == *AccessDenied* ]]; then got=AccessDenied; else got=\$(tr '\t\n' '  ' <<<\"\$err\" | cut -c1-160); fi
+      fi
+      printf '%s\t%s\t%s\n' \"\$label\" \"\$want\" \"\$got\"
+    }
+    # A new access key takes a few seconds to work.
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do arn=\$(a sts get-caller-identity --query Arn --output text 2>/dev/null) && break; sleep 5; done
+    [[ \$arn == *:user/$DEV_USER ]] && got=\$arn || got=\"\${arn:-no identity, so the key was refused}\"
+    printf 'key identity\t%s\t%s\n' \"arn:aws:iam::$ACCOUNT:user/$DEV_USER\" \"\$got\"
+    probe 'staging table ${TABLE_staging:?}' allowed dynamodb describe-table --table-name ${TABLE_staging:?}
+    probe 'staging images bucket ${IMAGES_staging:?}' allowed s3api list-objects-v2 --bucket ${IMAGES_staging:?} --max-items 1
+    probe 'staging SSM parameters /plateful/staging/' allowed ssm get-parameters-by-path --path /plateful/staging/
+    if [[ -n '${TABLE_prod:-}' && -n '${IMAGES_prod:-}' ]]; then
+      probe 'prod table ${TABLE_prod:-}' AccessDenied dynamodb describe-table --table-name ${TABLE_prod:-}
+      probe 'prod images bucket ${IMAGES_prod:-}' AccessDenied s3api list-objects-v2 --bucket ${IMAGES_prod:-} --max-items 1
+    fi
+    rm -f \$creds
+  ")
+  ((n == expected)) || { warn "only $n of $expected checks ran."; failed=1; }
+  ((failed == 0))
+}
+
 run_wizard() {
 
 TOTAL_STAGES=13
@@ -515,6 +561,7 @@ if ! load_outputs staging || [[ -z ${DEV_USER:-} ]]; then
   warn "staging isn't deployed with its dev user yet: re-run after stage 7."
   SKIPPED+=("staging dev profile (stage 11)")
 else
+  load_outputs prod || true
   say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
   say "in ~/.aws so make dev STAGING_PROFILE=<profile> can reach staging's stores."
   ask STAGING_PROFILE "Profile name (Enter for $DEV_USER):"
@@ -537,6 +584,12 @@ else
         printf '\n[profile %s]\nregion = %s\n' "$STAGING_PROFILE" "$REGION" >>~/.aws/config
       say "${GREEN}✓${RESET} saved [$STAGING_PROFILE] to ~/.aws/credentials, with region $REGION in ~/.aws/config"
     fi
+  fi
+  if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
+    printf '\n'
+    say "Checking [$STAGING_PROFILE] reaches staging's stores and is denied prod's:"
+    verify_dev_profile "$STAGING_PROFILE" ||
+      { warn "[$STAGING_PROFILE] isn't a working staging-only key (see above). Fix it, then re-run."; exit 1; }
   fi
   printf '\n'
   step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
