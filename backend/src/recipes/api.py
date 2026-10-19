@@ -1,10 +1,12 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
-from collections.abc import Awaitable, Callable
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import FastAPI, Request, Response
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 SCHEMA_VERSION = 1
 
