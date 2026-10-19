@@ -1,37 +1,328 @@
-/* Color tokens from direction F of "Prototype: visual style" (#26). */
+/* The Plateful design tokens from "Prototype: visual style" (direction F). */
 :root {
   color-scheme: light dark;
+
   --bg: #f7f8f5;
+  --surface: #ffffff;
   --text: #1b2420;
   --text-secondary: #58645e;
+  --divider: #d9dfda;
+  --outline-strong: #7d8a83;
   --accent: #2e5e45;
-  font-family: system-ui, sans-serif;
+  --accent-text: #2e5e45;
+  --on-accent: #ffffff;
+  --accent-soft: #e3ece6;
+  --accent-soft-text: #24513a;
+  --emphasis: #c2362b;
+  --emphasis-text: #b02e24;
+  --done: #2e5e45;
+  --warning: #f6ebd2;
+  --warning-text: #6e5210;
+  --cooking-bg: #f7f8f5;
+  --cooking-text: #141b18;
+  --cooking-progress: #2e5e45;
+  --plate-shadow: rgba(30, 60, 45, 0.22);
+
+  --font-display: "Baloo 2", system-ui, sans-serif;
+  --font-body: "Nunito Sans", system-ui, sans-serif;
+  --text-recipe-title: 30px;
+  --text-screen-title: 23px;
+  --text-card-title: 17px;
+  --text-step: 17px;
+  --text-body: 16px;
+  --text-small: 13.5px;
+  --text-tiny: 12px;
+  --text-cooking-step: 31px;
+  --text-cooking-step-large: 39px;
+
+  --radius-card: 24px;
+  --radius-button: 18px;
+  --radius-pill: 999px;
+  --space: 4px;
+  --gutter: 16px;
+  --card-gap: 12px;
+  --tap: 50px;
+  --cooking-button: 70px;
+  --rail-width: 96px;
+  --nav-height: 68px;
+  --top-bar-height: calc(var(--tap) + var(--space) * 4);
+
+  --elevation-card: 0 1px 2px rgba(30, 60, 45, 0.08), 0 4px 12px rgba(30, 60, 45, 0.06);
+  --elevation-float: 0 10px 28px rgba(20, 50, 35, 0.25);
+  --elevation-plate: 0 6px 14px var(--plate-shadow);
+
+  --motion: 320ms;
+  --spring: cubic-bezier(0.34, 1.8, 0.64, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #121715;
+    --surface: #1a201d;
     --text: #ecefec;
     --text-secondary: #a3ada7;
-    --accent: #9ed2b2;
+    --divider: #2e3833;
+    --outline-strong: #6e7c75;
+    --accent: #8cc5a2;
+    --accent-text: #9ed2b2;
+    --on-accent: #0f1a14;
+    --accent-soft: #22312a;
+    --accent-soft-text: #bfe0cb;
+    --emphasis: #f07b6b;
+    --emphasis-text: #f59486;
+    --done: #8cc5a2;
+    --warning: #352c17;
+    --warning-text: #ebcf8a;
+    --cooking-bg: #101412;
+    --cooking-text: #eef1ee;
+    --cooking-progress: #8cc5a2;
+    --plate-shadow: rgba(0, 0, 0, 0.5);
   }
+}
+
+/* Under reduced motion, everything timed by --motion finishes at once. Animate with --motion. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0s;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrolling to a focused control keeps it clear of the sticky top bar and the fixed tab bar. */
+html {
+  scroll-padding: calc(var(--top-bar-height) + env(safe-area-inset-top)) 0
+    calc(var(--nav-height) + env(safe-area-inset-bottom));
 }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-}
-
-main {
-  padding: 2rem 1rem;
-  text-align: center;
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1 {
-  color: var(--accent);
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-screen-title);
+  line-height: 1.2;
 }
 
-[role="status"] {
+a {
+  color: var(--accent-text);
+}
+
+button {
+  font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Phones: a top bar, the screen, and a bottom tab bar that never scrolls away. */
+.shell {
+  min-height: 100dvh;
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom));
+}
+
+.top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  min-height: var(--top-bar-height);
+  padding: calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-right))
+    calc(var(--space) * 2) calc(var(--gutter) + env(safe-area-inset-left));
+  padding-top: calc(var(--space) * 2 + env(safe-area-inset-top));
+  background: var(--bg);
+}
+
+.top-bar h1 {
+  flex: 1;
+}
+
+/* The title takes focus after navigation only to be announced; it isn't a control. */
+.top-bar h1:focus {
+  outline: none;
+}
+
+.top-bar .icon-button:first-child {
+  margin-left: calc(var(--space) * -3);
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color var(--motion);
+}
+
+.icon-button[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+/* Only where there is a real pointer: on a touch screen the hover fill sticks after a tap. */
+@media (hover: hover) {
+  .icon-button:hover {
+    background: var(--accent-soft);
+  }
+}
+
+/* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */
+.screen-body,
+.sync-status {
+  padding: 0 calc(var(--gutter) + env(safe-area-inset-right)) 0
+    calc(var(--gutter) + env(safe-area-inset-left));
+}
+
+.sync-status {
   color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.places {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 2;
+  display: flex;
+  padding: var(--space) calc(var(--space) * 2) calc(var(--space) + env(safe-area-inset-bottom));
+  background: var(--surface);
+  /* The card shadow falls below the screen's edge, so the bar gets a divider along its top. */
+  box-shadow: 0 -1px 0 var(--divider);
+}
+
+.place {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: var(--tap);
+  min-height: calc(var(--nav-height) - var(--space) * 2); /* the bar's padding makes up the rest */
+  border-radius: var(--radius-button);
+  color: var(--text-secondary);
+  font-size: var(--text-tiny);
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    color var(--motion),
+    background-color var(--motion);
+}
+
+.place .icon {
+  width: 52px;
+  height: 28px;
+  padding: 2px 14px;
+  border-radius: var(--radius-pill);
+  transition: background-color var(--motion);
+}
+
+/* The active tab: an Accent pill around the icon over an Accent label. */
+.place[aria-current="page"] {
+  color: var(--accent-text);
+}
+
+.place[aria-current="page"] .icon {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.account-rail {
+  display: none;
+}
+
+/* Desktop: the one breakpoint. The places become a left rail with the account button at its foot. */
+@media (min-width: 768px) {
+  /* The rail doesn't cover the screen; the top bar is at most Back and its padding tall. */
+  html {
+    scroll-padding: calc(var(--tap) + var(--space) * 8) 0 0;
+  }
+
+  .shell {
+    padding-bottom: 0;
+    padding-left: calc(var(--rail-width) + env(safe-area-inset-left));
+  }
+
+  /* A phone in landscape gets the rail too: it clears the notch, and scrolls when the window is
+     too short for every place. */
+  .places {
+    inset: 0 auto 0 0;
+    width: calc(var(--rail-width) + env(safe-area-inset-left));
+    flex-direction: column;
+    gap: calc(var(--space) * 2);
+    padding: calc(var(--space) * 6) calc(var(--space) * 3);
+    padding-left: calc(var(--space) * 3 + env(safe-area-inset-left));
+    overflow-y: auto;
+    box-shadow: var(--elevation-card);
+  }
+
+  .place {
+    flex: none;
+    min-height: 64px;
+  }
+
+  .place .icon {
+    width: 28px;
+    padding: 2px;
+    background: none;
+  }
+
+  @media (hover: hover) {
+    .place:hover {
+      background: var(--accent-soft);
+    }
+  }
+
+  /* The selected rail item: an Accent soft fill, with the icon in the label's colour. */
+  .place[aria-current="page"] {
+    background: var(--accent-soft);
+    color: var(--accent-soft-text);
+  }
+
+  .place[aria-current="page"] .icon {
+    background: none;
+    color: inherit;
+  }
+
+  .account-rail {
+    display: flex;
+    margin-top: auto;
+  }
+
+  .account-top {
+    display: none;
+  }
+
+  /* The rail already keeps the left inset clear. */
+  .top-bar {
+    padding: calc(var(--space) * 6) calc(var(--space) * 8 + env(safe-area-inset-right))
+      calc(var(--space) * 2) calc(var(--space) * 8);
+  }
+
+  .screen-body,
+  .sync-status {
+    padding: 0 calc(var(--space) * 8 + env(safe-area-inset-right)) 0 calc(var(--space) * 8);
+  }
 }
