@@ -209,7 +209,6 @@ finish() {
 
 REGION=ca-west-1
 STACKS=(staging prod)
-DEV_USER=plateful-staging-dev
 MAKE_BIN=$(command -v gmake || command -v make || true)
 
 # in_aws CMD: run CMD with bash in the toolchain container, with this wizard's AWS credentials.
@@ -246,20 +245,25 @@ protect_env() {
   fi
 }
 
-# load_outputs STACK reads the stack's Terraform outputs into DOMAIN_<stack>, DIST_ARN_<stack> and
-# ACL_ARN_<stack>. Fails when the stack has never been applied.
+# load_outputs STACK reads the stack's Terraform outputs into DOMAIN_<stack>, DIST_ARN_<stack>,
+# ACL_ARN_<stack>, TABLE_<stack> and IMAGES_<stack>, and staging's dev user into DEV_USER. Fails
+# when the stack has never been applied.
 load_outputs() {
-  local s=$1 domain dist acl cached=DOMAIN_$1
+  local s=$1 cached=DOMAIN_$1 names=(distribution_domain distribution_arn web_acl_arn table_name images_bucket) v=()
   [[ -n ${!cached:-} ]] && return 0
-  { read -r domain && read -r dist && read -r acl; } < <(in_aws "
+  [[ $s == staging ]] && names+=(dev_user)
+  mapfile -t v < <(in_aws "
     export TF_PLUGIN_CACHE_DIR=\$XDG_CACHE_HOME/terraform-plugins && mkdir -p \$TF_PLUGIN_CACHE_DIR
     terraform -chdir=infra/stacks/$s init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET >/dev/null
-    for o in distribution_domain distribution_arn web_acl_arn; do terraform -chdir=infra/stacks/$s output -raw \$o; echo; done
-  " 2>/dev/null) || return 1
-  [[ $domain == *.cloudfront.net ]] || return 1
-  printf -v "DOMAIN_$s" '%s' "$domain"
-  printf -v "DIST_ARN_$s" '%s' "$dist"
-  printf -v "ACL_ARN_$s" '%s' "$acl"
+    for o in ${names[*]}; do terraform -chdir=infra/stacks/$s output -raw \$o; echo; done
+  " 2>/dev/null)
+  [[ ${#v[@]} == "${#names[@]}" && ${v[0]} == *.cloudfront.net ]] || return 1
+  printf -v "DOMAIN_$s" '%s' "${v[0]}"
+  printf -v "DIST_ARN_$s" '%s' "${v[1]}"
+  printf -v "ACL_ARN_$s" '%s' "${v[2]}"
+  printf -v "TABLE_$s" '%s' "${v[3]}"
+  printf -v "IMAGES_$s" '%s' "${v[4]}"
+  [[ $s != staging ]] || DEV_USER=${v[5]}
 }
 
 # param_version NAME prints the SSM parameter's version. Terraform writes version 1, a placeholder.
@@ -507,33 +511,38 @@ pause
 
 # ── 11 ────────────────────────────────────────────────────────────────────
 stage "Staging dev profile for make dev"
-say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
-say "in ~/.aws so make dev STAGING_PROFILE=<profile> can reach staging's stores."
-ask STAGING_PROFILE "Profile name (Enter for $DEV_USER):"
-STAGING_PROFILE=${STAGING_PROFILE:-$DEV_USER}
-write_env STAGING_PROFILE "$STAGING_PROFILE"
-mkdir -p ~/.aws && chmod 700 ~/.aws
-if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
-  say "${GREEN}✓${RESET} ~/.aws/credentials already has [$STAGING_PROFILE]. To make a new key, delete that"
-  say "section and the old key (IAM → Users → $DEV_USER), then re-run."
+if ! load_outputs staging || [[ -z ${DEV_USER:-} ]]; then
+  warn "staging isn't deployed with its dev user yet: re-run after stage 7."
+  SKIPPED+=("staging dev profile (stage 11)")
 else
-  KEYS=$(in_aws "aws iam list-access-keys --user-name $DEV_USER --query 'length(AccessKeyMetadata)' --output text")
-  if [[ $KEYS -ge 2 ]]; then
-    warn "$DEV_USER already has two access keys. Delete one in IAM, then re-run."
-  elif confirm "Create an access key for $DEV_USER and save it as [$STAGING_PROFILE]?"; then
-    read -r KEY_ID KEY_SECRET < <(in_aws "aws iam create-access-key --user-name $DEV_USER --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text")
-    (umask 077 && printf '\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
-      "$STAGING_PROFILE" "$KEY_ID" "$KEY_SECRET" >>~/.aws/credentials)
-    unset KEY_SECRET
-    grep -qx "\[profile $STAGING_PROFILE\]" ~/.aws/config 2>/dev/null ||
-      printf '\n[profile %s]\nregion = %s\n' "$STAGING_PROFILE" "$REGION" >>~/.aws/config
-    say "${GREEN}✓${RESET} saved [$STAGING_PROFILE] to ~/.aws/credentials, with region $REGION in ~/.aws/config"
+  say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
+  say "in ~/.aws so make dev STAGING_PROFILE=<profile> can reach staging's stores."
+  ask STAGING_PROFILE "Profile name (Enter for $DEV_USER):"
+  STAGING_PROFILE=${STAGING_PROFILE:-$DEV_USER}
+  write_env STAGING_PROFILE "$STAGING_PROFILE"
+  mkdir -p ~/.aws && chmod 700 ~/.aws
+  if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
+    say "${GREEN}✓${RESET} ~/.aws/credentials already has [$STAGING_PROFILE]. To make a new key, delete that"
+    say "section and the old key (IAM → Users → $DEV_USER), then re-run."
+  else
+    KEYS=$(in_aws "aws iam list-access-keys --user-name $DEV_USER --query 'length(AccessKeyMetadata)' --output text")
+    if [[ $KEYS -ge 2 ]]; then
+      warn "$DEV_USER already has two access keys. Delete one in IAM, then re-run."
+    elif confirm "Create an access key for $DEV_USER and save it as [$STAGING_PROFILE]?"; then
+      read -r KEY_ID KEY_SECRET < <(in_aws "aws iam create-access-key --user-name $DEV_USER --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text")
+      (umask 077 && printf '\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
+        "$STAGING_PROFILE" "$KEY_ID" "$KEY_SECRET" >>~/.aws/credentials)
+      unset KEY_SECRET
+      grep -qx "\[profile $STAGING_PROFILE\]" ~/.aws/config 2>/dev/null ||
+        printf '\n[profile %s]\nregion = %s\n' "$STAGING_PROFILE" "$REGION" >>~/.aws/config
+      say "${GREEN}✓${RESET} saved [$STAGING_PROFILE] to ~/.aws/credentials, with region $REGION in ~/.aws/config"
+    fi
   fi
+  printf '\n'
+  step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
+  step "Open http://localhost:5173 and check the page loads, then stop it with Ctrl-C."
+  pause "Press Enter once make dev works against staging"
 fi
-printf '\n'
-step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
-step "Open http://localhost:5173 and check the page loads, then stop it with Ctrl-C."
-pause "Press Enter once make dev works against staging"
 
 # ── 12 ────────────────────────────────────────────────────────────────────
 stage "Check both URLs"
