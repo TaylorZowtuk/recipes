@@ -139,6 +139,10 @@ output "table_name" {
   value = module.store.table_name
 }
 
+output "table_capacity" {
+  value = module.store.table_capacity
+}
+
 output "deploy_role_arn" {
   value = module.access.deploy_role_arn
 }

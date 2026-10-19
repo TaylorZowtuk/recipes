@@ -98,6 +98,14 @@ output "table_arn" {
   value = aws_dynamodb_table.this.arn
 }
 
+output "table_capacity" {
+  description = "The table's provisioned read and write capacity units."
+  value = {
+    read  = aws_dynamodb_table.this.read_capacity
+    write = aws_dynamodb_table.this.write_capacity
+  }
+}
+
 output "images_bucket" {
   value = module.images.name
 }
