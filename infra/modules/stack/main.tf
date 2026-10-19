@@ -1,6 +1,6 @@
 # One whole stack: its data (store), the API and the CloudFront site. stacks/prod and
 # stacks/staging call this with their own values; infra/bootstrap must already have made the
-# stack's deploy role and permissions boundary.
+# stack's deploy role, permissions boundary and CloudFront OACs.
 terraform {
   required_providers {
     aws = {
@@ -30,12 +30,11 @@ variable "lambda_zip" {
   type = string
 }
 
-variable "lambda_runtime" {
-  type = string
-}
-
-variable "lwa_layer_arn" {
-  type = string
+locals {
+  # The runtime follows the Python the Lambda zip's wheels are built for (scripts/lambda.sh).
+  lambda_runtime = "python${trimspace(file("${path.module}/../../../backend/.python-version"))}"
+  # The AWS Lambda Web Adapter layer for arm64 in ca-west-1, the stacks' region.
+  lwa_layer_arn = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:30"
 }
 
 data "aws_caller_identity" "current" {}
@@ -46,6 +45,16 @@ module "access" {
   stack      = var.stack
   account_id = data.aws_caller_identity.current.account_id
   region     = data.aws_region.current.region
+}
+
+# The stack's OACs belong to infra/bootstrap; their IDs come from its state.
+data "terraform_remote_state" "bootstrap" {
+  backend = "s3"
+  config = {
+    bucket = module.access.state_bucket
+    key    = module.access.bootstrap_state_key
+    region = data.aws_region.current.region
+  }
 }
 
 module "store" {
@@ -62,8 +71,8 @@ module "api" {
   source                   = "../api"
   function_name            = module.access.function_name
   zip_path                 = var.lambda_zip
-  runtime                  = var.lambda_runtime
-  lwa_layer_arn            = var.lwa_layer_arn
+  runtime                  = local.lambda_runtime
+  lwa_layer_arn            = local.lwa_layer_arn
   data_policy_json         = module.access.data_policy_json
   permissions_boundary_arn = module.access.boundary_arn
   environment = {
@@ -86,6 +95,7 @@ module "site" {
   images_bucket_regional_domain_name = module.store.images_bucket_regional_domain_name
   function_name                      = module.api.function_name
   function_url_domain                = module.api.function_url_domain
+  origin_access_control_ids          = data.terraform_remote_state.bootstrap.outputs.origin_access_control_ids[var.stack]
 }
 
 output "access" {
@@ -127,6 +137,10 @@ output "function_name" {
 
 output "table_name" {
   value = module.store.table_name
+}
+
+output "table_capacity" {
+  value = module.store.table_capacity
 }
 
 output "deploy_role_arn" {

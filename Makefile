@@ -6,8 +6,8 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke dev shell clean \
-	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links \
-	api-drift sh-lint workflows
+	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf tf-test \
+	links api-drift sh-lint workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
 $(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
@@ -111,8 +111,8 @@ deps:
 	cd frontend && pnpm install --frozen-lockfile --silent
 
 check: deps
-	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift \
-		sh-lint workflows
+	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf tf-test links \
+		api-drift sh-lint workflows
 	@echo "make check: all passed"
 
 fix: deps
@@ -168,10 +168,16 @@ tf:
 	for s in $(TF_ROOTS); do \
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
+# infra/tests checks the modules and stacks offline, in its own root so it runs alongside tf.
+tf-test: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+tf-test:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	terraform -chdir=infra/tests init -backend=false -input=false >/dev/null
+	terraform -chdir=infra/tests test -no-color
 links:
 	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'
-# The wizard library at the top of scripts/aws-setup.sh is kept as the wizard skill wrote it, and
-# its `$$e[Enter …` trips SC1087.
+# SC1087 is off: the wizard library at the top of scripts/aws-setup.sh writes `$$e[Enter …`, the
+# escape variable followed by a bracket, which shellcheck mistakes for an array index.
 sh-lint:
 	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
 	@# make and the workflows exec these directly, so git must record them as executable.

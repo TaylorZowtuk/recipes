@@ -1,5 +1,5 @@
 # The public entry point: one CloudFront distribution per stack, with OAC on every origin, an empty
-# WAF web ACL, and the PWA bucket. Only managed cache, origin request and response headers policies
+# WAF web ACL, and the PWA bucket. The OACs themselves are infra/bootstrap's. Only managed cache, origin request and response headers policies
 # are used, because the CloudFront Free plan forbids custom ones; it also allows at most five
 # behaviours (hosting ADR). The Free plan subscription itself is a manual CLI step that takes the
 # distribution and web ACL ARNs this module outputs.
@@ -41,6 +41,15 @@ variable "function_url_domain" {
   type = string
 }
 
+variable "origin_access_control_ids" {
+  description = "The stack's OAC IDs by origin (api, pwa, images), made by infra/bootstrap."
+  type = object({
+    api    = string
+    pwa    = string
+    images = string
+  })
+}
+
 module "pwa" {
   source = "../private-bucket"
   name   = var.pwa_bucket
@@ -64,22 +73,8 @@ data "aws_cloudfront_response_headers_policy" "security" {
   name = "Managed-SecurityHeadersPolicy"
 }
 
-resource "aws_cloudfront_origin_access_control" "lambda" {
-  name                              = "${var.prefix}-api"
-  origin_access_control_origin_type = "lambda"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
-resource "aws_cloudfront_origin_access_control" "s3" {
-  name                              = "${var.prefix}-s3"
-  origin_access_control_origin_type = "s3"
-  signing_behavior                  = "always"
-  signing_protocol                  = "sigv4"
-}
-
-# Rules (the rate limit) belong to the WAF ticket. The Free plan requires a web ACL, and
-# CLOUDFRONT-scoped ACLs must live in us-east-1.
+# No rules yet: every request is allowed. The Free plan requires a web ACL, and CLOUDFRONT-scoped
+# ACLs must live in us-east-1.
 resource "aws_wafv2_web_acl" "this" {
   provider = aws.us_east_1
   name     = var.prefix
@@ -106,8 +101,9 @@ resource "aws_cloudfront_function" "spa" {
   code    = file("${path.module}/spa.js")
 }
 
-# X-Robots-Tag: noindex on every response. No managed response headers policy adds it, and the
-# Free plan forbids custom ones, so every behaviour runs this on viewer responses.
+# Adds X-Robots-Tag: noindex. No managed response headers policy adds it, and the Free plan forbids
+# custom ones, so every behaviour runs this on viewer responses. CloudFront skips it when the origin
+# returns 400 or more, so the API sets the header on its own responses too.
 resource "aws_cloudfront_function" "noindex" {
   name    = "${var.prefix}-noindex"
   runtime = "cloudfront-js-2.0"
@@ -132,7 +128,7 @@ resource "aws_cloudfront_distribution" "this" {
   origin {
     origin_id                = local.api_origin
     domain_name              = var.function_url_domain
-    origin_access_control_id = aws_cloudfront_origin_access_control.lambda.id
+    origin_access_control_id = var.origin_access_control_ids.api
     custom_origin_config {
       http_port              = 80
       https_port             = 443
@@ -144,13 +140,13 @@ resource "aws_cloudfront_distribution" "this" {
   origin {
     origin_id                = local.pwa_origin
     domain_name              = module.pwa.regional_domain_name
-    origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+    origin_access_control_id = var.origin_access_control_ids.pwa
   }
 
   origin {
     origin_id                = local.images_origin
     domain_name              = var.images_bucket_regional_domain_name
-    origin_access_control_id = aws_cloudfront_origin_access_control.s3.id
+    origin_access_control_id = var.origin_access_control_ids.images
   }
 
   # The API. Nothing is cached yet: the only managed policies that put query strings in the cache

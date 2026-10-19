@@ -105,6 +105,14 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["arn:aws:s3:::${var.state_bucket}/${local.state_key}"]
   }
 
+  # The stack reads its OAC IDs from bootstrap's outputs. OACs carry no tags and have generated
+  # IDs, so bootstrap owns them and the deploy role can only read them (CloudFrontRead).
+  statement {
+    sid       = "BootstrapState"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${var.state_bucket}/${module.access.bootstrap_state_key}"]
+  }
+
   statement {
     sid       = "StateLock"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
@@ -218,7 +226,8 @@ data "aws_iam_policy_document" "deploy" {
   }
 
   # CloudFront distributions have generated IDs, so they are scoped by their Stack tag (the stacks'
-  # default tags) instead of by name.
+  # default tags) instead of by name. This covers UntagResource too, so a role can only untag its
+  # own stack's distribution.
   statement {
     sid       = "Distribution"
     actions   = ["cloudfront:*"]
@@ -230,10 +239,12 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
+  # CreateDistribution has no resource type, so it matches only "*". A create with tags is also
+  # authorized as TagResource on the new distribution.
   statement {
     sid       = "DistributionCreate"
-    actions   = ["cloudfront:CreateDistribution", "cloudfront:CreateDistributionWithTags", "cloudfront:TagResource"]
-    resources = ["arn:aws:cloudfront::${local.acct}:distribution/*"]
+    actions   = ["cloudfront:CreateDistribution"]
+    resources = ["*"]
     condition {
       test     = "StringEquals"
       variable = "aws:RequestTag/Stack"
@@ -241,13 +252,36 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
+  # Tagging sets this stack's Stack tag, on a new distribution or one already tagged for this
+  # stack, so one stack's role can't retag another stack's distribution into its reach.
   statement {
-    sid     = "CloudFrontNamed"
-    actions = ["cloudfront:*"]
-    resources = [
-      "arn:aws:cloudfront::${local.acct}:function/${local.prefix}-*",
-      "arn:aws:cloudfront::${local.acct}:origin-access-control/*",
-    ]
+    sid       = "DistributionTag"
+    actions   = ["cloudfront:TagResource"]
+    resources = ["arn:aws:cloudfront::${local.acct}:distribution/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestTag/Stack"
+      values   = [var.stack]
+    }
+    condition {
+      test     = "StringEqualsIfExists"
+      variable = "aws:ResourceTag/Stack"
+      values   = [var.stack]
+    }
+  }
+
+  # CreateFunction has no resource type, so it matches only "*" and can't be scoped by name. Every
+  # later call on a function stays on the stack's prefix.
+  statement {
+    sid       = "EdgeFunctionCreate"
+    actions   = ["cloudfront:CreateFunction"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "EdgeFunction"
+    actions   = ["cloudfront:*"]
+    resources = ["arn:aws:cloudfront::${local.acct}:function/${local.prefix}-*"]
   }
 
   statement {

@@ -1,6 +1,7 @@
 # The account's one-time setup, applied by a human with temporary admin credentials (see
 # infra/AGENTS.md): the Terraform state bucket, GitHub's OIDC provider, and each stack's deploy
-# role and permissions boundary. Its own state lives in the state bucket under bootstrap/.
+# role, permissions boundary and CloudFront OACs. Its own state lives in the state bucket under
+# bootstrap/.
 # After the first apply, init with:
 #   terraform init -backend-config="bucket=plateful-tfstate-<account id>"
 terraform {
@@ -50,7 +51,7 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
 }
 
-# Versioned, so an overwritten or deleted state can be recovered.
+# Versioned, so an overwritten or deleted state can be recovered. Named as stack-access names it.
 module "state" {
   source    = "../modules/private-bucket"
   name      = "plateful-tfstate-${local.account_id}"
@@ -73,10 +74,29 @@ module "deploy_role" {
   state_bucket      = module.state.name
 }
 
+module "access" {
+  source     = "../modules/stack-access"
+  for_each   = var.stacks
+  stack      = each.key
+  account_id = local.account_id
+  region     = data.aws_region.current.region
+}
+
+module "origin_access" {
+  source   = "../modules/origin-access"
+  for_each = var.stacks
+  names    = module.access[each.key].oac_names
+}
+
 output "state_bucket" {
   value = module.state.name
 }
 
 output "deploy_role_arns" {
   value = { for s, m in module.deploy_role : s => m.role_arn }
+}
+
+output "origin_access_control_ids" {
+  description = "Each stack's OAC IDs by origin, read by the stack through terraform_remote_state."
+  value       = { for s, m in module.origin_access : s => m.ids }
 }
