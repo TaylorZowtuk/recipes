@@ -445,8 +445,10 @@ export TF_STATE_BUCKET=$STATE_BUCKET
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "Bootstrap, step 1: apply with local state"
 say "infra/bootstrap makes the Terraform state bucket ($STATE_BUCKET), GitHub's OIDC provider, and"
-say "each stack's deploy role and permissions boundary. The bucket must exist before state can"
-say "live in it, so the first apply keeps its state in a local file."
+say "each stack's deploy role, permissions boundary and three CloudFront OACs (api, pwa, images)."
+say "The stacks read their OAC IDs from bootstrap's state, so bootstrap must be applied before the"
+say "first deploy. The bucket must exist before state can live in it, so the first apply keeps its"
+say "state in a local file."
 printf '\n'
 bootstrap_step1
 

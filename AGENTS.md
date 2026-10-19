@@ -7,7 +7,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | Command | What it does |
 | --- | --- |
 | `make setup` | Build the toolchain image, install dependencies and the pre-commit hook |
-| `make check` | Lint, type-check, unit tests, Terraform validation, shell and workflow lint, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
+| `make check` | Lint, type-check, unit tests, Terraform validation and tests, shell and workflow lint, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
 | `make fix` | Auto-format and apply safe lint fixes |
 | `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark. `E2E_BASE_URL=<url> make e2e` runs it against a deployed stack instead |
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
