@@ -209,7 +209,6 @@ finish() {
 
 REGION=ca-west-1
 STACKS=(staging prod)
-DEV_USER=plateful-staging-dev
 MAKE_BIN=$(command -v gmake || command -v make || true)
 
 # in_aws CMD: run CMD with bash in the toolchain container, with this wizard's AWS credentials.
@@ -246,20 +245,25 @@ protect_env() {
   fi
 }
 
-# load_outputs STACK reads the stack's Terraform outputs into DOMAIN_<stack>, DIST_ARN_<stack> and
-# ACL_ARN_<stack>. Fails when the stack has never been applied.
+# load_outputs STACK reads the stack's Terraform outputs into DOMAIN_<stack>, DIST_ARN_<stack>,
+# ACL_ARN_<stack>, TABLE_<stack> and IMAGES_<stack>, and staging's dev user into DEV_USER. Fails
+# when the stack has never been applied.
 load_outputs() {
-  local s=$1 domain dist acl cached=DOMAIN_$1
+  local s=$1 cached=DOMAIN_$1 names=(distribution_domain distribution_arn web_acl_arn table_name images_bucket) v=()
   [[ -n ${!cached:-} ]] && return 0
-  { read -r domain && read -r dist && read -r acl; } < <(in_aws "
+  [[ $s == staging ]] && names+=(dev_user)
+  mapfile -t v < <(in_aws "
     export TF_PLUGIN_CACHE_DIR=\$XDG_CACHE_HOME/terraform-plugins && mkdir -p \$TF_PLUGIN_CACHE_DIR
     terraform -chdir=infra/stacks/$s init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET >/dev/null
-    for o in distribution_domain distribution_arn web_acl_arn; do terraform -chdir=infra/stacks/$s output -raw \$o; echo; done
-  " 2>/dev/null) || return 1
-  [[ $domain == *.cloudfront.net ]] || return 1
-  printf -v "DOMAIN_$s" '%s' "$domain"
-  printf -v "DIST_ARN_$s" '%s' "$dist"
-  printf -v "ACL_ARN_$s" '%s' "$acl"
+    for o in ${names[*]}; do terraform -chdir=infra/stacks/$s output -raw \$o; echo; done
+  " 2>/dev/null)
+  [[ ${#v[@]} == "${#names[@]}" && ${v[0]} == *.cloudfront.net ]] || return 1
+  printf -v "DOMAIN_$s" '%s' "${v[0]}"
+  printf -v "DIST_ARN_$s" '%s' "${v[1]}"
+  printf -v "ACL_ARN_$s" '%s' "${v[2]}"
+  printf -v "TABLE_$s" '%s' "${v[3]}"
+  printf -v "IMAGES_$s" '%s' "${v[4]}"
+  [[ $s != staging ]] || DEV_USER=${v[5]}
 }
 
 # param_version NAME prints the SSM parameter's version. Terraform writes version 1, a placeholder.
@@ -307,6 +311,86 @@ stack_secrets() {
     [[ $s == staging ]] && note "It is also the e2e editor: add it as a staging environment secret when a job needs it."
   fi
   note "A running Lambda reads them at cold start, so a change applies on the next deploy."
+}
+
+# bootstrap_step1: apply infra/bootstrap with local state, until step 2 moves that state into the
+# state bucket. A leftover backend_override.tf means step 1 is unfinished, and local state missing
+# from the bucket means step 2 is, so the bucket existing doesn't yet mean the account is bootstrapped.
+bootstrap_step1() {
+  local dir=infra/bootstrap
+  if [[ -f $dir/backend_override.tf ]]; then
+    say "An earlier run didn't finish this step, so it applies again with the local state."
+  elif [[ -f $dir/terraform.tfstate ]] &&
+    ! in_aws "aws s3api head-object --bucket $STATE_BUCKET --key bootstrap/terraform.tfstate" >/dev/null 2>&1; then
+    say "Step 1 is done, but its state is still in infra/bootstrap/terraform.tfstate: the next stage moves it."
+    return 0
+  elif in_aws "aws s3api head-bucket --bucket $STATE_BUCKET" >/dev/null 2>&1; then
+    say "${GREEN}✓${RESET} $STATE_BUCKET already exists, so the account is bootstrapped."
+    if confirm "Apply infra/bootstrap again from its S3 state, to pick up changes?"; then
+      in_aws "terraform -chdir=$dir init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET && terraform -chdir=$dir apply"
+    fi
+    return 0
+  fi
+  step "Read the plan Terraform prints, then type yes to apply it."
+  confirm "Apply infra/bootstrap now?" || exit 1
+  printf 'terraform {\n  backend "local" {}\n}\n' >$dir/backend_override.tf
+  # An account has one GitHub OIDC provider. If it already has one, bootstrap adopts it.
+  in_aws "
+    oidc=arn:aws:iam::$ACCOUNT:oidc-provider/token.actions.githubusercontent.com
+    terraform -chdir=$dir init -input=false -reconfigure &&
+    if ! terraform -chdir=$dir state list 2>/dev/null | grep -qx aws_iam_openid_connect_provider.github &&
+      aws iam get-open-id-connect-provider --open-id-connect-provider-arn \$oidc >/dev/null 2>&1; then
+      echo 'The account already has GitHub'\''s OIDC provider: importing it.'
+      terraform -chdir=$dir import -input=false aws_iam_openid_connect_provider.github \$oidc
+    fi &&
+    terraform -chdir=$dir apply
+  "
+}
+
+# verify_dev_profile PROFILE checks the ~/.aws profile's key from the container, with --profile:
+# it must be DEV_USER's, reach staging's table, images bucket and SSM parameters, and get
+# AccessDenied on prod's table and images bucket. Only that profile's section goes in, on stdin.
+verify_dev_profile() {
+  local p=$1 section label want got n=0 failed=0 expected=4
+  section=$(awk -v h="[$p]" '$0 == h { on = 1; print; next } /^\[/ { on = 0 } on' ~/.aws/credentials 2>/dev/null)
+  [[ -n $section ]] || { warn "$HOME/.aws/credentials has no [$p]."; return 1; }
+  if [[ -n ${TABLE_prod:-} && -n ${IMAGES_prod:-} ]]; then expected=6
+  else
+    warn "prod isn't deployed, so this can't check the key is denied prod's stores."
+    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 11 once prod is deployed")
+  fi
+  while IFS=$'\t' read -r label want got; do
+    n=$((n + 1))
+    if [[ $got == "$want" ]]; then say "${GREEN}✓${RESET} $label: $got"
+    else warn "$label: expected $want, got $got"; failed=1; fi
+  done < <(printf '%s\n' "$section" | in_aws "
+    creds=\$(mktemp) && cat >\$creds
+    export AWS_SHARED_CREDENTIALS_FILE=\$creds AWS_CONFIG_FILE=/dev/null
+    unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+    a() { aws --profile $(printf %q "$p") --region $REGION \"\$@\"; }
+    # probe LABEL WANT ARGS...: prints LABEL, WANT and what aws ARGS got: allowed, AccessDenied or its error.
+    probe() {
+      local label=\$1 want=\$2 err got=allowed; shift 2
+      if ! err=\$(a \"\$@\" 2>&1 >/dev/null); then
+        if [[ \$err == *AccessDenied* ]]; then got=AccessDenied; else got=\$(tr '\t\n' '  ' <<<\"\$err\" | cut -c1-160); fi
+      fi
+      printf '%s\t%s\t%s\n' \"\$label\" \"\$want\" \"\$got\"
+    }
+    # A new access key takes a few seconds to work.
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12; do arn=\$(a sts get-caller-identity --query Arn --output text 2>/dev/null) && break; sleep 5; done
+    [[ \$arn == *:user/$DEV_USER ]] && got=\$arn || got=\"\${arn:-no identity, so the key was refused}\"
+    printf 'key identity\t%s\t%s\n' \"arn:aws:iam::$ACCOUNT:user/$DEV_USER\" \"\$got\"
+    probe 'staging table ${TABLE_staging:?}' allowed dynamodb describe-table --table-name ${TABLE_staging:?}
+    probe 'staging images bucket ${IMAGES_staging:?}' allowed s3api list-objects-v2 --bucket ${IMAGES_staging:?} --max-items 1
+    probe 'staging SSM parameters /plateful/staging/' allowed ssm get-parameters-by-path --path /plateful/staging/
+    if [[ -n '${TABLE_prod:-}' && -n '${IMAGES_prod:-}' ]]; then
+      probe 'prod table ${TABLE_prod:-}' AccessDenied dynamodb describe-table --table-name ${TABLE_prod:-}
+      probe 'prod images bucket ${IMAGES_prod:-}' AccessDenied s3api list-objects-v2 --bucket ${IMAGES_prod:-} --max-items 1
+    fi
+    rm -f \$creds
+  ")
+  ((n == expected)) || { warn "only $n of $expected checks ran."; failed=1; }
+  ((failed == 0))
 }
 
 run_wizard() {
@@ -364,17 +448,7 @@ say "infra/bootstrap makes the Terraform state bucket ($STATE_BUCKET), GitHub's 
 say "each stack's deploy role and permissions boundary. The bucket must exist before state can"
 say "live in it, so the first apply keeps its state in a local file."
 printf '\n'
-if in_aws "aws s3api head-bucket --bucket $STATE_BUCKET" >/dev/null 2>&1; then
-  say "${GREEN}✓${RESET} $STATE_BUCKET already exists, so the account is bootstrapped."
-  if confirm "Apply infra/bootstrap again from its S3 state, to pick up changes?"; then
-    in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET && terraform -chdir=infra/bootstrap apply"
-  fi
-else
-  step "Read the plan Terraform prints, then type yes to apply it."
-  confirm "Apply infra/bootstrap now?" || exit 1
-  printf 'terraform {\n  backend "local" {}\n}\n' >infra/bootstrap/backend_override.tf
-  in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure && terraform -chdir=infra/bootstrap apply"
-fi
+bootstrap_step1
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "Bootstrap, step 2: move the state into its bucket"
@@ -483,33 +557,45 @@ pause
 
 # ── 11 ────────────────────────────────────────────────────────────────────
 stage "Staging dev profile for make dev"
-say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
-say "in ~/.aws so make dev STAGING_PROFILE=<profile> can reach staging's stores."
-ask STAGING_PROFILE "Profile name (Enter for $DEV_USER):"
-STAGING_PROFILE=${STAGING_PROFILE:-$DEV_USER}
-write_env STAGING_PROFILE "$STAGING_PROFILE"
-mkdir -p ~/.aws && chmod 700 ~/.aws
-if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
-  say "${GREEN}✓${RESET} ~/.aws/credentials already has [$STAGING_PROFILE]. To make a new key, delete that"
-  say "section and the old key (IAM → Users → $DEV_USER), then re-run."
+if ! load_outputs staging || [[ -z ${DEV_USER:-} ]]; then
+  warn "staging isn't deployed with its dev user yet: re-run after stage 7."
+  SKIPPED+=("staging dev profile (stage 11)")
 else
-  KEYS=$(in_aws "aws iam list-access-keys --user-name $DEV_USER --query 'length(AccessKeyMetadata)' --output text")
-  if [[ $KEYS -ge 2 ]]; then
-    warn "$DEV_USER already has two access keys. Delete one in IAM, then re-run."
-  elif confirm "Create an access key for $DEV_USER and save it as [$STAGING_PROFILE]?"; then
-    read -r KEY_ID KEY_SECRET < <(in_aws "aws iam create-access-key --user-name $DEV_USER --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text")
-    (umask 077 && printf '\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
-      "$STAGING_PROFILE" "$KEY_ID" "$KEY_SECRET" >>~/.aws/credentials)
-    unset KEY_SECRET
-    grep -qx "\[profile $STAGING_PROFILE\]" ~/.aws/config 2>/dev/null ||
-      printf '\n[profile %s]\nregion = %s\n' "$STAGING_PROFILE" "$REGION" >>~/.aws/config
-    say "${GREEN}✓${RESET} saved [$STAGING_PROFILE] to ~/.aws/credentials, with region $REGION in ~/.aws/config"
+  load_outputs prod || true
+  say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
+  say "in ~/.aws so make dev STAGING_PROFILE=<profile> can reach staging's stores."
+  ask STAGING_PROFILE "Profile name (Enter for $DEV_USER):"
+  STAGING_PROFILE=${STAGING_PROFILE:-$DEV_USER}
+  write_env STAGING_PROFILE "$STAGING_PROFILE"
+  mkdir -p ~/.aws && chmod 700 ~/.aws
+  if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
+    say "${GREEN}✓${RESET} ~/.aws/credentials already has [$STAGING_PROFILE]. To make a new key, delete that"
+    say "section and the old key (IAM → Users → $DEV_USER), then re-run."
+  else
+    KEYS=$(in_aws "aws iam list-access-keys --user-name $DEV_USER --query 'length(AccessKeyMetadata)' --output text")
+    if [[ $KEYS -ge 2 ]]; then
+      warn "$DEV_USER already has two access keys. Delete one in IAM, then re-run."
+    elif confirm "Create an access key for $DEV_USER and save it as [$STAGING_PROFILE]?"; then
+      read -r KEY_ID KEY_SECRET < <(in_aws "aws iam create-access-key --user-name $DEV_USER --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text")
+      (umask 077 && printf '\n[%s]\naws_access_key_id = %s\naws_secret_access_key = %s\n' \
+        "$STAGING_PROFILE" "$KEY_ID" "$KEY_SECRET" >>~/.aws/credentials)
+      unset KEY_SECRET
+      grep -qx "\[profile $STAGING_PROFILE\]" ~/.aws/config 2>/dev/null ||
+        printf '\n[profile %s]\nregion = %s\n' "$STAGING_PROFILE" "$REGION" >>~/.aws/config
+      say "${GREEN}✓${RESET} saved [$STAGING_PROFILE] to ~/.aws/credentials, with region $REGION in ~/.aws/config"
+    fi
   fi
+  if grep -qx "\[$STAGING_PROFILE\]" ~/.aws/credentials 2>/dev/null; then
+    printf '\n'
+    say "Checking [$STAGING_PROFILE] reaches staging's stores and is denied prod's:"
+    verify_dev_profile "$STAGING_PROFILE" ||
+      { warn "[$STAGING_PROFILE] isn't a working staging-only key (see above). Fix it, then re-run."; exit 1; }
+  fi
+  printf '\n'
+  step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
+  step "Open http://localhost:5173 and check the page loads, then stop it with Ctrl-C."
+  pause "Press Enter once make dev works against staging"
 fi
-printf '\n'
-step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
-step "Open http://localhost:5173 and check the page loads, then stop it with Ctrl-C."
-pause "Press Enter once make dev works against staging"
 
 # ── 12 ────────────────────────────────────────────────────────────────────
 stage "Check both URLs"
