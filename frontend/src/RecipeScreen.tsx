@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { Card, Recipe } from "./api/client";
+import type { Recipe } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { ClockIcon } from "./icons";
+import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
 import { byComponent } from "./recipeComponents";
 import { Screen } from "./Screen";
@@ -11,90 +12,76 @@ import { formatStatedTime } from "./statedTime";
 import { Tabs } from "./Tabs";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
-// The header comes from the recipe's card, so it shows as soon as the Collection has loaded.
+// The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
+// status note stays mounted through every state, so focus can rest on it after a retry.
 export function RecipeScreen() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
   const collection = useCollection();
   const card =
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
+  const recipe = useRecipe(card);
+  const status = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     if (card && shownSlug !== slug(card.title)) navigate(recipePath(card), { replace: true });
   }, [card, shownSlug, navigate]);
 
-  if (card) {
-    const time = formatStatedTime(card.stated_seconds);
-    return (
-      <Screen
-        title={card.title}
-        pushed
-        hero={{
-          above: (
-            <>
-              <Plate title={card.title} size="hero" />
-              {card.site_name && <p className="hero-site">{card.site_name}</p>}
-            </>
-          ),
-          below: time && (
-            <p className="hero-time">
-              <ClockIcon />
-              {time}
-            </p>
-          ),
-        }}
-      >
-        <RecipeBody card={card} />
-      </Screen>
-    );
-  }
+  const missing = collection.state === "ready" && !card;
+  const loading = collection.state === "loading" || (card && recipe.state === "loading");
+  const gone = card && recipe.state === "failed" && recipe.notFound;
+  const failed =
+    collection.state === "failed"
+      ? collection
+      : card && recipe.state === "failed" && !recipe.notFound
+        ? recipe
+        : undefined;
+  const time = card && formatStatedTime(card.stated_seconds);
 
-  const missing = collection.state === "ready";
   return (
-    <Screen title={missing ? "Recipe not found" : "Recipe"} pushed hero={{}}>
-      {collection.state === "loading" && <p className="screen-note">Loading the recipe…</p>}
-      {collection.state === "failed" && (
-        <div className="screen-note">
-          <p>The recipe couldn’t be loaded.</p>
-          <button type="button" className="button" onClick={collection.retry}>
-            Try again
-          </button>
-        </div>
-      )}
+    <Screen
+      title={card?.title ?? (missing ? "Recipe not found" : "Recipe")}
+      pushed
+      hero={
+        card
+          ? {
+              above: (
+                <>
+                  <Plate title={card.title} size="hero" />
+                  {card.site_name && <p className="hero-site">{card.site_name}</p>}
+                </>
+              ),
+              below: time && (
+                <p className="hero-time">
+                  <ClockIcon />
+                  {time}
+                </p>
+              ),
+            }
+          : {}
+      }
+    >
+      <p ref={status} role="status" tabIndex={-1} className="screen-note">
+        {loading && "Loading the recipe…"}
+        {gone && "This recipe is no longer in the Collection."}
+      </p>
+      {failed && <LoadFailed what="The recipe" retry={failed.retry} status={status} />}
       {missing && (
         <p className="screen-note">
           There’s no recipe at this address. <Link to="/recipes">Browse the Collection</Link>
         </p>
       )}
+      {card && recipe.state === "ready" && (
+        <Tabs
+          label="Recipe"
+          tabs={[
+            { label: "Ingredients", panel: <Ingredients recipe={recipe.value} /> },
+            { label: "Steps", panel: <Steps recipe={recipe.value} /> },
+            { label: "About", panel: <About recipe={recipe.value} /> },
+          ]}
+        />
+      )}
     </Screen>
-  );
-}
-
-function RecipeBody({ card }: { card: Card }) {
-  const recipe = useRecipe(card);
-  if (recipe.state === "loading") return <p className="screen-note">Loading the recipe…</p>;
-  if (recipe.state === "failed") {
-    return recipe.notFound ? (
-      <p className="screen-note">This recipe is no longer in the Collection.</p>
-    ) : (
-      <div className="screen-note">
-        <p>The recipe couldn’t be loaded.</p>
-        <button type="button" className="button" onClick={recipe.retry}>
-          Try again
-        </button>
-      </div>
-    );
-  }
-  const { value } = recipe;
-  return (
-    <Tabs
-      label="Recipe"
-      tabs={[
-        { label: "Ingredients", panel: <Ingredients recipe={value} /> },
-        { label: "Steps", panel: <Steps recipe={value} /> },
-        { label: "About", panel: <About recipe={value} /> },
-      ]}
-    />
   );
 }
 
@@ -154,6 +141,7 @@ function About({ recipe }: { recipe: Recipe }) {
         <span>Source</span>
         <a href={source.url} target="_blank" rel="noopener noreferrer">
           {sourceName}
+          <span className="visually-hidden"> (opens in a new tab)</span>
         </a>
       </p>
     </>

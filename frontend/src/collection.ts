@@ -67,14 +67,19 @@ export type Loaded<T> =
   | { state: "ready"; value: T };
 
 // Runs `load` whenever `key` changes, or on a retry, and reports how it went. `cached` is shown at
-// once, with no loading state, when the value is already in memory.
-function useLoaded<T>(key: string, load: () => Promise<T>, cached: T | undefined): Loaded<T> {
+// once, with no loading state, when the value is already in memory. With no `load` yet, it waits.
+function useLoaded<T>(
+  key: string,
+  load: (() => Promise<T>) | undefined,
+  cached: T | undefined,
+): Loaded<T> {
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; attempt: number; loaded: Loaded<T> }>();
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names what `load` fetches.
   useEffect(() => {
+    if (!load) return;
     let current = true;
     const settle = (loaded: Loaded<T>) => current && setResult({ key, attempt, loaded });
     load().then(
@@ -92,7 +97,8 @@ function useLoaded<T>(key: string, load: () => Promise<T>, cached: T | undefined
 
 export const useCollection = () => useLoaded("collection", loadCollection, loadedCollection);
 
-export function useRecipe(card: Card): Loaded<Recipe> {
-  const key = `${card.id}@${card.recipe_version}`;
-  return useLoaded(key, () => loadRecipe(card), recipes.get(key));
+// Waits while there is no card, so a screen can call it before the Collection has loaded.
+export function useRecipe(card: Card | undefined): Loaded<Recipe> {
+  const key = card ? `${card.id}@${card.recipe_version}` : "";
+  return useLoaded(key, card && (() => loadRecipe(card)), recipes.get(key));
 }

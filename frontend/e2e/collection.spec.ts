@@ -8,6 +8,8 @@ const pendingTitle = /^Grandma-Style Slow-Simmered Beef and Barley Stew/;
 
 const grid = (page: Page) => page.getByRole("list", { name: "Recipes" });
 const cardTitles = (page: Page) => grid(page).locator(".card-title");
+// The Shell's sync status is the other status on every screen.
+const resultCount = (page: Page) => page.getByRole("status").and(page.locator(".result-count"));
 
 async function expectTapTarget(target: Locator) {
   const box = await target.boundingBox();
@@ -39,13 +41,15 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
     "Enrichment pending",
   );
 
-  // The search ignores case and accents.
+  // The search ignores case and accents, and a status line says how many recipes match.
   const search = page.getByRole("searchbox", { name: "Search recipe titles" });
   await expectTapTarget(search);
+  await expect(resultCount(page)).toHaveText("7 recipes");
   await search.fill("NOODLÉS");
   await expect(cardTitles(page)).toHaveText([recipeTitle]);
+  await expect(resultCount(page)).toHaveText("1 recipe");
   await search.fill("no such dish");
-  await expect(page.getByText("No recipes match “no such dish”.")).toBeVisible();
+  await expect(resultCount(page)).toHaveText("No recipes match “no such dish”.");
   await search.fill("crispy");
   await grid(page)
     .getByRole("link", { name: new RegExp(recipeTitle) })
@@ -92,7 +96,10 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   for (const fact of ["Prep15 minutes", "Cook15 minutes", "Total30 minutes", "Yield4 bowls"]) {
     await expect(panel).toContainText(fact);
   }
-  const source = panel.getByRole("link", { name: "Example Noodle House" });
+  const source = panel.getByRole("link", {
+    name: "Example Noodle House (opens in a new tab)",
+    exact: true,
+  });
   await expect(source).toHaveAttribute("href", "https://example.com/sesame-noodles-crispy-tofu");
   await expect(source).toHaveAttribute("target", "_blank");
   await expect(source).toHaveAttribute("rel", /noopener/);
@@ -105,11 +112,55 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
 
 test("a stale or missing slug still opens the recipe and corrects itself", async ({ page }) => {
   for (const path of [`/recipes/${recipeId}/wrong-slug`, `/recipes/${recipeId}`]) {
+    await page.goto("/recipes");
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: recipeTitle })).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${recipePath}$`));
+
+    // The correction replaces the address it was opened at, so one Back leaves the recipe.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/recipes$/);
   }
 });
+
+test("a Collection that fails to load can be tried again", async ({ page }) => {
+  let failed = false;
+  await page.route("**/api/collection*", (route) => {
+    if (failed) return route.continue();
+    failed = true;
+    return route.fulfill({ status: 503 });
+  });
+  await page.goto("/recipes");
+
+  await expect(page.getByRole("alert")).toHaveText("The Collection couldn’t be loaded.");
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(cardTitles(page)).toHaveCount(7);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  // The button is gone, so focus is on the status line rather than lost to the page.
+  await expect(resultCount(page)).toBeFocused();
+  await expect(resultCount(page)).toHaveText("7 recipes");
+});
+
+for (const [what, url] of [
+  ["Collection", "**/api/collection*"],
+  ["recipe", `**/api/recipes/${recipeId}*`],
+] as const) {
+  test(`a recipe whose ${what} fails to load can be tried again`, async ({ page }) => {
+    let failed = false;
+    await page.route(url, (route) => {
+      if (failed) return route.continue();
+      failed = true;
+      return route.fulfill({ status: 503 });
+    });
+    await page.goto(recipePath);
+
+    await expect(page.getByRole("alert")).toHaveText("The recipe couldn’t be loaded.");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("tab", { name: "Ingredients" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByRole("main").getByRole("status")).toBeFocused();
+  });
+}
 
 test("an unknown recipe says it isn't there", async ({ page }) => {
   await page.goto("/recipes/01K7SEED000000000000000099/whatever");
@@ -122,6 +173,6 @@ test("a spreadsheet recipe links to its entry", async ({ page }) => {
   await page.getByRole("link", { name: /Smoky Taco Seasoning/ }).click();
   await page.getByRole("tab", { name: "About" }).click();
   const source = page.getByRole("tabpanel", { name: "About" }).getByRole("link");
-  await expect(source).toHaveText("Smoky Taco Seasoning");
+  await expect(source).toHaveAccessibleName("Smoky Taco Seasoning (opens in a new tab)");
   await expect(source).toHaveAttribute("href", "https://sheets.example.com/d/spice-blends");
 });

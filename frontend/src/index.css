@@ -262,6 +262,32 @@ h1:focus {
   color: var(--text-secondary);
 }
 
+/* An empty status note waits for its next message without taking up space. */
+.screen-note:empty {
+  margin: 0;
+}
+
+.result-count {
+  margin: 0 0 calc(var(--space) * 3);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+/* A status note takes focus only after a retry, to keep focus on the screen; it isn't a control. */
+[role="status"]:focus {
+  outline: none;
+}
+
+/* Read by screen readers but not drawn. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .button {
   min-height: var(--tap);
   padding: 0 calc(var(--space) * 5);

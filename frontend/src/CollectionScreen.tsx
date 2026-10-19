@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { Card } from "./api/client";
 import { useCollection } from "./collection";
 import { SearchIcon } from "./icons";
+import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
 import { Screen } from "./Screen";
 import { recipePath } from "./slug";
@@ -18,6 +19,7 @@ export function CollectionScreen() {
     [collection],
   );
   const shown = cards.filter((card) => titleMatches(card.title, query));
+  const status = useRef<HTMLParagraphElement>(null);
 
   return (
     <Screen title="Collection">
@@ -31,33 +33,31 @@ export function CollectionScreen() {
           onChange={(event) => setQuery(event.target.value)}
         />
       </search>
-      {collection.state === "loading" && <p className="screen-note">Loading the Collection…</p>}
+      {/* Always rendered, so screen readers hear each change: loading, then how many match. */}
+      <p ref={status} role="status" tabIndex={-1} className="result-count">
+        {collection.state === "loading" && "Loading the Collection…"}
+        {collection.state === "ready" && resultCount(cards.length, shown.length, query)}
+      </p>
       {collection.state === "failed" && (
-        <div className="screen-note">
-          <p>The Collection couldn’t be loaded.</p>
-          <button type="button" className="button" onClick={collection.retry}>
-            Try again
-          </button>
-        </div>
+        <LoadFailed what="The Collection" retry={collection.retry} status={status} />
       )}
-      {collection.state === "ready" &&
-        (shown.length > 0 ? (
-          <ul className="card-grid" aria-label="Recipes">
-            {shown.map((card) => (
-              <li key={card.id}>
-                <RecipeCard card={card} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="screen-note">
-            {cards.length === 0
-              ? "The Collection is empty."
-              : `No recipes match “${query.trim()}”.`}
-          </p>
-        ))}
+      {shown.length > 0 && (
+        <ul className="card-grid" aria-label="Recipes">
+          {shown.map((card) => (
+            <li key={card.id}>
+              <RecipeCard card={card} />
+            </li>
+          ))}
+        </ul>
+      )}
     </Screen>
   );
+}
+
+function resultCount(total: number, shown: number, query: string): string {
+  if (total === 0) return "The Collection is empty.";
+  if (shown === 0) return `No recipes match “${query.trim()}”.`;
+  return shown === 1 ? "1 recipe" : `${shown} recipes`;
 }
 
 function RecipeCard({ card }: { card: Card }) {
