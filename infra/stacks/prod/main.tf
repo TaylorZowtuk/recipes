@@ -49,18 +49,6 @@ variable "lambda_zip" {
   default     = "../../../backend/dist/lambda.zip"
 }
 
-variable "lambda_runtime" {
-  description = "Lambda runtime. Matches backend/.python-version; the backend Lambda packaging checks it exists in ca-west-1."
-  type        = string
-  default     = "python3.14"
-}
-
-variable "lwa_layer_arn" {
-  description = "AWS Lambda Web Adapter layer for arm64 in ca-west-1."
-  type        = string
-  default     = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:30"
-}
-
 module "stack" {
   source = "../../modules/stack"
   providers = {
@@ -72,6 +60,4 @@ module "stack" {
   write_capacity      = 10
   deletion_protection = true
   lambda_zip          = var.lambda_zip
-  lambda_runtime      = var.lambda_runtime
-  lwa_layer_arn       = var.lwa_layer_arn
 }

@@ -30,12 +30,11 @@ variable "lambda_zip" {
   type = string
 }
 
-variable "lambda_runtime" {
-  type = string
-}
-
-variable "lwa_layer_arn" {
-  type = string
+locals {
+  # The runtime follows the Python the Lambda zip's wheels are built for (scripts/lambda.sh).
+  lambda_runtime = "python${trimspace(file("${path.module}/../../../backend/.python-version"))}"
+  # The AWS Lambda Web Adapter layer for arm64 in ca-west-1, the stacks' region.
+  lwa_layer_arn = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:30"
 }
 
 data "aws_caller_identity" "current" {}
@@ -62,8 +61,8 @@ module "api" {
   source                   = "../api"
   function_name            = module.access.function_name
   zip_path                 = var.lambda_zip
-  runtime                  = var.lambda_runtime
-  lwa_layer_arn            = var.lwa_layer_arn
+  runtime                  = local.lambda_runtime
+  lwa_layer_arn            = local.lwa_layer_arn
   data_policy_json         = module.access.data_policy_json
   permissions_boundary_arn = module.access.boundary_arn
   environment = {
