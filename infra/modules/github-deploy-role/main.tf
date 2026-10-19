@@ -253,7 +253,8 @@ data "aws_iam_policy_document" "deploy" {
   }
 
   # Tagging sets this stack's Stack tag, on a new distribution or one already tagged for this
-  # stack, so one stack's role can't retag another stack's distribution into its reach.
+  # stack, so a role can't tag the other stack's distribution. Distribution still lets a role
+  # retag its own, so a reviewed prod change could hand prod's distribution to staging's role.
   statement {
     sid       = "DistributionTag"
     actions   = ["cloudfront:TagResource"]
