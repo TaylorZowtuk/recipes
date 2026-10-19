@@ -2,9 +2,9 @@ import { useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { Card, Recipe } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
-import { byComponent } from "./components";
 import { ClockIcon } from "./icons";
 import { Plate } from "./Plate";
+import { byComponent } from "./recipeComponents";
 import { Screen } from "./Screen";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime } from "./statedTime";
@@ -100,11 +100,11 @@ function RecipeBody({ card }: { card: Card }) {
 
 // The ingredient lines as captured, under a heading wherever the Component changes.
 function Ingredients({ recipe }: { recipe: Recipe }) {
-  return byComponent(recipe.original.ingredients).map((group) => (
-    <section key={group.start} className="component">
-      {group.component && <h2>{group.component}</h2>}
+  return byComponent(recipe.original.ingredients).map((part) => (
+    <section key={part.start} className="component">
+      {part.component && <h2>{part.component}</h2>}
       <ul className="ingredients">
-        {group.lines.map((line) => (
+        {part.lines.map((line) => (
           <li key={line.id}>{line.text}</li>
         ))}
       </ul>
@@ -114,11 +114,11 @@ function Ingredients({ recipe }: { recipe: Recipe }) {
 
 // The steps as captured, numbered through the whole recipe across its Components.
 function Steps({ recipe }: { recipe: Recipe }) {
-  return byComponent(recipe.original.steps).map((group) => (
-    <section key={group.start} className="component">
-      {group.component && <h2>{group.component}</h2>}
-      <ol className="steps" start={group.start}>
-        {group.lines.map((step) => (
+  return byComponent(recipe.original.steps).map((part) => (
+    <section key={part.start} className="component">
+      {part.component && <h2>{part.component}</h2>}
+      <ol className="steps" start={part.start}>
+        {part.lines.map((step) => (
           <li key={step.id}>{step.text}</li>
         ))}
       </ol>
