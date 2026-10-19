@@ -123,44 +123,51 @@ test("a stale or missing slug still opens the recipe and corrects itself", async
   }
 });
 
-test("a Collection that fails to load can be tried again", async ({ page }) => {
-  let failed = false;
-  await page.route("**/api/collection*", (route) => {
-    if (failed) return route.continue();
-    failed = true;
-    return route.fulfill({ status: 503 });
-  });
-  await page.goto("/recipes");
+// These tests fail one request with page.route. Once the app's service worker takes control of the
+// page (it claims it as soon as it activates), WebKit sends the page's fetches through it, and
+// page.route no longer sees them. So the service worker stays out of the way here.
+test.describe("with no service worker", () => {
+  test.use({ serviceWorkers: "block" });
 
-  await expect(page.getByRole("alert")).toHaveText("The Collection couldn’t be loaded.");
-  await page.getByRole("button", { name: "Try again" }).click();
-  await expect(cardTitles(page)).toHaveCount(7);
-  await expect(page.getByRole("alert")).toHaveCount(0);
-  // The button is gone, so focus is on the status line rather than lost to the page.
-  await expect(resultCount(page)).toBeFocused();
-  await expect(resultCount(page)).toHaveText("7 recipes");
-});
-
-for (const [what, url] of [
-  ["Collection", "**/api/collection*"],
-  ["recipe", `**/api/recipes/${recipeId}*`],
-] as const) {
-  test(`a recipe whose ${what} fails to load can be tried again`, async ({ page }) => {
+  test("a Collection that fails to load can be tried again", async ({ page }) => {
     let failed = false;
-    await page.route(url, (route) => {
+    await page.route("**/api/collection*", (route) => {
       if (failed) return route.continue();
       failed = true;
       return route.fulfill({ status: 503 });
     });
-    await page.goto(recipePath);
+    await page.goto("/recipes");
 
-    await expect(page.getByRole("alert")).toHaveText("The recipe couldn’t be loaded.");
+    await expect(page.getByRole("alert")).toHaveText("The Collection couldn’t be loaded.");
     await page.getByRole("button", { name: "Try again" }).click();
-    await expect(page.getByRole("tab", { name: "Ingredients" })).toBeVisible();
+    await expect(cardTitles(page)).toHaveCount(7);
     await expect(page.getByRole("alert")).toHaveCount(0);
-    await expect(page.getByRole("main").getByRole("status")).toBeFocused();
+    // The button is gone, so focus is on the status line rather than lost to the page.
+    await expect(resultCount(page)).toBeFocused();
+    await expect(resultCount(page)).toHaveText("7 recipes");
   });
-}
+
+  for (const [what, url] of [
+    ["Collection", "**/api/collection*"],
+    ["recipe", `**/api/recipes/${recipeId}*`],
+  ] as const) {
+    test(`a recipe whose ${what} fails to load can be tried again`, async ({ page }) => {
+      let failed = false;
+      await page.route(url, (route) => {
+        if (failed) return route.continue();
+        failed = true;
+        return route.fulfill({ status: 503 });
+      });
+      await page.goto(recipePath);
+
+      await expect(page.getByRole("alert")).toHaveText("The recipe couldn’t be loaded.");
+      await page.getByRole("button", { name: "Try again" }).click();
+      await expect(page.getByRole("tab", { name: "Ingredients" })).toBeVisible();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.getByRole("main").getByRole("status")).toBeFocused();
+    });
+  }
+});
 
 test("an unknown recipe says it isn't there", async ({ page }) => {
   await page.goto("/recipes/01K7SEED000000000000000099/whatever");
