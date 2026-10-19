@@ -79,18 +79,23 @@ run "deploy_policy" {
     condition     = ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).EdgeFunction.Resource == "arn:aws:cloudfront::123456789012:function/plateful-staging-*"
     error_message = "Function updates, publishes and deletes stay on the stack's prefix."
   }
+  # Each granted action and resource is a glob, so these turn it into a regex and test it against
+  # the names it could cover: cloudfront:Tag* or cloudfront:* grants TagResource as much as the
+  # literal name does.
   assert {
-    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !contains(flatten([s.Action]), "cloudfront:TagResource")
-    if !contains(["DistributionTag", "Distribution", "EdgeFunction"], s.Sid)])
-    error_message = "Only the tag-checked statements and the stack's own functions may grant TagResource."
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !anytrue([
+      for a in flatten([s.Action]) : can(regex("^${replace(lower(a), "*", ".*")}$", "cloudfront:tagresource"))
+    ]) if !contains(["DistributionTag", "Distribution", "EdgeFunction"], s.Sid)])
+    error_message = "Only the tag-checked statements and the stack's own functions may grant TagResource, wildcards included."
   }
   assert {
-    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : alltrue([
-      for r in flatten([s.Resource]) : !strcontains(r, "origin-access-control")
-      ]) && alltrue([
-      for a in flatten([s.Action]) : !strcontains(lower(a), "originaccesscontrol")
-    ])])
-    error_message = "OACs belong to infra/bootstrap: the deploy role only reads them, through CloudFrontRead."
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:cloudfront::123456789012:origin-access-control/E1"))]) &&
+      anytrue([for a in flatten([s.Action]) : anytrue([for op in ["create", "update", "delete"] :
+        can(regex("^${replace(lower(a), "*", ".*")}$", "cloudfront:${op}originaccesscontrol"))
+      ])])
+    )])
+    error_message = "OACs belong to infra/bootstrap: no statement may create, update or delete one, wildcards included."
   }
   assert {
     condition = (
