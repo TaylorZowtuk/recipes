@@ -97,6 +97,14 @@ run "deploy_policy" {
     )])
     error_message = "OACs belong to infra/bootstrap: no statement may create, update or delete one, wildcards included."
   }
+  # Outside the scoped statements, the role may only read CloudFront: any write there (Untag,
+  # UpdateDistribution, a ? wildcard) would reach the other stack's distribution or functions.
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : alltrue([
+      for a in flatten([s.Action]) : !startswith(lower(a), "cloudfront:") || can(regex("^cloudfront:(get|list|describe)", lower(a)))
+    ]) if !contains(["Distribution", "DistributionCreate", "DistributionTag", "EdgeFunction", "EdgeFunctionCreate"], s.Sid)])
+    error_message = "Outside the stack-scoped CloudFront statements, the deploy role only reads CloudFront."
+  }
   assert {
     condition = (
       flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).BootstrapState.Action]) == ["s3:GetObject"] &&
