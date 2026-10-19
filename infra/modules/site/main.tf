@@ -73,8 +73,8 @@ data "aws_cloudfront_response_headers_policy" "security" {
   name = "Managed-SecurityHeadersPolicy"
 }
 
-# Rules (the rate limit) belong to the WAF ticket. The Free plan requires a web ACL, and
-# CLOUDFRONT-scoped ACLs must live in us-east-1.
+# No rules yet: every request is allowed. The Free plan requires a web ACL, and CLOUDFRONT-scoped
+# ACLs must live in us-east-1.
 resource "aws_wafv2_web_acl" "this" {
   provider = aws.us_east_1
   name     = var.prefix
@@ -101,8 +101,9 @@ resource "aws_cloudfront_function" "spa" {
   code    = file("${path.module}/spa.js")
 }
 
-# X-Robots-Tag: noindex on every response. No managed response headers policy adds it, and the
-# Free plan forbids custom ones, so every behaviour runs this on viewer responses.
+# Adds X-Robots-Tag: noindex. No managed response headers policy adds it, and the Free plan forbids
+# custom ones, so every behaviour runs this on viewer responses. CloudFront skips it when the origin
+# returns 400 or more, so the API sets the header on its own responses too.
 resource "aws_cloudfront_function" "noindex" {
   name    = "${var.prefix}-noindex"
   runtime = "cloudfront-js-2.0"

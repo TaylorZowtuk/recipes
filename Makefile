@@ -176,8 +176,8 @@ tf-test:
 	terraform -chdir=infra/tests test -no-color
 links:
 	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'
-# The wizard library at the top of scripts/aws-setup.sh is kept as the wizard skill wrote it, and
-# its `$$e[Enter …` trips SC1087.
+# SC1087 is off: the wizard library at the top of scripts/aws-setup.sh writes `$$e[Enter …`, the
+# escape variable followed by a bracket, which shellcheck mistakes for an array index.
 sh-lint:
 	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
 	@# make and the workflows exec these directly, so git must record them as executable.
