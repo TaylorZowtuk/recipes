@@ -169,7 +169,7 @@ tf:
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
 # infra/tests checks the modules and stacks offline, in its own root so it runs alongside tf.
-tf-test: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+tf-test: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins-test
 tf-test:
 	mkdir -p $$TF_PLUGIN_CACHE_DIR
 	terraform -chdir=infra/tests init -backend=false -input=false >/dev/null

@@ -15,7 +15,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make lambda` | Build the API's Lambda zip (arm64, run by the Lambda Web Adapter) into `backend/dist/lambda.zip` |
 | `make build` | Build a release: the Lambda zip and the PWA bundle in `frontend/dist` |
 | `make deploy STACK=<staging\|prod>` | Apply the stack with the built zip and upload the PWA bundle, using the AWS credentials and `TF_STATE_BUCKET` in your environment. CI's deploy jobs run it |
-| `make smoke URL=<url>` | Check a deployed stack's responses through CloudFront (status, Content-Type, `X-Robots-Tag`) |
+| `make smoke URL=<url>` | Check a deployed stack's responses through CloudFront (status, Content-Type, `Cache-Control`, `X-Robots-Tag`, and an OAC-signed POST) |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
 | `make shell` | A shell in the toolchain container, with dependencies installed |
 | `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
@@ -33,7 +33,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 
 - `backend/`: one uv project, one `recipes` package. The API, ingest and the `enrich` CLI are modules in it. See [`backend/AGENTS.md`](backend/AGENTS.md).
 - `frontend/`: one pnpm package, the PWA. Playwright tests are in `e2e/`, the generated API client in `src/api/`. See [`frontend/AGENTS.md`](frontend/AGENTS.md).
-- `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup. See [`infra/AGENTS.md`](infra/AGENTS.md).
+- `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup and `tests/` (`terraform test` on mock providers). See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.
 - `scripts/`: helpers the Makefile calls, and `aws-setup.sh`, the wizard for the AWS and GitHub steps only the human can do.
 
