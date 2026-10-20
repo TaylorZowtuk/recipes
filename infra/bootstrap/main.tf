@@ -32,10 +32,13 @@ provider "aws" {
   }
 }
 
-variable "repository" {
-  description = "The GitHub repository whose workflows deploy."
+# The repository uses GitHub's immutable OIDC subject, which names the owner and repository by name
+# and ID, so a renamed or re-created repository can't assume the roles. Read it with
+# gh api repos/TaylorZowtuk/recipes/actions/oidc/customization/sub --jq .sub_claim_prefix
+variable "github_subject_prefix" {
+  description = "The repository part of the OIDC sub claim of the GitHub repository whose workflows deploy."
   type        = string
-  default     = "TaylorZowtuk/recipes"
+  default     = "repo:TaylorZowtuk@43101199/recipes@1386669274"
 }
 
 variable "stacks" {
@@ -70,7 +73,7 @@ module "deploy_role" {
   stack             = each.key
   account_id        = local.account_id
   region            = data.aws_region.current.region
-  repository        = var.repository
+  subject_prefix    = var.github_subject_prefix
   oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
   state_bucket      = module.state.name
 }

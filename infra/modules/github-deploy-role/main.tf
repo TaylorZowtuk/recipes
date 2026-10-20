@@ -20,8 +20,8 @@ variable "region" {
   type = string
 }
 
-variable "repository" {
-  description = "owner/name of the GitHub repository."
+variable "subject_prefix" {
+  description = "The repository part of GitHub's OIDC sub claim, such as repo:owner@<id>/name@<id>."
   type        = string
 }
 
@@ -79,7 +79,7 @@ data "aws_iam_policy_document" "trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.repository}:environment:${var.stack}"]
+      values   = ["${var.subject_prefix}:environment:${var.stack}"]
     }
   }
 }

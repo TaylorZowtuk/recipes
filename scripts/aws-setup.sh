@@ -481,6 +481,14 @@ say "The stacks read their OAC IDs from bootstrap's state, so bootstrap must be 
 say "first deploy. The bucket must exist before state can live in it, so the first apply keeps its"
 say "state in a local file."
 printf '\n'
+# The deploy roles trust only the OIDC subject bootstrap names, so it must be the one GitHub sends.
+want=$(gh api "repos/$REPO_SLUG/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null || true)
+have=$(sed -n '/variable "github_subject_prefix"/,/^}/s/.*default *= *"\(.*\)"/\1/p' infra/bootstrap/main.tf)
+if [[ -n $want && $want != "$have" ]]; then
+  warn "GitHub signs this repository's deploy jobs as $want, but infra/bootstrap trusts $have."
+  say "Set github_subject_prefix's default in infra/bootstrap/main.tf to $want, then re-run."
+  exit 1
+fi
 bootstrap_step1
 
 # ── 4 ─────────────────────────────────────────────────────────────────────

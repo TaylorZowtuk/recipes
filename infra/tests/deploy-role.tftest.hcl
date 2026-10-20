@@ -1,7 +1,8 @@
 # The deploy role's CloudFront and state grants. Create calls have no resource type, so they only
 # match "*"; tagging a distribution needs this stack's Stack tag both on the request and on any
 # existing distribution, so one stack's role can't retag another stack's distribution. OACs
-# belong to infra/bootstrap, so the role may only read them.
+# belong to infra/bootstrap, so the role may only read them. Only a job in the stack's GitHub
+# environment may assume it, matched on the immutable OIDC subject GitHub sends.
 
 # A real but unauthenticated provider: aws_iam_policy_document renders locally, so the test checks
 # the policy JSON IAM would get, and the overridden resources make no calls.
@@ -18,7 +19,7 @@ variables {
   stack             = "staging"
   account_id        = "123456789012"
   region            = "ca-west-1"
-  repository        = "owner/repo"
+  subject_prefix    = "repo:owner@1/repo@2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
   state_bucket      = "plateful-tfstate-123456789012"
 }
@@ -39,6 +40,16 @@ run "deploy_policy" {
   }
   override_resource {
     target = aws_iam_role_policy.deploy
+  }
+
+  assert {
+    condition = (
+      one(jsondecode(data.aws_iam_policy_document.trust.json).Statement).Condition.StringEquals == {
+        "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+        "token.actions.githubusercontent.com:sub" = "repo:owner@1/repo@2:environment:staging"
+      }
+    )
+    error_message = "Only a job in the stack's GitHub environment, with the repository's immutable subject, may assume the role."
   }
 
   assert {
