@@ -207,7 +207,7 @@ finish() {
 # writes in the repo is .aws-setup.env (gitignored, no secrets): the account ID and profile name.
 # Every stage checks what is already done, so it is safe to re-run.
 
-REGION=ca-west-1
+REGION=us-west-2
 STACKS=(staging prod)
 MAKE_BIN=$(command -v gmake || command -v make || true)
 
@@ -434,8 +434,8 @@ ask_secret AWS_SESSION_TOKEN "AWS_SESSION_TOKEN (hidden; Enter if you made an ac
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION=$REGION AWS_DEFAULT_REGION=$REGION
 if [[ -n $AWS_SESSION_TOKEN ]]; then export AWS_SESSION_TOKEN; USED_ACCESS_KEY=no
 else unset AWS_SESSION_TOKEN; USED_ACCESS_KEY=yes; fi
-# STS and the Account API are asked in us-east-1, which every account has: $REGION is opt-in, and
-# until it's enabled AWS answers there that even good keys are invalid.
+# STS and the Account API are asked in us-east-1, which every account has: in an opt-in region
+# that isn't enabled yet, AWS answers that even good keys are invalid.
 note "Checking the credentials. A new access key can take up to a minute to work."
 err=$(mktemp)
 for try in {1..12}; do

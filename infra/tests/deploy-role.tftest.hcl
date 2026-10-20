@@ -7,7 +7,7 @@
 # A real but unauthenticated provider: aws_iam_policy_document renders locally, so the test checks
 # the policy JSON IAM would get, and the overridden resources make no calls.
 provider "aws" {
-  region                      = "ca-west-1"
+  region                      = "us-west-2"
   access_key                  = "mock"
   secret_key                  = "mock"
   skip_credentials_validation = true
@@ -18,7 +18,7 @@ provider "aws" {
 variables {
   stack             = "staging"
   account_id        = "123456789012"
-  region            = "ca-west-1"
+  region            = "us-west-2"
   subject_prefix    = "repo:owner@1/repo@2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
   state_bucket      = "plateful-tfstate-123456789012"

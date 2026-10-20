@@ -8,7 +8,7 @@ mock_provider "aws" {
     defaults = { account_id = "123456789012" }
   }
   mock_data "aws_region" {
-    defaults = { region = "ca-west-1" }
+    defaults = { region = "us-west-2" }
   }
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{}" }
@@ -26,10 +26,10 @@ mock_provider "aws" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
   }
   mock_resource "aws_cloudwatch_log_group" {
-    defaults = { arn = "arn:aws:logs:ca-west-1:123456789012:log-group:mock" }
+    defaults = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:mock" }
   }
   mock_resource "aws_lambda_function_url" {
-    defaults = { function_url = "https://abc.lambda-url.ca-west-1.on.aws/" }
+    defaults = { function_url = "https://abc.lambda-url.us-west-2.on.aws/" }
   }
 }
 
@@ -52,9 +52,9 @@ run "site" {
     pwa_bucket                         = "plateful-test-pwa"
     images_bucket                      = "plateful-test-images"
     images_bucket_arn                  = "arn:aws:s3:::plateful-test-images"
-    images_bucket_regional_domain_name = "plateful-test-images.s3.ca-west-1.amazonaws.com"
+    images_bucket_regional_domain_name = "plateful-test-images.s3.us-west-2.amazonaws.com"
     function_name                      = "plateful-test-api"
-    function_url_domain                = "abc.lambda-url.ca-west-1.on.aws"
+    function_url_domain                = "abc.lambda-url.us-west-2.on.aws"
     origin_access_control_ids          = { api = "OACAPI", pwa = "OACPWA", images = "OACIMAGES" }
   }
 

@@ -16,14 +16,14 @@ terraform {
 
   backend "s3" {
     key          = "bootstrap/terraform.tfstate"
-    region       = "ca-west-1"
+    region       = "us-west-2"
     encrypt      = true
     use_lockfile = true
   }
 }
 
 provider "aws" {
-  region = "ca-west-1"
+  region = "us-west-2"
   default_tags {
     tags = {
       Project = "plateful"

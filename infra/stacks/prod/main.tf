@@ -13,7 +13,7 @@ terraform {
 
   backend "s3" {
     key          = "prod/terraform.tfstate"
-    region       = "ca-west-1"
+    region       = "us-west-2"
     encrypt      = true
     use_lockfile = true
   }
@@ -28,7 +28,7 @@ locals {
 }
 
 provider "aws" {
-  region = "ca-west-1"
+  region = "us-west-2"
   default_tags {
     tags = local.tags
   }
