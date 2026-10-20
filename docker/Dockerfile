@@ -10,6 +10,10 @@ FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
 FROM hashicorp/terraform:1.16.4 AS terraform
 FROM lycheeverse/lychee:0.24.2 AS lychee
 FROM ghcr.io/gitleaks/gitleaks:v8.30.1 AS gitleaks
+FROM rhysd/actionlint:1.7.12 AS actionlint
+FROM koalaman/shellcheck:v0.11.0 AS shellcheck
+# The AWS CLI v2 bundle is self-contained, so it runs here as it does in its own image.
+FROM amazon/aws-cli:2.37.5 AS awscli
 
 # The browsers only work with their own Playwright release, so the tag follows the lockfile.
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
@@ -27,6 +31,10 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=terraform /bin/terraform /usr/local/bin/
 COPY --from=lychee /usr/local/bin/lychee /usr/local/bin/
 COPY --from=gitleaks /usr/bin/gitleaks /usr/local/bin/
+COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/
+COPY --from=shellcheck /bin/shellcheck /usr/local/bin/
+COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
+RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws
 
 # Containers run as the host user, whose UID the image doesn't know, so these are world-writable.
 # Docker copies their mode into each new named volume mounted on them (compose.yaml).

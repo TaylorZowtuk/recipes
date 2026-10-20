@@ -1,0 +1,108 @@
+# The release path (stacks ADR): one build, deployed to staging and tested there, then the same build
+# to prod once the human approves the prod environment. Each environment holds DEPLOY_ROLE_ARN,
+# TF_STATE_BUCKET and AWS_REGION as variables (scripts/aws-setup.sh sets them). No AWS secrets live in
+# GitHub: each deploy job assumes its stack's role through OIDC.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # a cold run builds the toolchain image
+    steps:
+      - uses: actions/checkout@v7
+      - run: make build # in the toolchain container, like every make command
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: |
+            backend/dist/lambda.zip
+            frontend/dist/
+          if-no-files-found: error
+
+  staging:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60 # a first apply waits for CloudFront to deploy the distribution
+    environment:
+      name: staging
+      url: ${{ steps.deploy.outputs.url }}
+    # One deploy at a time per stack. Deploy, smoke and e2e are one job so that no newer run can
+    # deploy between this run's deploy and its tests. An apply in flight is never cancelled: that
+    # could leave the state locked or half-applied. A newer run queued behind replaces an older one.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # OIDC, for the stack's deploy role
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - id: deploy
+        run: |
+          make deploy STACK=staging
+          cat .deploy/staging.env >>"$GITHUB_OUTPUT"
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      - run: make smoke URL="$URL"
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+      - run: make e2e
+        env:
+          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: staging-playwright-report
+          path: frontend/playwright-report/
+          if-no-files-found: ignore
+
+  prod:
+    needs: [build, staging] # staging's job ends with its smoke and e2e tests
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # The prod environment's required reviewer is the approval gate.
+    environment:
+      name: prod
+      url: ${{ steps.deploy.outputs.url }}
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8 # the build staging tested, not a rebuild
+        with:
+          name: release
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - id: deploy
+        run: |
+          make deploy STACK=prod
+          cat .deploy/prod.env >>"$GITHUB_OUTPUT"
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      - run: make smoke URL="$URL"
+        env:
+          URL: ${{ steps.deploy.outputs.url }}

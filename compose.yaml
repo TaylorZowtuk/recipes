@@ -13,6 +13,9 @@ x-toolchain: &toolchain
   shm_size: 1gb # Chromium runs out of Docker's default 64 MB
   environment:
     CI: ${CI:-}
+    # Passed through only when set: `E2E_BASE_URL=<url> make e2e` runs Playwright against a deployed
+    # stack instead of a local build.
+    E2E_BASE_URL:
   volumes:
     - .:/work/repo
     # A worktree's .git file points into the main checkout's .git, so mount it at the same path.
@@ -28,6 +31,21 @@ services:
   tools:
     <<: *toolchain
     profiles: [tools]
+
+  # `make deploy` and `make aws` (the setup wizard): the toolchain plus the caller's AWS credentials,
+  # passed through only when set: the deploy role's in CI, the wizard's temporary ones by hand.
+  # Nothing is written down. The other services never see AWS credentials.
+  aws:
+    <<: *toolchain
+    profiles: [tools]
+    environment: # replaces the anchor's environment rather than merging, so repeat CI
+      CI: ${CI:-}
+      TF_STATE_BUCKET:
+      AWS_ACCESS_KEY_ID:
+      AWS_SECRET_ACCESS_KEY:
+      AWS_SESSION_TOKEN:
+      AWS_REGION:
+      AWS_DEFAULT_REGION:
 
   # `make dev`: FastAPI and the Vite dev server, both reloading on edits.
   api:

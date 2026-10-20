@@ -13,30 +13,36 @@ const viewports = {
 };
 const schemes = ["light", "dark"] as const;
 
+// E2E_BASE_URL points the suite at a deployed stack, such as staging, instead of a local build.
+// Its report is a public CI artifact, so it records no traces: they hold request headers and storage.
+const remote = process.env.E2E_BASE_URL;
+
 export default defineConfig({
   testDir: process.env.PLAYWRIGHT_TEST_DIR ?? "e2e",
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
-  use: { baseURL: "http://127.0.0.1:4173", trace: "retain-on-failure" },
+  use: { baseURL: remote ?? "http://127.0.0.1:4173", trace: remote ? "off" : "retain-on-failure" },
   projects: Object.entries(viewports).flatMap(([name, device]) =>
     schemes.map((colorScheme) => ({
       name: `${name}-${colorScheme}`,
       use: { ...device, colorScheme },
     })),
   ),
-  webServer: [
-    {
-      command: "uv run --locked python -m recipes.e2e_server",
-      cwd: path.join(root, "backend"),
-      url: "http://127.0.0.1:8787/api/sync",
-      reuseExistingServer: false,
-    },
-    {
-      command: "pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --strictPort",
-      cwd: path.join(root, "frontend"),
-      url: "http://127.0.0.1:4173",
-      reuseExistingServer: false,
-    },
-  ],
+  webServer: remote
+    ? []
+    : [
+        {
+          command: "uv run --locked python -m recipes.e2e_server",
+          cwd: path.join(root, "backend"),
+          url: "http://127.0.0.1:8787/api/sync",
+          reuseExistingServer: false,
+        },
+        {
+          command: "pnpm exec vite build && pnpm exec vite preview --host 127.0.0.1 --strictPort",
+          cwd: path.join(root, "frontend"),
+          url: "http://127.0.0.1:4173",
+          reuseExistingServer: false,
+        },
+      ],
 });

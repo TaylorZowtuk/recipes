@@ -7,11 +7,15 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | Command | What it does |
 | --- | --- |
 | `make setup` | Build the toolchain image, install dependencies and the pre-commit hook |
-| `make check` | Lint, type-check, unit tests, Terraform validation, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
+| `make check` | Lint, type-check, unit tests, Terraform validation and tests, shell and workflow lint, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
 | `make fix` | Auto-format and apply safe lint fixes |
-| `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark |
+| `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark. `E2E_BASE_URL=<url> make e2e` runs it against a deployed stack instead |
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
+| `make lambda` | Build the API's Lambda zip (arm64, run by the Lambda Web Adapter) into `backend/dist/lambda.zip` |
+| `make build` | Build a release: the Lambda zip and the PWA bundle in `frontend/dist` |
+| `make deploy STACK=<staging\|prod>` | Apply the stack with the built zip and upload the PWA bundle, using the AWS credentials and `TF_STATE_BUCKET` in your environment. CI's deploy jobs run it |
+| `make smoke URL=<url>` | Check a deployed stack's responses through CloudFront (status, Content-Type, `Cache-Control`, `X-Robots-Tag`, and an OAC-signed POST) |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it) |
 | `make shell` | A shell in the toolchain container, with dependencies installed |
 | `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
@@ -22,16 +26,20 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 - For anything without a `make` command, use `make shell`. For example: a single test (`cd backend && uv run pytest tests/test_sync.py`, `cd frontend && pnpm exec vitest run src/syncStatus.test.ts`, `cd frontend && pnpm exec playwright test --project iphone-light`), or adding a dependency (`pnpm add` in `frontend/`, `uv add` in `backend/`; restart `make dev` afterwards).
 - Containers run as your user, so files they write into the checkout are yours. `frontend/node_modules` and `backend/.venv` are Docker volumes mounted into the checkout (on the host they're empty directories), and the tool caches are a volume shared by every worktree. If a volume goes stale, `make clean` and rerun.
 - Each worktree gets its own Compose project, so worktrees can run commands at the same time. Only `make dev` publishes a port, so give a second worktree's dev stack its own, for example `make dev DEV_PORT=5174`.
-- Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, the Playwright image from the `@playwright/test` version in `frontend/pnpm-lock.yaml`, and every other image tag (Terraform, uv, lychee, gitleaks) from `docker/Dockerfile`.
-- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys and set a region. Name the staging profile, never prod's: the whole of `~/.aws` is visible to the container.
+- Versions: Node comes from `.nvmrc`, Python from `backend/.python-version`, the Playwright image from the `@playwright/test` version in `frontend/pnpm-lock.yaml`, and every other image tag (Terraform, uv, lychee, gitleaks, actionlint, shellcheck, the AWS CLI) from `docker/Dockerfile`.
+- To run locally against staging, use `make dev STAGING_PROFILE=<staging dev profile>`. It mounts `~/.aws` read-only into the API container, so the profile must use static keys and set a region, and points FastAPI at staging's table, images bucket and SSM parameters. The bucket name ends in the account ID, which comes from `STAGING_ACCOUNT_ID` or else the setup wizard's `.aws-setup.env` (in this checkout or the main one); with neither, `make dev` stops and says so. Name the staging profile, never prod's: the whole of `~/.aws` is visible to the container.
 
 ## Layout
 
 - `backend/`: one uv project, one `recipes` package. The API, ingest and the `enrich` CLI are modules in it. See [`backend/AGENTS.md`](backend/AGENTS.md).
 - `frontend/`: one pnpm package, the PWA. Playwright tests are in `e2e/`, the generated API client in `src/api/`. See [`frontend/AGENTS.md`](frontend/AGENTS.md).
-- `infra/`: Terraform `modules/` plus `stacks/prod` and `stacks/staging`. See [`infra/AGENTS.md`](infra/AGENTS.md).
+- `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup and `tests/` (`terraform test` on mock providers). See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.
-- `scripts/`: helpers the Makefile calls.
+- `scripts/`: helpers the Makefile calls, and `aws-setup.sh`, the wizard for the AWS and GitHub steps only the human can do.
+
+## Deploys
+
+A push to `main` runs [`deploy.yml`](.github/workflows/deploy.yml): `make build` once, then `make deploy STACK=staging`, then `make smoke` and `make e2e` against staging's URL, then the same build to prod once the human approves the `prod` environment, followed by `make smoke` there. Each deploy job assumes its stack's deploy role through GitHub OIDC; the role ARN, state bucket and region are variables on the GitHub environment, and no AWS key is stored anywhere. Both environments deploy from `main` only, so a manual run from another branch can't reach either stack; only `prod` has a required reviewer. Deploys run one at a time per stack and are never cancelled mid-apply. The one-time setup (account, bootstrap, GitHub environments, Free plan, SSM secrets, dev profile) is [`scripts/aws-setup.sh`](scripts/aws-setup.sh), run by the human on the host; see [`infra/AGENTS.md`](infra/AGENTS.md).
 
 ## Hard rules
 
