@@ -434,10 +434,41 @@ ask_secret AWS_SESSION_TOKEN "AWS_SESSION_TOKEN (hidden; Enter if you made an ac
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION=$REGION AWS_DEFAULT_REGION=$REGION
 if [[ -n $AWS_SESSION_TOKEN ]]; then export AWS_SESSION_TOKEN; USED_ACCESS_KEY=no
 else unset AWS_SESSION_TOKEN; USED_ACCESS_KEY=yes; fi
-read -r ACCOUNT CALLER < <(in_aws 'aws sts get-caller-identity --query "[Account,Arn]" --output text') ||
-  { warn "AWS rejected those credentials. Re-run the wizard with fresh ones."; exit 1; }
+# STS and the Account API are asked in us-east-1, which every account has: $REGION is opt-in, and
+# until it's enabled AWS answers there that even good keys are invalid.
+note "Checking the credentials. A new access key can take up to a minute to work."
+err=$(mktemp)
+for try in {1..12}; do
+  out=$(in_aws 'aws sts get-caller-identity --region us-east-1 --query "[Account,Arn]" --output text' 2>"$err") && break
+  if [[ $try == 12 ]] || ! grep -q InvalidClientTokenId "$err"; then
+    warn "AWS rejected those credentials:"; sed 's/^/    /' "$err"; rm -f "$err"
+    say "Check they were pasted whole, then re-run the wizard (the same key is fine)."
+    exit 1
+  fi
+  sleep 5
+done
+rm -f "$err"
+read -r ACCOUNT CALLER <<<"$out"
 say "Signed in to account ${BOLD}$ACCOUNT${RESET} as $CALLER"
 confirm "Is this the account Plateful should live in?" || exit 1
+region_status() {
+  in_aws "aws account get-region-opt-status --region us-east-1 --region-name $REGION --query RegionOptStatus --output text"
+}
+case $(region_status || echo UNKNOWN) in
+  ENABLED | ENABLED_BY_DEFAULT) ;;
+  DISABLED | DISABLING)
+    say "$REGION is an opt-in region and isn't enabled on this account yet."
+    confirm "Enable $REGION now? (Account → AWS Regions in the console does the same)" || exit 1
+    in_aws "aws account enable-region --region us-east-1 --region-name $REGION"
+    ;&
+  ENABLING)
+    note "Waiting for $REGION to finish enabling: usually minutes, rarely hours. Ctrl-C and re-running later is safe."
+    until [[ $(region_status) == ENABLED ]]; do sleep 20; done
+    say "${GREEN}✓${RESET} $REGION is enabled."
+    ;;
+  *) warn "Couldn't read $REGION's status. Check Account → AWS Regions shows it enabled before going on."
+     pause "Press Enter once $REGION is enabled" ;;
+esac
 write_env AWS_ACCOUNT_ID "$ACCOUNT"
 STATE_BUCKET=plateful-tfstate-$ACCOUNT
 export TF_STATE_BUCKET=$STATE_BUCKET
