@@ -1,5 +1,8 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
+// A deployed stack (E2E_BASE_URL) holds its own Collection, not the seed these tests read.
+test.skip(!!process.env.E2E_BASE_URL, "needs the local seed");
+
 // From the synthetic seed the e2e server loads (backend/src/recipes/seed.py).
 const recipeId = "01K7SEED000000000000000002";
 const recipeTitle = "Sesame Noodles with Crispy Tofu";

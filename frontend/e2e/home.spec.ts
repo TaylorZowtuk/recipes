@@ -7,5 +7,5 @@ test("the home page opens the Collection and shows the API's sync status", async
   await expect(page.getByRole("heading", { level: 1, name: "Collection" })).toBeVisible();
   // The Collection has a status line of its own.
   const syncStatus = page.getByRole("status").and(page.locator(".sync-status"));
-  await expect(syncStatus).toHaveText("Up to date · collection v8");
+  await expect(syncStatus).toHaveText(/^Up to date · collection v\d+$/);
 });

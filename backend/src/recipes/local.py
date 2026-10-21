@@ -15,7 +15,7 @@ from recipes.store import Store, create_table
 
 TABLE_NAME = "plateful-local"
 
-os.environ.setdefault("AWS_DEFAULT_REGION", "ca-west-1")
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
 
 
 def seeded_store() -> Store:

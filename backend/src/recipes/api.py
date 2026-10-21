@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from recipes.models import SCHEMA_VERSION, Card, KitchenSettings, Recipe, Ulid
@@ -112,10 +112,25 @@ async def no_store_by_default(
     return response
 
 
-def server_error(_request: Request, _exc: Exception) -> PlainTextResponse:
-    # Unhandled errors are answered outside every middleware, so this sets its own header:
-    # CloudFront would otherwise cache the 500 after DynamoDB has recovered.
-    return PlainTextResponse("Internal Server Error", status_code=500, headers=NO_STORE)
+async def noindex(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    # CloudFront skips viewer-response functions when the origin answers 400 or
+    # more, so the API marks its own responses. An unhandled exception never
+    # comes back through here: server_error marks its 500 instead.
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noindex"
+    return response
+
+
+def server_error(_request: Request, _exc: Exception) -> JSONResponse:
+    # Starlette sends this 500 from its outermost middleware, outside every other, so it sets its
+    # own headers: CloudFront would otherwise cache the 500 after DynamoDB has recovered.
+    return JSONResponse(
+        {"detail": "Internal Server Error"},
+        status_code=500,
+        headers={**NO_STORE, "X-Robots-Tag": "noindex"},
+    )
 
 
 def create_app(*, store: Callable[[], Store] = Store.from_env) -> FastAPI:
@@ -133,6 +148,7 @@ def create_app(*, store: Callable[[], Store] = Store.from_env) -> FastAPI:
     app = FastAPI(title="Plateful", lifespan=lifespan)
     app.include_router(router)
     app.middleware("http")(no_store_by_default)
+    app.middleware("http")(noindex)
     app.add_exception_handler(VersionConflict, version_conflict)
     app.add_exception_handler(Exception, server_error)
     return app

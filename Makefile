@@ -5,8 +5,9 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client dev shell clean gitleaks \
-	deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
+.PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke dev shell clean \
+	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf tf-test \
+	links api-drift sh-lint workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
 $(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
@@ -41,9 +42,16 @@ export HOST_GID := $(shell id -g)
 endif
 export GIT_COMMON_DIR := $(shell git rev-parse --path-format=absolute --git-common-dir)
 COMPOSE := docker compose
+# `make dev STAGING_PROFILE=…` names staging's buckets, which end in the account ID: STAGING_ACCOUNT_ID,
+# else AWS_ACCOUNT_ID from the setup wizard's .aws-setup.env, here or in the main checkout.
+STAGING_ACCOUNT_ID ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
+	sed -n "s/^AWS_ACCOUNT_ID='\{0,1\}\([0-9]\{12\}\)'\{0,1\}$$/\1/p" | head -n1)
+export STAGING_ACCOUNT_ID
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
 RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
+# The same, plus the AWS credentials in the caller's environment (compose.yaml's aws service).
+RUN_AWS = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build -T aws
 
 setup: ## Build the toolchain image, install dependencies and the pre-commit hook
 	$(COMPOSE) build tools
@@ -65,6 +73,18 @@ screenshots: ## Before/after screenshots for a UI PR (BASE=origin/main by defaul
 api-client: ## Regenerate the committed TypeScript API client from FastAPI's OpenAPI schema
 	$(RUN) make api-client
 
+lambda: ## Build the API's Lambda zip into backend/dist/lambda.zip
+	$(RUN) make lambda
+
+build: ## Build a release: the Lambda zip and the PWA bundle (frontend/dist) that `make deploy` ships
+	$(RUN) make build
+
+deploy: ## Apply STACK=staging|prod and upload its PWA bundle, with the AWS credentials in your env
+	$(RUN_AWS) make deploy STACK='$(STACK)'
+
+smoke: ## Check a deployed stack's responses through CloudFront (URL=https://<distribution domain>)
+	$(RUN) make smoke URL='$(URL)'
+
 dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
@@ -79,16 +99,20 @@ gitleaks: RUN_FLAGS := -T
 gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
 	@$(RUN) gitleaks stdin --redact --verbose --no-banner
 
+aws: # The setup wizard's way into AWS: run $$CMD in the toolchain with the AWS credentials in your env
+	@$(RUN_AWS) bash -c "$$CMD"
+
 else
 
-STACKS := $(wildcard infra/stacks/*)
+TF_ROOTS := infra/bootstrap $(wildcard infra/stacks/*)
 
 deps:
 	cd backend && uv sync --locked --quiet
 	cd frontend && pnpm install --frozen-lockfile --silent
 
 check: deps
-	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf links api-drift
+	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf tf-test links \
+		api-drift sh-lint workflows
 	@echo "make check: all passed"
 
 fix: deps
@@ -104,6 +128,21 @@ screenshots: deps
 
 api-client: deps
 	scripts/api-client.sh frontend/src/api/schema.ts
+
+lambda: deps
+	scripts/lambda.sh backend/dist/lambda.zip
+
+build: lambda
+	cd frontend && pnpm exec vite build
+
+# No deps: deploy runs only Terraform and the AWS CLI, on what `make build` already made.
+deploy: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+deploy:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	scripts/deploy.sh '$(STACK)'
+
+smoke:
+	scripts/smoke.sh '$(URL)'
 
 # The API on a seeded fake table (recipes.local), or on staging's with STAGING_PROFILE.
 dev-api:
@@ -123,13 +162,30 @@ ts-types:
 	cd frontend && pnpm exec tsc -p .
 ts-test:
 	cd frontend && pnpm exec vitest run
+tf: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
 tf:
 	terraform fmt -check -recursive infra
-	for s in $(STACKS); do \
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	for s in $(TF_ROOTS); do \
 		terraform -chdir=$$s init -backend=false -input=false >/dev/null && terraform -chdir=$$s validate -no-color || exit 1; \
 	done
+# infra/tests checks the modules and stacks offline, in its own root so it runs alongside tf.
+tf-test: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins-test
+tf-test:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	terraform -chdir=infra/tests init -backend=false -input=false >/dev/null
+	terraform -chdir=infra/tests test -no-color
 links:
 	lychee --offline --no-progress --include-fragments --exclude-path node_modules --exclude-path .venv --exclude-path .claude '**/*.md'
+# SC1087 is off: the wizard library at the top of scripts/aws-setup.sh writes `$$e[Enter …`, the
+# escape variable followed by a bracket, which shellcheck mistakes for an array index.
+sh-lint:
+	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
+	@# make and the workflows exec these directly, so git must record them as executable.
+	@bad=$$(git ls-files -s -- 'scripts/*.sh' | awk '$$1 != "100755" {print $$4}'); \
+	[ -z "$$bad" ] || { echo "Not executable (git update-index --chmod=+x): $$bad"; exit 1; }
+workflows:
+	actionlint
 api-drift:
 	tmp=$$(mktemp) && trap 'rm -f $$tmp' EXIT && scripts/api-client.sh $$tmp && \
 	diff -u frontend/src/api/schema.ts $$tmp || { echo "API client is stale: run make api-client"; exit 1; }

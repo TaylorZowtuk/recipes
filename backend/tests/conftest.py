@@ -20,7 +20,7 @@ TABLE_NAME = "plateful-test"
 @pytest.fixture
 def table(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """An empty table on fake AWS."""
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "ca-west-1")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
     with mock_aws():
         create_table(boto3.client("dynamodb"), TABLE_NAME)
         yield TABLE_NAME
