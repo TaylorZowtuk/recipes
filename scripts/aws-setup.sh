@@ -633,7 +633,7 @@ else
       { warn "[$STAGING_PROFILE] isn't a working staging-only key (see above). Fix it, then re-run."; exit 1; }
   fi
   printf '\n'
-  step "In another terminal: $MAKE_BIN dev STAGING_PROFILE=$STAGING_PROFILE"
+  step "In another terminal: $MAKE_BIN -C $PWD dev STAGING_PROFILE=$STAGING_PROFILE"
   step "Open http://localhost:5173 and check the page loads, then stop it with Ctrl-C."
   pause "Press Enter once make dev works against staging"
 fi
