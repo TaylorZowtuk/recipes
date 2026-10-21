@@ -1,5 +1,7 @@
 # Host on AWS behind the CloudFront Free plan, with FastAPI and React + Vite
 
+Superseded in part by [Run in us-west-2](2026-10-20-region-us-west-2.md): the region is now `us-west-2`. Everything else here stands.
+
 We host on the household's existing AWS account (legacy Free Tier, Always Free offers only) in `ca-west-1`, in preference to the all-Cloudflare stack that the hosting research ranked first. Lambda runs real CPython, which removes the Pyodide package limits and the 10 ms CPU budget that Python Workers would impose on scraping and ingredient parsing. It also avoids signing up for a new vendor. The cost is that AWS meters instead of stopping at its limits, so the stack is shaped to stay inside Always Free allowances and is guarded by an alarm and a kill switch (below). The backend is **FastAPI** and the frontend is **React + Vite** with `vite-plugin-pwa`, managed with **Terraform**.
 
 ## Shape

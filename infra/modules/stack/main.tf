@@ -33,8 +33,8 @@ variable "lambda_zip" {
 locals {
   # The runtime follows the Python the Lambda zip's wheels are built for (scripts/lambda.sh).
   lambda_runtime = "python${trimspace(file("${path.module}/../../../backend/.python-version"))}"
-  # The AWS Lambda Web Adapter layer for arm64 in ca-west-1, the stacks' region.
-  lwa_layer_arn = "arn:aws:lambda:ca-west-1:753240598075:layer:LambdaAdapterLayerArm64:30"
+  # The AWS Lambda Web Adapter layer for arm64, published under the same version in every region.
+  lwa_layer_arn = "arn:aws:lambda:${data.aws_region.current.region}:753240598075:layer:LambdaAdapterLayerArm64:30"
 }
 
 data "aws_caller_identity" "current" {}

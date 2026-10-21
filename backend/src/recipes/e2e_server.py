@@ -7,7 +7,7 @@ from moto import mock_aws
 
 
 def main() -> None:
-    os.environ.setdefault("AWS_DEFAULT_REGION", "ca-west-1")
+    os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
     with mock_aws():
         # Seed data goes here, into moto's fake table, once the table exists.
         uvicorn.run("recipes.api:app", host="127.0.0.1", port=8787)
