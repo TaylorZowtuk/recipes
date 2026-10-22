@@ -22,6 +22,8 @@ variables {
   subject_prefix    = "repo:owner@1/repo@2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
   state_bucket      = "plateful-tfstate-123456789012"
+  # Synthetic: the account's spend alarm topic from infra/modules/spend-alarm.
+  spend_alarm_topic_arn = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
 }
 
 run "deploy_policy" {
@@ -141,5 +143,70 @@ run "deploy_policy" {
   assert {
     condition     = toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).State.Action])) == toset(["s3:GetObject", "s3:PutObject"])
     error_message = "The deploy role reads and writes its state key, and never deletes it."
+  }
+  # The kill switch: the stack's own kill-switch role carries the boundary, so the boundary must
+  # let it throttle the stack's API, and only that.
+  assert {
+    condition = (
+      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).KillSwitch.Action])) ==
+      toset(["lambda:PutFunctionConcurrency", "lambda:GetFunctionConcurrency"]) &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).KillSwitch.Resource == "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-api"
+    )
+    error_message = "The boundary lets the stack's roles set the concurrency of the stack's API function and no other."
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-api"))])
+    )])
+    error_message = "No boundary statement reaches the other stack's API function."
+  }
+  assert {
+    condition = toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Function.Resource])) == toset([
+      "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-*",
+      "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-*:*",
+    ])
+    error_message = "The deploy role manages every function with the stack's prefix: the API and the kill switch."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Topic.Action]) == ["sns:*"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Topic.Resource == "arn:aws:sns:us-west-2:123456789012:plateful-staging-*"
+    )
+    error_message = "The deploy role manages SNS topics with the stack's prefix, in the stack's region."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Action]) == ["sns:Subscribe"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Resource == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm" &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Condition == { StringEquals = {
+        "sns:Protocol" = "lambda"
+        "sns:Endpoint" = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-kill-switch"
+      } }
+    )
+    error_message = "The deploy role may subscribe only the stack's kill-switch function to the account's spend alarm topic."
+  }
+  assert {
+    condition = (
+      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscription.Action])) == toset([
+        "sns:GetTopicAttributes", "sns:ListSubscriptionsByTopic",
+        "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Unsubscribe",
+      ]) &&
+      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscription.Resource])) == toset([
+        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm",
+        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm:*",
+      ])
+    )
+    error_message = "The deploy role reads the account's spend alarm topic and manages subscriptions to it, nothing more."
+  }
+  # Publishing to the account topic would trip every stack's kill switch, so no statement may
+  # grant it, wildcards included; nor change or delete the topic itself.
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"))]) &&
+      anytrue([for a in flatten([s.Action]) : anytrue([for op in ["publish", "deletetopic", "settopicattributes", "addpermission", "removepermission"] :
+        can(regex("^${replace(lower(a), "*", ".*")}$", "sns:${op}"))
+      ])])
+    )])
+    error_message = "No statement lets a stack publish to, reconfigure or delete the account's spend alarm topic."
   }
 }

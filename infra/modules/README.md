@@ -12,4 +12,5 @@ Terraform modules shared by [`stacks/prod`](../stacks/prod), [`stacks/staging`](
 | `origin-access` | A stack's three CloudFront OACs (api, pwa, images). Called from `bootstrap`, so the deploy roles need no OAC write access; each stack reads the IDs from bootstrap's state. |
 | `private-bucket` | An S3 bucket with public access blocked, SSE-S3 and optional versioning. |
 | `dev-user` | Staging's dev IAM user, with access to staging's data only. |
+| `spend-alarm` | The account's $1-a-month budget and billing alarm (in us-east-1) and the SNS topic they send to. Called from `bootstrap`. |
 | `github-deploy-role` | A stack's GitHub Actions OIDC deploy role and permissions boundary. Called from `bootstrap`, so a deploy can't widen its own permissions. |
