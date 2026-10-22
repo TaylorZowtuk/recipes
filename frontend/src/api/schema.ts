@@ -4,6 +4,43 @@
  */
 
 export interface paths {
+    "/api/collection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Collection */
+        get: operations["get_collection_api_collection_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipes/{recipe_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recipe
+         * @description A recipe at its version (`v`) and schema version (`s`), which make up its cache key.
+         */
+        get: operations["get_recipe_api_recipes__recipe_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sync": {
         parameters: {
             query?: never;
@@ -26,6 +63,216 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * Card
+         * @description A recipe's small summary for the Collection grid, kept up to date on every recipe write.
+         */
+        Card: {
+            difficulty: components["schemas"]["Difficulty"] | null;
+            /** Id */
+            id: string;
+            needs_review: components["schemas"]["NeedsReview"];
+            preview: components["schemas"]["Preview"] | null;
+            /** Recipe Version */
+            recipe_version: number;
+            /** Schema Version */
+            schema_version: number;
+            /** Site Name */
+            site_name: string | null;
+            /** Stated Seconds */
+            stated_seconds: number | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "awaiting_review" | "ready";
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /**
+         * Collection
+         * @description Everything a phone caches about the Collection, at one collection version.
+         */
+        Collection: {
+            /** Cards */
+            cards: components["schemas"]["Card"][];
+            /** Collection Version */
+            collection_version: number;
+            kitchen_settings: components["schemas"]["KitchenSettings"];
+        };
+        /** Difficulty */
+        Difficulty: {
+            /** Cleanup */
+            cleanup: number;
+            /** Cook */
+            cook: number;
+            /** Prep */
+            prep: number;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /** Image */
+        Image: {
+            /** Height */
+            height: number;
+            /** Id */
+            id: string;
+            /** Origin */
+            origin: string;
+            /** Width */
+            width: number;
+        };
+        /** IngredientLine */
+        IngredientLine: {
+            /** Component */
+            component: string | null;
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /** KitchenSettings */
+        KitchenSettings: {
+            /** Schema Version */
+            schema_version: number;
+            /** Store Categories */
+            store_categories: components["schemas"]["StoreCategory"][];
+            /** Version */
+            version: number;
+        };
+        /** NeedsReview */
+        NeedsReview: {
+            /** Open Issues */
+            open_issues: number;
+            /** Unconfirmed */
+            unconfirmed: number;
+        };
+        /**
+         * Original
+         * @description The recipe exactly as captured from its Source.
+         */
+        Original: {
+            /** Author */
+            author: string | null;
+            /** Description */
+            description: string | null;
+            /** Extractor */
+            extractor: string;
+            /** Ingredients */
+            ingredients: components["schemas"]["IngredientLine"][];
+            /** @default {} */
+            stated_times: components["schemas"]["StatedTimes"];
+            /** Steps */
+            steps: components["schemas"]["Step"][];
+            /** Title */
+            title: string;
+            yield: components["schemas"]["RecipeYield"] | null;
+        };
+        /** Preview */
+        Preview: {
+            /** Focal X */
+            focal_x: number;
+            /** Focal Y */
+            focal_y: number;
+            /** Image Id */
+            image_id: string;
+        };
+        /** Recipe */
+        Recipe: {
+            /** Dedupe Key */
+            dedupe_key: string;
+            difficulty: components["schemas"]["Difficulty"] | null;
+            /** Id */
+            id: string;
+            /**
+             * Images
+             * @default []
+             */
+            images: components["schemas"]["Image"][];
+            original: components["schemas"]["Original"];
+            preview: components["schemas"]["Preview"] | null;
+            /** Schema Version */
+            schema_version: number;
+            /** Source */
+            source: components["schemas"]["WebsiteSource"] | components["schemas"]["SpreadsheetSource"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "awaiting_review" | "ready";
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+            /** Version */
+            version: number;
+        };
+        /** RecipeYield */
+        RecipeYield: {
+            /** Servings */
+            servings: number | null;
+            /** Text */
+            text: string;
+            /** Unit */
+            unit: string | null;
+        };
+        /** SpreadsheetSource */
+        SpreadsheetSource: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /** Entry Name */
+            entry_name: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "spreadsheet";
+            /** Sheet Id */
+            sheet_id: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * StatedTime
+         * @description A Stated Time as written, with its seconds when the text could be read.
+         */
+        StatedTime: {
+            /** Seconds */
+            seconds: number | null;
+            /** Text */
+            text: string;
+        };
+        /** StatedTimes */
+        StatedTimes: {
+            cook: components["schemas"]["StatedTime"] | null;
+            prep: components["schemas"]["StatedTime"] | null;
+            total: components["schemas"]["StatedTime"] | null;
+        };
+        /** Step */
+        Step: {
+            /** Component */
+            component: string | null;
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /** StoreCategory */
+        StoreCategory: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
          * Sync
          * @description What a phone polls to learn whether its cached copy is stale.
          */
@@ -41,6 +288,36 @@ export interface components {
                 [key: string]: number;
             } | null;
         };
+        /** ValidationError */
+        ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+        };
+        /** WebsiteSource */
+        WebsiteSource: {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "website";
+            /** Site Name */
+            site_name: string;
+            /** Url */
+            url: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -50,6 +327,92 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_collection_api_collection_get: {
+        parameters: {
+            query?: {
+                v?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Collection"];
+                };
+            };
+            /** @description Not the current version: redirects to it */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recipe_api_recipes__recipe_id__get: {
+        parameters: {
+            query?: {
+                v?: number | null;
+                s?: number | null;
+            };
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Not the current version: redirects to it */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_sync_api_sync_get: {
         parameters: {
             query?: never;

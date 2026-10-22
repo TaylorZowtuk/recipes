@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router";
-import { api, type Sync } from "./api/client";
+import type { Sync } from "./api/client";
+import { loadSync } from "./collection";
 import { AccountIcon, FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
 import { syncStatus } from "./syncStatus";
 
@@ -21,10 +22,7 @@ export function Shell() {
 
   useEffect(() => {
     const show = (sync: Sync | null) => setStatus(syncStatus({ sync, online: navigator.onLine }));
-    api.GET("/api/sync").then(
-      ({ data }) => show(data ?? null),
-      () => show(null),
-    );
+    loadSync().then(show, () => show(null));
   }, []);
 
   // After each navigation, focus moves to the new screen's title, without scrolling the window, so
@@ -34,7 +32,7 @@ export function Shell() {
     if (shownKey.current === key) return;
     shownKey.current = key;
     if (navigationType === "REPLACE") return;
-    document.querySelector<HTMLElement>(".top-bar h1")?.focus({ preventScroll: true });
+    document.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
   }, [key, navigationType]);
 
   return (

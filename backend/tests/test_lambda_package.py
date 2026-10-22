@@ -9,8 +9,16 @@ import sys
 import time
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+import boto3
 import pytest
+from moto.server import ThreadedMotoServer
+
+from recipes.store import create_table
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 REPO = Path(__file__).resolve().parents[2]
 RUN_SH = REPO / "backend" / "lambda" / "run.sh"
@@ -33,13 +41,42 @@ def get(port: int, path: str) -> tuple[int, bytes]:
         conn.close()
 
 
-def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set() -> None:
+@pytest.fixture
+def dynamodb() -> Iterator[dict[str, str]]:
+    """A DynamoDB outside this process, on moto's server, holding an empty table shaped like a
+    stack's: the environment that points boto3 at it.
+    """
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=free_port())
+    server.start()
+    host, port = server.get_host_and_port()
+    env = {
+        "AWS_ENDPOINT_URL": f"http://{host}:{port}",
+        "AWS_ACCESS_KEY_ID": "testing",
+        "AWS_SECRET_ACCESS_KEY": "testing",
+        "AWS_DEFAULT_REGION": "us-west-2",
+        "TABLE_NAME": "plateful-test",
+    }
+    client = boto3.client(
+        "dynamodb",
+        endpoint_url=env["AWS_ENDPOINT_URL"],
+        region_name=env["AWS_DEFAULT_REGION"],
+        aws_access_key_id=env["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=env["AWS_SECRET_ACCESS_KEY"],
+    )
+    create_table(client, env["TABLE_NAME"])
+    yield env
+    server.stop()
+
+
+def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set(
+    dynamodb: dict[str, str],
+) -> None:
     port = free_port()
     env = {
         **os.environ,
+        **dynamodb,
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
         "PORT": str(port),
-        "TABLE_NAME": "plateful-test",
         "IMAGES_BUCKET": "plateful-test-images",
         "SSM_PREFIX": "/plateful/test/",
     }
@@ -56,6 +93,7 @@ def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set() -> None:
                 time.sleep(0.1)
         assert status == 200
         assert b'"schema_version":1' in body
+        assert b'"collection_version":1' in body, "the lifespan should bootstrap the empty table"
     finally:
         server.terminate()
         server.wait(timeout=10)

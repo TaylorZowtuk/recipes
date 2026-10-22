@@ -1,0 +1,409 @@
+"""The single DynamoDB table: recipes, their cards, Source guards, Kitchen settings and meta items.
+
+The API is the table's only writer. Every write to shared collection data bumps `META#collection`
+in the same transaction, and versioned items are written only if their version hasn't changed.
+"""
+
+import json
+import os
+import random
+import time
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any, cast
+
+import boto3
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from botocore.exceptions import ClientError
+
+from recipes.models import (
+    SCHEMA_VERSION,
+    Card,
+    CollectionMeta,
+    KitchenSettings,
+    Recipe,
+    SchemaMeta,
+    SourceGuard,
+    StoreCategory,
+    card_for,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from pydantic import BaseModel
+    from types_boto3_dynamodb import DynamoDBClient
+    from types_boto3_dynamodb.type_defs import QueryInputTypeDef, TransactWriteItemTypeDef
+
+# An item in DynamoDB's attribute-value form, e.g. {"PK": {"S": "CARD"}}.
+type Item = dict[str, Any]
+
+COLLECTION_KEY: Item = {"PK": {"S": "META#collection"}, "SK": {"S": "META"}}
+SCHEMA_KEY: Item = {"PK": {"S": "META#schema"}, "SK": {"S": "META"}}
+KITCHEN_KEY: Item = {"PK": {"S": "SETTINGS#kitchen"}, "SK": {"S": "SETTINGS"}}
+
+# The Store Categories a new stack starts with, in Grocery List order.
+STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy", "Frozen", "Bakery"]
+
+# How many times a transaction or a read is tried before giving up, and the first backoff.
+ATTEMPTS = 4
+BACKOFF_SECONDS = 0.05
+
+
+class VersionConflict(Exception):
+    """The item changed since it was read: reload and show the newer state."""
+
+
+class DuplicateSource(Exception):
+    """A recipe from this Source is already in the Collection."""
+
+
+class SchemaMismatch(RuntimeError):
+    """The table holds another schema version than this code handles."""
+
+
+class SchemaMissing(RuntimeError):
+    """`META#schema` is still missing after bootstrapping, so the table's version is unknown."""
+
+
+def recipe_key(recipe_id: str) -> Item:
+    return {"PK": {"S": f"RECIPE#{recipe_id}"}, "SK": {"S": "RECIPE"}}
+
+
+def card_key(recipe_id: str) -> Item:
+    return {"PK": {"S": "CARD"}, "SK": {"S": recipe_id}}
+
+
+def source_key(dedupe_key: str) -> Item:
+    return {"PK": {"S": f"SOURCE#{dedupe_key}"}, "SK": {"S": "SOURCE"}}
+
+
+_serializer = TypeSerializer()
+_deserializer = TypeDeserializer()
+
+
+def _to_item(model: BaseModel, key: Item) -> Item:
+    stored = getattr(model, "schema_version", None)
+    if stored != SCHEMA_VERSION:
+        msg = f"{key['PK']['S']} is at schema version {stored}, not {SCHEMA_VERSION}"
+        raise ValueError(msg)
+    # DynamoDB takes numbers as Decimal, never float.
+    document = json.loads(model.model_dump_json(), parse_float=Decimal)
+    return {**key, **{name: _serializer.serialize(value) for name, value in document.items()}}
+
+
+def _plain(value: object) -> object:
+    # DynamoDB returns every number as Decimal: whole ones become ints, the rest floats.
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in cast("dict[str, object]", value).items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in cast("list[object]", value)]
+    return value
+
+
+def _from_item[M: BaseModel](model: type[M], item: Item) -> M:
+    document = {
+        name: _deserializer.deserialize(value)
+        for name, value in item.items()
+        if name not in {"PK", "SK"}
+    }
+    return model.model_validate(_plain(document))
+
+
+def create_table(client: DynamoDBClient, name: str) -> None:
+    """Create the table on fake AWS. Terraform creates the real stacks' tables."""
+    client.create_table(
+        TableName=name,
+        KeySchema=[
+            {"AttributeName": "PK", "KeyType": "HASH"},
+            {"AttributeName": "SK", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "PK", "AttributeType": "S"},
+            {"AttributeName": "SK", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+
+def _backoff(attempt: int) -> float:
+    """A random delay up to twice the last, so racing writers spread out."""
+    return random.SystemRandom().uniform(0, BACKOFF_SECONDS * 2**attempt)
+
+
+class Store:
+    def __init__(
+        self,
+        table_name: str,
+        client: DynamoDBClient | None = None,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.table = table_name
+        self.client: DynamoDBClient = client or boto3.client("dynamodb")
+        self.sleep = sleep
+
+    @classmethod
+    def from_env(cls) -> Store:
+        return cls(os.environ["TABLE_NAME"])
+
+    # Bootstrap and schema
+
+    def bootstrap(self) -> None:
+        """Bootstrap a new stack, or check an existing one is at this code's schema version.
+
+        Raises SchemaMismatch if it isn't, so the API refuses to start.
+        """
+        stored = self.schema_version()
+        if stored is None:
+            self._create_stack()
+            stored = self._await_schema_version()
+        if stored != SCHEMA_VERSION:
+            msg = f"The table is at schema version {stored}, but this API handles {SCHEMA_VERSION}"
+            raise SchemaMismatch(msg)
+
+    def schema_version(self) -> int | None:
+        item = self._get(SCHEMA_KEY, consistent=True)
+        return None if item is None else _from_item(SchemaMeta, item).schema_version
+
+    def collection_version(self) -> int:
+        return _from_item(CollectionMeta, self._get_bootstrapped(COLLECTION_KEY)).collection_version
+
+    def _create_stack(self) -> None:
+        settings = KitchenSettings(
+            schema_version=SCHEMA_VERSION,
+            version=1,
+            store_categories=[StoreCategory(id=n.lower(), name=n) for n in STORE_CATEGORIES],
+        )
+        # Creating the Kitchen settings is the collection's first write.
+        collection = CollectionMeta(schema_version=SCHEMA_VERSION, collection_version=1)
+        try:
+            self._transact(
+                [
+                    self._create(SchemaMeta(schema_version=SCHEMA_VERSION), SCHEMA_KEY),
+                    self._create(collection, COLLECTION_KEY),
+                    self._create(settings, KITCHEN_KEY),
+                ]
+            )
+        except VersionConflict:
+            pass  # another start kept winning the race, so it's bootstrapping the stack
+        except _Cancelled as cancelled:
+            # Another start bootstrapped the stack first, or is doing so now.
+            if not cancelled.reasons <= {"ConditionalCheckFailed", "TransactionConflict"}:
+                raise
+
+    def _await_schema_version(self) -> int:
+        """`META#schema` once some start's bootstrap has written it, which may take a moment."""
+        for attempt in range(ATTEMPTS):
+            stored = self.schema_version()
+            if stored is not None:
+                return stored
+            if attempt < ATTEMPTS - 1:
+                self.sleep(_backoff(attempt))
+        msg = "META#schema is still missing after bootstrapping"
+        raise SchemaMissing(msg)
+
+    # Recipes and their cards
+
+    def add_recipe(self, recipe: Recipe) -> Recipe:
+        """Add a new recipe at version 1, with its card and its Source guard."""
+        added = recipe.model_copy(update={"version": 1})
+        guard = self._guard_source(added)
+        try:
+            self._transact(
+                [
+                    guard,
+                    self._create(added, recipe_key(added.id)),
+                    self._put_card(added),
+                    self._bump_collection(),
+                ]
+            )
+        except _Cancelled as cancelled:
+            if cancelled.failed(guard):
+                raise DuplicateSource(added.dedupe_key) from None
+            raise
+        return added
+
+    def update_recipe(self, recipe: Recipe) -> Recipe:
+        """Write the recipe and its card if the stored recipe is still at `recipe.version`.
+
+        A changed `dedupe_key` would strand its Source guard, so it's refused as a VersionConflict.
+        """
+        return self._save_versioned(
+            recipe,
+            recipe_key(recipe.id),
+            shared=True,
+            also=lambda saved: [self._put_card(saved)],
+            unchanged=("dedupe_key",),
+        )
+
+    def get_recipe(self, recipe_id: str) -> Recipe | None:
+        # Consistent, like the card that names the version a phone asks for.
+        item = self._get(recipe_key(recipe_id), consistent=True)
+        return None if item is None else _from_item(Recipe, item)
+
+    def cards(self, page_size: int | None = None) -> list[Card]:
+        """Every card, in id order, read consistently so none is older than the counter.
+
+        `page_size` lets tests force several pages.
+        """
+        query: QueryInputTypeDef = {
+            "TableName": self.table,
+            "KeyConditionExpression": "PK = :card",
+            "ExpressionAttributeValues": {":card": {"S": "CARD"}},
+            "ConsistentRead": True,
+        }
+        if page_size:
+            query["Limit"] = page_size
+        cards: list[Card] = []
+        while True:
+            page = self.client.query(**query)
+            cards += [_from_item(Card, item) for item in page.get("Items", [])]
+            if "LastEvaluatedKey" not in page:
+                return cards
+            query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    # Kitchen settings
+
+    def kitchen_settings(self) -> KitchenSettings:
+        return _from_item(KitchenSettings, self._get_bootstrapped(KITCHEN_KEY))
+
+    def save_kitchen_settings(self, settings: KitchenSettings) -> KitchenSettings:
+        """Write the settings if the stored ones are still at `settings.version`."""
+        return self._save_versioned(settings, KITCHEN_KEY, shared=True)
+
+    # Building blocks
+
+    def _save_versioned[M: Recipe | KitchenSettings](
+        self,
+        model: M,
+        key: Item,
+        *,
+        shared: bool,
+        also: Callable[[M], Iterable[TransactWriteItemTypeDef]] = lambda _: (),
+        unchanged: Iterable[str] = (),
+    ) -> M:
+        """Write `model` at its next version if the stored item is still at `model.version`, and
+        hasn't changed its `unchanged` fields. `also` builds the writes that go with it, and
+        `shared` bumps `META#collection`, as every write to shared collection data must.
+
+        Raises VersionConflict otherwise.
+        """
+        saved = model.model_copy(update={"version": model.version + 1})
+        versioned = self._replace(saved, key, model.version, unchanged)
+        items = [versioned, *also(saved)]
+        if shared:
+            items.append(self._bump_collection())
+        try:
+            self._transact(items)
+        except _Cancelled as cancelled:
+            if cancelled.failed(versioned):
+                raise VersionConflict(key["PK"]["S"]) from None
+            raise
+        return saved
+
+    def _get(self, key: Item, *, consistent: bool = False) -> Item | None:
+        response = self.client.get_item(TableName=self.table, Key=key, ConsistentRead=consistent)
+        return response.get("Item")
+
+    def _get_bootstrapped(self, key: Item) -> Item:
+        item = self._get(key, consistent=True)
+        if item is None:
+            msg = f"{key['PK']['S']} is missing: the table hasn't been bootstrapped"
+            raise LookupError(msg)
+        return item
+
+    def _create(self, model: BaseModel, key: Item) -> TransactWriteItemTypeDef:
+        return {
+            "Put": {
+                "TableName": self.table,
+                "Item": _to_item(model, key),
+                "ConditionExpression": "attribute_not_exists(PK)",
+            }
+        }
+
+    def _replace(
+        self, model: BaseModel, key: Item, expected: int, unchanged: Iterable[str] = ()
+    ) -> TransactWriteItemTypeDef:
+        item = _to_item(model, key)
+        # Placeholders, as a field name may be a DynamoDB reserved word such as `status`.
+        fields = list(unchanged)
+        names = {"#version": "version", **{f"#u{n}": name for n, name in enumerate(fields)}}
+        conditions = ["#version = :expected", *(f"#u{n} = :u{n}" for n in range(len(fields)))]
+        return {
+            "Put": {
+                "TableName": self.table,
+                "Item": item,
+                "ConditionExpression": " AND ".join(conditions),
+                "ExpressionAttributeNames": names,
+                "ExpressionAttributeValues": {
+                    ":expected": {"N": str(expected)},
+                    **{f":u{n}": item[name] for n, name in enumerate(fields)},
+                },
+            }
+        }
+
+    def _guard_source(self, recipe: Recipe) -> TransactWriteItemTypeDef:
+        """Claim the recipe's Source, so a second recipe from it is refused."""
+        guard = SourceGuard(schema_version=recipe.schema_version, recipe_id=recipe.id)
+        return self._create(guard, source_key(recipe.dedupe_key))
+
+    def _put_card(self, recipe: Recipe) -> TransactWriteItemTypeDef:
+        item = _to_item(card_for(recipe), card_key(recipe.id))
+        return {"Put": {"TableName": self.table, "Item": item}}
+
+    def _bump_collection(self) -> TransactWriteItemTypeDef:
+        return {
+            "Update": {
+                "TableName": self.table,
+                "Key": COLLECTION_KEY,
+                "UpdateExpression": "ADD collection_version :one",
+                "ConditionExpression": "attribute_exists(PK)",
+                "ExpressionAttributeValues": {":one": {"N": "1"}},
+            }
+        }
+
+    def _transact(self, items: list[TransactWriteItemTypeDef]) -> None:
+        """Write `items` in one transaction, retrying while it only conflicts with another one.
+
+        The conditions still guard a retry against staleness. Raises VersionConflict once the
+        retries are spent, and _Cancelled for any other cancellation.
+        """
+        for attempt in range(ATTEMPTS):
+            try:
+                self.client.transact_write_items(TransactItems=items)
+            except ClientError as error:
+                if error.response.get("Error", {}).get("Code") != "TransactionCanceledException":
+                    raise
+                reasons = cast(
+                    "list[dict[str, Any]]", error.response.get("CancellationReasons", [])
+                )
+                cancelled = _Cancelled(items, [reason.get("Code") for reason in reasons])
+                if cancelled.reasons != {"TransactionConflict"}:
+                    raise cancelled from error
+                if attempt == ATTEMPTS - 1:
+                    msg = "The transaction kept conflicting with another write"
+                    raise VersionConflict(msg) from error
+                self.sleep(_backoff(attempt))
+            else:
+                return
+
+
+class _Cancelled(Exception):
+    """A transaction DynamoDB cancelled, with each item's reason in order."""
+
+    def __init__(self, items: list[TransactWriteItemTypeDef], codes: list[str | None]) -> None:
+        super().__init__(codes)
+        self.items = items
+        self.codes = codes
+
+    @property
+    def reasons(self) -> set[str]:
+        """The reasons of the items that failed. DynamoDB gives the others the code "None"."""
+        return {code for code in self.codes if code is not None and code != "None"}
+
+    def failed(self, item: TransactWriteItemTypeDef) -> bool:
+        """Whether `item`'s condition failed."""
+        index = next(n for n, each in enumerate(self.items) if each is item)
+        return len(self.codes) > index and self.codes[index] == "ConditionalCheckFailed"
