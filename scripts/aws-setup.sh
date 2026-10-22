@@ -326,9 +326,18 @@ bootstrap_step1() {
     return 0
   elif in_aws "aws s3api head-bucket --bucket $STATE_BUCKET" >/dev/null 2>&1; then
     say "${GREEN}✓${RESET} $STATE_BUCKET already exists, so the account is bootstrapped."
-    if confirm "Apply infra/bootstrap again from its S3 state, to pick up changes?"; then
-      in_aws "terraform -chdir=$dir init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET && terraform -chdir=$dir apply"
-    fi
+    say "Checking infra/bootstrap against its S3 state, so a re-run applies anything this checkout added."
+    # make exits 2 for any failure, so the plan's own exit code comes back on stdout.
+    local rc
+    rc=$(in_aws "terraform -chdir=$dir init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET >/dev/null &&
+      { terraform -chdir=$dir plan -input=false -detailed-exitcode -no-color >/dev/null; echo \$?; }") || true
+    case $rc in
+      0) say "${GREEN}✓${RESET} infra/bootstrap is up to date." ;;
+      2) say "infra/bootstrap has changes to apply (for example new deploy-role grants or the spend alarm)."
+         step "Read the plan Terraform prints, then type yes to apply it."
+         in_aws "terraform -chdir=$dir apply" || { warn "The apply failed (see above). Fix it, then re-run."; exit 1; } ;;
+      *) warn "Terraform couldn't plan infra/bootstrap (its error is above). Fix it, then re-run."; exit 1 ;;
+    esac
     return 0
   fi
   step "Read the plan Terraform prints, then type yes to apply it."
@@ -357,7 +366,7 @@ verify_dev_profile() {
   if [[ -n ${TABLE_prod:-} && -n ${IMAGES_prod:-} ]]; then expected=6
   else
     warn "prod isn't deployed, so this can't check the key is denied prod's stores."
-    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 11 once prod is deployed")
+    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 14 once prod is deployed")
   fi
   while IFS=$'\t' read -r label want got; do
     n=$((n + 1))
@@ -395,7 +404,7 @@ verify_dev_profile() {
 
 run_wizard() {
 
-TOTAL_STAGES=13
+TOTAL_STAGES=16
 ENV_FILE=.aws-setup.env
 
 cd "$(git rev-parse --show-toplevel)"
@@ -425,7 +434,7 @@ printf '\n'
 say "${BOLD}Either${RESET} IAM Identity Center: open your AWS access portal, pick the account and"
 step "your admin role → Access keys, and copy AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN."
 say "${BOLD}Or${RESET}, without Identity Center: IAM → Users → your admin user → Security credentials"
-step "→ Create access key → Command Line Interface. Stage 13 has you delete it again."
+step "→ Create access key → Command Line Interface. Stage 16 has you delete it again."
 open_url "https://console.aws.amazon.com/iam/home?region=$REGION#/security_credentials"
 printf '\n'
 ask_secret AWS_ACCESS_KEY_ID "AWS_ACCESS_KEY_ID (hidden):"
@@ -475,11 +484,12 @@ export TF_STATE_BUCKET=$STATE_BUCKET
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "Bootstrap, step 1: apply with local state"
-say "infra/bootstrap makes the Terraform state bucket ($STATE_BUCKET), GitHub's OIDC provider, and"
-say "each stack's deploy role, permissions boundary and three CloudFront OACs (api, pwa, images)."
-say "The stacks read their OAC IDs from bootstrap's state, so bootstrap must be applied before the"
-say "first deploy. The bucket must exist before state can live in it, so the first apply keeps its"
-say "state in a local file."
+say "infra/bootstrap makes the Terraform state bucket ($STATE_BUCKET), GitHub's OIDC provider, the"
+say "account's \$1 spend alarm, and each stack's deploy role, permissions boundary and three CloudFront"
+say "OACs (api, pwa, images). The stacks read their OAC IDs and the spend alarm topic from bootstrap's"
+say "state, so bootstrap must be applied before the first deploy, and again whenever it changes."
+say "The bucket must exist before state can live in it, so the first apply keeps its state in a"
+say "local file."
 printf '\n'
 # The deploy roles trust only the OIDC subject bootstrap names, so it must be the one GitHub sends.
 want=$(gh api "repos/$REPO_SLUG/actions/oidc/customization/sub" --jq '.sub_claim_prefix // empty' 2>/dev/null || true)
@@ -510,6 +520,109 @@ fi
 pause
 
 # ── 5 ─────────────────────────────────────────────────────────────────────
+stage "Lambda concurrency quota"
+say "Each stack's API reserves a few concurrent executions, which bounds spend while the spend alarm"
+say "lags. AWS keeps at least 100 unreserved for the rest of the account, so the account's limit must"
+say "cover 100 plus every stack's reservation. New accounts often start at 10."
+printf '\n'
+NEED=100
+for s in "${STACKS[@]}"; do
+  r=$(sed -n '/variable "api_reserved_concurrency"/,/^}/s/.*default *= *\([0-9][0-9]*\).*/\1/p' "infra/stacks/$s/main.tf")
+  [[ -n $r ]] || { warn "Couldn't read api_reserved_concurrency's default in infra/stacks/$s/main.tf."; exit 1; }
+  NEED=$((NEED + r))
+done
+LIMIT=$(in_aws "aws lambda get-account-settings --region $REGION --query AccountLimit.ConcurrentExecutions --output text")
+if ((LIMIT >= NEED)); then
+  say "${GREEN}✓${RESET} $REGION allows $LIMIT concurrent executions; the stacks need $NEED."
+else
+  warn "$REGION allows only $LIMIT concurrent executions, and the stacks need $NEED: a deploy would fail."
+  quota="--region $REGION --service-code lambda --quota-code L-B99A9384"
+  OPEN=$(in_aws "aws service-quotas list-requested-service-quota-change-history-by-quota $quota --query \"RequestedQuotas[?Status=='PENDING' || Status=='CASE_OPENED'].DesiredValue | [0]\" --output text" 2>/dev/null || true)
+  if [[ -n $OPEN && $OPEN != None ]]; then
+    say "An increase to $OPEN is already requested. AWS usually answers within a day, by email."
+  else
+    say "Service Quotas can raise it: the usual value is 1000, which AWS normally grants within a day."
+    if confirm "Request an increase of Concurrent executions in $REGION to 1000 now?"; then
+      in_aws "aws service-quotas request-service-quota-increase $quota --desired-value 1000 --query RequestedQuota.Status --output text"
+    else
+      step "Service Quotas → AWS Lambda → Concurrent executions → Request increase at account level."
+    fi
+  fi
+  open_url "https://$REGION.console.aws.amazon.com/servicequotas/home/services/lambda/quotas/L-B99A9384"
+  say "Re-run this wizard once the new limit shows on that page."
+  exit 1
+fi
+pause
+
+# ── 6 ─────────────────────────────────────────────────────────────────────
+stage "Billing alerts"
+say "Bootstrap's spend alarm watches AWS/Billing EstimatedCharges in us-east-1. AWS publishes that"
+say "metric only once billing alerts are turned on, which only the console can do."
+printf '\n'
+if [[ -n $(in_aws 'aws cloudwatch list-metrics --region us-east-1 --namespace AWS/Billing --metric-name EstimatedCharges --query "Metrics[0].MetricName" --output text' 2>/dev/null | grep -vx None) ]]; then
+  say "${GREEN}✓${RESET} AWS already publishes EstimatedCharges, so billing alerts are on."
+else
+  open_url "https://us-east-1.console.aws.amazon.com/billing/home#/preferences"
+  step "Billing preferences → Alert preferences → Edit → tick Receive CloudWatch billing alerts → Update."
+  if confirm "Are CloudWatch billing alerts turned on?"; then
+    note "The metric can take a few hours to appear; until then the alarm shows Insufficient data."
+    note "The \$1 budget works without it."
+  else
+    SKIPPED+=("turn on CloudWatch billing alerts (Billing preferences), or the spend alarm never fires")
+  fi
+fi
+pause
+
+# ── 7 ─────────────────────────────────────────────────────────────────────
+stage "Spend alarm emails"
+say "The \$1 budget and the billing alarm publish to one SNS topic, which also trips each stack's kill"
+say "switch. Subscribe the household's email addresses to it, so you hear when that happens. The"
+say "addresses stay in SNS: they're never written to the repo, which is public."
+printf '\n'
+TOPIC=$(in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET >/dev/null &&
+  terraform -chdir=infra/bootstrap output -raw spend_alarm_topic_arn")
+# email_subs: one "address<TAB>subscription ARN" line per email subscription; a pending one's ARN
+# is PendingConfirmation.
+email_subs() {
+  in_aws "aws sns list-subscriptions-by-topic --region us-east-1 --topic-arn $TOPIC --query \"Subscriptions[?Protocol=='email'].[Endpoint,SubscriptionArn]\" --output text"
+}
+SUBS=$(email_subs)
+CONFIRMED=$(awk -F'\t' '$2 != "PendingConfirmation" { print $1 }' <<<"$SUBS")
+[[ -z $CONFIRMED ]] || say "${GREEN}✓${RESET} Already confirmed: $(paste -sd ' ' <<<"$CONFIRMED")"
+say "Addresses to add, separated by spaces (Enter for none). A pending one gets its email again."
+ask SPEND_EMAILS "Emails:" || SPEND_EMAILS=""
+for addr in $SPEND_EMAILS; do
+  if [[ ! $addr =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
+    warn "$addr doesn't look like an email address: skipped"
+  elif grep -qxF "$addr" <<<"$CONFIRMED"; then
+    say "${GREEN}✓${RESET} $addr is already confirmed."
+  else
+    in_aws "aws sns subscribe --region us-east-1 --topic-arn $TOPIC --protocol email --notification-endpoint $(printf %q "$addr") >/dev/null" &&
+      say "${GREEN}✓${RESET} subscribed $addr: AWS sent it a confirmation email."
+  fi
+done
+unset SPEND_EMAILS
+while true; do
+  SUBS=$(email_subs)
+  PENDING=$(awk -F'\t' '$2 == "PendingConfirmation" { print $1 }' <<<"$SUBS")
+  if [[ -z $SUBS ]]; then
+    warn "Nobody is subscribed, so a tripped kill switch would go unnoticed until the app says so."
+    SKIPPED+=("subscribe the household's email to the spend alarm topic (stage 7)")
+    break
+  elif [[ -z $PENDING ]]; then
+    say "${GREEN}✓${RESET} Every address is confirmed: $(cut -f1 <<<"$SUBS" | paste -sd ' ')"
+    break
+  fi
+  step "Open the \"AWS Notification - Subscription Confirmation\" email at each of these and click"
+  step "Confirm subscription: $(paste -sd ' ' <<<"$PENDING")"
+  if ! confirm "Check again?"; then
+    SKIPPED+=("confirm the spend alarm emails (stage 7): $(paste -sd ' ' <<<"$PENDING")")
+    break
+  fi
+done
+pause
+
+# ── 8 ─────────────────────────────────────────────────────────────────────
 stage "GitHub environments: staging and prod"
 say "Each deploy job runs in its stack's environment, and only that environment can assume the"
 say "stack's role. Both deploy from main only. prod also gets you as its required reviewer (the"
@@ -522,7 +635,7 @@ say "${GREEN}✓${RESET} staging (branch main), and prod (reviewer $GH_LOGIN, br
 open_url "https://github.com/$REPO_SLUG/settings/environments"
 pause "Check both environments on that page, then press Enter"
 
-# ── 6 ─────────────────────────────────────────────────────────────────────
+# ── 9 ─────────────────────────────────────────────────────────────────────
 stage "GitHub environment variables"
 say "The deploy workflow reads these per environment. They're identifiers, not secrets."
 for s in "${STACKS[@]}"; do
@@ -532,10 +645,10 @@ for s in "${STACKS[@]}"; do
 done
 pause
 
-# ── 7 ─────────────────────────────────────────────────────────────────────
+# ── 10 ────────────────────────────────────────────────────────────────────
 stage "First deploy of both stacks"
 say "The Deploy workflow (.github/workflows/deploy.yml) makes each stack on its first run: staging,"
-say "then staging's smoke checks and e2e, then prod once you approve it."
+say "then staging's smoke checks, e2e and kill switch test, then prod once you approve it."
 if load_outputs staging 2>/dev/null && load_outputs prod 2>/dev/null; then
   say "${GREEN}✓${RESET} Both stacks are already deployed."
 elif ! gh workflow view deploy.yml -R "$REPO_SLUG" >/dev/null 2>&1; then
@@ -546,7 +659,7 @@ elif confirm "Start a Deploy run on main now?"; then
   sleep 5
   RUN_ID=$(gh run list -R "$REPO_SLUG" --workflow deploy.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')
   open_url "https://github.com/$REPO_SLUG/actions/runs/$RUN_ID"
-  step "When the staging job passes (deploy, smoke and e2e), click Review deployments → prod → Approve and deploy."
+  step "When the staging job passes (deploy, smoke, e2e and the kill switch test), click Review deployments → prod → Approve and deploy."
   if gh run watch "$RUN_ID" -R "$REPO_SLUG" --exit-status; then
     say "${GREEN}✓${RESET} Both stacks are deployed."
   else
@@ -562,13 +675,13 @@ elif confirm "Start a Deploy run on main now?"; then
 fi
 pause
 
-# ── 8 ─────────────────────────────────────────────────────────────────────
+# ── 11 ────────────────────────────────────────────────────────────────────
 stage "CloudFront Free plan, per distribution"
 say "Each distribution goes on the flat-rate Free plan (\$0, no overage). The subscription takes the"
 say "distribution and its web ACL. The account may hold three Free plan distributions."
 SUBSCRIBED=$(in_aws 'aws pricing-plan-manager list-subscriptions --region us-east-1 --query "subscriptionSummaries[].resourceArns[]" --output text' || true)
 for s in "${STACKS[@]}"; do
-  if ! load_outputs "$s"; then warn "$s isn't deployed yet: re-run after stage 7."; continue; fi
+  if ! load_outputs "$s"; then warn "$s isn't deployed yet: re-run after stage 10."; continue; fi
   dist_var=DIST_ARN_$s acl_var=ACL_ARN_$s domain_var=DOMAIN_$s
   dist=${!dist_var} acl=${!acl_var}
   if [[ $SUBSCRIBED == *"$dist"* ]]; then
@@ -586,21 +699,21 @@ done
 open_url "https://console.aws.amazon.com/cloudfront/v4/home#/distributions"
 pause "Check each distribution shows the Free plan, then press Enter"
 
-# ── 9 ─────────────────────────────────────────────────────────────────────
+# ── 12 ────────────────────────────────────────────────────────────────────
 stage "Staging secrets"
 stack_secrets staging
 pause
 
-# ── 10 ────────────────────────────────────────────────────────────────────
+# ── 13 ────────────────────────────────────────────────────────────────────
 stage "Prod secrets"
 stack_secrets prod
 pause
 
-# ── 11 ────────────────────────────────────────────────────────────────────
+# ── 14 ────────────────────────────────────────────────────────────────────
 stage "Staging dev profile for make dev"
 if ! load_outputs staging || [[ -z ${DEV_USER:-} ]]; then
-  warn "staging isn't deployed with its dev user yet: re-run after stage 7."
-  SKIPPED+=("staging dev profile (stage 11)")
+  warn "staging isn't deployed with its dev user yet: re-run after stage 10."
+  SKIPPED+=("staging dev profile (stage 14)")
 else
   load_outputs prod || true
   say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
@@ -638,7 +751,7 @@ else
   pause "Press Enter once make dev works against staging"
 fi
 
-# ── 12 ────────────────────────────────────────────────────────────────────
+# ── 15 ────────────────────────────────────────────────────────────────────
 stage "Check both URLs"
 for s in "${STACKS[@]}"; do
   if ! load_outputs "$s"; then warn "$s isn't deployed yet."; SKIPPED+=("deploy $s"); continue; fi
@@ -651,7 +764,7 @@ done
 step "Open both URLs on a phone too. Staging's is for checks before a release."
 pause
 
-# ── 13 ────────────────────────────────────────────────────────────────────
+# ── 16 ────────────────────────────────────────────────────────────────────
 stage "Put the admin credentials away"
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN TF_STATE_BUCKET
 if [[ $USED_ACCESS_KEY == yes ]]; then
