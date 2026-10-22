@@ -88,8 +88,6 @@ module "deploy_role" {
   subject_prefix    = var.github_subject_prefix
   oidc_provider_arn = aws_iam_openid_connect_provider.github.arn
   state_bucket      = module.state.name
-
-  spend_alarm_topic_arn = module.spend_alarm.topic_arn
 }
 
 module "access" {
@@ -106,12 +104,14 @@ module "origin_access" {
   names    = module.access[each.key].oac_names
 }
 
-# The account-wide $1-a-month budget and billing alarm, and the topic each stack's kill switch
-# subscribes to.
+# The account-wide $1-a-month budget and billing alarm, and the topic they send to. Bootstrap, not
+# the stacks, subscribes each stack's kill switch to it, so no deploy role needs any grant on the
+# topic: SNS can't scope a subscription call to one stack's subscription.
 module "spend_alarm" {
-  source     = "../modules/spend-alarm"
-  providers  = { aws = aws.us_east_1 }
-  account_id = local.account_id
+  source           = "../modules/spend-alarm"
+  providers        = { aws = aws.us_east_1 }
+  account_id       = local.account_id
+  kill_switch_arns = { for s, m in module.access : s => m.kill_switch_arn }
 }
 
 output "state_bucket" {

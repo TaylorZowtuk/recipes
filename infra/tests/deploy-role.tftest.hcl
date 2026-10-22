@@ -22,8 +22,6 @@ variables {
   subject_prefix    = "repo:owner@1/repo@2"
   oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
   state_bucket      = "plateful-tfstate-123456789012"
-  # Synthetic: the account's spend alarm topic from infra/modules/spend-alarm.
-  spend_alarm_topic_arn = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
 }
 
 run "deploy_policy" {
@@ -174,39 +172,18 @@ run "deploy_policy" {
     )
     error_message = "The deploy role manages SNS topics with the stack's prefix, in the stack's region."
   }
-  assert {
-    condition = (
-      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Action]) == ["sns:Subscribe"] &&
-      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Resource == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm" &&
-      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscribe.Condition == { StringEquals = {
-        "sns:Protocol" = "lambda"
-        "sns:Endpoint" = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-kill-switch"
-      } }
-    )
-    error_message = "The deploy role may subscribe only the stack's kill-switch function to the account's spend alarm topic."
-  }
-  assert {
-    condition = (
-      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscription.Action])) == toset([
-        "sns:GetTopicAttributes", "sns:ListSubscriptionsByTopic",
-        "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Unsubscribe",
-      ]) &&
-      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).SpendAlarmSubscription.Resource])) == toset([
-        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm",
-        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm:*",
-      ])
-    )
-    error_message = "The deploy role reads the account's spend alarm topic and manages subscriptions to it, nothing more."
-  }
-  # Publishing to the account topic would trip every stack's kill switch, so no statement may
-  # grant it, wildcards included; nor change or delete the topic itself.
+  # The account's spend alarm topic and its subscriptions belong to infra/bootstrap. SNS can't scope
+  # a subscription call to one stack's subscription, so any grant there would let one stack
+  # unsubscribe the other's kill switch; publishing would trip every stack. No statement may grant
+  # any SNS action on the topic or a subscription to it, wildcards included.
   assert {
     condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
-      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"))]) &&
-      anytrue([for a in flatten([s.Action]) : anytrue([for op in ["publish", "deletetopic", "settopicattributes", "addpermission", "removepermission"] :
-        can(regex("^${replace(lower(a), "*", ".*")}$", "sns:${op}"))
-      ])])
+      anytrue([for r in flatten([s.Resource]) : anytrue([for arn in [
+        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm",
+        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm:0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+      ] : can(regex("^${replace(r, "*", ".*")}$", arn))])]) &&
+      anytrue([for a in flatten([s.Action]) : a == "*" || startswith(lower(a), "sns:")])
     )])
-    error_message = "No statement lets a stack publish to, reconfigure or delete the account's spend alarm topic."
+    error_message = "No deploy-role statement names the account's spend alarm topic or its subscriptions."
   }
 }

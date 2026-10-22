@@ -1,6 +1,6 @@
 # The account's $1-a-month spending guard (hosting ADR): an account-wide budget on actual cost and a
 # billing alarm on EstimatedCharges, both sending to one SNS topic that only the account, Budgets
-# and CloudWatch may publish to.
+# and CloudWatch may publish to, and each stack's kill-switch function subscribed to it.
 
 # A real but unauthenticated provider: aws_iam_policy_document renders locally, so the test checks
 # the topic policy SNS would get, and the overridden resources make no calls.
@@ -15,6 +15,10 @@ provider "aws" {
 
 variables {
   account_id = "123456789012"
+  kill_switch_arns = {
+    prod    = "arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-kill-switch"
+    staging = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-kill-switch"
+  }
 }
 
 run "spend_alarm" {
@@ -36,6 +40,9 @@ run "spend_alarm" {
   }
   override_resource {
     target = aws_cloudwatch_metric_alarm.this
+  }
+  override_resource {
+    target = aws_sns_topic_subscription.kill_switch
   }
 
   assert {
@@ -80,6 +87,17 @@ run "spend_alarm" {
   assert {
     condition     = aws_cloudwatch_metric_alarm.this.alarm_actions == toset(["arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"])
     error_message = "The alarm sends to the topic."
+  }
+  assert {
+    condition = (
+      { for k, s in aws_sns_topic_subscription.kill_switch : k => s.endpoint } == {
+        prod    = "arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-kill-switch"
+        staging = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-kill-switch"
+      } &&
+      alltrue([for s in aws_sns_topic_subscription.kill_switch :
+      s.protocol == "lambda" && s.topic_arn == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"])
+    )
+    error_message = "Each stack's kill-switch function, and only those, is subscribed to the topic as a Lambda."
   }
   assert {
     condition = (

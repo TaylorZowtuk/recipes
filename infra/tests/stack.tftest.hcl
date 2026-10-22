@@ -202,11 +202,10 @@ run "kill_switch" {
   assert {
     condition = (
       aws_sns_topic_subscription.stack.topic_arn == "arn:aws:sns:us-west-2:123456789012:plateful-test-kill-switch" &&
-      aws_sns_topic_subscription.account.topic_arn == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm" &&
-      alltrue([for s in [aws_sns_topic_subscription.stack, aws_sns_topic_subscription.account] :
-      s.protocol == "lambda" && s.endpoint == "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-kill-switch"])
+      aws_sns_topic_subscription.stack.protocol == "lambda" &&
+      aws_sns_topic_subscription.stack.endpoint == "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-kill-switch"
     )
-    error_message = "The kill switch is subscribed to both the stack's topic and the account's spend alarm topic."
+    error_message = "The kill switch is subscribed to the stack's topic; infra/bootstrap subscribes it to the account's."
   }
   assert {
     condition = (

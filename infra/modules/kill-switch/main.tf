@@ -1,14 +1,12 @@
 # A stack's kill switch: a Lambda that sets the API's reserved concurrency to 0 when either SNS
 # topic it is subscribed to gets a message (hosting ADR). The account's spend alarm topic (made by
-# infra/bootstrap, in us-east-1) trips every stack at once; the stack's own topic trips only this
-# one, for testing. The phones then show "Editing is paused." while the PWA and images keep serving.
+# infra/bootstrap, in us-east-1, which also subscribes this function to it) trips every stack at
+# once; the stack's own topic trips only this one, for testing. The phones then show "Editing is
+# paused." while the PWA and images keep serving.
 # Re-enabling is by hand, and `make deploy` must be told to keep a tripped switch tripped.
 terraform {
   required_providers {
-    aws = {
-      source                = "hashicorp/aws"
-      configuration_aliases = [aws.us_east_1]
-    }
+    aws = { source = "hashicorp/aws" }
   }
 }
 
@@ -124,6 +122,7 @@ locals {
   }
 }
 
+# infra/bootstrap's subscription to the account topic delivers only because of its permission here.
 resource "aws_lambda_permission" "sns" {
   for_each      = local.topic_arns
   statement_id  = "SnsInvoke-${each.key}"
@@ -135,15 +134,6 @@ resource "aws_lambda_permission" "sns" {
 
 resource "aws_sns_topic_subscription" "stack" {
   topic_arn  = aws_sns_topic.stack.arn
-  protocol   = "lambda"
-  endpoint   = aws_lambda_function.this.arn
-  depends_on = [aws_lambda_permission.sns]
-}
-
-# A subscription lives in its topic's region, so this one is made in us-east-1.
-resource "aws_sns_topic_subscription" "account" {
-  provider   = aws.us_east_1
-  topic_arn  = var.account_topic_arn
   protocol   = "lambda"
   endpoint   = aws_lambda_function.this.arn
   depends_on = [aws_lambda_permission.sns]

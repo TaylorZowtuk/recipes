@@ -95,11 +95,7 @@ module "api" {
 }
 
 module "kill_switch" {
-  source = "../kill-switch"
-  providers = {
-    aws           = aws
-    aws.us_east_1 = aws.us_east_1
-  }
+  source                   = "../kill-switch"
   name                     = module.access.kill_switch_name
   zip_path                 = var.lambda_zip
   runtime                  = local.lambda_runtime

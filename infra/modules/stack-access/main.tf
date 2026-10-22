@@ -128,6 +128,10 @@ output "kill_switch_name" {
   value = local.kill_switch_name
 }
 
+output "kill_switch_arn" {
+  value = "arn:aws:lambda:${var.region}:${var.account_id}:function:${local.kill_switch_name}"
+}
+
 output "boundary_name" {
   value = local.boundary_name
 }

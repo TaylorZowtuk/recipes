@@ -1,7 +1,7 @@
 # The account's $1-a-month spending guard (hosting ADR): an account-wide AWS Budget on actual cost
 # and a CloudWatch alarm on EstimatedCharges, both sending to one SNS topic. Billing metrics exist
-# only in us-east-1, so the caller passes a us-east-1 provider. Each stack subscribes its own
-# kill-switch function to the topic; the household's email addresses are subscribed by hand (see
+# only in us-east-1, so the caller passes a us-east-1 provider. Each stack's kill-switch function is
+# subscribed to the topic here; the household's email addresses are subscribed by hand (see
 # scripts/aws-setup.sh), because an email subscription stays pending until it is confirmed and
 # the repo is public.
 terraform {
@@ -12,6 +12,11 @@ terraform {
 
 variable "account_id" {
   type = string
+}
+
+variable "kill_switch_arns" {
+  description = "Each stack's kill-switch function ARN, by stack (modules/stack-access's kill_switch_arn)."
+  type        = map(string)
 }
 
 locals {
@@ -106,6 +111,16 @@ resource "aws_cloudwatch_metric_alarm" "this" {
   comparison_operator = "GreaterThanThreshold"
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.this.arn]
+}
+
+# SNS doesn't check a Lambda endpoint when subscribing, so this works before the stack has made its
+# function, and deliveries reach it once it exists. The stack's own aws_lambda_permission (sns
+# invoke, source_arn this topic) is what lets them through; until then they fail without retry.
+resource "aws_sns_topic_subscription" "kill_switch" {
+  for_each  = var.kill_switch_arns
+  topic_arn = aws_sns_topic.this.arn
+  protocol  = "lambda"
+  endpoint  = each.value
 }
 
 output "topic_arn" {

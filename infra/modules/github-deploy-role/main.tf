@@ -33,11 +33,6 @@ variable "state_bucket" {
   type = string
 }
 
-variable "spend_alarm_topic_arn" {
-  description = "The account's spend alarm topic (modules/spend-alarm), which the stack's kill switch subscribes to."
-  type        = string
-}
-
 module "access" {
   source     = "../stack-access"
   stack      = var.stack
@@ -50,8 +45,6 @@ locals {
   acct      = var.account_id
   region    = var.region
   state_key = "${var.stack}/terraform.tfstate"
-  # Made by the stack: the function the spend alarm invokes to throttle the stack's API.
-  kill_switch_arn = "arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-kill-switch"
 }
 
 # The boundary: the most any role or user the stack makes may ever do (its data, its logs, and
@@ -183,35 +176,6 @@ data "aws_iam_policy_document" "deploy" {
     sid       = "Topic"
     actions   = ["sns:*"]
     resources = ["arn:aws:sns:${local.region}:${local.acct}:${local.prefix}-*"]
-  }
-
-  # The account's spend alarm topic belongs to infra/bootstrap. A stack may only subscribe its own
-  # kill switch to it and manage that subscription; never publish, which would trip every stack.
-  statement {
-    sid       = "SpendAlarmSubscribe"
-    actions   = ["sns:Subscribe"]
-    resources = [var.spend_alarm_topic_arn]
-    condition {
-      test     = "StringEquals"
-      variable = "sns:Protocol"
-      values   = ["lambda"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "sns:Endpoint"
-      values   = [local.kill_switch_arn]
-    }
-  }
-
-  # IAM authorizes subscription calls against the topic, so both ARN forms are listed. Neither can
-  # be narrowed to this stack's own subscription.
-  statement {
-    sid = "SpendAlarmSubscription"
-    actions = [
-      "sns:GetTopicAttributes", "sns:ListSubscriptionsByTopic",
-      "sns:GetSubscriptionAttributes", "sns:SetSubscriptionAttributes", "sns:Unsubscribe",
-    ]
-    resources = [var.spend_alarm_topic_arn, "${var.spend_alarm_topic_arn}:*"]
   }
 
   statement {
