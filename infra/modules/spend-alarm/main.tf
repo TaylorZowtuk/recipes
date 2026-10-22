@@ -97,9 +97,10 @@ resource "aws_budgets_budget" "this" {
   }
 }
 
-# The month-to-date bill, which AWS publishes every few hours, so one 6-hour period is enough. A
-# period with no datapoint keeps the alarm's state, so a gap can't move it to OK and re-trip both
-# stacks on the next datapoint after a reset.
+# The month-to-date bill, which AWS publishes every few hours, so one 6-hour period is enough.
+# "ignore" keeps the alarm's state through a gap in billing data. "missing" would move it to
+# INSUFFICIENT_DATA once every period is empty, and the next datapoint over $1 would move it back
+# to ALARM and re-trip both stacks after a reset.
 resource "aws_cloudwatch_metric_alarm" "this" {
   alarm_name          = "plateful-spend-alarm"
   alarm_description   = "The account's estimated charges this month are over ${local.limit_usd} USD."
@@ -111,7 +112,7 @@ resource "aws_cloudwatch_metric_alarm" "this" {
   evaluation_periods  = 1
   threshold           = local.limit_usd
   comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "missing"
+  treat_missing_data  = "ignore"
   alarm_actions       = [aws_sns_topic.this.arn]
 }
 

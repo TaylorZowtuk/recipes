@@ -71,6 +71,7 @@ resource "aws_cloudwatch_log_group" "this" {
 # Only the API's concurrency, and its own logs.
 data "aws_iam_policy_document" "this" {
   statement {
+    sid       = "ApiConcurrency"
     actions   = ["lambda:PutFunctionConcurrency", "lambda:GetFunctionConcurrency"]
     resources = [var.api_function_arn]
   }
@@ -145,11 +146,14 @@ output "function_name" {
 }
 
 output "wiring" {
-  description = "The function's name, the API function it throttles and the topics that may invoke it, for infra/tests."
+  description = "The function's name, the API function it throttles, the functions its policy lets it throttle and the topics that may invoke it, for infra/tests."
   value = {
     function_name     = aws_lambda_function.this.function_name
     api_function_name = aws_lambda_function.this.environment[0].variables["API_FUNCTION_NAME"]
-    topic_arns        = { for k, p in aws_lambda_permission.sns : k => p.source_arn }
+    # Read from the policy document's statements, not the variable, since infra/tests mocks the JSON.
+    api_function_arns = flatten([for s in data.aws_iam_policy_document.this.statement : s.resources
+    if contains(s.actions, "lambda:PutFunctionConcurrency")])
+    topic_arns = { for k, p in aws_lambda_permission.sns : k => p.source_arn }
   }
 }
 

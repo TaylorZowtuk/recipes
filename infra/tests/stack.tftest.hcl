@@ -197,6 +197,10 @@ run "kill_switch" {
     error_message = "The kill switch runs the plain Python handler from the API's zip, aimed at the API."
   }
   assert {
+    condition     = output.wiring.api_function_arns == ["arn:aws:lambda:us-west-2:123456789012:function:plateful-test-api"]
+    error_message = "The kill switch may set the concurrency of the API's function only."
+  }
+  assert {
     condition     = aws_iam_role.this.permissions_boundary == "arn:aws:iam::123456789012:policy/plateful-test-boundary"
     error_message = "The kill switch's role carries the stack's permissions boundary."
   }
@@ -264,6 +268,11 @@ run "prod" {
       spend_alarm_topic_arn     = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
     } }
   }
+  override_resource {
+    target          = module.stack.module.api.aws_lambda_function.this
+    values          = { arn = "arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-api" }
+    override_during = plan
+  }
 
   assert {
     condition     = module.stack.table_capacity == { read = 10, write = 10 }
@@ -279,9 +288,10 @@ run "prod" {
   assert {
     condition = (
       module.stack.kill_switch.api_function_name == "plateful-prod-api" &&
-      module.stack.kill_switch.function_name == "plateful-prod-kill-switch" # the name bootstrap subscribes
+      module.stack.kill_switch.function_name == "plateful-prod-kill-switch" && # the name bootstrap subscribes
+      module.stack.kill_switch.api_function_arns == ["arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-api"]
     )
-    error_message = "Prod's kill switch, plateful-prod-kill-switch, throttles prod's API."
+    error_message = "Prod's kill switch, plateful-prod-kill-switch, throttles prod's API, and may set only its concurrency."
   }
   assert {
     condition     = module.stack.kill_switch.topic_arns["account"] == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
@@ -376,8 +386,9 @@ run "prod_tripped" {
   }
 }
 
-# Bootstrap subscribes each stack's kill switch to the account's spend alarm topic, at the ARN the
-# stack's kill-switch function gets: its name in the stack's region (both stacks are us-west-2).
+# Bootstrap subscribes each stack's kill switch to the account's spend alarm topic, at the ARN
+# stack-access builds for it (the region is mocked here; the wizard's check_kill_switches confirms
+# it on AWS).
 run "bootstrap" {
   command = plan
 

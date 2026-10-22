@@ -80,7 +80,7 @@ run "spend_alarm" {
       aws_cloudwatch_metric_alarm.this.evaluation_periods == 1 &&
       aws_cloudwatch_metric_alarm.this.threshold == 1 &&
       aws_cloudwatch_metric_alarm.this.comparison_operator == "GreaterThanThreshold" &&
-      aws_cloudwatch_metric_alarm.this.treat_missing_data == "missing"
+      aws_cloudwatch_metric_alarm.this.treat_missing_data == "ignore"
     )
     error_message = "The alarm fires when the account's estimated charges pass $1, and a gap in datapoints keeps its state."
   }
