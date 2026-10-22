@@ -1046,7 +1046,7 @@ dev = [
     { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
-    { name = "types-boto3-lite", extra = ["dynamodb"] },
+    { name = "types-boto3-lite", extra = ["dynamodb", "lambda"] },
 ]
 
 [package.metadata]
@@ -1063,7 +1063,7 @@ dev = [
     { name = "pyright", specifier = ">=1.1.414" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.10" },
-    { name = "types-boto3-lite", extras = ["dynamodb"], specifier = ">=1.43.114" },
+    { name = "types-boto3-lite", extras = ["dynamodb", "lambda"], specifier = ">=1.43.114" },
 ]
 
 [[package]]
@@ -1356,6 +1356,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-boto3-lambda"
+version = "1.43.114"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/0b/d07af3fc3a97494dc8d6cbecdbee574d1b274508163af3367a91e22f3187/types_boto3_lambda-1.43.114.tar.gz", hash = "sha256:6a14ccb7b99f3211bd4ea58b525c170d7d7cf98c32fbf94a8127bfe2fff004f9", size = 53274, upload-time = "2026-10-14T19:39:31.992Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/fd/f606094121200d09f0c0dd13b6fd35b0923ef13f6b4aa0809ccb0636c867/types_boto3_lambda-1.43.114-py3-none-any.whl", hash = "sha256:5cd5072d8cd52ae4584e9b541e882114b89c7ce7677a734d16bd8c270aa32978", size = 61699, upload-time = "2026-10-14T19:39:30.472Z" },
+]
+
+[[package]]
 name = "types-boto3-lite"
 version = "1.43.114"
 source = { registry = "https://pypi.org/simple" }
@@ -1371,6 +1380,9 @@ wheels = [
 [package.optional-dependencies]
 dynamodb = [
     { name = "types-boto3-dynamodb" },
+]
+lambda = [
+    { name = "types-boto3-lambda" },
 ]
 
 [[package]]

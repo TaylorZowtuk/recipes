@@ -28,6 +28,20 @@ output "function_name" {
   value = module.stack.function_name
 }
 
+output "api_function_name" {
+  value = module.stack.api_function_name
+}
+
+output "api_reserved_concurrency" {
+  description = "The value to restore the API's reserved concurrency to after the kill switch trips."
+  value       = module.stack.api_reserved_concurrency
+}
+
+output "kill_switch_topic_arn" {
+  description = "Publishing to this topic trips only this stack's kill switch."
+  value       = module.stack.kill_switch_topic_arn
+}
+
 output "table_name" {
   value = module.stack.table_name
 }

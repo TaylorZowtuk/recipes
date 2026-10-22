@@ -20,7 +20,7 @@ dev = [
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
-    "types-boto3-lite[dynamodb]>=1.43.114",
+    "types-boto3-lite[dynamodb,lambda]>=1.43.114",
 ]
 
 [tool.ruff]
