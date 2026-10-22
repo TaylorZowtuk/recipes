@@ -49,6 +49,12 @@ variable "lambda_zip" {
   default     = "../../../backend/dist/lambda.zip"
 }
 
+variable "api_reserved_concurrency" {
+  description = "The API's reserved concurrency. `make deploy` passes 0 while the kill switch is tripped, so a deploy doesn't undo it."
+  type        = number
+  default     = 3
+}
+
 module "stack" {
   source = "../../modules/stack"
   providers = {
@@ -60,6 +66,8 @@ module "stack" {
   write_capacity      = 5
   deletion_protection = false
   lambda_zip          = var.lambda_zip
+
+  api_reserved_concurrency = var.api_reserved_concurrency
 }
 
 # Staging only: the user behind `make dev STAGING_PROFILE=...`. Its access key is made by hand.

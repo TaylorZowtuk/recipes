@@ -1,7 +1,8 @@
 # The Free plan and capacity rules (hosting and stacks ADRs), checked offline against mock
 # providers: provisioned DynamoDB at the stacks' capacities, managed CloudFront policies only, at
 # most five behaviours, no distribution-wide error responses, noindex.js on every behaviour,
-# spa.js on the default one only, and the bootstrap-made OAC on every origin.
+# spa.js on the default one only, and the bootstrap-made OAC on every origin. Also the spend guard:
+# the API's reserved concurrency, the WAF rate limit and the kill switch's wiring.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -27,6 +28,12 @@ mock_provider "aws" {
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:mock" }
+  }
+  mock_resource "aws_lambda_function" {
+    defaults = { arn = "arn:aws:lambda:us-west-2:123456789012:function:mock" }
+  }
+  mock_resource "aws_sns_topic" {
+    defaults = { arn = "arn:aws:sns:us-west-2:123456789012:mock" }
   }
   mock_resource "aws_lambda_function_url" {
     defaults = { function_url = "https://abc.lambda-url.us-west-2.on.aws/" }
@@ -114,6 +121,104 @@ run "site" {
     )
     error_message = "Each origin is locked with its own bootstrap-made OAC."
   }
+  assert {
+    condition = (
+      length(aws_wafv2_web_acl.this.rule) == 1 &&
+      one(aws_wafv2_web_acl.this.rule[*].statement[0].rate_based_statement[0].limit) == 1000 &&
+      one(aws_wafv2_web_acl.this.rule[*].statement[0].rate_based_statement[0].evaluation_window_sec) == 300 &&
+      one(aws_wafv2_web_acl.this.rule[*].statement[0].rate_based_statement[0].aggregate_key_type) == "IP" &&
+      length(one(aws_wafv2_web_acl.this.rule[*].action[0].block)) == 1
+    )
+    error_message = "One WAF rule blocks an IP over 1,000 requests per 5 minutes, above the phones' 3 s sync poll."
+  }
+  assert {
+    condition     = length(aws_wafv2_web_acl.this.rule) <= 5
+    error_message = "The Free plan allows at most five WAF rules."
+  }
+}
+
+run "api" {
+  command = apply
+
+  module {
+    source = "../modules/api"
+  }
+
+  variables {
+    function_name            = "plateful-test-api"
+    zip_path                 = "main.tf"
+    runtime                  = "python3.14"
+    lwa_layer_arn            = "arn:aws:lambda:us-west-2:753240598075:layer:LambdaAdapterLayerArm64:30"
+    environment              = {}
+    data_policy_json         = "{}"
+    permissions_boundary_arn = "arn:aws:iam::123456789012:policy/plateful-test-boundary"
+    reserved_concurrency     = 3
+  }
+
+  assert {
+    condition     = aws_lambda_function.this.reserved_concurrent_executions == 3
+    error_message = "The API reserves, and is capped at, the given concurrency."
+  }
+}
+
+run "kill_switch" {
+  command = apply
+
+  module {
+    source = "../modules/kill-switch"
+  }
+
+  variables {
+    name                     = "plateful-test-kill-switch"
+    zip_path                 = "main.tf"
+    runtime                  = "python3.14"
+    api_function_name        = "plateful-test-api"
+    api_function_arn         = "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-api"
+    account_topic_arn        = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    permissions_boundary_arn = "arn:aws:iam::123456789012:policy/plateful-test-boundary"
+  }
+
+  override_resource {
+    target = aws_lambda_function.this
+    values = { arn = "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-kill-switch" }
+  }
+  override_resource {
+    target = aws_sns_topic.stack
+    values = { arn = "arn:aws:sns:us-west-2:123456789012:plateful-test-kill-switch" }
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.this.handler == "recipes.kill_switch.handler" &&
+      aws_lambda_function.this.layers == null &&
+      aws_lambda_function.this.environment[0].variables["API_FUNCTION_NAME"] == "plateful-test-api"
+    )
+    error_message = "The kill switch runs the plain Python handler from the API's zip, aimed at the API."
+  }
+  assert {
+    condition     = aws_iam_role.this.permissions_boundary == "arn:aws:iam::123456789012:policy/plateful-test-boundary"
+    error_message = "The kill switch's role carries the stack's permissions boundary."
+  }
+  assert {
+    condition = (
+      aws_sns_topic_subscription.stack.topic_arn == "arn:aws:sns:us-west-2:123456789012:plateful-test-kill-switch" &&
+      aws_sns_topic_subscription.account.topic_arn == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm" &&
+      alltrue([for s in [aws_sns_topic_subscription.stack, aws_sns_topic_subscription.account] :
+      s.protocol == "lambda" && s.endpoint == "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-kill-switch"])
+    )
+    error_message = "The kill switch is subscribed to both the stack's topic and the account's spend alarm topic."
+  }
+  assert {
+    condition = (
+      toset([for p in aws_lambda_permission.sns : p.source_arn]) == toset([
+        "arn:aws:sns:us-west-2:123456789012:plateful-test-kill-switch",
+        "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm",
+      ]) &&
+      alltrue([for p in aws_lambda_permission.sns :
+      p.principal == "sns.amazonaws.com" && p.action == "lambda:InvokeFunction" && p.function_name == "plateful-test-kill-switch"])
+    )
+    error_message = "Each topic, and only those, may invoke the kill switch."
+  }
 }
 
 run "store" {
@@ -154,12 +259,19 @@ run "prod" {
 
   override_data {
     target = module.stack.data.terraform_remote_state.bootstrap
-    values = { outputs = { origin_access_control_ids = { prod = { api = "A", pwa = "P", images = "I" } } } }
+    values = { outputs = {
+      origin_access_control_ids = { prod = { api = "A", pwa = "P", images = "I" } }
+      spend_alarm_topic_arn     = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    } }
   }
 
   assert {
     condition     = module.stack.table_capacity == { read = 10, write = 10 }
     error_message = "Prod's table is provisioned at 10 RCU and 10 WCU."
+  }
+  assert {
+    condition     = module.stack.api_reserved_concurrency == 3
+    error_message = "The API reserves 3 concurrent executions by default (hosting ADR)."
   }
 }
 
@@ -176,11 +288,41 @@ run "staging" {
 
   override_data {
     target = module.stack.data.terraform_remote_state.bootstrap
-    values = { outputs = { origin_access_control_ids = { staging = { api = "A", pwa = "P", images = "I" } } } }
+    values = { outputs = {
+      origin_access_control_ids = { staging = { api = "A", pwa = "P", images = "I" } }
+      spend_alarm_topic_arn     = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    } }
   }
 
   assert {
     condition     = module.stack.table_capacity == { read = 5, write = 5 }
     error_message = "Staging's table is provisioned at 5 RCU and 5 WCU, so both stacks stay within the free 25."
+  }
+}
+
+# A deploy while the kill switch is tripped passes 0, which must plan.
+run "staging_tripped" {
+  command = plan
+
+  module {
+    source = "../stacks/staging"
+  }
+
+  variables {
+    lambda_zip               = "main.tf"
+    api_reserved_concurrency = 0
+  }
+
+  override_data {
+    target = module.stack.data.terraform_remote_state.bootstrap
+    values = { outputs = {
+      origin_access_control_ids = { staging = { api = "A", pwa = "P", images = "I" } }
+      spend_alarm_topic_arn     = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    } }
+  }
+
+  assert {
+    condition     = module.stack.api_reserved_concurrency == 0
+    error_message = "api_reserved_concurrency = 0 reaches the stack."
   }
 }

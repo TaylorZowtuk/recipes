@@ -122,7 +122,12 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
 
     run_sh = infos["run.sh"]
     assert (run_sh.external_attr >> 16) & 0o777 == 0o755
-    for name in ("recipes/__init__.py", "recipes/api.py", "fastapi/__init__.py"):
+    for name in (
+        "recipes/__init__.py",
+        "recipes/api.py",
+        "recipes/kill_switch.py",
+        "fastapi/__init__.py",
+    ):
         assert name in infos
     assert "uvicorn/__init__.py" in infos
     assert any(

@@ -36,6 +36,11 @@ variable "timeout" {
   default = 30
 }
 
+variable "reserved_concurrency" {
+  description = "Concurrent executions reserved for, and the most allowed to, the API. Bounds spend while a spend alarm lags; the kill switch sets it to 0."
+  type        = number
+}
+
 variable "log_retention_days" {
   type    = number
   default = 14
@@ -108,6 +113,8 @@ resource "aws_lambda_function" "this" {
   memory_size      = var.memory_size
   timeout          = var.timeout
 
+  reserved_concurrent_executions = var.reserved_concurrency
+
   environment {
     variables = merge(var.environment, {
       AWS_LAMBDA_EXEC_WRAPPER = "/opt/bootstrap"
@@ -132,6 +139,10 @@ resource "aws_lambda_function_url" "this" {
 
 output "function_name" {
   value = aws_lambda_function.this.function_name
+}
+
+output "function_arn" {
+  value = aws_lambda_function.this.arn
 }
 
 output "function_url_domain" {

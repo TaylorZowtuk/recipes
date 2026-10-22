@@ -1,4 +1,4 @@
-# One whole stack: its data (store), the API and the CloudFront site. stacks/prod and
+# One whole stack: its data (store), the API, its kill switch and the CloudFront site. stacks/prod and
 # stacks/staging call this with their own values; infra/bootstrap must already have made the
 # stack's deploy role, permissions boundary and CloudFront OACs.
 terraform {
@@ -30,6 +30,16 @@ variable "lambda_zip" {
   type = string
 }
 
+variable "api_reserved_concurrency" {
+  description = "The API's reserved concurrency: the most it may run at once, which bounds spend while a spend alarm lags (hosting ADR). 0 keeps a tripped kill switch tripped."
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.api_reserved_concurrency >= 0 && var.api_reserved_concurrency <= 10
+    error_message = "api_reserved_concurrency must be between 0 and 10."
+  }
+}
+
 locals {
   # The runtime follows the Python the Lambda zip's wheels are built for (scripts/lambda.sh).
   lambda_runtime = "python${trimspace(file("${path.module}/../../../backend/.python-version"))}"
@@ -47,7 +57,8 @@ module "access" {
   region     = data.aws_region.current.region
 }
 
-# The stack's OACs belong to infra/bootstrap; their IDs come from its state.
+# The stack's OACs and the account's spend alarm topic belong to infra/bootstrap; their IDs come
+# from its state.
 data "terraform_remote_state" "bootstrap" {
   backend = "s3"
   config = {
@@ -75,11 +86,27 @@ module "api" {
   lwa_layer_arn            = local.lwa_layer_arn
   data_policy_json         = module.access.data_policy_json
   permissions_boundary_arn = module.access.boundary_arn
+  reserved_concurrency     = var.api_reserved_concurrency
   environment = {
     TABLE_NAME    = module.store.table_name
     IMAGES_BUCKET = module.store.images_bucket
     SSM_PREFIX    = module.store.ssm_prefix
   }
+}
+
+module "kill_switch" {
+  source = "../kill-switch"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+  name                     = module.access.kill_switch_name
+  zip_path                 = var.lambda_zip
+  runtime                  = local.lambda_runtime
+  api_function_name        = module.api.function_name
+  api_function_arn         = module.api.function_arn
+  account_topic_arn        = data.terraform_remote_state.bootstrap.outputs.spend_alarm_topic_arn
+  permissions_boundary_arn = module.access.boundary_arn
 }
 
 module "site" {
@@ -133,6 +160,19 @@ output "images_bucket" {
 
 output "function_name" {
   value = module.api.function_name
+}
+
+output "api_function_name" {
+  value = module.api.function_name
+}
+
+output "api_reserved_concurrency" {
+  description = "The API's configured reserved concurrency: the value to restore after a kill switch trips."
+  value       = var.api_reserved_concurrency
+}
+
+output "kill_switch_topic_arn" {
+  value = module.kill_switch.topic_arn
 }
 
 output "table_name" {
