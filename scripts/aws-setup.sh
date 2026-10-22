@@ -266,6 +266,41 @@ load_outputs() {
   [[ $s != staging ]] || DEV_USER=${v[5]}
 }
 
+# check_kill_switches STAGE: the account topic ($TOPIC) has a confirmed subscription for each
+# stack's kill switch and, once a stack is deployed, its kill switch lets that topic invoke it.
+# Without both a real spend alarm trips nothing, while the deploy's test, on the stack's own topic,
+# still passes.
+check_kill_switches() {
+  local s fn arn subs out
+  subs=$(in_aws "aws sns list-subscriptions-by-topic --region us-east-1 --topic-arn $TOPIC --query \"Subscriptions[?Protocol=='lambda'].[Endpoint,SubscriptionArn]\" --output text") || subs=""
+  for s in "${STACKS[@]}"; do
+    fn=plateful-$s-kill-switch
+    arn=arn:aws:lambda:$REGION:$ACCOUNT:function:$fn
+    if awk -F'\t' -v a="$arn" '$1 == a && $2 ~ /^arn:/ { f = 1 } END { exit !f }' <<<"$subs"; then
+      say "${GREEN}✓${RESET} The spend alarm topic delivers to $fn."
+    else
+      warn "The spend alarm topic has no confirmed subscription for $arn, so an alarm wouldn't trip $s."
+      say "Re-apply infra/bootstrap (stage 3) and check its spend_alarm module."
+      SKIPPED+=("subscribe $fn to the spend alarm topic (stage $1)")
+    fi
+    if ! out=$(in_aws "aws lambda get-function --region $REGION --function-name $fn --query Configuration.FunctionArn --output text 2>&1"); then
+      if [[ $out == *ResourceNotFoundException* ]]; then
+        note "$fn doesn't exist until $s's first deploy (stage 10): re-run then to check its invoke permission."
+      else
+        warn "couldn't read $fn: $out"
+        SKIPPED+=("check $fn's invoke permission (stage $1)")
+      fi
+    elif out=$(in_aws "aws lambda get-policy --region $REGION --function-name $fn --query Policy --output text" 2>/dev/null) &&
+      grep -qF "\"AWS:SourceArn\":\"$TOPIC\"" <<<"$out"; then
+      say "${GREEN}✓${RESET} $fn lets the spend alarm topic invoke it."
+    else
+      warn "$fn has no permission for $TOPIC to invoke it, so an alarm wouldn't trip $s."
+      say "Deploy $s again: its kill switch module adds that permission."
+      SKIPPED+=("give $fn its spend alarm topic permission (stage $1)")
+    fi
+  done
+}
+
 # param_version NAME prints the SSM parameter's version. Terraform writes version 1, a placeholder.
 param_version() { in_aws "aws ssm get-parameter --name $1 --query Parameter.Version --output text"; }
 
@@ -620,6 +655,9 @@ while true; do
     break
   fi
 done
+printf '\n'
+say "Each stack's kill switch must also be subscribed to the topic, and allowed to be invoked by it:"
+check_kill_switches 7
 pause
 
 # ── 8 ─────────────────────────────────────────────────────────────────────
@@ -761,6 +799,9 @@ for s in "${STACKS[@]}"; do
   "$MAKE_BIN" -s --no-print-directory smoke URL="$url" || SKIPPED+=("fix $s's smoke checks ($url)")
   open_url "$url/week"
 done
+printf '\n'
+say "The spend alarm topic and each stack's kill switch:"
+check_kill_switches 15
 step "Open both URLs on a phone too. Staging's is for checks before a release."
 pause
 
