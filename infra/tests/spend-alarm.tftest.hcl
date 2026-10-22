@@ -80,9 +80,9 @@ run "spend_alarm" {
       aws_cloudwatch_metric_alarm.this.evaluation_periods == 1 &&
       aws_cloudwatch_metric_alarm.this.threshold == 1 &&
       aws_cloudwatch_metric_alarm.this.comparison_operator == "GreaterThanThreshold" &&
-      aws_cloudwatch_metric_alarm.this.treat_missing_data == "notBreaching"
+      aws_cloudwatch_metric_alarm.this.treat_missing_data == "missing"
     )
-    error_message = "The alarm fires when the account's estimated charges pass $1."
+    error_message = "The alarm fires when the account's estimated charges pass $1, and a gap in datapoints keeps its state."
   }
   assert {
     condition     = aws_cloudwatch_metric_alarm.this.alarm_actions == toset(["arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"])

@@ -2,7 +2,8 @@
 # providers: provisioned DynamoDB at the stacks' capacities, managed CloudFront policies only, at
 # most five behaviours, no distribution-wide error responses, noindex.js on every behaviour,
 # spa.js on the default one only, and the bootstrap-made OAC on every origin. Also the spend guard:
-# the API's reserved concurrency, the WAF rate limit and the kill switch's wiring.
+# the API's reserved concurrency, the WAF rate limit, the kill switch's wiring in each stack, and
+# bootstrap's subscription of each stack's kill switch to the account's spend alarm topic.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -269,8 +270,22 @@ run "prod" {
     error_message = "Prod's table is provisioned at 10 RCU and 10 WCU."
   }
   assert {
-    condition     = module.stack.api_reserved_concurrency == 3
+    condition = (
+      module.stack.api_reserved_concurrency == 3 &&
+      module.stack.api_applied_reserved_concurrency == 3
+    )
     error_message = "The API reserves 3 concurrent executions by default (hosting ADR)."
+  }
+  assert {
+    condition = (
+      module.stack.kill_switch.api_function_name == "plateful-prod-api" &&
+      module.stack.kill_switch.function_name == "plateful-prod-kill-switch" # the name bootstrap subscribes
+    )
+    error_message = "Prod's kill switch, plateful-prod-kill-switch, throttles prod's API."
+  }
+  assert {
+    condition     = module.stack.kill_switch.topic_arns["account"] == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    error_message = "The account's spend alarm topic, from bootstrap's state, may invoke prod's kill switch."
   }
 }
 
@@ -297,9 +312,14 @@ run "staging" {
     condition     = module.stack.table_capacity == { read = 5, write = 5 }
     error_message = "Staging's table is provisioned at 5 RCU and 5 WCU, so both stacks stay within the free 25."
   }
+  assert {
+    condition     = module.stack.kill_switch.api_function_name == "plateful-staging-api"
+    error_message = "Staging's kill switch throttles staging's API."
+  }
 }
 
-# A deploy while the kill switch is tripped passes 0, which must plan.
+# A deploy while the kill switch is tripped (scripts/deploy.sh) keeps the API at 0, and still
+# reports the configured value for the reset to restore.
 run "staging_tripped" {
   command = plan
 
@@ -308,8 +328,8 @@ run "staging_tripped" {
   }
 
   variables {
-    lambda_zip               = "main.tf"
-    api_reserved_concurrency = 0
+    lambda_zip          = "main.tf"
+    kill_switch_tripped = true
   }
 
   override_data {
@@ -321,7 +341,57 @@ run "staging_tripped" {
   }
 
   assert {
-    condition     = module.stack.api_reserved_concurrency == 0
-    error_message = "api_reserved_concurrency = 0 reaches the stack."
+    condition     = module.stack.api_applied_reserved_concurrency == 0
+    error_message = "kill_switch_tripped = true keeps the API at 0 reserved concurrency."
+  }
+  assert {
+    condition     = module.stack.api_reserved_concurrency == 3
+    error_message = "The output stays the configured value while tripped, so the reset has something to restore."
+  }
+}
+
+run "prod_tripped" {
+  command = plan
+
+  module {
+    source = "../stacks/prod"
+  }
+
+  variables {
+    lambda_zip          = "main.tf"
+    kill_switch_tripped = true
+  }
+
+  override_data {
+    target = module.stack.data.terraform_remote_state.bootstrap
+    values = { outputs = {
+      origin_access_control_ids = { prod = { api = "A", pwa = "P", images = "I" } }
+      spend_alarm_topic_arn     = "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
+    } }
+  }
+
+  assert {
+    condition     = module.stack.api_applied_reserved_concurrency == 0 && module.stack.api_reserved_concurrency == 3
+    error_message = "Prod passes kill_switch_tripped through: the API stays at 0 and the output stays 3."
+  }
+}
+
+# Bootstrap subscribes each stack's kill switch to the account's spend alarm topic, at the ARN the
+# stack's kill-switch function gets: its name in the stack's region (both stacks are us-west-2).
+run "bootstrap" {
+  command = plan
+
+  module {
+    source = "../bootstrap"
+  }
+
+  assert {
+    condition = (
+      module.spend_alarm.kill_switch_endpoints == {
+        prod    = "arn:aws:lambda:us-west-2:123456789012:function:plateful-prod-kill-switch"
+        staging = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-kill-switch"
+      }
+    )
+    error_message = "Bootstrap subscribes both stacks' kill-switch functions, at their real ARNs, to the account topic."
   }
 }

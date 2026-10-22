@@ -3,7 +3,8 @@
 # infra/bootstrap, in us-east-1, which also subscribes this function to it) trips every stack at
 # once; the stack's own topic trips only this one, for testing. The phones then show "Editing is
 # paused." while the PWA and images keep serving.
-# Re-enabling is by hand, and `make deploy` must be told to keep a tripped switch tripped.
+# Re-enabling is by hand: scripts/deploy.sh keeps a tripped switch tripped (infra/AGENTS.md,
+# "Spend guard").
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws" }
@@ -141,6 +142,15 @@ resource "aws_sns_topic_subscription" "stack" {
 
 output "function_name" {
   value = aws_lambda_function.this.function_name
+}
+
+output "wiring" {
+  description = "The function's name, the API function it throttles and the topics that may invoke it, for infra/tests."
+  value = {
+    function_name     = aws_lambda_function.this.function_name
+    api_function_name = aws_lambda_function.this.environment[0].variables["API_FUNCTION_NAME"]
+    topic_arns        = { for k, p in aws_lambda_permission.sns : k => p.source_arn }
+  }
 }
 
 output "topic_arn" {

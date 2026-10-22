@@ -97,7 +97,9 @@ resource "aws_budgets_budget" "this" {
   }
 }
 
-# The month-to-date bill, which AWS publishes every few hours, so one 6-hour period is enough.
+# The month-to-date bill, which AWS publishes every few hours, so one 6-hour period is enough. A
+# period with no datapoint keeps the alarm's state, so a gap can't move it to OK and re-trip both
+# stacks on the next datapoint after a reset.
 resource "aws_cloudwatch_metric_alarm" "this" {
   alarm_name          = "plateful-spend-alarm"
   alarm_description   = "The account's estimated charges this month are over ${local.limit_usd} USD."
@@ -109,7 +111,7 @@ resource "aws_cloudwatch_metric_alarm" "this" {
   evaluation_periods  = 1
   threshold           = local.limit_usd
   comparison_operator = "GreaterThanThreshold"
-  treat_missing_data  = "notBreaching"
+  treat_missing_data  = "missing"
   alarm_actions       = [aws_sns_topic.this.arn]
 }
 
@@ -125,4 +127,9 @@ resource "aws_sns_topic_subscription" "kill_switch" {
 
 output "topic_arn" {
   value = aws_sns_topic.this.arn
+}
+
+output "kill_switch_endpoints" {
+  description = "Each stack's subscribed kill-switch ARN, for infra/tests."
+  value       = { for k, s in aws_sns_topic_subscription.kill_switch : k => s.endpoint }
 }

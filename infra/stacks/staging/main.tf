@@ -50,9 +50,15 @@ variable "lambda_zip" {
 }
 
 variable "api_reserved_concurrency" {
-  description = "The API's reserved concurrency. `make deploy` passes 0 while the kill switch is tripped, so a deploy doesn't undo it."
+  description = "The API's reserved concurrency, which the kill switch's reset restores."
   type        = number
   default     = 3
+}
+
+variable "kill_switch_tripped" {
+  description = "`make deploy` sets this while the kill switch is tripped, so the apply keeps the API at 0."
+  type        = bool
+  default     = false
 }
 
 module "stack" {
@@ -68,6 +74,7 @@ module "stack" {
   lambda_zip          = var.lambda_zip
 
   api_reserved_concurrency = var.api_reserved_concurrency
+  kill_switch_tripped      = var.kill_switch_tripped
 }
 
 # Staging only: the user behind `make dev STAGING_PROFILE=...`. Its access key is made by hand.

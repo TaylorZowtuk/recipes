@@ -1,8 +1,9 @@
 # The public entry point: one CloudFront distribution per stack, with OAC on every origin, a WAF
-# web ACL with one rate limit, and the PWA bucket. The OACs themselves are infra/bootstrap's. Only managed cache, origin request and response headers policies
-# are used, because the CloudFront Free plan forbids custom ones; it also allows at most five
-# behaviours (hosting ADR). The Free plan subscription itself is a manual CLI step that takes the
-# distribution and web ACL ARNs this module outputs.
+# web ACL with one rate limit, and the PWA bucket. The OACs themselves are infra/bootstrap's. Only
+# managed cache, origin request and response headers policies are used, because the CloudFront Free
+# plan forbids custom ones; it also allows at most five behaviours (hosting ADR). The Free plan
+# subscription itself is a manual CLI step that takes the distribution and web ACL ARNs this module
+# outputs.
 terraform {
   required_providers {
     aws = {

@@ -31,13 +31,19 @@ variable "lambda_zip" {
 }
 
 variable "api_reserved_concurrency" {
-  description = "The API's reserved concurrency: the most it may run at once, which bounds spend while a spend alarm lags (hosting ADR). 0 keeps a tripped kill switch tripped."
+  description = "The API's reserved concurrency: the most it may run at once, which bounds spend while a spend alarm lags (hosting ADR). The kill switch's reset restores it."
   type        = number
   default     = 3
   validation {
     condition     = var.api_reserved_concurrency >= 0 && var.api_reserved_concurrency <= 10
     error_message = "api_reserved_concurrency must be between 0 and 10."
   }
+}
+
+variable "kill_switch_tripped" {
+  description = "Apply the API at 0 reserved concurrency, so a deploy keeps a tripped kill switch tripped. scripts/deploy.sh sets it."
+  type        = bool
+  default     = false
 }
 
 locals {
@@ -86,7 +92,7 @@ module "api" {
   lwa_layer_arn            = local.lwa_layer_arn
   data_policy_json         = module.access.data_policy_json
   permissions_boundary_arn = module.access.boundary_arn
-  reserved_concurrency     = var.api_reserved_concurrency
+  reserved_concurrency     = var.kill_switch_tripped ? 0 : var.api_reserved_concurrency
   environment = {
     TABLE_NAME    = module.store.table_name
     IMAGES_BUCKET = module.store.images_bucket
@@ -165,6 +171,15 @@ output "api_function_name" {
 output "api_reserved_concurrency" {
   description = "The API's configured reserved concurrency: the value to restore after a kill switch trips."
   value       = var.api_reserved_concurrency
+}
+
+output "api_applied_reserved_concurrency" {
+  description = "What the API reserves after this apply: 0 while kill_switch_tripped, else api_reserved_concurrency."
+  value       = module.api.reserved_concurrency
+}
+
+output "kill_switch" {
+  value = module.kill_switch.wiring
 }
 
 output "kill_switch_topic_arn" {

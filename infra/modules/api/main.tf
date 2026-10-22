@@ -145,6 +145,11 @@ output "function_arn" {
   value = aws_lambda_function.this.arn
 }
 
+output "reserved_concurrency" {
+  description = "What the function reserves after this apply, for infra/tests."
+  value       = aws_lambda_function.this.reserved_concurrent_executions
+}
+
 output "function_url_domain" {
   description = "The function URL's host, for the CloudFront origin."
   value       = split("/", aws_lambda_function_url.this.function_url)[2]

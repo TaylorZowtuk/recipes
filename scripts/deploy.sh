@@ -26,15 +26,17 @@ apply=()
 tf() { terraform -chdir="$root" "$@"; }
 tf init -input=false -reconfigure -backend-config="bucket=$TF_STATE_BUCKET"
 
-# Terraform owns the API's reserved concurrency, so an apply with the default would undo a tripped
-# kill switch. While the API reserves 0, apply with 0. A first deploy has no function to ask about.
+# Terraform owns the API's reserved concurrency, so a plain apply would undo a tripped kill switch.
+# While the API reserves 0, apply with kill_switch_tripped, which keeps it at 0 and leaves the
+# api_reserved_concurrency output at the configured value for the reset. A first deploy has no
+# function to ask about.
 # State from before the kill switch has only the function_name output.
 vars=()
 if fn=$(tf output -raw api_function_name 2>/dev/null || tf output -raw function_name 2>/dev/null) && [[ -n $fn ]]; then
   if reserved=$(aws lambda get-function-concurrency --function-name "$fn" \
     --query ReservedConcurrentExecutions --output text 2>&1); then
     if [[ $reserved == 0 ]]; then
-      vars=(-var api_reserved_concurrency=0)
+      vars=(-var kill_switch_tripped=true)
       echo "deploy: the kill switch is tripped ($fn reserves 0), so this deploy keeps it tripped."
       echo "deploy: check the bill first, then run make kill-switch-reset STACK=$stack (infra/AGENTS.md)."
     fi

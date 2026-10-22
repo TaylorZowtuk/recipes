@@ -167,10 +167,18 @@ run "deploy_policy" {
   }
   assert {
     condition = (
-      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Topic.Action]) == ["sns:*"] &&
+      contains(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Topic.Action]), "sns:Publish") &&
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Topic.Resource == "arn:aws:sns:us-west-2:123456789012:plateful-staging-*"
     )
-    error_message = "The deploy role manages SNS topics with the stack's prefix, in the stack's region."
+    error_message = "The deploy role manages SNS topics with the stack's prefix, in the stack's region, and may publish to them."
+  }
+  # AddPermission would let the role give anyone publish rights on the stack's kill-switch topic.
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !anytrue([
+      for a in flatten([s.Action]) : anytrue([for op in ["addpermission", "removepermission"] :
+      can(regex("^${replace(lower(a), "*", ".*")}$", "sns:${op}"))])
+    ])])
+    error_message = "No statement grants sns:AddPermission or sns:RemovePermission, wildcards included."
   }
   # The account's spend alarm topic and its subscriptions belong to infra/bootstrap. SNS can't scope
   # a subscription call to one stack's subscription, so any grant there would let one stack
