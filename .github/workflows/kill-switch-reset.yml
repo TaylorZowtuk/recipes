@@ -1,0 +1,42 @@
+# Re-enables one stack's API after its kill switch tripped: `make kill-switch-reset`, with the
+# stack's deploy role (infra/AGENTS.md, "Spend guard"). Check the bill before running it. It runs in
+# the stack's environment, so prod waits for its required reviewer, and in the stack's deploy
+# concurrency group, so it never runs during a deploy of that stack.
+name: Kill switch reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: The stack whose API to re-enable
+        type: choice
+        options: [staging, prod]
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  reset:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # a cold run builds the toolchain image
+    environment:
+      name: ${{ inputs.stack }}
+    concurrency:
+      group: deploy-${{ inputs.stack }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # OIDC, for the stack's deploy role
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+      - run: make kill-switch-reset STACK="$STACK"
+        env:
+          STACK: ${{ inputs.stack }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}

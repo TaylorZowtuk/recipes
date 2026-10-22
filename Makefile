@@ -5,7 +5,8 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke dev shell clean \
+.PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
+	kill-switch-reset dev shell clean \
 	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf tf-test \
 	links api-drift sh-lint workflows
 
@@ -14,7 +15,7 @@ $(error GNU make 4 or later is required (macOS: `brew install make`, then run `g
 endif
 
 help: ## List the commands
-	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-18s %s\n", $$1, $$2}'
 
 ifndef IN_CONTAINER
 
@@ -85,6 +86,12 @@ deploy: ## Apply STACK=staging|prod and upload its PWA bundle, with the AWS cred
 smoke: ## Check a deployed stack's responses through CloudFront (URL=https://<distribution domain>)
 	$(RUN) make smoke URL='$(URL)'
 
+kill-switch-test: ## Trip STACK's kill switch with a test SNS message, then reset it (AWS credentials in your env)
+	$(RUN_AWS) make kill-switch-test STACK='$(STACK)'
+
+kill-switch-reset: ## Re-enable STACK's API after its kill switch tripped (check the bill first)
+	$(RUN_AWS) make kill-switch-reset STACK='$(STACK)'
+
 dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
@@ -140,6 +147,12 @@ deploy: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
 deploy:
 	mkdir -p $$TF_PLUGIN_CACHE_DIR
 	scripts/deploy.sh '$(STACK)'
+
+# No deps, like deploy: Terraform's outputs name the function, topic and configured concurrency.
+kill-switch-test kill-switch-reset: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+kill-switch-test kill-switch-reset:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	scripts/kill-switch.sh $(patsubst kill-switch-%,%,$@) '$(STACK)'
 
 smoke:
 	scripts/smoke.sh '$(URL)'
