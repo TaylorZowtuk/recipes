@@ -64,7 +64,7 @@ jobs:
         env:
           URL: ${{ steps.deploy.outputs.url }}
       # The spend guard's test: a message on staging's own kill-switch topic must throttle the API,
-      # and the script then re-enables it. It runs before e2e, whose requests come close to the
+      # and the script then re-enables it. It runs before e2e, which shares the runner's IP and so the
       # WAF's per-IP rate limit, so the test's checks through CloudFront aren't blocked.
       - run: make kill-switch-test STACK=staging
         env:
