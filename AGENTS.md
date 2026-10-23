@@ -9,7 +9,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make setup` | Build the toolchain image, install dependencies and the pre-commit hook |
 | `make check` | Lint, type-check, unit tests, Terraform validation and tests, shell and workflow lint, markdown links and API-client drift, in parallel. Must stay under 60 s warm |
 | `make fix` | Auto-format and apply safe lint fixes |
-| `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark. `E2E_BASE_URL=<url> make e2e` runs it against a deployed stack instead, on `iphone-light` and `desktop-dark` only, to stay under the WAF's per-IP rate limit |
+| `make e2e` | Playwright against a local build (Vite preview + FastAPI on moto), iPhone (WebKit), Pixel and desktop (Chromium) × light/dark. `E2E_BASE_URL=<url> make e2e` runs it against a deployed stack instead, on `iphone-light` and `desktop-dark` by default (`--project` picks any), to stay under the WAF's per-IP rate limit |
 | `make screenshots` | Before (`BASE`, default `origin/main`) and after screenshots into `.screenshots/` |
 | `make api-client` | Regenerate the committed TypeScript client after changing the API |
 | `make lambda` | Build the API's Lambda zip (arm64, run by the Lambda Web Adapter) into `backend/dist/lambda.zip` |

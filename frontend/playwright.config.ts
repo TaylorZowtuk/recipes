@@ -20,8 +20,9 @@ const remote = process.env.E2E_BASE_URL;
 // Against a deployed stack every request counts toward the WAF's per-IP rate limit, about 1,000 per
 // 5 minutes, so the suite runs one WebKit and one Chromium project, which between them cover both
 // engines and both schemes. A run of these two makes about 800 requests (34 tests, counted by a proxy
-// in front of the local build in October 2026), so about 200 are left: each test costs about 23, mostly
-// the shell and the assets the service worker precaches in its fresh context, and runs in both
+// in front of the local build in October 2026). Smoke and the kill switch test run just before it from
+// the same IP, so about 150 are left, before CI's retry of each failing test. Each test costs about 23,
+// mostly the shell and the assets the service worker precaches in its fresh context, and runs in both
 // projects. `--project` still picks any of the six. Workers load this file without the CLI's
 // arguments, so the choice reaches them in the environment.
 const deployed = ["iphone-light", "desktop-dark"];
