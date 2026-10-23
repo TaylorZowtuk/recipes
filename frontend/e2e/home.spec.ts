@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("the home page opens the Collection and shows the API's sync status", async ({ page }) => {
+test("the home page opens the Collection and shows the API's sync status", {
+  tag: "@deployed",
+}, async ({ page }) => {
   await page.goto("/");
 
   await expect(page).toHaveURL(/\/recipes$/);
