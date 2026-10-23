@@ -5,7 +5,9 @@ description = "Plateful's API, ingest and enrich CLI."
 requires-python = ">=3.14"
 dependencies = [
     "boto3>=1.43.107",
+    "cachecontrol>=0.14.4", # keeps Google's signing certs for as long as their Cache-Control says
     "fastapi>=0.142.2",
+    "google-auth[requests]>=2.62.0", # verifies Sign in with Google ID tokens
     "uvicorn>=0.54.0", # run.sh serves the app with it behind the Lambda Web Adapter
 ]
 
@@ -16,11 +18,12 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
-    "moto[dynamodb,server]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB
+    "moto[dynamodb,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; ssm: auth settings
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
-    "types-boto3-lite[dynamodb,lambda]>=1.43.114",
+    "types-boto3-lite[dynamodb,lambda,ssm]>=1.43.114",
+    "types-requests>=2.33.0.20261006",
 ]
 
 [tool.ruff]
@@ -41,12 +44,15 @@ ignore = [
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
+"src/recipes/local.py" = ["S105"] # the fake stack's made-up service token
 "tests/**" = [
     "ANN401",  # stubs pass boto3's keyword arguments and responses straight through
     "ARG001",  # fixtures take others they need only for their side effects
     "INP001",  # tests aren't a package
     "PLR2004", # expected values are clearer inline
     "S101",    # pytest asserts
+    "S105",    # made-up service tokens
     "S603",    # tests run the repo's own scripts
 ]
 

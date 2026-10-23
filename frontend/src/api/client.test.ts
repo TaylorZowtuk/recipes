@@ -2,7 +2,7 @@ import type { Client } from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { createApi } from "./client";
 
-// sha256("") — what CloudFront expects when a POST or PUT carries no body.
+// sha256("") — what CloudFront expects when a write carries no body.
 const EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 async function sha256Hex(text: string) {
@@ -17,7 +17,7 @@ function recordingApi() {
     sent.push(request);
     return new Response("{}", { headers: { "Content-Type": "application/json" } });
   };
-  // biome-ignore lint/suspicious/noExplicitAny: the schema has no POST or PUT routes yet.
+  // biome-ignore lint/suspicious/noExplicitAny: the tests write to routes the schema lacks.
   const client = createApi({ baseUrl: "https://plateful.test", fetch }) as unknown as Client<any>;
   const lastSent = () => {
     const request = sent.at(-1);
@@ -48,6 +48,20 @@ describe("x-amz-content-sha256", () => {
   it("sends the empty-string hash when a POST has no body", async () => {
     const { client, lastSent } = recordingApi();
     await client.POST("/api/sync", {});
+    expect(lastSent().headers.get("x-amz-content-sha256")).toBe(EMPTY);
+  });
+
+  it("hashes the body of a PATCH", async () => {
+    const { client, lastSent } = recordingApi();
+    await client.PATCH("/api/recipes/1", { body: { servings: 6 } });
+    expect(lastSent().headers.get("x-amz-content-sha256")).toBe(
+      await sha256Hex(JSON.stringify({ servings: 6 })),
+    );
+  });
+
+  it("sends the empty-string hash on a DELETE", async () => {
+    const { client, lastSent } = recordingApi();
+    await client.DELETE("/api/session", {});
     expect(lastSent().headers.get("x-amz-content-sha256")).toBe(EMPTY);
   });
 
