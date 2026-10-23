@@ -14,6 +14,14 @@ _Avoid_: User account, family
 A household member who is signed in and can change the collection.
 _Avoid_: Admin, owner
 
+**Editor Allowlist**:
+The emails of a stack's editors, kept in that stack's SSM parameters. Someone who signs in with Google is an editor only if their email is on it.
+_Avoid_: Whitelist, user list
+
+**Service Token**:
+A permanent token per stack that local CLIs send in a header instead of signing in. The API treats a match as an editor.
+_Avoid_: API key, password
+
 **Visitor**:
 Anyone viewing the collection without signing in. A visitor can read but cannot change anything. A visitor sees the household's recipes and settings as they are, but not its Week Plans or Grocery Lists: they see a Demo instead.
 _Avoid_: Guest, anonymous user

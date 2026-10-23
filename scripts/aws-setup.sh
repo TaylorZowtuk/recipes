@@ -320,16 +320,55 @@ put_param() {
     printf '  %s✓ set%s %s\n' "$GREEN" "$RESET" "$1"
 }
 
-# stack_secrets STACK: the three SecureStrings the sign-in ADR names, under /plateful/<stack>/.
+# google_client_id STACK EMAILS: walk the human through the stack's Google OAuth client, then store
+# its ID. Not secret, but kept beside the others so the API reads all four at once.
+google_client_id() {
+  local s=$1 emails=$2 p=/plateful/$1 id origins
+  if ! load_outputs "$s"; then
+    warn "$s isn't deployed yet, so its CloudFront URL is unknown: re-run after stage 10."
+    SKIPPED+=("$s's Google OAuth client ID (stage 12/13)")
+    return 0
+  fi
+  should_set "$p/google-client-id" || return 0
+  local domain_var=DOMAIN_$s
+  origins="https://${!domain_var}"
+  [[ $s == staging ]] && origins+=" and http://localhost:5173"
+  say "Editors sign in with Google. Each stack has its own OAuth client, kept in Testing status."
+  open_url "https://console.cloud.google.com/projectcreate"
+  step "Use one Google Cloud project for Plateful (create it if you have none; no billing needed)."
+  open_url "https://console.cloud.google.com/auth/overview"
+  step "Google Auth platform → Branding: app name \"Plateful $s\", your email as support and contact."
+  step "Audience: User type External, publishing status ${BOLD}Testing${RESET} (never In production)."
+  step "Audience → Test users: add the editors' two emails${emails:+ ($emails)}."
+  step "Data Access: add no scopes beyond the basic openid, email and profile."
+  open_url "https://console.cloud.google.com/auth/clients"
+  step "Clients → Create client → Application type ${BOLD}Web application${RESET}, named \"Plateful $s\"."
+  step "Authorized JavaScript origins: $origins"
+  step "No authorized redirect URIs. Create it; you need no client secret."
+  printf '\n'
+  ask id "Client ID (ends in .apps.googleusercontent.com):"
+  if [[ $id != *.apps.googleusercontent.com ]]; then
+    warn "That doesn't look like a Google client ID: skipped."
+    SKIPPED+=("$s's Google OAuth client ID (stage 12/13)")
+    return 0
+  fi
+  printf '%s' "$id" | put_param "$p/google-client-id"
+  note "Origins can take a few minutes to take effect in Google."
+}
+
+# stack_secrets STACK: the four SSM parameters the sign-in ADR names, under /plateful/<stack>/.
 stack_secrets() {
-  local s=$1 p=/plateful/$1 emails token
-  say "The API reads three secrets from SSM Parameter Store. Terraform made them with a placeholder"
+  local s=$1 p=/plateful/$1 emails="" token
+  say "The API reads four parameters from SSM Parameter Store. Terraform made them with a placeholder"
   say "and never stores or reverts their values (value_wo)."
   printf '\n'
   if should_set "$p/editor-allowlist"; then
     say "The editors' Google email addresses, comma-separated (the household's two)."
     ask emails "Editor emails:"
     printf '%s' "$emails" | put_param "$p/editor-allowlist"
+  fi
+  if [[ -z $emails && $(param_version "$p/editor-allowlist" 2>/dev/null) != 1 ]]; then
+    emails=$(in_aws "aws ssm get-parameter --name $p/editor-allowlist --with-decryption --query Parameter.Value --output text" 2>/dev/null || true)
   fi
   if should_set "$p/session-hmac-key"; then
     say "The session cookie signing key: 32 random bytes, made in the container and never shown."
@@ -345,6 +384,7 @@ stack_secrets() {
     unset token
     [[ $s == staging ]] && note "It is also the e2e editor: add it as a staging environment secret when a job needs it."
   fi
+  google_client_id "$s" "$emails"
   note "A running Lambda reads them at cold start, so a change applies on the next deploy."
 }
 

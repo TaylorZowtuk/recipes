@@ -42,6 +42,9 @@ locals {
     "editor-allowlist"   = "The editors' email addresses, comma-separated."
     "session-hmac-key"   = "The key that signs editor session cookies."
     "service-token-hash" = "The hex SHA-256 of this stack's service token."
+    # Not secret (browsers get it from /api/session), but a SecureString too, so the API reads all
+    # four with one GetParameters call.
+    "google-client-id" = "The stack's Google OAuth web client ID."
   }
 }
 
