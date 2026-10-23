@@ -7,16 +7,20 @@ through `CurrentEditor` or `EditorDep`, and never read the cookie or the header 
 
 import base64
 import binascii
+import functools
 import hashlib
 import hmac
+import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Protocol
 
 import boto3
 import requests
+from botocore.config import Config
 from cachecontrol import CacheControl
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from google.auth.exceptions import GoogleAuthError, TransportError
@@ -42,8 +46,15 @@ MIN_KEY_BYTES = 32
 PARAMETERS = ("editor-allowlist", "session-hmac-key", "service-token-hash", "google-client-id")
 PLACEHOLDER = "placeholder"
 UNCONFIGURED = "Sign-in isn't configured"
+# How long the API keeps the SSM settings before reading them again.
+SETTINGS_TTL = timedelta(minutes=5)
+# Well inside the Lambda's 30 s timeout, so a hung SSM or Google answers 503 rather than dying.
+_SSM_CONFIG = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2})
+GOOGLE_TIMEOUT_SECONDS = 5
 # Signed along with the payload, so a signature for anything else never passes as a session.
 _SESSION_CONTEXT = b"plateful-session-v1."
+
+logger = logging.getLogger(__name__)
 
 
 class Editor(BaseModel):
@@ -136,27 +147,46 @@ def _is_sha256_hex(value: str) -> bool:
     )
 
 
-def ssm_settings(prefix: str, client: SSMClient | None = None) -> Callable[[], AuthSettings]:
-    """The settings under `prefix`, read with one call when first needed and kept for the life of
-    the process. A new value takes effect at the next cold start.
+def ssm_settings(
+    prefix: str, client: SSMClient | None = None, clock: Callable[[], float] = time.monotonic
+) -> Callable[[], AuthSettings]:
+    """The settings under `prefix`, read with one call when first needed and kept for
+    SETTINGS_TTL, so a new value takes effect within five minutes. When a read after that fails,
+    the last good settings stay in use and the next request tries again: a passing SSM error
+    shouldn't sign anyone out. Only a failed first read raises.
     """
     lock = threading.Lock()
-    loaded: list[AuthSettings] = []
+    ssm: list[SSMClient] = [client] if client else []
+    loaded: list[tuple[AuthSettings, float]] = []
+
+    def fetch() -> AuthSettings:
+        if not ssm:
+            ssm.append(boto3.client("ssm", config=_SSM_CONFIG))
+        response = ssm[0].get_parameters(
+            Names=[prefix + name for name in PARAMETERS], WithDecryption=True
+        )
+        return AuthSettings.parse(
+            {
+                p["Name"].removeprefix(prefix): p["Value"]
+                for p in response["Parameters"]
+                if "Name" in p and "Value" in p
+            }
+        )
 
     def settings() -> AuthSettings:
         with lock:
-            if not loaded:
-                ssm = client or boto3.client("ssm")
-                response = ssm.get_parameters(
-                    Names=[prefix + name for name in PARAMETERS], WithDecryption=True
-                )
-                values = {
-                    p["Name"].removeprefix(prefix): p["Value"]
-                    for p in response["Parameters"]
-                    if "Name" in p and "Value" in p
-                }
-                loaded.append(AuthSettings.parse(values))
-            return loaded[0]
+            now = clock()
+            if loaded and now - loaded[0][1] < SETTINGS_TTL.total_seconds():
+                return loaded[0][0]
+            try:
+                fresh = fetch()
+            except Exception:
+                if not loaded:
+                    raise
+                logger.exception("Sign-in settings not refreshed: keeping the last good ones")
+                return loaded[0][0]
+            loaded[:] = [(fresh, now)]
+            return fresh
 
     return settings
 
@@ -167,7 +197,10 @@ class GoogleVerifier:
     """
 
     def __init__(self, request: Transport | Callable[..., object] | None = None) -> None:
-        self.request = request or GoogleRequest(session=CacheControl(requests.Session()))
+        self.request = request or functools.partial(
+            GoogleRequest(session=CacheControl(requests.Session())),
+            timeout=GOOGLE_TIMEOUT_SECONDS,
+        )
 
     def __call__(self, token: str, audience: str) -> Claims:
         try:

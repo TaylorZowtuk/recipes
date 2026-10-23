@@ -101,6 +101,76 @@ def test_placeholders_and_missing_parameters_leave_sign_in_unconfigured(ssm: Cou
     )
 
 
+@dataclass
+class Clock:
+    """A monotonic clock, in seconds, that a test moves by hand."""
+
+    now: float = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_a_changed_parameter_is_picked_up_after_five_minutes(ssm: CountingSsm) -> None:
+    put(ssm, {"editor-allowlist": "editor@example.com"})
+    clock = Clock()
+    settings = ssm_settings(PREFIX, cast("SSMClient", ssm), clock=clock)
+    assert settings().editors == {"editor@example.com"}
+
+    ssm.client.put_parameter(
+        Name=PREFIX + "editor-allowlist", Value="partner@example.com", Overwrite=True
+    )
+    clock.now += 299
+    assert settings().editors == {"editor@example.com"}, "kept for five minutes"
+    assert len(ssm.calls) == 1
+
+    clock.now += 2
+    assert settings().editors == {"partner@example.com"}
+    assert len(ssm.calls) == 2
+
+
+@dataclass
+class FlakySsm(CountingSsm):
+    """moto's SSM, failing while `down` is set."""
+
+    down: bool = False
+
+    def get_parameters(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if self.down:
+            msg = "SSM is unreachable"
+            raise ConnectionError(msg)
+        return self.client.get_parameters(**kwargs)
+
+
+def test_a_failed_refetch_keeps_the_last_good_settings_and_retries(ssm: CountingSsm) -> None:
+    put(ssm, {"editor-allowlist": "editor@example.com"})
+    flaky = FlakySsm(ssm.client)
+    clock = Clock()
+    settings = ssm_settings(PREFIX, cast("SSMClient", flaky), clock=clock)
+    first = settings()
+
+    flaky.down = True
+    clock.now += 301
+    assert settings() is first
+    assert settings() is first
+    assert len(flaky.calls) == 3, "each request after the TTL tries again"
+
+    flaky.down = False
+    ssm.client.put_parameter(
+        Name=PREFIX + "editor-allowlist", Value="partner@example.com", Overwrite=True
+    )
+    assert settings().editors == {"partner@example.com"}
+    assert len(flaky.calls) == 4
+
+
+def test_a_failed_first_read_raises(ssm: CountingSsm) -> None:
+    flaky = FlakySsm(ssm.client, down=True)
+    settings = ssm_settings(PREFIX, cast("SSMClient", flaky))
+    with pytest.raises(ConnectionError):
+        settings()
+
+
 def test_a_signing_key_shorter_than_32_bytes_is_unset() -> None:
     short = base64.b64encode(b"k" * 31).decode()
     assert AuthSettings.parse({"session-hmac-key": short}).session_key is None

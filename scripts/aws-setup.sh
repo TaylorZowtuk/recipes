@@ -385,7 +385,7 @@ stack_secrets() {
     [[ $s == staging ]] && note "It is also the e2e editor: add it as a staging environment secret when a job needs it."
   fi
   google_client_id "$s" "$emails"
-  note "A running Lambda reads them at cold start, so a change applies on the next deploy."
+  note "A running Lambda reads them again every 5 minutes, so a change applies within 5 minutes."
 }
 
 # bootstrap_step1: apply infra/bootstrap with local state, until step 2 moves that state into the
