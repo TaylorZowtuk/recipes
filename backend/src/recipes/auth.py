@@ -49,7 +49,10 @@ UNCONFIGURED = "Sign-in isn't configured"
 # How long the API keeps the SSM settings before reading them again.
 SETTINGS_TTL = timedelta(minutes=5)
 # Well inside the Lambda's 30 s timeout, so a hung SSM or Google answers 503 rather than dying.
-_SSM_CONFIG = Config(connect_timeout=3, read_timeout=5, retries={"max_attempts": 2})
+# Two attempts in all (legacy mode's max_attempts counts retries, so it would make three).
+_SSM_CONFIG = Config(
+    connect_timeout=3, read_timeout=5, retries={"total_max_attempts": 2, "mode": "standard"}
+)
 GOOGLE_TIMEOUT_SECONDS = 5
 # Signed along with the payload, so a signature for anything else never passes as a session.
 _SESSION_CONTEXT = b"plateful-session-v1."

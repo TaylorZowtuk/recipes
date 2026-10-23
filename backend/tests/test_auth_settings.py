@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import boto3
 import pytest
+from botocore.exceptions import ConnectTimeoutError
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -170,6 +171,32 @@ def test_a_failed_first_read_raises(ssm: CountingSsm) -> None:
     settings = ssm_settings(PREFIX, cast("SSMClient", flaky))
     with pytest.raises(ConnectionError):
         settings()
+
+
+def test_a_hung_ssm_is_tried_twice_in_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Each attempt can wait up to the read timeout while holding the settings lock, so the
+    # attempts (not the retries) are what keep a read inside the Lambda's 30 s.
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    attempts: list[str] = []
+
+    def no_backoff(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(time, "sleep", no_backoff)
+
+    def hang(request: Any, **_: Any) -> None:
+        attempts.append(request.url)
+        raise ConnectTimeoutError(endpoint_url=request.url)
+
+    # The API builds its own client, on boto3's default session.
+    session = boto3.Session()
+    session.events.register("before-send.ssm", hang)
+    monkeypatch.setattr(boto3, "DEFAULT_SESSION", session)
+    with pytest.raises(ConnectTimeoutError):
+        ssm_settings(PREFIX)()
+    assert len(attempts) == 2
 
 
 def test_a_signing_key_shorter_than_32_bytes_is_unset() -> None:
