@@ -13,6 +13,11 @@ type ScreenProps = {
   children?: ReactNode;
 };
 
+/** Moves focus to the screen's title, without scrolling the window, so screen readers announce it. */
+export function focusTitle() {
+  document.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
+}
+
 /** Goes one step back, or to Recipes when this screen opened the app. */
 export function useBack() {
   const navigate = useNavigate();

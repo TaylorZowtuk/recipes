@@ -38,6 +38,7 @@ async function serveGoogle(page: Page, credential: string) {
 const accountButton = (page: Page) => page.getByRole("button", { name: "Account" });
 const menu = (page: Page) => page.getByRole("menu", { name: "Account" });
 const menuItems = (page: Page) => menu(page).getByRole("menuitem");
+const title = (page: Page) => page.getByRole("heading", { level: 1, name: "Editor sign-in" });
 
 async function openMenu(page: Page) {
   await accountButton(page).click();
@@ -131,10 +132,18 @@ test("sign-in says when Google can't be reached, and tries again", async ({ page
   );
   await expect(page.getByText("Loading Google sign-in…")).toHaveCount(0);
 
+  // Focus rests on the title once the retry settles, whether it fails or works.
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Couldn’t reach Google. Check your connection and try again.",
+  );
+  await expect(title(page)).toBeFocused();
+
   reachable = true;
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(title(page)).toBeFocused();
 });
 
 test("sign-in says when it isn't available", async ({ page }) => {
@@ -162,10 +171,18 @@ test("sign-in tries again once the session can be loaded", async ({ page }) => {
     "Sign-in isn’t available right now. Try again later.",
   );
 
+  // Focus rests on the title once the retry settles, whether it fails or works.
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Sign-in isn’t available right now. Try again later.",
+  );
+  await expect(title(page)).toBeFocused();
+
   reachable = true;
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(title(page)).toBeFocused();
 });
 
 test("opening sign-in again retries a session that couldn't be loaded", async ({ page }) => {

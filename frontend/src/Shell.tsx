@@ -4,6 +4,7 @@ import { AccountMenu } from "./AccountMenu";
 import type { Sync } from "./api/client";
 import { loadSync } from "./collection";
 import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
+import { focusTitle } from "./Screen";
 import { syncStatus } from "./syncStatus";
 
 const tabs = [
@@ -33,7 +34,7 @@ export function Shell() {
     if (shownKey.current === key) return;
     shownKey.current = key;
     if (navigationType === "REPLACE") return;
-    document.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
+    focusTitle();
   }, [key, navigationType]);
 
   return (

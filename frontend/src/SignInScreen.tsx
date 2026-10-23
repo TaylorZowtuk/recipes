@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { loadGoogleIdentity } from "./googleIdentity";
-import { Screen, useBack } from "./Screen";
+import { focusTitle, Screen, useBack } from "./Screen";
 import { type SignInResult, useSession } from "./session";
 
 type Problem = Exclude<SignInResult, { ok: true }>["reason"] | "google-unreachable";
@@ -21,6 +21,13 @@ export function SignInScreen() {
   const [problem, setProblem] = useState<Problem>();
   const [signingIn, setSigningIn] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Try again unmounts itself, so once its retry settles focus goes to the title, not <body>.
+  const refocus = useRef(false);
+  const focusIfRetried = () => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    focusTitle();
+  };
 
   // Google keeps the callback it was first given, even after this screen has gone: the popup can
   // finish once the person has moved on, and then they're signed in where they are.
@@ -70,8 +77,13 @@ export function SignInScreen() {
           text: "signin_with",
           shape: "pill",
         });
+        focusIfRetried();
       },
-      () => current && setProblem("google-unreachable"),
+      () => {
+        if (!current) return;
+        setProblem("google-unreachable");
+        focusIfRetried();
+      },
     );
     return () => {
       current = false;
@@ -79,6 +91,7 @@ export function SignInScreen() {
   }, [ready, googleClientId, attempt]);
 
   const retry = () => {
+    refocus.current = true;
     setProblem(undefined);
     setAttempt((n) => n + 1);
   };
@@ -98,7 +111,7 @@ export function SignInScreen() {
         <p role="alert" className="sign-in-problem">
           {status === "failed" && !navigator.onLine ? messages.offline : messages.unavailable}
         </p>
-        <button type="button" className="button" onClick={() => void load()}>
+        <button type="button" className="button" onClick={() => void load().then(focusTitle)}>
           Try again
         </button>
       </div>
