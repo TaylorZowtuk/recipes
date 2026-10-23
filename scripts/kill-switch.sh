@@ -53,6 +53,15 @@ before=$(reserved)
 [[ $before != 0 ]] || die "$fn already reserves 0: the kill switch is tripped. Check the bill, then make kill-switch-reset STACK=$stack"
 [[ $before == "$want" ]] || say "warning: $fn reserves $before, not the configured $want; the reset puts $want back."
 
+# status <path>: the HTTP status of a GET through the distribution (000 when curl can't connect).
+status() { curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "https://$domain$1" || true; }
+# Both paths must answer 200 before the trip, so a later error means the switch. A 403 here is
+# usually the WAF's rate limit blocking this IP, which would hide whether the API is throttled.
+for path in /api/sync /; do
+  code=$(status "$path")
+  [[ $code == 200 ]] || die "https://$domain$path answers $code before the test, not 200$([[ $code != 403 ]] || echo ": the WAF rate limit may be blocking this IP for up to 5 minutes"). Nothing was tripped."
+done
+
 # From here on, however the script ends, put the concurrency back if the test may have tripped it.
 finished=
 cleanup() {
@@ -80,13 +89,13 @@ for ((waited = 0; ; waited += 5)); do
 done
 say "tripped after about ${waited}s: $fn reserves 0."
 
-# status <path>: the HTTP status of a GET through the distribution (000 when curl can't connect).
-status() { curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "https://$domain$1" || true; }
-# A throttled function URL answers 429, which CloudFront passes on; any other error counts too.
+# A throttled function URL answers 429, which CloudFront passes on, or CloudFront answers 5xx.
+# Anything else, a 403 from the WAF's rate limit above all, isn't the throttle.
 for attempt in 1 2 3 4 5 6; do
   api=$(status /api/sync)
-  [[ $api == 000 || $api == 2* ]] || break
-  ((attempt < 6)) || die "https://$domain/api/sync still answers $api while $fn reserves 0"
+  [[ $api == 429 || $api == 5* ]] && break
+  [[ $api != 403 ]] || die "https://$domain/api/sync answers 403 while $fn reserves 0: that's the WAF rate limit blocking this IP, not the throttle"
+  ((attempt < 6)) || die "https://$domain/api/sync still answers $api while $fn reserves 0, not 429 or 5xx"
   sleep 5
 done
 say "https://$domain/api/sync answers $api: the API is throttled."

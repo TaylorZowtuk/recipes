@@ -34,7 +34,7 @@ jobs:
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.url }}
-    # One deploy at a time per stack. Deploy, smoke, e2e and the kill switch test are one job so that
+    # One deploy at a time per stack. Deploy, smoke, the kill switch test and e2e are one job so that
     # no newer run can deploy between this run's deploy and its tests. An apply in flight is never
     # cancelled: that could leave the state locked or half-applied. A newer run queued behind
     # replaces an older one.
@@ -63,14 +63,15 @@ jobs:
       - run: make smoke URL="$URL"
         env:
           URL: ${{ steps.deploy.outputs.url }}
-      - run: make e2e
-        env:
-          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
       # The spend guard's test: a message on staging's own kill-switch topic must throttle the API,
-      # and the script then re-enables it. It runs last, so smoke and e2e see a working API.
+      # and the script then re-enables it. It runs before e2e, whose requests come close to the
+      # WAF's per-IP rate limit, so the test's checks through CloudFront aren't blocked.
       - run: make kill-switch-test STACK=staging
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      - run: make e2e
+        env:
+          E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
@@ -79,7 +80,7 @@ jobs:
           if-no-files-found: ignore
 
   prod:
-    needs: [build, staging] # staging's job ends with its smoke, e2e and kill switch tests
+    needs: [build, staging] # staging's job runs its smoke, kill switch and e2e tests
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 40
