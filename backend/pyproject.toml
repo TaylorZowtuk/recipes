@@ -44,12 +44,15 @@ ignore = [
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
+"src/recipes/local.py" = ["S105"] # the fake stack's made-up service token
 "tests/**" = [
     "ANN401",  # stubs pass boto3's keyword arguments and responses straight through
     "ARG001",  # fixtures take others they need only for their side effects
     "INP001",  # tests aren't a package
     "PLR2004", # expected values are clearer inline
     "S101",    # pytest asserts
+    "S105",    # made-up service tokens
     "S603",    # tests run the repo's own scripts
 ]
 
