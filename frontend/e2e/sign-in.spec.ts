@@ -25,7 +25,6 @@ function fakeGoogle(credential: string) {
         button.onclick = () => window.__gsi.callback({ credential: ${JSON.stringify(credential)} });
         parent.replaceChildren(button);
       },
-      disableAutoSelect() {},
     } } };
   `;
 }
@@ -61,6 +60,7 @@ test("an editor signs in, stays signed in across a reload, and signs out", async
   await openMenu(page);
   await expect(menuItems(page)).toHaveText(["Add a recipe", "Kitchen settings", "Sign out"]);
   await expect(page.getByText("editor@example.com")).toBeVisible();
+  await expect(menu(page)).toHaveAccessibleDescription("Signed in as editor@example.com");
 
   // The session cookie survives a reload, even without the remembered role.
   await page.evaluate(() => localStorage.clear());
@@ -240,4 +240,37 @@ test("a credential that arrives after leaving sign-in doesn't move the editor", 
   await openMenu(page);
   await expect(menuItems(page)).toHaveText(["Add a recipe", "Kitchen settings", "Sign out"]);
   await expect(page).toHaveURL(/\/week$/);
+});
+
+test("Sign out shows it's signing out and ignores another tap", async ({ page }) => {
+  await serveGoogle(page, "fake:editor@example.com");
+  await page.goto("/sign-in");
+  await page.getByRole("button", { name: "Sign in with Google" }).click();
+  await expect(page).toHaveURL(/\/recipes$/);
+
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let deletes = 0;
+  await page.route("**/api/session", async (route) => {
+    if (route.request().method() === "DELETE") {
+      deletes++;
+      await held;
+    }
+    await route.fallback();
+  });
+
+  await openMenu(page);
+  await menu(page).getByRole("menuitem", { name: "Sign out" }).click();
+  const signingOut = menu(page).getByRole("menuitem", { name: "Signing out…" });
+  await expect(signingOut).toHaveAttribute("aria-disabled", "true");
+  // Playwright won't tap an aria-disabled item, so force it: a person can still tap it.
+  await signingOut.click({ force: true });
+  release();
+
+  await expect(menu(page)).toBeHidden();
+  expect(deletes).toBe(1);
+  await openMenu(page);
+  await expect(menuItems(page)).toHaveText(["Kitchen settings", "Sign in"]);
 });

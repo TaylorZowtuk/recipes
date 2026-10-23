@@ -1,7 +1,6 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import { accountMenuItems } from "./accountMenu";
-import { forgetGoogleSignIn } from "./googleIdentity";
 import { AccountIcon } from "./icons";
 import { useSession } from "./session";
 
@@ -11,10 +10,12 @@ export function AccountMenu({ placement }: { placement: "rail" | "top" }) {
   const { isEditor, email, signOut } = useSession();
   const [open, setOpen] = useState(false);
   const [signOutFailed, setSignOutFailed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const whoId = useId();
 
   const items = () =>
     Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
@@ -67,12 +68,13 @@ export function AccountMenu({ placement }: { placement: "rail" | "top" }) {
   };
 
   const onSignOut = async () => {
-    if (await signOut()) {
-      forgetGoogleSignIn();
-      close({ refocus: true });
-    } else {
-      setSignOutFailed(true);
-    }
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutFailed(false);
+    const signedOut = await signOut();
+    setSigningOut(false);
+    if (signedOut) close({ refocus: true });
+    else setSignOutFailed(true);
   };
 
   return (
@@ -94,11 +96,17 @@ export function AccountMenu({ placement }: { placement: "rail" | "top" }) {
         // biome-ignore lint/a11y/noStaticElementInteractions: it passes on the menu's keys.
         <div className="account-menu" onKeyDown={onKeyDown}>
           {isEditor && (
-            <p className="account-who">
+            <p id={whoId} className="account-who">
               Signed in as <strong>{email}</strong>
             </p>
           )}
-          <div ref={menu} id={menuId} role="menu" aria-label="Account">
+          <div
+            ref={menu}
+            id={menuId}
+            role="menu"
+            aria-label="Account"
+            aria-describedby={isEditor ? whoId : undefined}
+          >
             {accountMenuItems(isEditor).map((item) =>
               "to" in item ? (
                 <Link
@@ -118,9 +126,10 @@ export function AccountMenu({ placement }: { placement: "rail" | "top" }) {
                   role="menuitem"
                   tabIndex={-1}
                   className="menu-item"
+                  aria-disabled={signingOut || undefined}
                   onClick={onSignOut}
                 >
-                  {item.label}
+                  {signingOut ? "Signing out…" : item.label}
                 </button>
               ),
             )}
