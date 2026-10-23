@@ -15,19 +15,37 @@ const messages: Record<Problem, string> = {
 
 // Sign in with Google, in a popup, then back to where sign-in was opened from as an editor.
 export function SignInScreen() {
-  const { isEditor, email, googleClientId, status, signIn } = useSession();
+  const { isEditor, email, googleClientId, status, signIn, load, retryIfFailed } = useSession();
   const back = useBack();
   const button = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState<Problem>();
+  const [signingIn, setSigningIn] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  // Google keeps the callback it was first given, so it calls the latest one through this.
+
+  // Google keeps the callback it was first given, even after this screen has gone: the popup can
+  // finish once the person has moved on, and then they're signed in where they are.
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const onCredential = useRef<(credential: string) => void>(() => {});
   onCredential.current = async (credential) => {
     setProblem(undefined);
+    setSigningIn(true);
     const result = await signIn(credential);
+    if (!mounted.current) return;
+    setSigningIn(false);
     if (result.ok) back();
     else setProblem(result.reason);
   };
+
+  // A session that couldn't be loaded (offline, or the API was down) is tried again here.
+  useEffect(() => {
+    void retryIfFailed();
+  }, [retryIfFailed]);
 
   const ready = !isEditor && status === "loaded" && googleClientId !== null;
 
@@ -76,9 +94,14 @@ export function SignInScreen() {
     body = <p className="screen-note">Checking…</p>;
   } else if (status === "failed" || googleClientId === null) {
     body = (
-      <p role="alert" className="sign-in-problem">
-        {status === "failed" && !navigator.onLine ? messages.offline : messages.unavailable}
-      </p>
+      <div className="sign-in-problem-row">
+        <p role="alert" className="sign-in-problem">
+          {status === "failed" && !navigator.onLine ? messages.offline : messages.unavailable}
+        </p>
+        <button type="button" className="button" onClick={() => void load()}>
+          Try again
+        </button>
+      </div>
     );
   } else {
     body = (
@@ -87,7 +110,13 @@ export function SignInScreen() {
           Sign in with the Google account on this kitchen’s list of editors to add and change
           recipes. Anyone can browse without signing in.
         </p>
-        <div ref={button} className="google-button" />
+        {/* Google's button replaces the note once its script has loaded. */}
+        <div ref={button} className="google-button">
+          <p className="screen-note">Loading Google sign-in…</p>
+        </div>
+        <p role="status" className="screen-note">
+          {signingIn ? "Signing in…" : ""}
+        </p>
         {problem && (
           <div className="sign-in-problem-row">
             <p role="alert" className="sign-in-problem">

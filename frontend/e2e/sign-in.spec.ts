@@ -149,3 +149,95 @@ test("sign-in says when it isn't available", async ({ page }) => {
     "Sign-in isn’t available right now. Try again later.",
   );
 });
+
+test("sign-in tries again once the session can be loaded", async ({ page }) => {
+  await serveGoogle(page, "fake:editor@example.com");
+  let reachable = false;
+  await page.route("**/api/session", (route) =>
+    reachable ? route.fallback() : route.abort("internetdisconnected"),
+  );
+  await page.goto("/sign-in");
+  await expect(page.getByRole("alert")).toHaveText(
+    "Sign-in isn’t available right now. Try again later.",
+  );
+
+  reachable = true;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("opening sign-in again retries a session that couldn't be loaded", async ({ page }) => {
+  await serveGoogle(page, "fake:editor@example.com");
+  let reachable = false;
+  await page.route("**/api/session", (route) =>
+    reachable ? route.fallback() : route.abort("internetdisconnected"),
+  );
+  await page.goto("/week");
+  await openMenu(page);
+  await menu(page).getByRole("menuitem", { name: "Sign in" }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await page.getByRole("button", { name: "Back" }).click();
+
+  reachable = true;
+  await openMenu(page);
+  await menu(page).getByRole("menuitem", { name: "Sign in" }).click();
+  await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
+});
+
+test("sign-in shows that Google's button and the sign-in are on their way", async ({ page }) => {
+  let releaseGoogle = () => {};
+  const googleHeld = new Promise<void>((resolve) => {
+    releaseGoogle = resolve;
+  });
+  await page.route(GSI, async (route) => {
+    await googleHeld;
+    await route.fulfill({
+      contentType: "text/javascript",
+      body: fakeGoogle("fake:editor@example.com"),
+    });
+  });
+  let releaseSignIn = () => {};
+  const signInHeld = new Promise<void>((resolve) => {
+    releaseSignIn = resolve;
+  });
+  await page.route("**/api/session", async (route) => {
+    if (route.request().method() === "POST") await signInHeld;
+    await route.fallback();
+  });
+
+  await page.goto("/sign-in");
+  await expect(page.getByText("Loading Google sign-in…")).toBeVisible();
+  releaseGoogle();
+  await page.getByRole("button", { name: "Sign in with Google" }).click();
+  await expect(page.getByText("Loading Google sign-in…")).toHaveCount(0);
+
+  await expect(page.getByRole("main").getByRole("status")).toHaveText("Signing in…");
+  releaseSignIn();
+  await expect(page).toHaveURL(/\/recipes$/);
+});
+
+test("a credential that arrives after leaving sign-in doesn't move the editor", async ({
+  page,
+}) => {
+  await serveGoogle(page, "fake:editor@example.com");
+  await page.goto("/recipes");
+  await openMenu(page);
+  await menu(page).getByRole("menuitem", { name: "Sign in" }).click();
+  await expect(page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
+
+  // Google's popup is still open when the editor goes elsewhere, then finishes.
+  await page
+    .getByRole("navigation", { name: "Places" })
+    .getByRole("link", { name: "Week" })
+    .click();
+  await expect(page).toHaveURL(/\/week$/);
+  await page.evaluate(() => {
+    const gsi = (window as { __gsi?: { callback(r: { credential: string }): void } }).__gsi;
+    gsi?.callback({ credential: "fake:editor@example.com" });
+  });
+
+  await openMenu(page);
+  await expect(menuItems(page)).toHaveText(["Add a recipe", "Kitchen settings", "Sign out"]);
+  await expect(page).toHaveURL(/\/week$/);
+});
