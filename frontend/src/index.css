@@ -272,13 +272,19 @@ h1:focus {
 }
 
 /* The account menu: a floating card under the top bar's account button on phones. It's fixed, so
-   it escapes the desktop rail's scrolling. */
+   it escapes the desktop rail's scrolling. On a short screen (a small phone, or zoomed in) it stops
+   above the tab bar and scrolls. */
 .account-menu {
+  --menu-top: calc(var(--top-bar-height) + env(safe-area-inset-top));
+  --menu-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 2);
   position: fixed;
-  top: calc(var(--top-bar-height) + env(safe-area-inset-top));
+  top: var(--menu-top);
   right: calc(var(--gutter) + env(safe-area-inset-right));
   z-index: 3;
   width: min(280px, calc(100vw - var(--gutter) * 2));
+  max-height: calc(100dvh - var(--menu-top) - var(--menu-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: calc(var(--space) * 2);
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -288,6 +294,12 @@ h1:focus {
   font-weight: 400;
   text-align: left;
   animation: menu-in var(--motion) ease-out;
+}
+
+/* The sticky top bar is its own stacking context, under the tab bar: lift it while its menu is
+   open, so the menu's shadow and edge aren't drawn over by the tab bar. */
+.top-bar:has(.account-menu) {
+  z-index: 3;
 }
 
 @keyframes menu-in {
@@ -329,14 +341,23 @@ h1:focus {
   transition: background-color var(--motion);
 }
 
+/* Opening the menu focuses its first item, so any focus gets the tint; keyboard focus also gets
+   the app's focus ring, inset so the card doesn't clip it. */
 .menu-item:focus {
   outline: none;
-}
-
-.menu-item:focus-visible,
-.menu-item:focus {
   background: var(--accent-soft);
   color: var(--accent-soft-text);
+}
+
+.menu-item:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Signing out: the item stays in place but can't be chosen again. */
+.menu-item[aria-disabled="true"] {
+  color: var(--text-secondary);
+  cursor: progress;
 }
 
 @media (hover: hover) {
@@ -380,6 +401,16 @@ h1:focus {
 /* An empty status note waits for its next message without taking up space. */
 .screen-note:empty {
   margin: 0;
+}
+
+.google-button .screen-note {
+  margin: 0;
+  line-height: 44px;
+}
+
+/* In case Google's script adds its button beside the loading note instead of replacing it. */
+.google-button:has(> :not(.screen-note)) > .screen-note {
+  display: none;
 }
 
 .result-count {
@@ -759,9 +790,11 @@ h1:focus {
 
   /* Beside the rail, level with the foot of it. */
   .account-rail .account-menu {
+    --menu-top: calc(var(--space) * 2 + env(safe-area-inset-top));
+    --menu-bottom: calc(var(--space) * 6 + env(safe-area-inset-bottom));
     top: auto;
     right: auto;
-    bottom: calc(var(--space) * 6);
+    bottom: var(--menu-bottom);
     left: calc(var(--rail-width) + env(safe-area-inset-left) + var(--space) * 2);
   }
 

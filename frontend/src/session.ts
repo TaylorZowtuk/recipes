@@ -1,5 +1,6 @@
 import { type ReactNode, useSyncExternalStore } from "react";
 import { type createApi, api as defaultApi } from "./api/client";
+import type { components } from "./api/schema";
 
 // Whether this device is signed in as an editor. Components ask only "is this an editor"
 // (useIsEditor, EditorOnly); how someone signed in stays here and in the API.
@@ -20,6 +21,7 @@ export type SignInResult =
 export type RoleStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 type Api = ReturnType<typeof createApi>;
+type Session = components["schemas"]["Session"];
 
 // The last known role, so an editor's UI survives offline or a failed load until it's revalidated.
 const ROLE_KEY = "plateful.role";
@@ -46,7 +48,16 @@ function writeRole(storage: RoleStorage | undefined, editor: boolean, email: str
   }
 }
 
-export function createSessionStore({ api, storage }: { api: Api; storage?: RoleStorage }) {
+export function createSessionStore({
+  api,
+  storage,
+  connectivity,
+}: {
+  api: Api;
+  storage?: RoleStorage;
+  /** Fires "online" when the device reconnects (the window), to retry a failed load. */
+  connectivity?: Pick<EventTarget, "addEventListener">;
+}) {
   const remembered = readRole(storage);
   let snapshot: SessionSnapshot = {
     isEditor: remembered.editor,
@@ -55,6 +66,9 @@ export function createSessionStore({ api, storage }: { api: Api; storage?: RoleS
     status: "loading",
   };
   const listeners = new Set<() => void>();
+  // Bumped when a sign-in or sign-out changes the role, so a load that was already in flight (on a
+  // slow network) can't undo it: that load's answer predates the new cookie.
+  let roleChanges = 0;
 
   const update = (changes: Partial<SessionSnapshot>) => {
     snapshot = { ...snapshot, ...changes };
@@ -62,15 +76,31 @@ export function createSessionStore({ api, storage }: { api: Api; storage?: RoleS
     for (const listener of listeners) listener();
   };
 
-  const fromSession = (session: {
-    editor: boolean;
-    email: string | null;
-    google_client_id: string | null;
-  }): Partial<SessionSnapshot> => ({
+  const fromSession = (session: Session): Partial<SessionSnapshot> => ({
     isEditor: session.editor,
     email: session.editor ? session.email : null,
     googleClientId: session.google_client_id,
   });
+
+  async function load() {
+    const before = roleChanges;
+    if (snapshot.status !== "loading") update({ status: "loading" });
+    let data: Session | undefined;
+    try {
+      ({ data } = await api.GET("/api/session"));
+    } catch {
+      // Offline: fall through and keep the remembered role.
+    }
+    if (!data) return update({ status: "failed" });
+    const { isEditor, email, ...rest } = fromSession(data);
+    const role = before === roleChanges ? { isEditor, email } : {};
+    update({ ...role, ...rest, status: "loaded" });
+  }
+
+  /** Loads the session again only if the last load failed. */
+  const retryIfFailed = () => (snapshot.status === "failed" ? load() : Promise.resolve());
+
+  connectivity?.addEventListener("online", () => void retryIfFailed());
 
   return {
     getSnapshot: () => snapshot,
@@ -79,20 +109,14 @@ export function createSessionStore({ api, storage }: { api: Api; storage?: RoleS
       return () => void listeners.delete(listener);
     },
 
-    async load() {
-      try {
-        const { data } = await api.GET("/api/session");
-        if (data) return update({ ...fromSession(data), status: "loaded" });
-      } catch {
-        // Offline: fall through and keep the remembered role.
-      }
-      update({ status: "failed" });
-    },
+    load,
+    retryIfFailed,
 
     async signIn(credential: string): Promise<SignInResult> {
       try {
         const { data, response } = await api.POST("/api/session", { body: { credential } });
         if (data) {
+          roleChanges++;
           update({ ...fromSession(data), status: "loaded" });
           return { ok: true };
         }
@@ -112,6 +136,7 @@ export function createSessionStore({ api, storage }: { api: Api; storage?: RoleS
       } catch {
         return false;
       }
+      roleChanges++;
       update({ isEditor: false, email: null });
       return true;
     },
@@ -129,12 +154,19 @@ function browserStorage(): RoleStorage | undefined {
 }
 
 // The app's one session, loaded once per page load.
-export const session = createSessionStore({ api: defaultApi, storage: browserStorage() });
+// A failed load is retried when the device comes back online, and when sign-in opens.
+export const session = createSessionStore({
+  api: defaultApi,
+  storage: browserStorage(),
+  connectivity: typeof window !== "undefined" ? window : undefined,
+});
 if (typeof window !== "undefined") void session.load();
 
-export function useSession(): SessionSnapshot & Pick<SessionStore, "signIn" | "signOut"> {
+export function useSession(): SessionSnapshot &
+  Pick<SessionStore, "signIn" | "signOut" | "load" | "retryIfFailed"> {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
-  return { ...snapshot, signIn: session.signIn, signOut: session.signOut };
+  const { signIn, signOut, load, retryIfFailed } = session;
+  return { ...snapshot, signIn, signOut, load, retryIfFailed };
 }
 
 /** Whether this device's person may edit. The gate for editing controls and review marks. */

@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApi } from "./api/client";
 import { createSessionStore, type RoleStorage } from "./session";
 
 type Reply = { status: number; body?: unknown } | "offline";
+type Queued = Reply | Promise<Reply>;
 type Call = { method: string; path: string; body: string };
 
 // A fake API: each request takes the next reply queued for its method, and is recorded.
-function fakeApi(replies: Partial<Record<string, Reply[]>>) {
+function fakeApi(replies: Partial<Record<string, Queued[]>>) {
   const calls: Call[] = [];
   const fetch = async (input: Request) => {
     calls.push({
@@ -14,7 +15,7 @@ function fakeApi(replies: Partial<Record<string, Reply[]>>) {
       path: new URL(input.url).pathname,
       body: await input.text(),
     });
-    const reply = replies[input.method]?.shift();
+    const reply = await replies[input.method]?.shift();
     if (!reply) throw new Error(`No reply queued for ${input.method}`);
     if (reply === "offline") throw new TypeError("Failed to fetch");
     return new Response(reply.body === undefined ? null : JSON.stringify(reply.body), {
@@ -48,6 +49,15 @@ const blockedStorage: RoleStorage = {
     throw new Error("SecurityError");
   },
 };
+
+// A reply that arrives only when the test says so.
+function deferred() {
+  let resolve: (reply: Reply) => void = () => {};
+  const promise = new Promise<Reply>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 const visitor = { editor: false, email: null, google_client_id: "client-123" };
 const editor = { editor: true, email: "editor@example.com", google_client_id: "client-123" };
@@ -146,6 +156,75 @@ describe("the session store", () => {
     expect(store.getSnapshot().isEditor).toBe(false);
   });
 
+  it("tries again when the device comes back online after a failed load", async () => {
+    const { api, calls } = fakeApi({ GET: ["offline", { status: 200, body: editor }] });
+    const connectivity = new EventTarget();
+    const store = createSessionStore({ api, storage: memoryStorage(), connectivity });
+    await store.load();
+    expect(store.getSnapshot().status).toBe("failed");
+
+    connectivity.dispatchEvent(new Event("online"));
+    await vi.waitFor(() => expect(store.getSnapshot().status).toBe("loaded"));
+
+    expect(calls).toHaveLength(2);
+    expect(store.getSnapshot()).toMatchObject({ isEditor: true, email: "editor@example.com" });
+  });
+
+  it("doesn't reload on coming back online once the session has loaded", async () => {
+    const { api, calls } = fakeApi({ GET: [{ status: 200, body: visitor }] });
+    const connectivity = new EventTarget();
+    const store = createSessionStore({ api, storage: memoryStorage(), connectivity });
+    await store.load();
+
+    connectivity.dispatchEvent(new Event("online"));
+    await store.retryIfFailed();
+
+    expect(calls).toHaveLength(1);
+  });
+
+  it("retries a failed load when asked, showing it's checking again", async () => {
+    const reply = deferred();
+    const { api } = fakeApi({ GET: ["offline", reply.promise] });
+    const store = createSessionStore({ api, storage: memoryStorage() });
+    await store.load();
+
+    const retried = store.retryIfFailed();
+    expect(store.getSnapshot().status).toBe("loading");
+    reply.resolve({ status: 200, body: visitor });
+    await retried;
+
+    expect(store.getSnapshot()).toMatchObject({ status: "loaded", googleClientId: "client-123" });
+  });
+
+  it("doesn't let a load that was in flight undo a sign-out", async () => {
+    const reply = deferred();
+    const { api } = fakeApi({ GET: [reply.promise], DELETE: [{ status: 204 }] });
+    const storage = rememberedEditor();
+    const store = createSessionStore({ api, storage });
+
+    const loading = store.load();
+    expect(await store.signOut()).toBe(true);
+    // The GET was answered while the cookie was still valid.
+    reply.resolve({ status: 200, body: editor });
+    await loading;
+
+    expect(store.getSnapshot()).toMatchObject({ isEditor: false, email: null });
+    expect(storage.items.has("plateful.role")).toBe(false);
+  });
+
+  it("doesn't let a load that was in flight undo a sign-in", async () => {
+    const reply = deferred();
+    const { api } = fakeApi({ GET: [reply.promise], POST: [{ status: 200, body: editor }] });
+    const store = createSessionStore({ api, storage: memoryStorage() });
+
+    const loading = store.load();
+    expect(await store.signIn("google-id-token")).toEqual({ ok: true });
+    reply.resolve({ status: 200, body: visitor });
+    await loading;
+
+    expect(store.getSnapshot()).toMatchObject({ isEditor: true, status: "loaded" });
+  });
+
   it("tells subscribers when the session changes", async () => {
     const { api } = fakeApi({ GET: [{ status: 200, body: editor }] });
     const store = createSessionStore({ api, storage: memoryStorage() });
@@ -220,9 +299,13 @@ describe("signing out", () => {
     expect(storage.items.has("plateful.role")).toBe(false);
   });
 
-  it("stays signed in when the session can't be ended", async () => {
+  it.each([
+    ["offline", "offline"],
+    ["throttled", { status: 503, body: { detail: "Throttled" } }],
+    ["forbidden", { status: 403, body: { detail: "Forbidden" } }],
+  ] as const)("stays signed in when the session can't be ended (%s)", async (_, reply) => {
     // The cookie is HttpOnly, so only the API can clear it.
-    const { api } = fakeApi({ GET: [{ status: 200, body: editor }], DELETE: ["offline"] });
+    const { api } = fakeApi({ GET: [{ status: 200, body: editor }], DELETE: [reply] });
     const storage = memoryStorage();
     const store = createSessionStore({ api, storage });
     await store.load();

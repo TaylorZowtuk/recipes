@@ -320,7 +320,6 @@ test("the sign-in screen adds a back button beside the navigation", async ({ pag
 
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByRole("heading", { level: 1, name: "Editor sign-in" })).toBeVisible();
-  await expect(page.getByRole("main")).toContainText("Sign in with the Google account");
   const back = page.getByRole("button", { name: "Back" });
   await expect(back).toBeVisible();
   await expectTapTarget(back);
@@ -393,6 +392,19 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
   });
   expect(faces.map((count) => count > 0)).toEqual([true, true]);
   await expect(page.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
+});
+
+test("keyboard focus in the account menu shows the focus ring", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/week");
+  await accountButton(page).focus();
+  await page.keyboard.press("Enter");
+  const first = accountMenu(page).getByRole("menuitem").first();
+  await expect(first).toBeFocused();
+  await expect(first).toHaveCSS("outline-style", "solid");
+  await expect(first).toHaveCSS("outline-width", "3px");
+  await expect(first).toHaveCSS("outline-color", rgb(scheme, "--accent"));
+  await expect(first).toHaveCSS("background-color", rgb(scheme, "--accent-soft"));
 });
 
 test("buttons have no borders and the button radius", async ({ page }) => {

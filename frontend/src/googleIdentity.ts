@@ -20,7 +20,6 @@ export type GoogleIdentity = {
       width?: number;
     },
   ): void;
-  disableAutoSelect(): void;
 };
 
 declare global {
@@ -51,9 +50,4 @@ export function loadGoogleIdentity(): Promise<GoogleIdentity> {
     throw error;
   });
   return loading;
-}
-
-/** After signing out, so Google doesn't sign this device straight back in. */
-export function forgetGoogleSignIn() {
-  window.google?.accounts?.id?.disableAutoSelect();
 }

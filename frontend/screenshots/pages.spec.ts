@@ -52,7 +52,6 @@ const fakeGoogle = `window.google = { accounts: { id: {
     b.style.cssText = "min-height:40px;padding:0 20px;border:1px solid #dadce0;border-radius:20px;background:#fff;color:#3c4043;font:500 14px system-ui";
     parent.replaceChildren(b);
   },
-  disableAutoSelect() {},
 } } };`;
 
 for (const { name, path: url, ready, loaded, editor, menu } of pages) {
