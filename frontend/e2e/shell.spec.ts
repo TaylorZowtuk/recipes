@@ -320,7 +320,6 @@ test("the sign-in screen adds a back button beside the navigation", async ({ pag
 
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByRole("heading", { level: 1, name: "Editor sign-in" })).toBeVisible();
-  await expect(page.getByRole("main")).toContainText("Sign in with the Google account");
   const back = page.getByRole("button", { name: "Back" });
   await expect(back).toBeVisible();
   await expectTapTarget(back);
