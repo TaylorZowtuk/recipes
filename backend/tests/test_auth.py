@@ -16,6 +16,7 @@ from recipes.auth import (
     Auth,
     AuthSettings,
     Claims,
+    CurrentEditor,
     Editor,
     EditorDep,
     InvalidIdToken,
@@ -260,7 +261,7 @@ def test_a_cookie_more_than_a_day_old_is_reissued_for_another_year(
     client: TestClient, clock: Clock
 ) -> None:
     first = cookie_value(sign_in(client))
-    clock.advance(days=2)
+    clock.advance(hours=24, minutes=1)
 
     response = session(client, first)
 
@@ -272,6 +273,18 @@ def test_a_cookie_more_than_a_day_old_is_reissued_for_another_year(
     clock.advance(days=364)
     assert session(client, first).json()["editor"] is False
     assert session(client, second).json()["editor"] is True
+
+
+def test_a_cookie_issued_more_than_five_minutes_ahead_of_the_clock_is_a_visitor(
+    client: TestClient, clock: Clock
+) -> None:
+    value = cookie_value(sign_in(client))
+
+    clock.advance(minutes=-4)
+    assert session(client, value).json()["editor"] is True
+
+    clock.advance(minutes=-2)
+    assert session(client, value).json()["editor"] is False
 
 
 def test_a_cookie_for_an_email_taken_off_the_allowlist_is_a_visitor(
@@ -318,7 +331,25 @@ def test_no_service_token_matches_an_unset_hash(client: TestClient, settings: Se
     assert client.get("/api/session", headers=headers).json()["editor"] is False
 
 
-# EditorDep
+# CurrentEditor and EditorDep
+
+
+def test_a_visitor_never_reads_the_settings(table: str, clock: Clock) -> None:
+    def unreachable() -> AuthSettings:
+        msg = "a visitor's request read the settings"
+        raise AssertionError(msg)
+
+    auth = Auth(settings=unreachable, verifier=fake_verifier, clock=clock)
+    app = create_app(store=lambda: Store(table), auth=lambda: auth)
+
+    @app.get("/api/test-who")
+    def who(editor: CurrentEditor) -> bool:  # pyright: ignore[reportUnusedFunction]
+        return editor is not None
+
+    with TestClient(app) as client:
+        response = client.get("/api/test-who")
+    assert response.status_code == 200
+    assert response.json() is False
 
 
 def test_editor_only_routes_refuse_visitors(client: TestClient) -> None:

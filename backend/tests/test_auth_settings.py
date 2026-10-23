@@ -93,6 +93,7 @@ def test_placeholders_and_missing_parameters_leave_sign_in_unconfigured(ssm: Cou
             "editor-allowlist": placeholder,
             "session-hmac-key": placeholder,
             "service-token-hash": placeholder,
+            "google-client-id": placeholder,
         },
     )
 
