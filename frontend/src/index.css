@@ -258,6 +258,121 @@ h1:focus {
   margin-left: auto;
 }
 
+/* The rail's account button looks like the places above it. */
+.account .place {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.account button[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+/* The account menu: a floating card under the top bar's account button on phones. It's fixed, so
+   it escapes the desktop rail's scrolling. */
+.account-menu {
+  position: fixed;
+  top: calc(var(--top-bar-height) + env(safe-area-inset-top));
+  right: calc(var(--gutter) + env(safe-area-inset-right));
+  z-index: 3;
+  width: min(280px, calc(100vw - var(--gutter) * 2));
+  padding: calc(var(--space) * 2);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--elevation-float);
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 400;
+  text-align: left;
+  animation: menu-in var(--motion) ease-out;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+.account-who {
+  margin: 0 0 calc(var(--space) * 2);
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
+.account-who strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--text-body);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 calc(var(--space) * 3);
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion);
+}
+
+.menu-item:focus {
+  outline: none;
+}
+
+.menu-item:focus-visible,
+.menu-item:focus {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+@media (hover: hover) {
+  .menu-item:hover {
+    background: var(--accent-soft);
+  }
+}
+
+.account-error,
+.sign-in-problem {
+  color: var(--emphasis-text);
+  font-weight: 700;
+}
+
+.account-error {
+  margin: calc(var(--space) * 2) calc(var(--space) * 3) var(--space);
+  font-size: var(--text-small);
+}
+
+.sign-in,
+.prompt {
+  max-width: 480px;
+}
+
+.google-button {
+  min-height: 44px;
+  margin: calc(var(--space) * 6) 0;
+}
+
+.sign-in-problem-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+}
+
 .screen-note {
   color: var(--text-secondary);
 }
@@ -289,6 +404,9 @@ h1:focus {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--tap);
   padding: 0 calc(var(--space) * 5);
   border: none;
@@ -296,6 +414,7 @@ h1:focus {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 700;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -634,7 +753,16 @@ h1:focus {
 
   .account-rail {
     display: flex;
+    flex-direction: column;
     margin-top: auto;
+  }
+
+  /* Beside the rail, level with the foot of it. */
+  .account-rail .account-menu {
+    top: auto;
+    right: auto;
+    bottom: calc(var(--space) * 6);
+    left: calc(var(--rail-width) + env(safe-area-inset-left) + var(--space) * 2);
   }
 
   .account-top {

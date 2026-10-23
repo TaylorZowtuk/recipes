@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect } from "react";
-import { NavLink, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
+import { AccountMenu } from "./AccountMenu";
 import { backTarget } from "./back";
-import { AccountIcon, BackIcon } from "./icons";
+import { BackIcon } from "./icons";
 
 type ScreenProps = {
   title: string;
@@ -12,21 +13,25 @@ type ScreenProps = {
   children?: ReactNode;
 };
 
-// The top bar (Back on pushed screens, the title, and on phones the account button) over a
-// screen's content.
-export function Screen({ title, pushed = false, hero, children }: ScreenProps) {
+/** Goes one step back, or to Recipes when this screen opened the app. */
+export function useBack() {
   const navigate = useNavigate();
-
-  useEffect(() => {
-    document.title = `${title} · Plateful`;
-  }, [title]);
-
-  const back = () => {
+  return () => {
     // React Router keeps the history index in the entry's state, which survives a reload.
     const target = backTarget(window.history.state?.idx);
     if (target === -1) navigate(-1);
     else navigate(target, { replace: true });
   };
+}
+
+// The top bar (Back on pushed screens, the title, and on phones the account button) over a
+// screen's content.
+export function Screen({ title, pushed = false, hero, children }: ScreenProps) {
+  useEffect(() => {
+    document.title = `${title} · Plateful`;
+  }, [title]);
+
+  const back = useBack();
 
   const heading = (
     <h1 tabIndex={-1} className={hero ? "hero-title" : undefined}>
@@ -43,9 +48,7 @@ export function Screen({ title, pushed = false, hero, children }: ScreenProps) {
           </button>
         )}
         {!hero && heading}
-        <NavLink to="/sign-in" className="icon-button account-top" aria-label="Sign in">
-          <AccountIcon />
-        </NavLink>
+        <AccountMenu placement="top" />
       </header>
       <main className="screen-body">
         {hero && (
