@@ -11,7 +11,7 @@ The couple who own the collection. There is one household, and it shares all of 
 _Avoid_: User account, family
 
 **Editor**:
-A household member who is signed in and can change the collection.
+A household member who is signed in, or a local CLI sending the Service Token, and can change the collection.
 _Avoid_: Admin, owner
 
 **Editor Allowlist**:

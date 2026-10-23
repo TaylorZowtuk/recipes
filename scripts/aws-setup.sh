@@ -344,6 +344,7 @@ google_client_id() {
   open_url "https://console.cloud.google.com/auth/clients"
   step "Clients → Create client → Application type ${BOLD}Web application${RESET}, named \"Plateful $s\"."
   step "Authorized JavaScript origins: $origins"
+  [[ $s == staging ]] && step "Also add http://localhost:<port> for any other DEV_PORT you run make dev on."
   step "No authorized redirect URIs. Create it; you need no client secret."
   printf '\n'
   ask id "Client ID (ends in .apps.googleusercontent.com):"

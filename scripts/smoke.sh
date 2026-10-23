@@ -64,6 +64,8 @@ fi
 # CloudFront runs no viewer-response function on a 404, so its X-Robots-Tag comes from FastAPI.
 check /api/does-not-exist 404 application/json '"detail"'
 check /api/sync 200 application/json '"collection_version"'
+# A visitor's session, which reads the stack's SSM parameters (with KMS decryption) on a cold start.
+check -c no-store /api/session 200 application/json '"google_client_id"'
 # OAC signs a write to the function URL only with the body's SHA-256 in x-amz-content-sha256 (here the
 # empty body's); without it the function URL answers 403. FastAPI's 405 shows the request got through.
 empty_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
