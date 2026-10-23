@@ -1,7 +1,7 @@
 # The account's one-time setup, applied by a human with temporary admin credentials (see
-# infra/AGENTS.md): the Terraform state bucket, GitHub's OIDC provider, and each stack's deploy
-# role, permissions boundary and CloudFront OACs. Its own state lives in the state bucket under
-# bootstrap/.
+# infra/AGENTS.md): the Terraform state bucket, GitHub's OIDC provider, the account's spend alarm,
+# and each stack's deploy role, permissions boundary and CloudFront OACs. Its own state lives in
+# the state bucket under bootstrap/.
 # After the first apply, init with:
 #   terraform init -backend-config="bucket=plateful-tfstate-<account id>"
 terraform {
@@ -24,6 +24,18 @@ terraform {
 
 provider "aws" {
   region = "us-west-2"
+  default_tags {
+    tags = {
+      Project = "plateful"
+      Stack   = "bootstrap"
+    }
+  }
+}
+
+# Billing metrics, and so the spend alarm, exist only in us-east-1.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
   default_tags {
     tags = {
       Project = "plateful"
@@ -92,6 +104,16 @@ module "origin_access" {
   names    = module.access[each.key].oac_names
 }
 
+# The account-wide $1-a-month budget and billing alarm, and the topic they send to. Bootstrap, not
+# the stacks, subscribes each stack's kill switch to it, so no deploy role needs any grant on the
+# topic: SNS can't scope a subscription call to one stack's subscription.
+module "spend_alarm" {
+  source           = "../modules/spend-alarm"
+  providers        = { aws = aws.us_east_1 }
+  account_id       = local.account_id
+  kill_switch_arns = { for s, m in module.access : s => m.kill_switch_arn }
+}
+
 output "state_bucket" {
   value = module.state.name
 }
@@ -103,4 +125,9 @@ output "deploy_role_arns" {
 output "origin_access_control_ids" {
   description = "Each stack's OAC IDs by origin, read by the stack through terraform_remote_state."
   value       = { for s, m in module.origin_access : s => m.ids }
+}
+
+output "spend_alarm_topic_arn" {
+  description = "The account's spend alarm topic, read by each stack through terraform_remote_state."
+  value       = module.spend_alarm.topic_arn
 }

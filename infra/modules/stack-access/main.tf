@@ -30,6 +30,8 @@ locals {
   images_bucket = "${local.prefix}-images-${var.account_id}"
   ssm_prefix    = "/plateful/${var.stack}/"
   function_name = "${local.prefix}-api"
+  # The kill switch's function, role, log group and SNS topic.
+  kill_switch_name = "${local.prefix}-kill-switch"
 
   table_arn         = "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.table_name}"
   images_bucket_arn = "arn:aws:s3:::${local.images_bucket}"
@@ -120,6 +122,14 @@ output "ssm_prefix" {
 
 output "function_name" {
   value = local.function_name
+}
+
+output "kill_switch_name" {
+  value = local.kill_switch_name
+}
+
+output "kill_switch_arn" {
+  value = "arn:aws:lambda:${var.region}:${var.account_id}:function:${local.kill_switch_name}"
 }
 
 output "boundary_name" {

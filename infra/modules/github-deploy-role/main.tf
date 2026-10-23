@@ -47,7 +47,8 @@ locals {
   state_key = "${var.stack}/terraform.tfstate"
 }
 
-# The boundary: the most any role or user the stack makes may ever do (its data plus its logs).
+# The boundary: the most any role or user the stack makes may ever do (its data, its logs, and
+# throttling its own API, which the stack's kill switch does when the spend alarm fires).
 data "aws_iam_policy_document" "boundary" {
   source_policy_documents = [module.access.data_policy_json]
 
@@ -55,6 +56,12 @@ data "aws_iam_policy_document" "boundary" {
     sid       = "Logs"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = ["arn:aws:logs:${local.region}:${local.acct}:log-group:/aws/lambda/${local.prefix}-*:*"]
+  }
+
+  statement {
+    sid       = "KillSwitch"
+    actions   = ["lambda:PutFunctionConcurrency", "lambda:GetFunctionConcurrency"]
+    resources = ["arn:aws:lambda:${local.region}:${local.acct}:function:${module.access.function_name}"]
   }
 }
 
@@ -153,13 +160,38 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
+  # The API and the kill switch, and any later function with the stack's prefix.
   statement {
     sid     = "Function"
     actions = ["lambda:*"]
     resources = [
-      "arn:aws:lambda:${local.region}:${local.acct}:function:${module.access.function_name}",
-      "arn:aws:lambda:${local.region}:${local.acct}:function:${module.access.function_name}:*",
+      "arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-*",
+      "arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-*:*",
     ]
+  }
+
+  # The stack's own topics, such as its kill-switch topic, and their subscriptions (whose ARNs
+  # extend the topic's): the calls the AWS provider makes for them, and Publish, which lets CI trip
+  # staging's kill switch on purpose. No AddPermission, so the role can't open a topic to other
+  # accounts; SetTopicAttributes stays, because the topic resource writes its policy through it.
+  statement {
+    sid = "Topic"
+    actions = [
+      "sns:CreateTopic",
+      "sns:DeleteTopic",
+      "sns:GetTopicAttributes",
+      "sns:SetTopicAttributes",
+      "sns:TagResource",
+      "sns:UntagResource",
+      "sns:ListTagsForResource",
+      "sns:Subscribe",
+      "sns:Unsubscribe",
+      "sns:GetSubscriptionAttributes",
+      "sns:SetSubscriptionAttributes",
+      "sns:ListSubscriptionsByTopic",
+      "sns:Publish",
+    ]
+    resources = ["arn:aws:sns:${local.region}:${local.acct}:${local.prefix}-*"]
   }
 
   statement {

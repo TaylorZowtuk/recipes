@@ -1,8 +1,9 @@
-# The public entry point: one CloudFront distribution per stack, with OAC on every origin, an empty
-# WAF web ACL, and the PWA bucket. The OACs themselves are infra/bootstrap's. Only managed cache, origin request and response headers policies
-# are used, because the CloudFront Free plan forbids custom ones; it also allows at most five
-# behaviours (hosting ADR). The Free plan subscription itself is a manual CLI step that takes the
-# distribution and web ACL ARNs this module outputs.
+# The public entry point: one CloudFront distribution per stack, with OAC on every origin, a WAF
+# web ACL with one rate limit, and the PWA bucket. The OACs themselves are infra/bootstrap's. Only
+# managed cache, origin request and response headers policies are used, because the CloudFront Free
+# plan forbids custom ones; it also allows at most five behaviours (hosting ADR). The Free plan
+# subscription itself is a manual CLI step that takes the distribution and web ACL ARNs this module
+# outputs.
 terraform {
   required_providers {
     aws = {
@@ -73,8 +74,15 @@ data "aws_cloudfront_response_headers_policy" "security" {
   name = "Managed-SecurityHeadersPolicy"
 }
 
-# No rules yet: every request is allowed. The Free plan requires a web ACL, and CLOUDFRONT-scoped
-# ACLs must live in us-east-1.
+variable "rate_limit" {
+  description = "Requests per IP per 5 minutes before WAF blocks it. Two phones on one Wi-Fi polling /api/sync every 3 s make about 200; it moves together with that poll (offline cache and sync ADR)."
+  type        = number
+  default     = 1000
+}
+
+# One rule: an IP over the rate limit is blocked with WAF's default 403 (the Free plan allows IP
+# rate limiting but no custom responses). Everything else is allowed. The Free plan requires a web
+# ACL, and CLOUDFRONT-scoped ACLs must live in us-east-1.
 resource "aws_wafv2_web_acl" "this" {
   provider = aws.us_east_1
   name     = var.prefix
@@ -82,6 +90,29 @@ resource "aws_wafv2_web_acl" "this" {
 
   default_action {
     allow {}
+  }
+
+  rule {
+    name     = "rate-limit"
+    priority = 0
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.rate_limit
+        evaluation_window_sec = 300
+        aggregate_key_type    = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = false
+      metric_name                = "${var.prefix}-rate-limit"
+      sampled_requests_enabled   = false
+    }
   }
 
   visibility_config {

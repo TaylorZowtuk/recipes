@@ -49,6 +49,18 @@ variable "lambda_zip" {
   default     = "../../../backend/dist/lambda.zip"
 }
 
+variable "api_reserved_concurrency" {
+  description = "The API's reserved concurrency, which the kill switch's reset restores."
+  type        = number
+  default     = 3
+}
+
+variable "kill_switch_tripped" {
+  description = "`make deploy` sets this while the kill switch is tripped, so the apply keeps the API at 0."
+  type        = bool
+  default     = false
+}
+
 module "stack" {
   source = "../../modules/stack"
   providers = {
@@ -60,4 +72,7 @@ module "stack" {
   write_capacity      = 10
   deletion_protection = true
   lambda_zip          = var.lambda_zip
+
+  api_reserved_concurrency = var.api_reserved_concurrency
+  kill_switch_tripped      = var.kill_switch_tripped
 }
