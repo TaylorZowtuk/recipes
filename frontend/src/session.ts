@@ -25,6 +25,8 @@ type Session = components["schemas"]["Session"];
 
 // The last known role, so an editor's UI survives offline or a failed load until it's revalidated.
 const ROLE_KEY = "plateful.role";
+// How long sign-out waits for a load in flight before ending the session anyway.
+const SIGN_OUT_WAIT_MS = 30_000;
 
 function readRole(storage: RoleStorage | undefined): { editor: boolean; email: string | null } {
   try {
@@ -143,7 +145,11 @@ export function createSessionStore({
     /** False when the API couldn't be reached: its cookie is HttpOnly, so this stays signed in. */
     async signOut(): Promise<boolean> {
       // A GET answered after the DELETE would set the cookie again (it re-issues an old one).
-      await inFlight?.catch(() => {});
+      // Waits at most 30 s for it, so a request that never settles can't keep someone signed in.
+      await Promise.race([
+        inFlight?.catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, SIGN_OUT_WAIT_MS)),
+      ]);
       try {
         const { response } = await api.DELETE("/api/session");
         if (!response.ok) return false;

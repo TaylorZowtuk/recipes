@@ -185,6 +185,39 @@ test("sign-in tries again once the session can be loaded", async ({ page }) => {
   await expect(title(page)).toBeFocused();
 });
 
+test("a retry that settles after leaving sign-in doesn't take focus", async ({ page }) => {
+  let hold = false;
+  let heldGets = 0;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/session", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    if (!hold) return route.abort("internetdisconnected");
+    heldGets++;
+    await held;
+    return route.fallback();
+  });
+  await page.goto("/sign-in");
+  const tryAgain = page.getByRole("button", { name: "Try again" });
+  await expect(tryAgain).toBeVisible();
+  hold = true;
+  await tryAgain.click();
+  await expect.poll(() => heldGets).toBe(1);
+
+  await page
+    .getByRole("navigation", { name: "Places" })
+    .getByRole("link", { name: "Recipes" })
+    .click();
+  const search = page.getByRole("searchbox", { name: "Search recipe titles" });
+  await search.focus();
+  release();
+  // Give a stray focusTitle() time to run, then check the search kept focus.
+  await page.waitForTimeout(300);
+  await expect(search).toBeFocused();
+});
+
 test("opening sign-in again retries a session that couldn't be loaded", async ({ page }) => {
   await serveGoogle(page, "fake:editor@example.com");
   let reachable = false;

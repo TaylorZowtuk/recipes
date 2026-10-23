@@ -111,7 +111,11 @@ export function SignInScreen() {
         <p role="alert" className="sign-in-problem">
           {status === "failed" && !navigator.onLine ? messages.offline : messages.unavailable}
         </p>
-        <button type="button" className="button" onClick={() => void load().then(focusTitle)}>
+        <button
+          type="button"
+          className="button"
+          onClick={() => void load().then(() => mounted.current && focusTitle())}
+        >
           Try again
         </button>
       </div>

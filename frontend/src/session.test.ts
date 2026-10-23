@@ -233,18 +233,24 @@ describe("the session store", () => {
     expect(store.getSnapshot()).toMatchObject({ isEditor: false, email: null });
   });
 
-  it("ends the session even when the load in flight fails", async () => {
-    const reply = deferred();
-    const { api, calls } = fakeApi({ GET: [reply.promise], DELETE: [{ status: 204 }] });
-    const store = createSessionStore({ api, storage: rememberedEditor() });
+  it("ends the session after 30 s even when the load in flight never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const { api, calls } = fakeApi({ GET: [deferred().promise], DELETE: [{ status: 204 }] });
+      const store = createSessionStore({ api, storage: rememberedEditor() });
 
-    void store.load();
-    const signingOut = store.signOut();
-    reply.resolve("offline");
+      void store.load();
+      const signingOut = store.signOut();
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(calls.map((call) => call.method)).toEqual(["GET"]);
 
-    expect(await signingOut).toBe(true);
-    expect(calls.map((call) => call.method)).toEqual(["GET", "DELETE"]);
-    expect(store.getSnapshot()).toMatchObject({ isEditor: false });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await signingOut).toBe(true);
+      expect(calls.map((call) => call.method)).toEqual(["GET", "DELETE"]);
+      expect(store.getSnapshot()).toMatchObject({ isEditor: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("doesn't let a load that was in flight undo a sign-in", async () => {
