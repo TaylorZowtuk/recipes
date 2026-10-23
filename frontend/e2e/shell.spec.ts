@@ -394,6 +394,19 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
   await expect(page.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
 });
 
+test("keyboard focus in the account menu shows the focus ring", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/week");
+  await accountButton(page).focus();
+  await page.keyboard.press("Enter");
+  const first = accountMenu(page).getByRole("menuitem").first();
+  await expect(first).toBeFocused();
+  await expect(first).toHaveCSS("outline-style", "solid");
+  await expect(first).toHaveCSS("outline-width", "3px");
+  await expect(first).toHaveCSS("outline-color", rgb(scheme, "--accent"));
+  await expect(first).toHaveCSS("background-color", rgb(scheme, "--accent-soft"));
+});
+
 test("buttons have no borders and the button radius", async ({ page }) => {
   await page.goto("/sign-in");
   const back = page.getByRole("button", { name: "Back" });

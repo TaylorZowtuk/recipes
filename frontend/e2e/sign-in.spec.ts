@@ -274,3 +274,24 @@ test("Sign out shows it's signing out and ignores another tap", async ({ page })
   await openMenu(page);
   await expect(menuItems(page)).toHaveText(["Kitchen settings", "Sign in"]);
 });
+
+test("Sign out stays in reach on a very short phone screen", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("desktop"), "the phone's top-bar menu");
+  // A 1280×1024 window at 400% zoom.
+  await page.setViewportSize({ width: 320, height: 256 });
+  await serveGoogle(page, "fake:editor@example.com");
+  await page.goto("/sign-in");
+  await page.getByRole("button", { name: "Sign in with Google" }).click();
+  await expect(page).toHaveURL(/\/recipes$/);
+
+  await openMenu(page);
+  const signOut = menu(page).getByRole("menuitem", { name: "Sign out" });
+  await signOut.scrollIntoViewIfNeeded();
+  await expect(signOut).toBeInViewport({ ratio: 1 });
+  // Nothing (such as the tab bar) covers it: a click lands on it.
+  await signOut.click({ trial: true });
+  await signOut.click();
+  await expect(menu(page)).toBeHidden();
+  await openMenu(page);
+  await expect(menuItems(page)).toHaveText(["Kitchen settings", "Sign in"]);
+});
