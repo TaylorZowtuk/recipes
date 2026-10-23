@@ -5,15 +5,15 @@
 ARG NODE_VERSION
 ARG PLAYWRIGHT_VERSION
 FROM node:${NODE_VERSION}-bookworm-slim AS node
-FROM ghcr.io/astral-sh/uv:0.12.23 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.3 AS uv
 # Terraform's one pin. The stacks' `required_version` must allow it.
-FROM hashicorp/terraform:1.16.4 AS terraform
+FROM hashicorp/terraform:1.16.6 AS terraform
 FROM lycheeverse/lychee:0.24.2 AS lychee
 FROM ghcr.io/gitleaks/gitleaks:v8.30.1 AS gitleaks
 FROM rhysd/actionlint:1.7.12 AS actionlint
 FROM koalaman/shellcheck:v0.11.0 AS shellcheck
 # The AWS CLI v2 bundle is self-contained, so it runs here as it does in its own image.
-FROM amazon/aws-cli:2.37.5 AS awscli
+FROM amazon/aws-cli:2.38.1 AS awscli
 
 # The browsers only work with their own Playwright release, so the tag follows the lockfile.
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
