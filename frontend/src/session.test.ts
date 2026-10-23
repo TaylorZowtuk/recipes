@@ -203,13 +203,48 @@ describe("the session store", () => {
     const store = createSessionStore({ api, storage });
 
     const loading = store.load();
-    expect(await store.signOut()).toBe(true);
+    const signingOut = store.signOut();
     // The GET was answered while the cookie was still valid.
     reply.resolve({ status: 200, body: editor });
+    expect(await signingOut).toBe(true);
     await loading;
 
     expect(store.getSnapshot()).toMatchObject({ isEditor: false, email: null });
     expect(storage.items.has("plateful.role")).toBe(false);
+  });
+
+  it("waits for a load in flight before ending the session", async () => {
+    // The GET can re-issue the cookie, so a DELETE answered before it would be undone on the API.
+    const reply = deferred();
+    const { api, calls } = fakeApi({ GET: [reply.promise], DELETE: [{ status: 204 }] });
+    const store = createSessionStore({ api, storage: rememberedEditor() });
+
+    const loading = store.load();
+    const signingOut = store.signOut();
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls.map((call) => call.method)).toEqual(["GET"]);
+
+    reply.resolve({ status: 200, body: editor });
+    expect(await signingOut).toBe(true);
+    await loading;
+
+    expect(calls.map((call) => call.method)).toEqual(["GET", "DELETE"]);
+    expect(store.getSnapshot()).toMatchObject({ isEditor: false, email: null });
+  });
+
+  it("ends the session even when the load in flight fails", async () => {
+    const reply = deferred();
+    const { api, calls } = fakeApi({ GET: [reply.promise], DELETE: [{ status: 204 }] });
+    const store = createSessionStore({ api, storage: rememberedEditor() });
+
+    void store.load();
+    const signingOut = store.signOut();
+    reply.resolve("offline");
+
+    expect(await signingOut).toBe(true);
+    expect(calls.map((call) => call.method)).toEqual(["GET", "DELETE"]);
+    expect(store.getSnapshot()).toMatchObject({ isEditor: false });
   });
 
   it("doesn't let a load that was in flight undo a sign-in", async () => {

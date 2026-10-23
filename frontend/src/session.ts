@@ -69,6 +69,8 @@ export function createSessionStore({
   // Bumped when a sign-in or sign-out changes the role, so a load that was already in flight (on a
   // slow network) can't undo it: that load's answer predates the new cookie.
   let roleChanges = 0;
+  // The load in flight, if any. Its GET can re-issue the cookie, so sign-out waits for it.
+  let inFlight: Promise<void> | undefined;
 
   const update = (changes: Partial<SessionSnapshot>) => {
     snapshot = { ...snapshot, ...changes };
@@ -82,7 +84,17 @@ export function createSessionStore({
     googleClientId: session.google_client_id,
   });
 
-  async function load() {
+  function load(): Promise<void> {
+    const current = fetchSession();
+    inFlight = current;
+    const settled = () => {
+      if (inFlight === current) inFlight = undefined;
+    };
+    current.then(settled, settled);
+    return current;
+  }
+
+  async function fetchSession() {
     const before = roleChanges;
     if (snapshot.status !== "loading") update({ status: "loading" });
     let data: Session | undefined;
@@ -130,6 +142,8 @@ export function createSessionStore({
 
     /** False when the API couldn't be reached: its cookie is HttpOnly, so this stays signed in. */
     async signOut(): Promise<boolean> {
+      // A GET answered after the DELETE would set the cookie again (it re-issues an old one).
+      await inFlight?.catch(() => {});
       try {
         const { response } = await api.DELETE("/api/session");
         if (!response.ok) return false;
