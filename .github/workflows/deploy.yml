@@ -64,13 +64,15 @@ jobs:
         env:
           URL: ${{ steps.deploy.outputs.url }}
       # The spend guard's test: a message on staging's own kill-switch topic must throttle the API,
-      # and the script then re-enables it. It runs before e2e, whose requests come close to the
+      # and the script then re-enables it. It runs before e2e, which shares the runner's IP and so the
       # WAF's per-IP rate limit, so the test's checks through CloudFront aren't blocked.
       - run: make kill-switch-test STACK=staging
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
-      # Against a deployed stack, e2e runs only the iphone-light and desktop-dark projects, so its
-      # requests stay under the rate limit (see frontend/playwright.config.ts).
+      # Against a deployed stack, e2e runs only the tests tagged @deployed, on the iphone-light and
+      # desktop-dark projects, so its requests stay under the rate limit. Tag a test @deployed when it
+      # tests what only a deployed stack shows: the real API through CloudFront, CloudFront's headers
+      # and assets, the service worker against real caching (see frontend/playwright.config.ts).
       - run: make e2e
         env:
           E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
