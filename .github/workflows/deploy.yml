@@ -69,6 +69,8 @@ jobs:
       - run: make kill-switch-test STACK=staging
         env:
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      # Against a deployed stack, e2e runs only the iphone-light and desktop-dark projects, so its
+      # requests stay under the rate limit (see frontend/playwright.config.ts).
       - run: make e2e
         env:
           E2E_BASE_URL: ${{ steps.deploy.outputs.url }}
