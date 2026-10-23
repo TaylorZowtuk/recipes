@@ -129,6 +129,7 @@ test("sign-in says when Google can't be reached, and tries again", async ({ page
   await expect(page.getByRole("alert")).toHaveText(
     "Couldn’t reach Google. Check your connection and try again.",
   );
+  await expect(page.getByText("Loading Google sign-in…")).toHaveCount(0);
 
   reachable = true;
   await page.getByRole("button", { name: "Try again" }).click();

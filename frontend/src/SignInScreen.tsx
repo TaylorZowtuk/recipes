@@ -110,9 +110,11 @@ export function SignInScreen() {
           Sign in with the Google account on this kitchen’s list of editors to add and change
           recipes. Anyone can browse without signing in.
         </p>
-        {/* Google's button replaces the note once its script has loaded. */}
+        {/* Google's button covers the note (or replaces it) once its script has loaded. */}
         <div ref={button} className="google-button">
-          <p className="screen-note">Loading Google sign-in…</p>
+          {problem !== "google-unreachable" && (
+            <p className="screen-note">Loading Google sign-in…</p>
+          )}
         </div>
         <p role="status" className="screen-note">
           {signingIn ? "Signing in…" : ""}

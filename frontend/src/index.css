@@ -382,7 +382,10 @@ h1:focus {
   max-width: 480px;
 }
 
+/* Its own stacking context, so the loading note can sit beneath Google's button. */
 .google-button {
+  position: relative;
+  isolation: isolate;
   min-height: 44px;
   margin: calc(var(--space) * 6) 0;
 }
@@ -403,14 +406,14 @@ h1:focus {
   margin: 0;
 }
 
+/* Beneath Google's button, so its iframe covers the note once it paints, however the script
+   inserts it. Out of the flow, so the area keeps its height either way. */
 .google-button .screen-note {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   margin: 0;
   line-height: 44px;
-}
-
-/* In case Google's script adds its button beside the loading note instead of replacing it. */
-.google-button:has(> :not(.screen-note)) > .screen-note {
-  display: none;
 }
 
 .result-count {
