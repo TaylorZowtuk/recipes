@@ -367,7 +367,8 @@ def current_editor(request: Request, response: Response, auth: AuthDep) -> Edito
 
 
 CurrentEditor = Annotated[Editor | None, Depends(current_editor)]
-"""The editor making the request, or None for a visitor. Routes using it are never cached."""
+"""The editor making the request, or None for a visitor. The answer depends on the request's
+cookie and may re-issue it, so a route using it must not set a cacheable Cache-Control."""
 
 
 def require_editor(editor: CurrentEditor) -> Editor:
@@ -379,13 +380,12 @@ def require_editor(editor: CurrentEditor) -> Editor:
 EditorDep = Annotated[Editor, Depends(require_editor)]
 """The editor making the request; a visitor gets a 403."""
 
+# api.py's middleware makes every /api response no-store unless a route says otherwise.
 router = APIRouter(prefix="/api")
-NO_STORE = "no-store"
 
 
 @router.get("/session")
-def get_session(editor: CurrentEditor, auth: AuthDep, response: Response) -> Session:
-    response.headers["Cache-Control"] = NO_STORE
+def get_session(editor: CurrentEditor, auth: AuthDep) -> Session:
     return Session(
         editor=editor is not None,
         email=None if editor is None else editor.email,
@@ -403,7 +403,6 @@ def get_session(editor: CurrentEditor, auth: AuthDep, response: Response) -> Ses
 )
 def post_session(body: SignIn, auth: AuthDep, response: Response) -> Session:
     """Sign in with a Google ID token, which sets the session cookie."""
-    response.headers["Cache-Control"] = NO_STORE
     try:
         editor = auth.sign_in(body.credential, response)
     except InvalidIdToken:
