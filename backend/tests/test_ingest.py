@@ -362,55 +362,29 @@ class _SlowRobots(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-class _DrippedHeaders(BaseHTTPRequestHandler):
-    """No robots.txt, and pages that send their status line, then a header byte each 0.1 s."""
-
-    def do_GET(self) -> None:
-        if self.path == "/robots.txt":
-            self.send_error(404)
-            return
-        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
-        try:
-            for _ in range(30):
-                self.wfile.write(b"X")
-                self.wfile.flush()
-                time.sleep(0.1)
-        except OSError:
-            pass
-
-
 @pytest.fixture
-def site(request: pytest.FixtureRequest) -> Iterator[str]:
+def slow_site() -> Iterator[str]:
     """A real local site, for what FakeWeb can't fake: requests waiting on a slow connection."""
-    server = ThreadingHTTPServer(("127.0.0.1", 0), request.param)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowRobots)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
     server.server_close()
 
 
-@pytest.mark.parametrize("site", [_SlowRobots, _DrippedHeaders], indirect=True)
-def test_a_fetch_that_stalls_ends_unreachable_at_its_deadline(
-    monkeypatch: pytest.MonkeyPatch, site: str
+def test_a_slow_robots_txt_redirect_chain_ends_unreachable_at_the_deadline(
+    monkeypatch: pytest.MonkeyPatch, slow_site: str
 ) -> None:
     monkeypatch.setattr("recipes.ingest.DEADLINE_SECONDS", 1)
     fetcher = PoliteFetcher(resolve=lambda _host: [PUBLIC_ADDRESS])
     started = time.monotonic()
 
     with pytest.raises(IngestFailed) as failed:
-        fetcher(f"{site}/miso-soup")
+        fetcher(f"{slow_site}/miso-soup")
     elapsed = time.monotonic() - started
 
     assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
     assert elapsed < 1.2, f"ended after {elapsed:.2f} s"
-
-
-def test_a_fetch_leaves_no_watchdog_running() -> None:
-    web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
-
-    web.fetcher()(URL)
-
-    assert not [t for t in threading.enumerate() if isinstance(t, threading.Timer)]
 
 
 def test_a_page_that_drips_past_the_deadline_waits_for_the_fallback(

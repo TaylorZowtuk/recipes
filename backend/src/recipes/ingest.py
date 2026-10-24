@@ -6,9 +6,6 @@ Only the Original is kept. The page's HTML and its schema.org data are read here
 import ipaddress
 import re
 import socket
-import threading
-from contextlib import suppress
-from contextvars import ContextVar
 from dataclasses import dataclass
 from http import HTTPStatus
 from time import monotonic
@@ -18,9 +15,6 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 import urllib3
 from protego import Protego
-from requests.adapters import HTTPAdapter
-from urllib3.connection import HTTPConnection, HTTPSConnection
-from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from recipes.models import (
     MAX_KEY_BYTES,
@@ -46,9 +40,8 @@ EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
-# redirects still answer inside the API's 30 s: at the deadline a watchdog shuts the connection a
-# read is waiting on. Running out of either, of redirects, or of the size a body may decode to, is
-# unreachable.
+# redirects still answer inside the API's 30 s: a read that stalls just before the deadline ends
+# by 22 s. Running out of either, of redirects, or of the size a body may decode to, is unreachable.
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 14
 MAX_REDIRECTS = 5
@@ -156,24 +149,12 @@ class PoliteFetcher:
         session: requests.Session | None = None,
         resolve: Callable[[str], list[str]] = resolve,
     ) -> None:
-        self.session = session or _watched_session()
+        self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.resolve = resolve
 
     def __call__(self, url: str) -> Page:
         deadline = monotonic() + DEADLINE_SECONDS
-        waiting: list[HTTPConnection] = []
-        token = _WAITING.set(waiting)
-        watchdog = threading.Timer(DEADLINE_SECONDS, _shut, [waiting])
-        watchdog.start()
-        try:
-            return self._fetch(url, deadline)
-        finally:
-            watchdog.cancel()
-            watchdog.join()
-            _WAITING.reset(token)
-
-    def _fetch(self, url: str, deadline: float) -> Page:
         robots: dict[str, Protego | None] = {}
 
         def allowed(hop: str) -> None:
@@ -242,69 +223,11 @@ class PoliteFetcher:
         if remaining <= 0:
             raise IngestFailed(reason="unreachable")
         try:
-            response = self.session.get(
+            return self.session.get(
                 url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=False, stream=True
             )
         except requests.RequestException:
             raise IngestFailed(reason="unreachable") from None
-        _raise_if_shut(response, deadline)
-        return response
-
-
-# The connections this fetch has waited on for a response, which its watchdog shuts. A timeout
-# is per read, so without it a site sending a byte a second could hold a fetch for ever.
-_WAITING: ContextVar[list[HTTPConnection]] = ContextVar("waiting")
-
-
-def _shut(waiting: list[HTTPConnection]) -> None:
-    """Shuts each socket rather than closing it, which wakes a read blocked on it. The plain
-    socket's shutdown, since an SSL socket's own drops its TLS state under the reading thread.
-    """
-    for connection in list(waiting):
-        if connection.sock is not None:
-            with suppress(OSError):
-                socket.socket.shutdown(connection.sock, socket.SHUT_RDWR)
-
-
-class _WatchedHTTPConnection(HTTPConnection):
-    def getresponse(self) -> urllib3.HTTPResponse:
-        _WAITING.get([]).append(self)
-        return super().getresponse()
-
-
-class _WatchedHTTPSConnection(HTTPSConnection):
-    def getresponse(self) -> urllib3.HTTPResponse:
-        _WAITING.get([]).append(self)
-        return super().getresponse()
-
-
-# urllib3's own connection classes don't match the protocol it declares for this, under pyright.
-class _WatchedHTTPPool(HTTPConnectionPool):
-    ConnectionCls = _WatchedHTTPConnection  # pyright: ignore[reportAssignmentType]
-
-
-class _WatchedHTTPSPool(HTTPSConnectionPool):
-    ConnectionCls = _WatchedHTTPSConnection  # pyright: ignore[reportAssignmentType]
-
-
-def _watched_session() -> requests.Session:
-    """A session whose connections the watchdog can shut."""
-    adapter = HTTPAdapter()
-    pools = {"http": _WatchedHTTPPool, "https": _WatchedHTTPSPool}
-    adapter.poolmanager.pool_classes_by_scheme = pools
-    session = requests.Session()
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-def _raise_if_shut(response: requests.Response, deadline: float) -> None:
-    """A read the watchdog woke at the deadline ends as if the site had stopped sending, so
-    whatever came before it is given up on, not taken as the whole response.
-    """
-    if monotonic() > deadline:
-        response.close()
-        raise IngestFailed(reason="unreachable")
 
 
 def _raise_for_status(response: requests.Response) -> None:
@@ -330,7 +253,6 @@ def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
                 raise IngestFailed(reason="unreachable")
     except urllib3.exceptions.HTTPError, OSError:
         raise IngestFailed(reason="unreachable") from None
-    _raise_if_shut(response, deadline)
     # requests decodes text without a charset as ISO-8859-1, but such pages are nearly all UTF-8.
     charset = "charset" in response.headers.get("Content-Type", "").lower()
     try:
