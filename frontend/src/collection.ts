@@ -43,6 +43,14 @@ export function loadCollection(): Promise<Collection> {
   return collection;
 }
 
+// Forgets the sync and the Collection after this device changes the Collection, so the next
+// screen to ask loads the new version instead of this page load's copy.
+export function forgetCollection() {
+  sync = undefined;
+  collection = undefined;
+  loadedCollection = undefined;
+}
+
 // A recipe at its card's version and the schema version, its immutable URL.
 export async function loadRecipe(card: Card): Promise<Recipe> {
   const key = `${card.id}@${card.recipe_version}`;

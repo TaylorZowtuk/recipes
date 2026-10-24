@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { Recipe } from "./api/client";
+import type { Original, Recipe } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
@@ -8,7 +8,7 @@ import { Plate } from "./Plate";
 import { byComponent } from "./recipeComponents";
 import { Screen } from "./Screen";
 import { recipePath, slug } from "./slug";
-import { formatStatedTime } from "./statedTime";
+import { formatStatedTime, statedTimeText } from "./statedTime";
 import { Tabs } from "./Tabs";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
@@ -76,8 +76,8 @@ export function RecipeScreen() {
         <Tabs
           label="Recipe"
           tabs={[
-            { label: "Ingredients", panel: <Ingredients recipe={recipe.value} /> },
-            { label: "Steps", panel: <Steps recipe={recipe.value} /> },
+            { label: "Ingredients", panel: <Ingredients original={recipe.value.original} /> },
+            { label: "Steps", panel: <Steps original={recipe.value.original} /> },
             { label: "About", panel: <About recipe={recipe.value} /> },
           ]}
         />
@@ -87,8 +87,8 @@ export function RecipeScreen() {
 }
 
 // The ingredient lines as captured, under a heading wherever the Component changes.
-function Ingredients({ recipe }: { recipe: Recipe }) {
-  return byComponent(recipe.original.ingredients).map((part) => (
+export function Ingredients({ original }: { original: Original }) {
+  return byComponent(original.ingredients).map((part) => (
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ul className="ingredients">
@@ -101,8 +101,8 @@ function Ingredients({ recipe }: { recipe: Recipe }) {
 }
 
 // The steps as captured, numbered through the whole recipe across its Components.
-function Steps({ recipe }: { recipe: Recipe }) {
-  return byComponent(recipe.original.steps).map((part) => (
+export function Steps({ original }: { original: Original }) {
+  return byComponent(original.steps).map((part) => (
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ol className="steps" start={part.start}>
@@ -114,30 +114,37 @@ function Steps({ recipe }: { recipe: Recipe }) {
   ));
 }
 
-// The Stated Times and yield as the Source wrote them, and a link back to the Source.
-function About({ recipe }: { recipe: Recipe }) {
-  const { stated_times: times, yield: recipeYield } = recipe.original;
+// The Stated Times (an ISO duration humanized, other text as written) and the yield as written.
+export function Facts({ original }: { original: Original }) {
+  const { stated_times: times, yield: recipeYield } = original;
+  const time = (stated: { text: string } | null) => stated && statedTimeText(stated.text);
   const facts = [
-    ["Prep", times.prep?.text],
-    ["Cook", times.cook?.text],
-    ["Total", times.total?.text],
+    ["Prep", time(times.prep)],
+    ["Cook", time(times.cook)],
+    ["Total", time(times.total)],
     ["Yield", recipeYield?.text],
   ].filter((fact): fact is [string, string] => !!fact[1]);
+  if (facts.length === 0) return null;
+  return (
+    <dl className="facts">
+      {facts.map(([term, text]) => (
+        <div key={term}>
+          <dt>{term}</dt>
+          <dd>{text}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+// The Stated Times and yield, and a link back to the Source.
+function About({ recipe }: { recipe: Recipe }) {
   const { source } = recipe;
   const sourceName = source.kind === "website" ? source.site_name : source.entry_name;
 
   return (
     <>
-      {facts.length > 0 && (
-        <dl className="facts">
-          {facts.map(([term, text]) => (
-            <div key={term}>
-              <dt>{term}</dt>
-              <dd>{text}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      <Facts original={recipe.original} />
       <p className="source">
         <span>Source</span>
         <a href={source.url} target="_blank" rel="noopener noreferrer">
