@@ -26,6 +26,8 @@ EDITOR = {SERVICE_TOKEN_HEADER: SERVICE_TOKEN}
 URL = "https://plateful.test/miso-soup"
 KEY = "https://plateful.test/miso-soup"
 ROBOTS = "https://plateful.test/robots.txt"
+# 2001 characters, though its key, without the tracking parameter, is short.
+LONG_URL = f"{URL}?utm_source=" + "x" * (2001 - len(f"{URL}?utm_source="))
 
 SETTINGS = AuthSettings.parse(
     {"service-token-hash": hashlib.sha256(SERVICE_TOKEN.encode()).hexdigest()}
@@ -118,6 +120,19 @@ def test_a_page_without_its_own_site_name_is_named_for_its_host(
     assert response.json()["source"]["site_name"] == "plateful.test"
 
 
+def test_a_host_past_a_site_names_limit_is_cut_to_its_first_200_characters(
+    client: TestClient, web: FakeWeb
+) -> None:
+    host = ".".join(letter * 63 for letter in "abcd")
+    url = f"https://{host}/garlic-rice"
+    web.pages[url] = (200, page("json-ld-graph.html"))
+
+    response = ingest(client, url)
+
+    assert response.status_code == 200
+    assert response.json()["source"]["site_name"] == host[:200]
+
+
 def test_a_page_whose_site_name_is_past_its_limit_is_named_by_its_first_200_characters(
     client: TestClient, web: FakeWeb
 ) -> None:
@@ -138,6 +153,7 @@ def test_a_page_whose_site_name_is_past_its_limit_is_named_by_its_first_200_char
         "https://x.test:99999/",
         f"https://{'a' * 64}.test/x",
         pytest.param("https://plateful.test/" + "a" * 2000, id="a key past 2000 bytes"),
+        pytest.param(LONG_URL, id="a url past 2000 characters with a short key"),
     ],
 )
 def test_an_invalid_url_is_refused(client: TestClient, web: FakeWeb, url: str) -> None:
@@ -415,6 +431,15 @@ def test_a_site_name_past_its_limit_is_refused(client: TestClient, store: Store)
     captured = ingest(client).json()
 
     response = save(client, {**captured, "source": {**captured["source"], "site_name": "x" * 201}})
+
+    assert response.status_code == 422
+    assert store.cards() == []
+
+
+def test_a_source_url_past_2000_characters_is_refused(client: TestClient, store: Store) -> None:
+    captured = ingest(client).json()
+
+    response = save(client, {**captured, "source": {**captured["source"], "url": LONG_URL}})
 
     assert response.status_code == 422
     assert store.cards() == []

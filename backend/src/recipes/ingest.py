@@ -6,6 +6,9 @@ Only the Original is kept. The page's HTML and its schema.org data are read here
 import ipaddress
 import re
 import socket
+import threading
+from contextlib import suppress
+from contextvars import ContextVar
 from dataclasses import dataclass
 from http import HTTPStatus
 from time import monotonic
@@ -15,8 +18,12 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 import requests
 import urllib3
 from protego import Protego
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from recipes.models import (
+    MAX_KEY_BYTES,
     MAX_LABEL,
     IngredientLine,
     Original,
@@ -39,8 +46,9 @@ EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
-# redirects still answer inside the API's 30 s: a read that stalls just before the deadline ends
-# by 22 s. Running out of either, of redirects, or of the size a body may decode to, is unreachable.
+# redirects still answer inside the API's 30 s: at the deadline a watchdog shuts the connection a
+# read is waiting on. Running out of either, of redirects, or of the size a body may decode to, is
+# unreachable.
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 14
 MAX_REDIRECTS = 5
@@ -51,8 +59,6 @@ CHUNK_BYTES = 64 * 1024
 # Query parameters that only say how someone reached the page. Any other, `ref` included, is kept.
 TRACKING = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"}
 DEFAULT_PORTS = {"http": 80, "https": 443}
-# Under DynamoDB's 2048-byte key, with room for the guard's `SOURCE#` prefix.
-MAX_KEY_BYTES = 2000
 
 
 class InvalidUrl(ValueError):
@@ -150,37 +156,64 @@ class PoliteFetcher:
         session: requests.Session | None = None,
         resolve: Callable[[str], list[str]] = resolve,
     ) -> None:
-        self.session = session or requests.Session()
+        self.session = session or _watched_session()
         self.session.headers["User-Agent"] = USER_AGENT
-        # Pages are redirected by hand, with a robots check per hop; this caps the redirects
-        # requests follows itself, for robots.txt.
-        self.session.max_redirects = MAX_REDIRECTS
         self.resolve = resolve
 
     def __call__(self, url: str) -> Page:
         deadline = monotonic() + DEADLINE_SECONDS
+        waiting: list[HTTPConnection] = []
+        token = _WAITING.set(waiting)
+        watchdog = threading.Timer(DEADLINE_SECONDS, _shut, [waiting])
+        watchdog.start()
+        try:
+            return self._fetch(url, deadline)
+        finally:
+            watchdog.cancel()
+            watchdog.join()
+            _WAITING.reset(token)
+
+    def _fetch(self, url: str, deadline: float) -> Page:
         robots: dict[str, Protego | None] = {}
+
+        def allowed(hop: str) -> None:
+            if not self._allowed(hop, robots, deadline):
+                raise FetchRefused(reason="robots")
+
+        url, response = self._follow(url, deadline, allowed)
+        with response:
+            if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
+                raise PageNotFound(url)
+            _raise_for_status(response)
+            return Page(html=_text(response, deadline, MAX_PAGE_BYTES), url=url)
+
+    def _follow(
+        self, url: str, deadline: float, check: Callable[[str], None]
+    ) -> tuple[str, requests.Response]:
+        """Where `url` finally leads and its response, following at most MAX_REDIRECTS by hand,
+        so each hop is checked as public and by `check` before it's requested, and has its own
+        timeout inside the deadline.
+        """
         for _ in range(MAX_REDIRECTS + 1):
             self._refuse_unless_public(url)
-            if not self._allowed(url, robots, deadline):
-                raise FetchRefused(reason="robots")
-            with self._get(url, deadline, follow=False) as response:
-                if not response.is_redirect:
-                    if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
-                        raise PageNotFound(url)
-                    _raise_for_status(response)
-                    return Page(html=_text(response, deadline, MAX_PAGE_BYTES), url=url)
-                url = urljoin(url, response.headers["Location"])
+            check(url)
+            response = self._get(url, deadline)
+            if not response.is_redirect:
+                return url, response
+            response.close()
+            url = urljoin(url, response.headers["Location"])
         # A redirect loop, like a page that never answers.
         raise IngestFailed(reason="unreachable")
 
     def _refuse_unless_public(self, url: str) -> None:
         """Loopback, private and other non-global addresses are never fetched, so a pasted URL
-        or a redirect can't reach the machine Plateful runs on or its network.
+        or a redirect can't reach the machine Plateful runs on or its network. The host checked
+        is the one requests connects to, encoded as it encodes it (IDNA 2008).
         """
         try:
-            addresses = self.resolve(urlsplit(url).hostname or "")
-        except OSError, UnicodeError:
+            prepared = requests.Request("GET", url).prepare().url or ""
+            addresses = self.resolve(urlsplit(prepared).hostname or "")
+        except OSError, UnicodeError, requests.RequestException:
             raise IngestFailed(reason="unreachable") from None
         if not all(ipaddress.ip_address(a.partition("%")[0]).is_global for a in addresses):
             raise FetchRefused(reason="blocked")
@@ -195,7 +228,8 @@ class PoliteFetcher:
         return rules is None or rules.can_fetch(url, ROBOTS_AGENT)
 
     def _robots(self, url: str, deadline: float) -> Protego | None:
-        with self._get(url, deadline, follow=True) as robots:
+        _, robots = self._follow(url, deadline, lambda _hop: None)
+        with robots:
             # RFC 9309: a robots.txt that's unavailable (4xx) allows everything, and one that's
             # unreachable (5xx) disallows everything for now, so the Source waits.
             if HTTPStatus.BAD_REQUEST <= robots.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
@@ -203,27 +237,74 @@ class PoliteFetcher:
             _raise_for_status(robots)
             return Protego.parse(_text(robots, deadline, MAX_ROBOTS_BYTES))
 
-    def _public_hop(self, response: requests.Response, *_args: object, **_kwargs: object) -> None:
-        """Called on each response when requests follows the redirects, as it does for robots.txt,
-        so a redirect off the public internet is refused before it's requested, as a page's is.
-        """
-        if response.is_redirect:
-            self._refuse_unless_public(urljoin(response.url, response.headers["Location"]))
-
-    def _get(self, url: str, deadline: float, *, follow: bool) -> requests.Response:
+    def _get(self, url: str, deadline: float) -> requests.Response:
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise IngestFailed(reason="unreachable")
         try:
-            return self.session.get(
-                url,
-                timeout=min(TIMEOUT_SECONDS, remaining),
-                allow_redirects=follow,
-                stream=True,
-                hooks={"response": self._public_hop} if follow else None,
+            response = self.session.get(
+                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=False, stream=True
             )
         except requests.RequestException:
             raise IngestFailed(reason="unreachable") from None
+        _raise_if_shut(response, deadline)
+        return response
+
+
+# The connections this fetch has waited on for a response, which its watchdog shuts. A timeout
+# is per read, so without it a site sending a byte a second could hold a fetch for ever.
+_WAITING: ContextVar[list[HTTPConnection]] = ContextVar("waiting")
+
+
+def _shut(waiting: list[HTTPConnection]) -> None:
+    """Shuts each socket rather than closing it, which wakes a read blocked on it. The plain
+    socket's shutdown, since an SSL socket's own drops its TLS state under the reading thread.
+    """
+    for connection in list(waiting):
+        if connection.sock is not None:
+            with suppress(OSError):
+                socket.socket.shutdown(connection.sock, socket.SHUT_RDWR)
+
+
+class _WatchedHTTPConnection(HTTPConnection):
+    def getresponse(self) -> urllib3.HTTPResponse:
+        _WAITING.get([]).append(self)
+        return super().getresponse()
+
+
+class _WatchedHTTPSConnection(HTTPSConnection):
+    def getresponse(self) -> urllib3.HTTPResponse:
+        _WAITING.get([]).append(self)
+        return super().getresponse()
+
+
+# urllib3's own connection classes don't match the protocol it declares for this, under pyright.
+class _WatchedHTTPPool(HTTPConnectionPool):
+    ConnectionCls = _WatchedHTTPConnection  # pyright: ignore[reportAssignmentType]
+
+
+class _WatchedHTTPSPool(HTTPSConnectionPool):
+    ConnectionCls = _WatchedHTTPSConnection  # pyright: ignore[reportAssignmentType]
+
+
+def _watched_session() -> requests.Session:
+    """A session whose connections the watchdog can shut."""
+    adapter = HTTPAdapter()
+    pools = {"http": _WatchedHTTPPool, "https": _WatchedHTTPSPool}
+    adapter.poolmanager.pool_classes_by_scheme = pools
+    session = requests.Session()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _raise_if_shut(response: requests.Response, deadline: float) -> None:
+    """A read the watchdog woke at the deadline ends as if the site had stopped sending, so
+    whatever came before it is given up on, not taken as the whole response.
+    """
+    if monotonic() > deadline:
+        response.close()
+        raise IngestFailed(reason="unreachable")
 
 
 def _raise_for_status(response: requests.Response) -> None:
@@ -249,6 +330,7 @@ def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
                 raise IngestFailed(reason="unreachable")
     except urllib3.exceptions.HTTPError, OSError:
         raise IngestFailed(reason="unreachable") from None
+    _raise_if_shut(response, deadline)
     # requests decodes text without a charset as ISO-8859-1, but such pages are nearly all UTF-8.
     charset = "charset" in response.headers.get("Content-Type", "").lower()
     try:

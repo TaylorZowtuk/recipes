@@ -16,8 +16,11 @@ SCHEMA_VERSION = 1
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 Rating = Annotated[int, Field(ge=1, le=3)]
-# A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly.
-WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$")]
+# A website's dedupe key, under DynamoDB's 2048-byte key with room for the guard's `SOURCE#` prefix.
+MAX_KEY_BYTES = 2000
+# A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly,
+# and no longer than a key, so tracking parameters dropped from the key can't swell the item.
+WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$", max_length=MAX_KEY_BYTES)]
 # An Original's limits, so a save past them is a 422 rather than an item past DynamoDB's 400 KB:
 # each field's, and its whole size as JSON, which leaves the rest of the item room.
 MAX_LABEL = 200

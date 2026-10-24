@@ -4,18 +4,20 @@ import gzip
 import socket
 import subprocess
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import chain, count, repeat
+from typing import TYPE_CHECKING
 
 import pytest
 import requests
-from fake_web import FakeWeb, Redirect, Served, page
+from fake_web import PUBLIC_ADDRESS, FakeWeb, Redirect, Served, page
 
 from recipes.ingest import (
-    DEADLINE_SECONDS,
     EXTRACTOR,
     MAX_PAGE_BYTES,
     MAX_ROBOTS_BYTES,
-    TIMEOUT_SECONDS,
     USER_AGENT,
     FetchRefused,
     IngestFailed,
@@ -31,6 +33,9 @@ from recipes.ingest import (
 )
 from recipes.models import StatedTime
 from recipes.seed import RECIPES
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 URL = "https://plateful.test/miso-soup"
 ROBOTS = "https://plateful.test/robots.txt"
@@ -347,8 +352,65 @@ def test_a_request_near_the_deadline_is_given_only_the_time_left(
     assert web.timeouts == [8, 3.0]
 
 
-def test_a_request_that_stalls_at_the_deadline_still_ends_inside_22_seconds() -> None:
-    assert DEADLINE_SECONDS + TIMEOUT_SECONDS <= 22
+class _SlowRobots(BaseHTTPRequestHandler):
+    """A robots.txt that redirects again and again, each hop answering after 0.3 s."""
+
+    def do_GET(self) -> None:
+        time.sleep(0.3)
+        self.send_response(302)
+        self.send_header("Location", f"{self.path}/next")
+        self.end_headers()
+
+
+class _DrippedHeaders(BaseHTTPRequestHandler):
+    """No robots.txt, and pages that send their status line, then a header byte each 0.1 s."""
+
+    def do_GET(self) -> None:
+        if self.path == "/robots.txt":
+            self.send_error(404)
+            return
+        self.wfile.write(b"HTTP/1.1 200 OK\r\n")
+        try:
+            for _ in range(30):
+                self.wfile.write(b"X")
+                self.wfile.flush()
+                time.sleep(0.1)
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def site(request: pytest.FixtureRequest) -> Iterator[str]:
+    """A real local site, for what FakeWeb can't fake: requests waiting on a slow connection."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), request.param)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.mark.parametrize("site", [_SlowRobots, _DrippedHeaders], indirect=True)
+def test_a_fetch_that_stalls_ends_unreachable_at_its_deadline(
+    monkeypatch: pytest.MonkeyPatch, site: str
+) -> None:
+    monkeypatch.setattr("recipes.ingest.DEADLINE_SECONDS", 1)
+    fetcher = PoliteFetcher(resolve=lambda _host: [PUBLIC_ADDRESS])
+    started = time.monotonic()
+
+    with pytest.raises(IngestFailed) as failed:
+        fetcher(f"{site}/miso-soup")
+    elapsed = time.monotonic() - started
+
+    assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
+    assert elapsed < 1.2, f"ended after {elapsed:.2f} s"
+
+
+def test_a_fetch_leaves_no_watchdog_running() -> None:
+    web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
+
+    web.fetcher()(URL)
+
+    assert not [t for t in threading.enumerate() if isinstance(t, threading.Timer)]
 
 
 def test_a_page_that_drips_past_the_deadline_waits_for_the_fallback(
@@ -442,6 +504,20 @@ def test_a_url_off_the_public_internet_is_refused_before_any_request(
 
     with pytest.raises(FetchRefused) as failed:
         PoliteFetcher(web.session(), resolve=lambda _host: addresses)(url)
+
+    assert failed.value.reason == "blocked"
+    assert web.urls == []
+
+
+def test_the_address_checked_is_the_one_requests_connects_to() -> None:
+    # getaddrinfo encodes this host as IDNA 2003, fass.de; requests as IDNA 2008, xn--fa-hia.de.
+    addresses = {"xn--fa-hia.de": ["127.0.0.1"], "fass.de": [PUBLIC_ADDRESS]}
+    web = FakeWeb()
+
+    with pytest.raises(FetchRefused) as failed:
+        PoliteFetcher(web.session(), resolve=lambda host: addresses[host.encode("idna").decode()])(
+            "http://faß.de/x"
+        )
 
     assert failed.value.reason == "blocked"
     assert web.urls == []
