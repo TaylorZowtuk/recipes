@@ -63,6 +63,14 @@ _Avoid_: Origin, provider
 Bringing a recipe from its source into the collection.
 _Avoid_: Import, scrape (scraping is only one way to ingest)
 
+**Queued Ingest**:
+A website Source that Add a recipe couldn't turn into a recipe with a plain fetch, kept so the Source stays reserved. It is either *waiting* for the local fallback chain or *needs a page*, where an editor has to paste the page or its text. It isn't a recipe and has no card. It has nothing to do with the Enrichment Status *Pending*, which is a saved recipe waiting for enrichment.
+_Avoid_: Pending ingest (*Pending* is an Enrichment Status), draft, failed import
+
+**Source Guard**:
+The record that a Source is already in the collection, which stops it being ingested twice. It points at either a recipe or a Queued Ingest, and is checked before anything is fetched.
+_Avoid_: Duplicate check, dedupe index
+
 **Enrichment**:
 Structured facts added to a recipe once, after it is ingested, and stored with it. This includes parsed ingredients, substitutions, nutrition estimates and grocery categories.
 _Avoid_: AI processing, augmentation

@@ -3,9 +3,12 @@
 import hashlib
 import http.client
 import os
+import platform
+import shutil
 import socket
 import subprocess
 import sys
+import sysconfig
 import time
 import zipfile
 from pathlib import Path
@@ -129,13 +132,48 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
         "fastapi/__init__.py",
     ):
         assert name in infos
-    assert "uvicorn/__init__.py" in infos
-    assert any(
-        name.startswith("pydantic_core/") and "aarch64-linux-gnu" in name and name.endswith(".so")
-        for name in infos
-    ), "pydantic_core should be the Linux arm64 build"
+    for name in ("uvicorn/__init__.py", "recipe_scrapers/__init__.py", "protego/__init__.py"):
+        assert name in infos
+    assert "jstyleson.py" in infos, "built from its source distribution"
+    for compiled in ("pydantic_core", "lxml"):
+        assert any(
+            name.startswith(f"{compiled}/") and "aarch64-linux-gnu" in name and name.endswith(".so")
+            for name in infos
+        ), f"{compiled} should be the Linux arm64 build"
 
     top_level = {name.split("/", 1)[0] for name in infos}
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
         assert dev_only not in top_level
     assert not any("__pycache__" in name for name in infos)
+
+
+# recipe_scrapers too, which the API imports only on its first parse, with its dependencies.
+IMPORT_FROM_ARGV = "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api, recipe_scrapers"
+
+
+def test_the_api_imports_from_the_zip_without_installed_package_metadata(
+    lambda_zips: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The zip holds `recipes` without its dist-info, so importing the API and its scrapers
+    mustn't need it. The arm64 extensions can't load here, so those packages come from this
+    venv's own builds instead, linked into a directory that holds nothing else.
+    """
+    tree, native = tmp_path / "tree", tmp_path / "native"
+    native.mkdir()
+    with zipfile.ZipFile(lambda_zips[0]) as zf:
+        zf.extractall(tree)
+    site_packages = Path(sysconfig.get_paths()["purelib"])
+    arm64 = {path.relative_to(tree).parts[0] for path in tree.rglob("*.so")}
+    for name in arm64:
+        shutil.rmtree(tree / name) if (tree / name).is_dir() else (tree / name).unlink()
+        local = name.replace("aarch64", platform.machine())
+        (native / local).symlink_to(site_packages / local)
+
+    imported = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", IMPORT_FROM_ARGV, tree, native],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert imported.returncode == 0, imported.stderr

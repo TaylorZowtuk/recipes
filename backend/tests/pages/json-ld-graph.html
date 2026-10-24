@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- A synthetic recipe page written for this repo: a Recipe inside an @graph, with no site name,
+a numeric yield and no times. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Garlic Rice</title>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {"@type": "WebPage", "@id": "https://www.plateful.test/garlic-rice#page"},
+    {
+      "@type": "Recipe",
+      "name": "Garlic Rice",
+      "recipeYield": 6,
+      "recipeIngredient": ["3 cups cooked rice", "4 cloves garlic, minced", "2 tbsp oil"],
+      "recipeInstructions": "Fry the garlic in the oil until golden. Add the rice and toss."
+    }
+  ]
+}
+</script>
+</head>
+<body><h1>Garlic Rice</h1></body>
+</html>

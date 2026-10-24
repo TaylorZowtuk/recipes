@@ -11,6 +11,16 @@ const pendingTitle = /^Grandma-Style Slow-Simmered Beef and Barley Stew/;
 
 const grid = (page: Page) => page.getByRole("list", { name: "Recipes" });
 const cardTitles = (page: Page) => grid(page).locator(".card-title");
+// The seeded cards. Tests in other files add recipes to the same local API as these run, so the
+// grid may hold more than the seed.
+const seededCards = (page: Page) => grid(page).locator('a[href^="/recipes/01K7SEED"]');
+const seededCount = 7;
+
+// How many cards the grid shows, once the seeded ones have loaded.
+async function shownCount(page: Page) {
+  await expect(seededCards(page)).toHaveCount(seededCount);
+  return cardTitles(page).count();
+}
 // The Shell's sync status is the other status on every screen.
 const resultCount = (page: Page) => page.getByRole("status").and(page.locator(".result-count"));
 
@@ -24,7 +34,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await page.goto("/recipes");
 
   // Every seeded card, sorted by title, two to a row even on a phone.
-  await expect(cardTitles(page)).toHaveCount(7);
+  const total = await shownCount(page);
   const titles = await cardTitles(page).allTextContents();
   expect(titles).toEqual([...titles].sort((a, b) => a.localeCompare(b)));
   const items = grid(page).getByRole("listitem");
@@ -38,8 +48,8 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await expect(card).toContainText("30 min");
   await expectTapTarget(card);
 
-  // Only the Pending recipe says enrichment is pending.
-  await expect(grid(page).getByText("Enrichment pending")).toHaveCount(1);
+  // Of the seeded recipes, only the Pending one says enrichment is pending.
+  await expect(seededCards(page).filter({ hasText: "Enrichment pending" })).toHaveCount(1);
   await expect(grid(page).getByRole("link", { name: pendingTitle })).toContainText(
     "Enrichment pending",
   );
@@ -47,7 +57,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   // The search ignores case and accents, and a status line says how many recipes match.
   const search = page.getByRole("searchbox", { name: "Search recipe titles" });
   await expectTapTarget(search);
-  await expect(resultCount(page)).toHaveText("7 recipes");
+  await expect(resultCount(page)).toHaveText(`${total} recipes`);
   await search.fill("NOODLÉS");
   await expect(cardTitles(page)).toHaveText([recipeTitle]);
   await expect(resultCount(page)).toHaveText("1 recipe");
@@ -110,7 +120,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   // Back returns to the Collection.
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/recipes$/);
-  await expect(cardTitles(page)).toHaveCount(7);
+  await expect(seededCards(page)).toHaveCount(seededCount);
 });
 
 test("a stale or missing slug still opens the recipe and corrects itself", async ({ page }) => {
@@ -143,11 +153,11 @@ test.describe("with no service worker", () => {
 
     await expect(page.getByRole("alert")).toHaveText("The Collection couldn’t be loaded.");
     await page.getByRole("button", { name: "Try again" }).click();
-    await expect(cardTitles(page)).toHaveCount(7);
+    const total = await shownCount(page);
     await expect(page.getByRole("alert")).toHaveCount(0);
     // The button is gone, so focus is on the status line rather than lost to the page.
     await expect(resultCount(page)).toBeFocused();
-    await expect(resultCount(page)).toHaveText("7 recipes");
+    await expect(resultCount(page)).toHaveText(`${total} recipes`);
   });
 
   for (const [what, url] of [
