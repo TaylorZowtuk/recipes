@@ -9,7 +9,7 @@ import socket
 from dataclasses import dataclass
 from http import HTTPStatus
 from time import monotonic
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast, override
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
@@ -40,9 +40,9 @@ EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
-# redirects still answer inside the API's 30 s: a request started just before the deadline ends by
-# about 25 s (a 3 s connect and one 8 s read). Running out of either, of redirects, or of the size a
-# body may decode to, is unreachable.
+# redirects still answer inside the API's 30 s: a body read started just before the deadline ends
+# by about 22 s (one 8 s read). DNS lookups have no timeout, so aren't bounded. Running out of
+# either, of redirects, or of the size a body may decode to, is unreachable.
 CONNECT_SECONDS = 3
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 14
@@ -136,6 +136,16 @@ class Fetcher(Protocol):
         ...
 
 
+class UnredirectedSession(requests.Session):
+    """A session that never resolves a redirect itself, as requests otherwise does even when not
+    following one, reading the whole 3xx body unbounded. The fetcher follows them by hand.
+    """
+
+    @override
+    def get_redirect_target(self, resp: requests.Response) -> None:
+        return None
+
+
 def resolve(host: str) -> list[str]:
     """The addresses `host` resolves to."""
     return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
@@ -148,10 +158,10 @@ class PoliteFetcher:
 
     def __init__(
         self,
-        session: requests.Session | None = None,
+        session: UnredirectedSession | None = None,
         resolve: Callable[[str], list[str]] = resolve,
     ) -> None:
-        self.session = session or requests.Session()
+        self.session = session or UnredirectedSession()
         self.session.headers["User-Agent"] = USER_AGENT
         self.resolve = resolve
 
@@ -184,7 +194,10 @@ class PoliteFetcher:
             if not response.is_redirect:
                 return url, response
             response.close()
-            url = urljoin(url, response.headers["Location"])
+            try:
+                url = urljoin(url, response.headers["Location"])
+            except ValueError:  # a malformed Location
+                raise IngestFailed(reason="unreachable") from None
         # A redirect loop, like a page that never answers.
         raise IngestFailed(reason="unreachable")
 
@@ -225,11 +238,9 @@ class PoliteFetcher:
         if remaining <= 0:
             raise IngestFailed(reason="unreachable")
         timeout = (min(CONNECT_SECONDS, remaining), min(TIMEOUT_SECONDS, remaining))
-        # requests resolves a redirect's Location even when not following it, and a malformed
-        # one raises ValueError there.
         try:
             return self.session.get(url, timeout=timeout, allow_redirects=False, stream=True)
-        except requests.RequestException, ValueError:
+        except requests.RequestException:
             raise IngestFailed(reason="unreachable") from None
 
 

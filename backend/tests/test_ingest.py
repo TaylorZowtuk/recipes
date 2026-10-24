@@ -271,6 +271,20 @@ def test_a_redirect_on_the_same_host_is_followed_under_the_same_robots_txt() -> 
     assert web.urls == [ROBOTS, URL, moved]
 
 
+def test_a_redirects_body_is_left_unread_however_large() -> None:
+    moved = "https://plateful.test/recipes/miso-soup"
+    web = FakeWeb(
+        {
+            ROBOTS: (404, ""),
+            URL: Redirect(moved, body="x" * (MAX_PAGE_BYTES + 1)),
+            moved: (200, "<html>page</html>"),
+        }
+    )
+
+    assert web.fetcher()(URL) == Page(html="<html>page</html>", url=moved)
+    assert web.bodies[1].read_bytes == 0
+
+
 def test_a_redirect_the_target_hosts_robots_txt_refuses_needs_the_page_and_is_not_followed() -> (
     None
 ):

@@ -10,7 +10,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.response import HTTPResponse
 
-from recipes.ingest import PoliteFetcher
+from recipes.ingest import PoliteFetcher, UnredirectedSession
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -21,10 +21,11 @@ PUBLIC_ADDRESS = "8.8.8.8"
 
 
 class Redirect(NamedTuple):
-    """A redirect to `location`, which may be relative."""
+    """A redirect to `location`, which may be relative, with a `body` the fetcher shouldn't read."""
 
     location: str
     status: int = 301
+    body: str = ""
 
 
 class Served(NamedTuple):
@@ -43,7 +44,23 @@ class Served(NamedTuple):
 type Page = tuple[int, str] | Served | Redirect | requests.RequestException
 
 
-class _Drip(io.BytesIO):
+class _Body(io.BytesIO):
+    """A body that counts the bytes read from it."""
+
+    read_bytes = 0
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        data = super().read(size)
+        self.read_bytes += len(data)
+        return data
+
+    def read1(self, size: int | None = -1, /) -> bytes:
+        data = super().read1(size)
+        self.read_bytes += len(data)
+        return data
+
+
+class _Drip(_Body):
     def read1(self, size: int | None = -1, /) -> bytes:
         return super().read1(1 if size else size)
 
@@ -54,13 +71,16 @@ def page(name: str) -> str:
 
 
 class FakeWeb(HTTPAdapter):
-    """Serves `pages` by URL, and 404 for any other, recording every request it's sent."""
+    """Serves `pages` by URL, and 404 for any other, recording every request it's sent and the
+    body it answered with.
+    """
 
     def __init__(self, pages: Mapping[str, Page] | None = None) -> None:
         super().__init__()
         self.pages = dict(pages or {})
         self.requests: list[requests.PreparedRequest] = []
         self.timeouts: list[object] = []
+        self.bodies: list[_Body] = []
 
     @property
     def urls(self) -> list[str | None]:
@@ -77,7 +97,7 @@ class FakeWeb(HTTPAdapter):
         headers: dict[str, str] = {}
         if isinstance(served, Redirect):
             headers["Location"] = served.location
-            served = Served(served.status, "")
+            served = Served(served.status, served.body)
         elif not isinstance(served, Served):
             served = Served(*served)
         headers["Content-Type"] = served.content_type
@@ -85,17 +105,20 @@ class FakeWeb(HTTPAdapter):
         if served.encoding:
             headers["Content-Encoding"] = served.encoding
             body = gzip.compress(body)
+        self.bodies.append((_Drip if served.drip else _Body)(body))
         raw = HTTPResponse(
-            body=(_Drip if served.drip else io.BytesIO)(body),
+            body=self.bodies[-1],
             headers=headers,
             status=served.status,
             preload_content=False,
         )
         return self.build_response(request, raw)
 
-    def session(self) -> requests.Session:
-        """A session whose every request goes to this fake web."""
-        session = requests.Session()
+    def session(self) -> UnredirectedSession:
+        """A session whose every request goes to this fake web, leaving redirects to the fetcher
+        as the fetcher's own session does.
+        """
+        session = UnredirectedSession()
         session.mount("http://", self)
         session.mount("https://", self)
         return session
