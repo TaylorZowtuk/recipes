@@ -41,8 +41,9 @@ ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
 # redirects still answer inside the API's 30 s: a body read started just before the deadline ends
-# by about 22 s (one 8 s read). DNS lookups have no timeout, so aren't bounded. Running out of
-# either, of redirects, or of the size a body may decode to, is unreachable.
+# by about 22 s (one 8 s read). DNS lookups have no timeout, and the connect timeout is per
+# address the host resolves to, so neither is bounded. Running out of time, of redirects, or of
+# the size a body may decode to, is unreachable.
 CONNECT_SECONDS = 3
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 14
