@@ -20,7 +20,7 @@ We chose a client that returns the Original over keeping a draft on the server, 
 
 ## Queued Ingest
 
-When the plain fetch can't produce a recipe, the Source is reserved rather than the attempt lost. A **Queued Ingest** is an item `INGEST#<ulid>` holding `{schema_version, id, source, dedupe_key, state, reason, queued_at}`, written in one transaction with its source guard. It has a `state`:
+When the plain fetch can't produce a recipe, the Source is reserved rather than the attempt lost. A **Queued Ingest** is an item in one partition (`INGEST`, sort key its ULID, like the cards' `CARD` partition, so listing them in queue order is one query) holding `{schema_version, id, source, dedupe_key, state, reason, queued_at}`, written in one transaction with its source guard. It has a `state`:
 
 - `waiting`: the local CLI fallback chain ([TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50)) will try it.
 - `needs_page`: an editor has to paste the page or its text. The completion UI belongs to [TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50).
