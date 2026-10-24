@@ -4,18 +4,26 @@ Enrichment facts (parses, matches, segments, issues) and Our Version join these 
 features that write them arrive.
 """
 
-from datetime import datetime
+import secrets
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 SCHEMA_VERSION = 1
 
 # A ULID in Crockford base32. The first character is at most 7, since the timestamp is 48 bits.
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
+_CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 Rating = Annotated[int, Field(ge=1, le=3)]
 # A Source's link: http(s) only, since it's rendered as a link. The string is kept exactly.
 WebUrl = Annotated[str, StringConstraints(pattern=r"^https?://\S+$")]
+
+
+def new_ulid() -> str:
+    """A new ULID: the time in milliseconds, then 80 random bits, so ids sort by creation."""
+    value = int(datetime.now(UTC).timestamp() * 1000) << 80 | secrets.randbits(80)
+    return "".join(_CROCKFORD[value >> shift & 31] for shift in range(125, -1, -5))
 
 
 class Model(BaseModel):
@@ -110,6 +118,8 @@ class Preview(Model):
 
 
 EnrichmentStatus = Literal["pending", "awaiting_review", "ready"]
+# How a recipe came into the Collection: "add_a_recipe" is an editor adding it from a website.
+IngestChannel = Literal["add_a_recipe"]
 
 
 class Recipe(Model):
@@ -124,6 +134,7 @@ class Recipe(Model):
     images: list[Image] = []
     preview: Preview | None = None
     status: EnrichmentStatus
+    ingest_channel: IngestChannel | None = None
 
 
 class NeedsReview(Model):
@@ -193,10 +204,43 @@ class CollectionMeta(Model):
 
 
 class SourceGuard(Model):
-    """`SOURCE#<dedupe key>`: claims a Source for the one recipe taken from it."""
+    """`SOURCE#<dedupe key>`: claims a Source for the one recipe taken from it, or for the Queued
+    Ingest that reserves it until that recipe is ingested.
+    """
 
     schema_version: int
-    recipe_id: Ulid
+    recipe_id: Ulid | None = None
+    queued_ingest_id: Ulid | None = None
+
+    @model_validator(mode="after")
+    def _points_at_one(self) -> SourceGuard:
+        if (self.recipe_id is None) == (self.queued_ingest_id is None):
+            msg = "A Source guard points at a recipe or a Queued Ingest"
+            raise ValueError(msg)
+        return self
+
+
+# `waiting` is for the CLI's fallbacks; `needs_page` waits for an editor to paste the page.
+QueuedIngestState = Literal["waiting", "needs_page"]
+# Why the automated ingest stopped: robots.txt refused it, the site answered 403 or another 4xx
+# (blocked), 429 (rate_limited) or 5xx (server_error), it was unreachable, or had no recipe.
+QueuedIngestReason = Literal[
+    "robots", "blocked", "rate_limited", "server_error", "unreachable", "no_recipe"
+]
+
+
+class QueuedIngest(Model):
+    """`INGEST` / `<id>`: a Source an automated ingest couldn't capture, kept until a fallback does.
+    Not a recipe, so it has no card and isn't in the Collection.
+    """
+
+    schema_version: int
+    id: Ulid
+    source: Source
+    dedupe_key: str
+    state: QueuedIngestState
+    reason: QueuedIngestReason
+    queued_at: datetime
 
 
 class SchemaMeta(Model):
