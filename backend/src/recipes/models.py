@@ -16,8 +16,8 @@ SCHEMA_VERSION = 1
 Ulid = Annotated[str, StringConstraints(pattern=r"^[0-7][0-9A-HJKMNP-TV-Z]{25}$")]
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 Rating = Annotated[int, Field(ge=1, le=3)]
-# A Source's link: http(s) only, since it's rendered as a link. The string is kept exactly.
-WebUrl = Annotated[str, StringConstraints(pattern=r"^https?://\S+$")]
+# A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly.
+WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$")]
 
 
 def new_ulid() -> str:

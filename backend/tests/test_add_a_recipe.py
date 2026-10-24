@@ -133,7 +133,7 @@ def test_a_source_already_in_the_collection_is_a_duplicate_before_any_fetch(
 ) -> None:
     recipe = store.add_recipe(RECIPES[0].model_copy(update={"dedupe_key": KEY}))
 
-    response = ingest(client, "http://www.plateful.test/miso-soup/?utm_source=newsletter#top")
+    response = ingest(client, "HTTP://WWW.Plateful.test/miso-soup/?utm_source=newsletter#top")
 
     assert response.status_code == 409
     assert response.json()["recipe_id"] == recipe.id
