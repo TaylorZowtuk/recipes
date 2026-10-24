@@ -1,9 +1,10 @@
 """A fake web for the polite fetcher: a requests adapter serving canned pages."""
 
+import gzip
 import io
 import ipaddress
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -27,12 +28,15 @@ class Redirect(NamedTuple):
 
 
 class Served(NamedTuple):
-    """A body sent with `content_type`, all at once or, dripping, one byte per read."""
+    """A body sent with `content_type`, all at once or, dripping, one byte per read, and
+    compressed when it has an `encoding`.
+    """
 
     status: int
     body: str | bytes
     content_type: str = "text/html; charset=utf-8"
     drip: bool = False
+    encoding: Literal["gzip"] | None = None
 
 
 # A page as its status and body, a redirect, or the error fetching it raises.
@@ -78,6 +82,9 @@ class FakeWeb(HTTPAdapter):
             served = Served(*served)
         headers["Content-Type"] = served.content_type
         body = served.body.encode() if isinstance(served.body, str) else served.body
+        if served.encoding:
+            headers["Content-Encoding"] = served.encoding
+            body = gzip.compress(body)
         raw = HTTPResponse(
             body=(_Drip if served.drip else io.BytesIO)(body),
             headers=headers,

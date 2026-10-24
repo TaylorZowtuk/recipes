@@ -18,10 +18,13 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 Rating = Annotated[int, Field(ge=1, le=3)]
 # A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly.
 WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$")]
-# An Original's limits, so a save past them is a 422 rather than an item past DynamoDB's 400 KB.
+# An Original's limits, so a save past them is a 422 rather than an item past DynamoDB's 400 KB:
+# each field's, and its whole size as JSON, which leaves the rest of the item room.
+MAX_LABEL = 200
 Line = Annotated[str, StringConstraints(max_length=2000)]
-Label = Annotated[str, StringConstraints(max_length=200)]
+Label = Annotated[str, StringConstraints(max_length=MAX_LABEL)]
 MAX_LINES = 500
+MAX_ORIGINAL_BYTES = 350 * 1024
 
 
 def new_ulid() -> str:
@@ -38,7 +41,7 @@ class Model(BaseModel):
 class WebsiteSource(Model):
     kind: Literal["website"] = "website"
     url: WebUrl
-    site_name: str
+    site_name: Label
     captured_at: datetime
 
 
@@ -100,6 +103,13 @@ class Original(Model):
         default=None, validation_alias="yield", serialization_alias="yield"
     )
     stated_times: StatedTimes = StatedTimes()
+
+    @model_validator(mode="after")
+    def _fits_an_item(self) -> Original:
+        if len(self.model_dump_json().encode()) > MAX_ORIGINAL_BYTES:
+            msg = f"An Original is at most {MAX_ORIGINAL_BYTES} bytes as JSON"
+            raise ValueError(msg)
+        return self
 
 
 class Difficulty(Model):

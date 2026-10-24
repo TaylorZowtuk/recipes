@@ -118,8 +118,27 @@ def test_a_page_without_its_own_site_name_is_named_for_its_host(
     assert response.json()["source"]["site_name"] == "plateful.test"
 
 
+def test_a_page_whose_site_name_is_past_its_limit_is_named_by_its_first_200_characters(
+    client: TestClient, web: FakeWeb
+) -> None:
+    web.pages[URL] = (200, page("json-ld-recipe.html").replace("Plateful Test Kitchen", "x" * 300))
+
+    response = ingest(client)
+
+    assert response.status_code == 200
+    assert response.json()["source"]["site_name"] == "x" * 200
+
+
 @pytest.mark.parametrize(
-    "url", ["ftp://plateful.test/x", "plateful.test/x", "https://:443/x", "https://x.test:99999/"]
+    "url",
+    [
+        "ftp://plateful.test/x",
+        "plateful.test/x",
+        "https://:443/x",
+        "https://x.test:99999/",
+        f"https://{'a' * 64}.test/x",
+        pytest.param("https://plateful.test/" + "a" * 2000, id="a key past 2000 bytes"),
+    ],
 )
 def test_an_invalid_url_is_refused(client: TestClient, web: FakeWeb, url: str) -> None:
     response = ingest(client, url)
@@ -378,6 +397,7 @@ def test_saving_keys_the_recipe_by_its_normalised_source(
         ("description", "x" * 5001),
         ("ingredients", [{"id": "i1", "text": "x" * 2001}]),
         ("steps", [{"id": f"s{n}", "text": "Stir."} for n in range(501)]),
+        ("steps", [{"id": f"s{n}", "text": "x" * 2000} for n in range(200)]),
     ],
 )
 def test_an_original_past_its_limits_is_refused(
@@ -386,6 +406,15 @@ def test_an_original_past_its_limits_is_refused(
     captured = ingest(client).json()
 
     response = save(client, {**captured, "original": {**captured["original"], field: value}})
+
+    assert response.status_code == 422
+    assert store.cards() == []
+
+
+def test_a_site_name_past_its_limit_is_refused(client: TestClient, store: Store) -> None:
+    captured = ingest(client).json()
+
+    response = save(client, {**captured, "source": {**captured["source"], "site_name": "x" * 201}})
 
     assert response.status_code == 422
     assert store.cards() == []

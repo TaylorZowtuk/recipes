@@ -15,10 +15,10 @@ We chose a client that returns the Original over keeping a draft on the server, 
 - **User agent:** an honest `Plateful/1 (+https://github.com/TaylorZowtuk/recipes)`. The [research note](https://github.com/TaylorZowtuk/recipes/blob/research/recipe-scraping/docs/research/recipe-scraping.md) found sites that block a spoofed browser agent and allow an honest one.
 - **robots.txt:** read with `protego` (RFC 9309). A 4xx on `robots.txt` means allowed. A 5xx or an unreachable `robots.txt` means disallowed for now, which is a transient failure, not a refusal (see below).
 - **Timeout and retries:** about 8 s per request, so robots.txt plus the page fit the 30 s CloudFront and Lambda limit. No retries: one editor-initiated request per recipe.
-- **Body size and the deadline:** bodies are streamed, and the 20 s deadline is checked as each piece arrives, so a page that drips slowly can't outlast it. A page may decode to at most 5 MB and a robots.txt to at most 512 KB, decompression included. Past either limit the Source waits as unreachable.
+- **Body size and the deadline:** bodies are streamed, and a 14 s deadline for the whole fetch is checked as each piece arrives and caps each request's timeout. A read that stalls just before the deadline still waits out its own timeout, so the fetch ends within about 22 s (14 s plus one 8 s read), leaving the parse and the queue write room inside the 30 s. A page may decode to at most 5 MB and a robots.txt to at most 512 KB, decompression included. Past either limit the Source waits as unreachable.
 - **Parse:** `recipe_scrapers.scrape_html(html, org_url=<final URL>, supported_only=False)`, recording `extractor = "recipe-scrapers"`. The final URL, after redirects, picks the site's scraper, while the pasted URL stays the Source and its dedupe key. Any error from a scraper, or a recipe past an Original's size limits, is the no-recipe outcome.
-- **Redirects:** followed by hand, at most 5, each hop only if its own host's robots.txt allows it (each robots.txt read once per ingest). A refusal at any hop is the robots outcome. Too many redirects, or the whole fetch running past about 20 s, waits as unreachable.
-- **Public addresses only:** before each hop's robots check the host is resolved, and if any of its addresses is loopback, private, link-local or otherwise not global, nothing is requested and the Source needs its page (reason blocked). A pasted URL or a site's redirect can't reach the machine the API runs on or its network.
+- **Redirects:** followed by hand, at most 5, each hop only if its own host's robots.txt allows it (each robots.txt read once per ingest). A refusal at any hop is the robots outcome. Too many redirects, or the whole fetch running past its 14 s deadline, waits as unreachable.
+- **Public addresses only:** before each hop's robots check, and before each redirect robots.txt itself answers with, the host is resolved, and if any of its addresses is loopback, private, link-local or otherwise not global, nothing is requested and the Source needs its page (reason blocked). A pasted URL or a site's redirect can't reach the machine the API runs on or its network. DNS rebinding is an accepted residual: a host's address can change between this check and the HTTP client's own lookup. Pinning the connection to the checked address needs a custom transport adapter, which isn't worth it when only signed-in editors can start a fetch and its worst case is a blind GET: the response is only parsed for a recipe, never shown as it came.
 - **Order:** the duplicate check comes first, before robots.txt or the page is requested.
 
 ## Queued Ingest
@@ -53,6 +53,8 @@ The website `dedupe_key` extends the data model ADR's summary with the exact rul
 - tracking parameters removed: `utm_*`, `fbclid`, `gclid`, `dclid`, `msclkid`, `mc_cid`, `mc_eid`, `_ga` and `igshid`. Any other parameter, `ref` included, is kept, because some sites select the recipe with one;
 - remaining parameters sorted by name;
 - path case kept, since paths are case-sensitive.
+
+A URL whose host IDNA can't encode, or whose key would pass 2000 bytes (under DynamoDB's 2048-byte key, with room for `SOURCE#`), is invalid.
 
 ## Stated Times
 

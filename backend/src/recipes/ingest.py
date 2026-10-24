@@ -17,6 +17,7 @@ import urllib3
 from protego import Protego
 
 from recipes.models import (
+    MAX_LABEL,
     IngredientLine,
     Original,
     QueuedIngestReason,
@@ -38,10 +39,10 @@ EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
-# redirects still answer inside the API's 30 s. Running out of either, of redirects, or of the
-# size a body may decode to, is unreachable.
+# redirects still answer inside the API's 30 s: a read that stalls just before the deadline ends
+# by 22 s. Running out of either, of redirects, or of the size a body may decode to, is unreachable.
 TIMEOUT_SECONDS = 8
-DEADLINE_SECONDS = 20
+DEADLINE_SECONDS = 14
 MAX_REDIRECTS = 5
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 MAX_ROBOTS_BYTES = 512 * 1024
@@ -50,10 +51,12 @@ CHUNK_BYTES = 64 * 1024
 # Query parameters that only say how someone reached the page. Any other, `ref` included, is kept.
 TRACKING = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"}
 DEFAULT_PORTS = {"http": 80, "https": 443}
+# Under DynamoDB's 2048-byte key, with room for the guard's `SOURCE#` prefix.
+MAX_KEY_BYTES = 2000
 
 
 class InvalidUrl(ValueError):
-    """Not an http(s) URL with a host."""
+    """Not an http(s) URL with a host IDNA can encode, or too long to be a key."""
 
 
 class PageNotFound(Exception):
@@ -87,6 +90,10 @@ def website_dedupe_key(url: str) -> str:
         raise InvalidUrl(url) from None
     if scheme not in DEFAULT_PORTS or not parts.hostname:
         raise InvalidUrl(url)
+    try:
+        parts.hostname.encode("idna")
+    except UnicodeError:
+        raise InvalidUrl(url) from None
     host = parts.hostname.removeprefix("www.")
     netloc = host if port in {None, DEFAULT_PORTS[scheme]} else f"{host}:{port}"
     query = sorted(
@@ -94,7 +101,10 @@ def website_dedupe_key(url: str) -> str:
         for name, value in parse_qsl(parts.query, keep_blank_values=True)
         if not name.lower().startswith("utm_") and name.lower() not in TRACKING
     )
-    return urlunsplit(("https", netloc, parts.path.rstrip("/"), urlencode(query), ""))
+    key = urlunsplit(("https", netloc, parts.path.rstrip("/"), urlencode(query), ""))
+    if len(key.encode()) > MAX_KEY_BYTES:
+        raise InvalidUrl(url)
+    return key
 
 
 def dedupe_key(source: Source) -> str:
@@ -104,8 +114,10 @@ def dedupe_key(source: Source) -> str:
 
 
 def site_host(dedupe_key: str) -> str:
-    """A website's name when its page doesn't give one: the host of its dedupe key."""
-    return urlsplit(dedupe_key).netloc
+    """A website's name when its page doesn't give one: the host of its dedupe key, cut to a
+    Label's length like a page's own name.
+    """
+    return urlsplit(dedupe_key).netloc[:MAX_LABEL]
 
 
 # Fetching
@@ -168,7 +180,7 @@ class PoliteFetcher:
         """
         try:
             addresses = self.resolve(urlsplit(url).hostname or "")
-        except OSError:
+        except OSError, UnicodeError:
             raise IngestFailed(reason="unreachable") from None
         if not all(ipaddress.ip_address(a.partition("%")[0]).is_global for a in addresses):
             raise FetchRefused(reason="blocked")
@@ -191,13 +203,24 @@ class PoliteFetcher:
             _raise_for_status(robots)
             return Protego.parse(_text(robots, deadline, MAX_ROBOTS_BYTES))
 
+    def _public_hop(self, response: requests.Response, *_args: object, **_kwargs: object) -> None:
+        """Called on each response when requests follows the redirects, as it does for robots.txt,
+        so a redirect off the public internet is refused before it's requested, as a page's is.
+        """
+        if response.is_redirect:
+            self._refuse_unless_public(urljoin(response.url, response.headers["Location"]))
+
     def _get(self, url: str, deadline: float, *, follow: bool) -> requests.Response:
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise IngestFailed(reason="unreachable")
         try:
             return self.session.get(
-                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=follow, stream=True
+                url,
+                timeout=min(TIMEOUT_SECONDS, remaining),
+                allow_redirects=follow,
+                stream=True,
+                hooks={"response": self._public_hop} if follow else None,
             )
         except requests.RequestException:
             raise IngestFailed(reason="unreachable") from None
@@ -259,7 +282,8 @@ def parse(html: str, url: str) -> Captured:
         raise IngestFailed(reason="no_recipe") from None
     if original is None:
         raise IngestFailed(reason="no_recipe")
-    return Captured(original=original, site_name=_optional(scraper.site_name))
+    site_name = _optional(scraper.site_name)
+    return Captured(original=original, site_name=site_name and site_name[:MAX_LABEL])
 
 
 def _original(scraper: AbstractScraper) -> Original | None:

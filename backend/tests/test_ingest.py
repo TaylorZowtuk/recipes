@@ -1,5 +1,6 @@
 """Ingest from a website: the dedupe key, the polite fetcher and the parse into an Original."""
 
+import gzip
 import socket
 import subprocess
 import sys
@@ -10,9 +11,11 @@ import requests
 from fake_web import FakeWeb, Redirect, Served, page
 
 from recipes.ingest import (
+    DEADLINE_SECONDS,
     EXTRACTOR,
     MAX_PAGE_BYTES,
     MAX_ROBOTS_BYTES,
+    TIMEOUT_SECONDS,
     USER_AGENT,
     FetchRefused,
     IngestFailed,
@@ -23,6 +26,7 @@ from recipes.ingest import (
     dedupe_key,
     iso_seconds,
     parse,
+    resolve,
     website_dedupe_key,
 )
 from recipes.models import StatedTime
@@ -63,11 +67,30 @@ def test_a_website_dedupe_key_is_the_normalised_url(url: str, key: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "url", ["ftp://plateful.test/x", "plateful.test/x", "https://:443/x", "https://x.test:99999/"]
+    "url",
+    [
+        "ftp://plateful.test/x",
+        "plateful.test/x",
+        "https://:443/x",
+        "https://x.test:99999/",
+        f"https://{'a' * 64}.test/x",
+        "https://a..test/x",
+    ],
 )
 def test_only_an_http_url_with_a_host_has_a_dedupe_key(url: str) -> None:
     with pytest.raises(InvalidUrl):
         website_dedupe_key(url)
+
+
+def test_a_dedupe_key_fits_a_dynamodb_key_at_2000_bytes() -> None:
+    longest = "https://plateful.test/" + "a" * (2000 - len("https://plateful.test/"))
+
+    assert website_dedupe_key(longest) == longest
+    with pytest.raises(InvalidUrl):
+        website_dedupe_key(longest + "a")
+    with pytest.raises(InvalidUrl):
+        # Normalising percent-encodes the query, so the key is longer than the URL.
+        website_dedupe_key("https://plateful.test/?q=" + "é" * 400)
 
 
 def test_each_source_variant_has_its_dedupe_key() -> None:
@@ -301,7 +324,7 @@ def test_a_redirect_loop_waits_for_the_fallback_after_five_redirects() -> None:
 def test_an_ingest_that_runs_past_its_deadline_waits_for_the_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clock = chain([0.0, 1.0, 21.0], repeat(21.0))
+    clock = chain([0.0, 1.0, 15.0], repeat(15.0))
     monkeypatch.setattr("recipes.ingest.monotonic", lambda: next(clock))
     web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
 
@@ -315,13 +338,17 @@ def test_an_ingest_that_runs_past_its_deadline_waits_for_the_fallback(
 def test_a_request_near_the_deadline_is_given_only_the_time_left(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    clock = chain([0.0, 1.0, 17.0], repeat(17.0))
+    clock = chain([0.0, 1.0, 11.0], repeat(11.0))
     monkeypatch.setattr("recipes.ingest.monotonic", lambda: next(clock))
     web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
 
     web.fetcher()(URL)
 
     assert web.timeouts == [8, 3.0]
+
+
+def test_a_request_that_stalls_at_the_deadline_still_ends_inside_22_seconds() -> None:
+    assert DEADLINE_SECONDS + TIMEOUT_SECONDS <= 22
 
 
 def test_a_page_that_drips_past_the_deadline_waits_for_the_fallback(
@@ -355,6 +382,23 @@ def test_a_body_past_its_size_limit_waits_for_the_fallback(
     assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
 
 
+def test_a_gzipped_page_is_read_as_its_html() -> None:
+    web = FakeWeb({ROBOTS: (404, ""), URL: Served(200, "<html>page</html>", encoding="gzip")})
+
+    assert web.fetcher()(URL).html == "<html>page</html>"
+
+
+def test_a_small_gzipped_page_that_decodes_past_its_limit_waits_for_the_fallback() -> None:
+    served = Served(200, "x" * (MAX_PAGE_BYTES + 1), encoding="gzip")
+    web = FakeWeb({ROBOTS: (404, ""), URL: served})
+    assert len(gzip.compress(b"x" * (MAX_PAGE_BYTES + 1))) < MAX_PAGE_BYTES // 100
+
+    with pytest.raises(IngestFailed) as failed:
+        web.fetcher()(URL)
+
+    assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
+
+
 def test_a_page_without_a_charset_is_read_as_utf_8() -> None:
     body = "<html>Crème brûlée</html>"
     web = FakeWeb({ROBOTS: (404, ""), URL: Served(200, body.encode(), content_type="text/html")})
@@ -370,6 +414,16 @@ def test_a_redirect_to_loopback_is_refused_and_never_requested() -> None:
 
     assert failed.value.reason == "blocked"
     assert web.urls == [ROBOTS, URL]
+
+
+def test_a_robots_txt_redirect_to_loopback_is_refused_and_never_requested() -> None:
+    web = FakeWeb({ROBOTS: Redirect("http://127.0.0.1:9/robots.txt", status=302)})
+
+    with pytest.raises(FetchRefused) as failed:
+        web.fetcher()(URL)
+
+    assert failed.value.reason == "blocked"
+    assert web.urls == [ROBOTS]
 
 
 @pytest.mark.parametrize(
@@ -401,3 +455,19 @@ def test_a_host_that_does_not_resolve_waits_for_the_fallback() -> None:
         PoliteFetcher(FakeWeb().session(), resolve=unresolved)(URL)
 
     assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
+
+
+def test_a_redirect_to_a_host_that_cannot_be_encoded_waits_for_the_fallback() -> None:
+    web = FakeWeb({ROBOTS: (404, ""), URL: Redirect("http://a..test/")})
+
+    def lookup(host: str) -> list[str]:
+        # The real lookup for the bad host, which fails before anything reaches the network.
+        return web.resolve(host) if host == "plateful.test" else resolve(host)
+
+    fetcher = PoliteFetcher(web.session(), resolve=lookup)
+
+    with pytest.raises(IngestFailed) as failed:
+        fetcher(URL)
+
+    assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
+    assert web.urls == [ROBOTS, URL]

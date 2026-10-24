@@ -55,7 +55,7 @@ export function forgetCollection() {
 }
 
 // The sync poll: undefined until it answers, null when it failed. It loads again after this device
-// changes the Collection.
+// changes the Collection, and when the network comes back, which asks again only after a failure.
 export function useSync(): Sync | null | undefined {
   const [polled, setPolled] = useState<{ sync: Sync | null }>();
   useEffect(() => {
@@ -67,9 +67,11 @@ export function useSync(): Sync | null | undefined {
       );
     load();
     forgotten.add(load);
+    window.addEventListener("online", load);
     return () => {
       current = false;
       forgotten.delete(load);
+      window.removeEventListener("online", load);
     };
   }, []);
   return polled?.sync;

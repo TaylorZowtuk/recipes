@@ -5,10 +5,12 @@ Importing this module starts an empty fake, so under `uvicorn --reload` every re
 from the same seeded Collection.
 """
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 import boto3
@@ -19,6 +21,11 @@ from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
 from recipes.ingest import FetchRefused, IngestFailed, Page, PageNotFound
 from recipes.store import Store, create_table
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from fastapi import Request, Response
 
 TABLE_NAME = "plateful-local"
 EDITOR = "editor@example.com"
@@ -124,3 +131,14 @@ def _recipe_page(title: str) -> str:
 mock_aws().start()
 create_table(boto3.client("dynamodb"), TABLE_NAME)
 app = create_app(store=seeded_store, auth=fake_auth, fetcher=lambda: fake_fetcher)
+# moto's table isn't safe across the threads uvicorn runs routes on: overlapping transactions
+# fail with a 500. One request at a time, as if on one table.
+one_at_a_time = asyncio.Lock()
+
+
+@app.middleware("http")
+async def _serialised(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    async with one_at_a_time:
+        return await call_next(request)
