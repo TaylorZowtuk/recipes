@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 from recipes.auth import Auth, require_editor
 from recipes.auth import router as auth_router
 from recipes.ingest import (
     Fetcher,
+    FetchRefused,
     IngestFailed,
     InvalidUrl,
     PageNotFound,
@@ -27,6 +28,7 @@ from recipes.models import (
     KitchenSettings,
     Original,
     QueuedIngest,
+    QueuedIngestState,
     Recipe,
     Ulid,
     WebsiteSource,
@@ -82,11 +84,15 @@ class NewRecipe(BaseModel):
     source: WebsiteSource
     original: Original
     difficulty: Difficulty | None = None
-    tags: list[str] = []
+    tags: Annotated[
+        list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)
+    ] = []
 
 
 class Duplicate(BaseModel):
-    """A 409: the Source is already a recipe in the Collection, or already a Queued Ingest."""
+    """A 409: the Source is already a recipe in the Collection, or already a Queued Ingest. With
+    neither id, its guard was there a moment ago and isn't now, so the editor can try again.
+    """
 
     detail: str
     recipe_id: Ulid | None
@@ -185,7 +191,9 @@ def post_ingest(body: IngestUrl, store: StoreDep, fetcher: FetcherDep) -> Ingest
         return duplicate
     now = datetime.now(UTC)
     try:
-        captured = parse(fetcher(body.url), body.url)
+        # Scraped as the site the page came from, while the pasted URL stays the Source.
+        page = fetcher(body.url)
+        captured = parse(page.html, page.url)
     except PageNotFound:
         raise HTTPException(404, "That page isn't on the website") from None
     except IngestFailed as failed:
@@ -194,14 +202,14 @@ def post_ingest(body: IngestUrl, store: StoreDep, fetcher: FetcherDep) -> Ingest
             id=new_ulid(),
             source=WebsiteSource(url=body.url, site_name=site_host(key), captured_at=now),
             dedupe_key=key,
-            state=failed.state,
+            state=_queued_state(failed),
             reason=failed.reason,
             queued_at=now,
         )
         try:
             store.queue_ingest(queued)
         except DuplicateSource:
-            return _duplicate(store, key) or _conflict(None)
+            return _claimed(store, key)
         return JSONResponse(queued.model_dump(mode="json"), status_code=202)
     source = WebsiteSource(
         url=body.url, site_name=captured.site_name or site_host(key), captured_at=now
@@ -234,7 +242,7 @@ def post_recipe(body: NewRecipe, store: StoreDep) -> Recipe | Response:
     try:
         return store.add_recipe(recipe)
     except DuplicateSource:
-        return _duplicate(store, key) or _conflict(None)
+        return _claimed(store, key)
 
 
 @router.get("/queued-ingests", dependencies=EDITORS_ONLY, responses={403: DUPLICATE[403]})
@@ -250,13 +258,30 @@ def _dedupe_key(url: str) -> str:
         raise HTTPException(422, "That isn't a website's address") from None
 
 
+def _queued_state(failed: IngestFailed) -> QueuedIngestState:
+    """A refused fetch needs an editor to paste the page; any other failure waits for the CLI."""
+    return "needs_page" if isinstance(failed, FetchRefused) else "waiting"
+
+
 def _duplicate(store: Store, key: str) -> JSONResponse | None:
     guard = store.source_guard(key)
     return None if guard is None else _conflict(guard.recipe_id, guard.queued_ingest_id)
 
 
-def _conflict(recipe_id: str | None, queued_ingest_id: str | None = None) -> JSONResponse:
-    detail = "Already in the Collection" if recipe_id else "Already waiting to be ingested"
+def _claimed(store: Store, key: str) -> JSONResponse:
+    """The 409 for a write that found the Source's guard: the duplicate it names, or a retry when
+    the guard has gone again by the time it's read.
+    """
+    return _duplicate(store, key) or _conflict(None, None)
+
+
+def _conflict(recipe_id: str | None, queued_ingest_id: str | None) -> JSONResponse:
+    if recipe_id:
+        detail = "Already in the Collection"
+    elif queued_ingest_id:
+        detail = "Already waiting to be ingested"
+    else:
+        detail = "Try again"
     duplicate = Duplicate(detail=detail, recipe_id=recipe_id, queued_ingest_id=queued_ingest_id)
     return JSONResponse(duplicate.model_dump(mode="json"), status_code=409, headers=NO_STORE)
 

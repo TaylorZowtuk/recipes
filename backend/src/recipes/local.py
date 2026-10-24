@@ -17,7 +17,7 @@ from moto import mock_aws
 from recipes import seed
 from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
-from recipes.ingest import IngestFailed, PageNotFound
+from recipes.ingest import FetchRefused, IngestFailed, Page, PageNotFound
 from recipes.store import Store, create_table
 
 TABLE_NAME = "plateful-local"
@@ -66,7 +66,7 @@ def fake_auth() -> Auth:
 FAKE_HOST = "plateful.test"
 
 
-def fake_fetcher(url: str) -> str:
+def fake_fetcher(url: str) -> Page:
     """Stands in for the web. On https://plateful.test, a path is a synthetic recipe page titled
     after its last segment, unless its first segment is one of these, for any rest of the path:
 
@@ -80,19 +80,20 @@ def fake_fetcher(url: str) -> str:
     """
     parts = urlsplit(url)
     if parts.hostname != FAKE_HOST:
-        raise IngestFailed(state="waiting", reason="unreachable")
+        raise IngestFailed(reason="unreachable")
     segments = [s for s in parts.path.split("/") if s] or ["home"]
     match segments[0]:
         case "missing":
             raise PageNotFound(url)
         case "blocked":
-            raise IngestFailed(state="waiting", reason="blocked")
+            raise IngestFailed(reason="blocked")
         case "robots-denied":
-            raise IngestFailed(state="needs_page", reason="robots")
+            raise FetchRefused(reason="robots")
         case "no-recipe":
-            return "<!doctype html><html><head><title>About</title></head><body></body></html>"
+            html = "<!doctype html><html><head><title>About</title></head><body></body></html>"
         case _:
-            return _recipe_page(segments[-1].replace("-", " ").title())
+            html = _recipe_page(segments[-1].replace("-", " ").title())
+    return Page(html=html, url=url)
 
 
 def _recipe_page(title: str) -> str:

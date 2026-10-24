@@ -3,9 +3,12 @@
 import hashlib
 import http.client
 import os
+import platform
+import shutil
 import socket
 import subprocess
 import sys
+import sysconfig
 import time
 import zipfile
 from pathlib import Path
@@ -142,3 +145,34 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
         assert dev_only not in top_level
     assert not any("__pycache__" in name for name in infos)
+
+
+IMPORT_FROM_ARGV = "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api"
+
+
+def test_the_api_imports_from_the_zip_without_installed_package_metadata(
+    lambda_zips: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The zip holds `recipes` without its dist-info, so importing the API mustn't need it. The
+    arm64 extensions can't load here, so those packages come from this venv's own builds instead,
+    linked into a directory that holds nothing else.
+    """
+    tree, native = tmp_path / "tree", tmp_path / "native"
+    native.mkdir()
+    with zipfile.ZipFile(lambda_zips[0]) as zf:
+        zf.extractall(tree)
+    site_packages = Path(sysconfig.get_paths()["purelib"])
+    arm64 = {path.relative_to(tree).parts[0] for path in tree.rglob("*.so")}
+    for name in arm64:
+        shutil.rmtree(tree / name) if (tree / name).is_dir() else (tree / name).unlink()
+        local = name.replace("aarch64", platform.machine())
+        (native / local).symlink_to(site_packages / local)
+
+    imported = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", IMPORT_FROM_ARGV, tree, native],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert imported.returncode == 0, imported.stderr

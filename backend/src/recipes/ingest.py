@@ -3,24 +3,23 @@
 Only the Original is kept. The page's HTML and its schema.org data are read here and dropped.
 """
 
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from http import HTTPStatus
-from importlib.metadata import version
 from time import monotonic
 from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
+import urllib3
 from protego import Protego
-from recipe_scrapers import scrape_html
-from recipe_scrapers._exceptions import RecipeScrapersExceptions
 
 from recipes.models import (
     IngredientLine,
     Original,
     QueuedIngestReason,
-    QueuedIngestState,
     RecipeYield,
     StatedTime,
     StatedTimes,
@@ -31,23 +30,26 @@ from recipes.models import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from recipe_scrapers._abstract import AbstractScraper
+
     from recipes.models import Source
 
 EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
-USER_AGENT = f"{ROBOTS_AGENT}/{version('recipes')} (+https://github.com/TaylorZowtuk/recipes)"
-# Per request, and a deadline for the whole fetch, so robots.txt, a page and its redirects
-# still answer inside the API's 30 s. Running out of either, or of redirects, is unreachable.
+USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
+# Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
+# redirects still answer inside the API's 30 s. Running out of either, of redirects, or of the
+# size a body may decode to, is unreachable.
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 20
 MAX_REDIRECTS = 5
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+MAX_ROBOTS_BYTES = 512 * 1024
+CHUNK_BYTES = 64 * 1024
 
 # Query parameters that only say how someone reached the page. Any other, `ref` included, is kept.
 TRACKING = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"}
 DEFAULT_PORTS = {"http": 80, "https": 443}
-
-# A scraper for a site it knows may fail on an unexpected page in a plain Python way.
-_SCRAPER_ERRORS = (RecipeScrapersExceptions, AttributeError, KeyError, IndexError, TypeError)
 
 
 class InvalidUrl(ValueError):
@@ -59,12 +61,15 @@ class PageNotFound(Exception):
 
 
 class IngestFailed(Exception):
-    """The automated ingest stopped, so the Source becomes a Queued Ingest in `state`."""
+    """The automated ingest stopped for `reason`, and a later automated attempt may succeed."""
 
-    def __init__(self, state: QueuedIngestState, reason: QueuedIngestReason) -> None:
-        super().__init__(f"{state}: {reason}")
-        self.state: QueuedIngestState = state
+    def __init__(self, reason: QueuedIngestReason) -> None:
+        super().__init__(reason)
         self.reason: QueuedIngestReason = reason
+
+
+class FetchRefused(IngestFailed):
+    """No automated fetch may be tried: robots.txt refuses it, or it leads off the public web."""
 
 
 # Dedupe keys
@@ -106,40 +111,67 @@ def site_host(dedupe_key: str) -> str:
 # Fetching
 
 
+@dataclass(frozen=True)
+class Page:
+    html: str
+    url: str  # where the page finally came from, after any redirects
+
+
 class Fetcher(Protocol):
-    def __call__(self, url: str) -> str:
-        """The page's HTML. Raises PageNotFound, or IngestFailed for a Queued Ingest."""
+    def __call__(self, url: str) -> Page:
+        """The page. Raises PageNotFound, or IngestFailed for a Queued Ingest."""
         ...
+
+
+def resolve(host: str) -> list[str]:
+    """The addresses `host` resolves to."""
+    return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
 
 
 class PoliteFetcher:
     """Fetches a page as Plateful, each request once, following a redirect only where the
-    robots.txt of the host it leads to allows it.
+    robots.txt of the host it leads to allows it, and only to a host on the public internet.
     """
 
-    def __init__(self, session: requests.Session | None = None) -> None:
+    def __init__(
+        self,
+        session: requests.Session | None = None,
+        resolve: Callable[[str], list[str]] = resolve,
+    ) -> None:
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
-        # Only robots.txt is fetched with requests following its redirects.
+        # Pages are redirected by hand, with a robots check per hop; this caps the redirects
+        # requests follows itself, for robots.txt.
         self.session.max_redirects = MAX_REDIRECTS
+        self.resolve = resolve
 
-    def __call__(self, url: str) -> str:
+    def __call__(self, url: str) -> Page:
         deadline = monotonic() + DEADLINE_SECONDS
         robots: dict[str, Protego | None] = {}
         for _ in range(MAX_REDIRECTS + 1):
+            self._refuse_unless_public(url)
             if not self._allowed(url, robots, deadline):
-                raise IngestFailed(state="needs_page", reason="robots")
-            response = self._get(url, deadline, follow=False)
-            if not response.is_redirect:
-                break
-            url = urljoin(url, response.headers["Location"])
-        else:
-            # A redirect loop, like a page that never answers.
-            raise IngestFailed(state="waiting", reason="unreachable")
-        if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
-            raise PageNotFound(url)
-        _raise_for_status(response)
-        return _text(response)
+                raise FetchRefused(reason="robots")
+            with self._get(url, deadline, follow=False) as response:
+                if not response.is_redirect:
+                    if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
+                        raise PageNotFound(url)
+                    _raise_for_status(response)
+                    return Page(html=_text(response, deadline, MAX_PAGE_BYTES), url=url)
+                url = urljoin(url, response.headers["Location"])
+        # A redirect loop, like a page that never answers.
+        raise IngestFailed(reason="unreachable")
+
+    def _refuse_unless_public(self, url: str) -> None:
+        """Loopback, private and other non-global addresses are never fetched, so a pasted URL
+        or a redirect can't reach the machine Plateful runs on or its network.
+        """
+        try:
+            addresses = self.resolve(urlsplit(url).hostname or "")
+        except OSError:
+            raise IngestFailed(reason="unreachable") from None
+        if not all(ipaddress.ip_address(a.partition("%")[0]).is_global for a in addresses):
+            raise FetchRefused(reason="blocked")
 
     def _allowed(self, url: str, robots: dict[str, Protego | None], deadline: float) -> bool:
         """Whether the robots.txt of `url`'s origin allows it, reading each origin's once."""
@@ -151,41 +183,55 @@ class PoliteFetcher:
         return rules is None or rules.can_fetch(url, ROBOTS_AGENT)
 
     def _robots(self, url: str, deadline: float) -> Protego | None:
-        robots = self._get(url, deadline, follow=True)
-        # RFC 9309: a robots.txt that's unavailable (4xx) allows everything, and one that's
-        # unreachable (5xx) disallows everything for now, so the Source waits.
-        if HTTPStatus.BAD_REQUEST <= robots.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
-            return None
-        _raise_for_status(robots)
-        return Protego.parse(_text(robots))
+        with self._get(url, deadline, follow=True) as robots:
+            # RFC 9309: a robots.txt that's unavailable (4xx) allows everything, and one that's
+            # unreachable (5xx) disallows everything for now, so the Source waits.
+            if HTTPStatus.BAD_REQUEST <= robots.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
+                return None
+            _raise_for_status(robots)
+            return Protego.parse(_text(robots, deadline, MAX_ROBOTS_BYTES))
 
     def _get(self, url: str, deadline: float, *, follow: bool) -> requests.Response:
         remaining = deadline - monotonic()
         if remaining <= 0:
-            raise IngestFailed(state="waiting", reason="unreachable")
+            raise IngestFailed(reason="unreachable")
         try:
             return self.session.get(
-                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=follow
+                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=follow, stream=True
             )
         except requests.RequestException:
-            raise IngestFailed(state="waiting", reason="unreachable") from None
+            raise IngestFailed(reason="unreachable") from None
 
 
 def _raise_for_status(response: requests.Response) -> None:
     status = response.status_code
     if status == HTTPStatus.TOO_MANY_REQUESTS:
-        raise IngestFailed(state="waiting", reason="rate_limited")
+        raise IngestFailed(reason="rate_limited")
     if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
-        raise IngestFailed(state="waiting", reason="server_error")
+        raise IngestFailed(reason="server_error")
     if status >= HTTPStatus.BAD_REQUEST:
-        raise IngestFailed(state="waiting", reason="blocked")
+        raise IngestFailed(reason="blocked")
 
 
-def _text(response: requests.Response) -> str:
+def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
+    """The body as text, read as it arrives, so a page that drips past the deadline or decodes
+    to more than `max_bytes` is given up on. read1 returns whatever has arrived rather than
+    waiting for a whole chunk.
+    """
+    body = bytearray()
+    try:
+        while chunk := response.raw.read1(CHUNK_BYTES, decode_content=True):
+            body += chunk
+            if len(body) > max_bytes or monotonic() > deadline:
+                raise IngestFailed(reason="unreachable")
+    except urllib3.exceptions.HTTPError, OSError:
+        raise IngestFailed(reason="unreachable") from None
     # requests decodes text without a charset as ISO-8859-1, but such pages are nearly all UTF-8.
-    if "charset" not in response.headers.get("Content-Type", "").lower():
-        response.encoding = "utf-8"
-    return response.text
+    charset = "charset" in response.headers.get("Content-Type", "").lower()
+    try:
+        return body.decode((charset and response.encoding) or "utf-8", errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
 
 
 # Parsing
@@ -198,19 +244,35 @@ class Captured:
 
 
 def parse(html: str, url: str) -> Captured:
-    """The page's recipe as written. Raises IngestFailed when it has none."""
+    """The page's recipe as written, scraped as the site at `url` lays it out. Raises
+    IngestFailed when it has none, or when what it has is too big for an Original.
+    """
+    # Imported here, not at load: its hundreds of site modules would slow every cold start.
+    from recipe_scrapers import scrape_html
+
+    # A site's own scraper fails in its own ways on a page it doesn't expect, so any error
+    # means no recipe was found, as does a recipe past an Original's limits.
     try:
         scraper = scrape_html(html, org_url=url, supported_only=False)
-        title = cast("str | None", scraper.title())
-        groups = scraper.ingredient_groups()
-        steps = scraper.instructions_list()
-    except _SCRAPER_ERRORS:
-        raise IngestFailed(state="waiting", reason="no_recipe") from None
-    ingredients = [(group.purpose, text) for group in groups for text in group.ingredients]
+        original = _original(scraper)
+    except Exception:
+        raise IngestFailed(reason="no_recipe") from None
+    if original is None:
+        raise IngestFailed(reason="no_recipe")
+    return Captured(original=original, site_name=_optional(scraper.site_name))
+
+
+def _original(scraper: AbstractScraper) -> Original | None:
+    """The scraper's recipe as an Original, or None without a title or an ingredient."""
+    title = cast("str | None", scraper.title())
+    ingredients = [
+        (group.purpose, text) for group in scraper.ingredient_groups() for text in group.ingredients
+    ]
+    steps = scraper.instructions_list()
     if not title or not ingredients:
-        raise IngestFailed(state="waiting", reason="no_recipe")
+        return None
     data = cast("dict[str, object]", scraper.schema.data)  # pyright: ignore[reportUnknownMemberType]
-    original = Original(
+    return Original(
         title=title,
         description=_optional(scraper.description),
         author=_optional(scraper.author),
@@ -219,7 +281,7 @@ def parse(html: str, url: str) -> Captured:
             IngredientLine(id=f"i{n}", component=component, text=text)
             for n, (component, text) in enumerate(ingredients, 1)
         ],
-        steps=[Step(id=f"s{n}", text=text) for n, text in enumerate(steps, 1)],
+        steps=[Step(id=f"s{n}", text=step) for n, step in enumerate(steps, 1)],
         recipe_yield=_yield(data.get("recipeYield")),
         stated_times=StatedTimes(
             prep=_stated_time(data.get("prepTime")),
@@ -227,13 +289,12 @@ def parse(html: str, url: str) -> Captured:
             total=_stated_time(data.get("totalTime")),
         ),
     )
-    return Captured(original=original, site_name=_optional(scraper.site_name))
 
 
 def _optional(field: Callable[[], object]) -> str | None:
     try:
         value = field()
-    except (*_SCRAPER_ERRORS, NotImplementedError):
+    except Exception:
         return None
     return (value.strip() or None) if isinstance(value, str) else None
 
