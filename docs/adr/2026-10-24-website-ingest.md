@@ -16,6 +16,7 @@ We chose a client that returns the Original over keeping a draft on the server, 
 - **robots.txt:** read with `protego` (RFC 9309). A 4xx on `robots.txt` means allowed. A 5xx or an unreachable `robots.txt` means disallowed for now, which is a transient failure, not a refusal (see below).
 - **Timeout and retries:** about 8 s per request, so robots.txt plus the page fit the 30 s CloudFront and Lambda limit. No retries: one editor-initiated request per recipe.
 - **Parse:** `recipe_scrapers.scrape_html(html, org_url=url, supported_only=False)`, recording `extractor = "recipe-scrapers"`.
+- **Redirects:** followed by hand, at most 5, each hop only if its own host's robots.txt allows it (each robots.txt read once per ingest). A refusal at any hop is the robots outcome. Too many redirects, or the whole fetch running past about 20 s, waits as unreachable.
 - **Order:** the duplicate check comes first, before robots.txt or the page is requested.
 
 ## Queued Ingest
