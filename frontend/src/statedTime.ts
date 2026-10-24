@@ -24,5 +24,6 @@ export function statedTimeText(text: string): string {
     (sum, part, i) => sum + Number(part ?? 0) * (UNIT_SECONDS[i] ?? 0),
     0,
   );
+  if (seconds === 0) return "0 min";
   return (Number.isFinite(seconds) && formatStatedTime(seconds)) || text;
 }

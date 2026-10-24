@@ -55,7 +55,8 @@ describe("statedTimeText", () => {
     expect(statedTimeText("P1M")).toBe("P1M");
   });
 
-  it("shows a zero duration as written", () => {
-    expect(statedTimeText("PT0M")).toBe("PT0M");
+  it("shows a zero duration as no minutes", () => {
+    expect(statedTimeText("PT0M")).toBe("0 min");
+    expect(statedTimeText("PT0S")).toBe("0 min");
   });
 });
