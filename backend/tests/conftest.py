@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 
 from recipes.api import create_app
+from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
 from recipes.store import Store, create_table
 
 if TYPE_CHECKING:
@@ -34,9 +35,17 @@ def store(table: str) -> Store:
     return store
 
 
+def no_sign_in(token: str, audience: str) -> Claims:
+    raise InvalidIdToken(token)
+
+
+# Sign-in as a stack has it before its settings are written: no one is an editor.
+UNCONFIGURED = Auth(settings=lambda: AuthSettings.parse({}), verifier=no_sign_in)
+
+
 @pytest.fixture
 def app(table: str) -> FastAPI:
-    return create_app(store=lambda: Store(table))
+    return create_app(store=lambda: Store(table), auth=lambda: UNCONFIGURED)
 
 
 @pytest.fixture

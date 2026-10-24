@@ -248,6 +248,19 @@ run "store" {
     )
     error_message = "The table is provisioned at the given capacities, so excess traffic throttles instead of billing."
   }
+  assert {
+    condition = toset(keys(aws_ssm_parameter.secret)) == toset([
+      "editor-allowlist", "session-hmac-key", "service-token-hash", "google-client-id",
+    ])
+    error_message = "The store holds the four sign-in parameters the API reads."
+  }
+  assert {
+    condition = alltrue([
+      for k, p in aws_ssm_parameter.secret :
+      p.name == "/plateful/test/${k}" && p.type == "SecureString" && p.value_wo_version == 1
+    ])
+    error_message = "Each sign-in parameter sits under the stack's prefix, written once as a placeholder (version 1) that Terraform never reverts."
+  }
 }
 
 run "prod" {

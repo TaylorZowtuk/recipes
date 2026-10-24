@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router";
+import { AccountMenu } from "./AccountMenu";
 import type { Sync } from "./api/client";
 import { loadSync } from "./collection";
-import { AccountIcon, FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
+import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
+import { focusTitle } from "./Screen";
 import { syncStatus } from "./syncStatus";
 
 const tabs = [
@@ -32,7 +34,7 @@ export function Shell() {
     if (shownKey.current === key) return;
     shownKey.current = key;
     if (navigationType === "REPLACE") return;
-    document.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
+    focusTitle();
   }, [key, navigationType]);
 
   return (
@@ -44,10 +46,7 @@ export function Shell() {
             <span>{label}</span>
           </NavLink>
         ))}
-        <NavLink to="/sign-in" className="place account-rail">
-          <AccountIcon />
-          <span>Sign in</span>
-        </NavLink>
+        <AccountMenu placement="rail" />
       </nav>
       <Outlet />
       <p role="status" className="sync-status">

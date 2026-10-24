@@ -41,6 +41,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session */
+        get: operations["get_session_api_session_get"];
+        put?: never;
+        /**
+         * Post Session
+         * @description Sign in with a Google ID token, which sets the session cookie.
+         */
+        post: operations["post_session_api_session_post"];
+        /**
+         * Delete Session
+         * @description Sign out on this device.
+         */
+        delete: operations["delete_session_api_session_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/sync": {
         parameters: {
             query?: never;
@@ -220,6 +245,26 @@ export interface components {
             text: string;
             /** Unit */
             unit: string | null;
+        };
+        /**
+         * Session
+         * @description Whether this device is signed in, and the Google client ID the PWA signs in with.
+         */
+        Session: {
+            /** Editor */
+            editor: boolean;
+            /** Email */
+            email: string | null;
+            /** Google Client Id */
+            google_client_id: string | null;
+        };
+        /**
+         * SignIn
+         * @description A Google ID token from Sign in with Google.
+         */
+        SignIn: {
+            /** Credential */
+            credential: string;
         };
         /** SpreadsheetSource */
         SpreadsheetSource: {
@@ -410,6 +455,98 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_session_api_session_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+        };
+    };
+    post_session_api_session_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description Not a valid Google ID token for this stack */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unverified, or not on the editor allowlist */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Sign-in isn't configured, or Google can't be reached */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_session_api_session_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

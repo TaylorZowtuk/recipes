@@ -258,6 +258,145 @@ h1:focus {
   margin-left: auto;
 }
 
+/* The rail's account button looks like the places above it. */
+.account .place {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.account button[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+/* The account menu: a floating card under the top bar's account button on phones. It's fixed, so
+   it escapes the desktop rail's scrolling. On a short screen (a small phone, or zoomed in) it stops
+   above the tab bar and scrolls. */
+.account-menu {
+  --menu-top: calc(var(--top-bar-height) + env(safe-area-inset-top));
+  --menu-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 2);
+  position: fixed;
+  top: var(--menu-top);
+  right: calc(var(--gutter) + env(safe-area-inset-right));
+  z-index: 3;
+  width: min(280px, calc(100vw - var(--gutter) * 2));
+  max-height: calc(100dvh - var(--menu-top) - var(--menu-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--space) * 2);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--elevation-float);
+  color: var(--text);
+  font-size: var(--text-body);
+  font-weight: 400;
+  text-align: left;
+  animation: menu-in var(--motion) ease-out;
+}
+
+/* The sticky top bar is its own stacking context, under the tab bar: lift it while its menu is
+   open, so the menu's shadow and edge aren't drawn over by the tab bar. */
+.top-bar:has(.account-menu) {
+  z-index: 3;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+.account-who {
+  margin: 0 0 calc(var(--space) * 2);
+  padding: calc(var(--space) * 2) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
+.account-who strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--text-body);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 calc(var(--space) * 3);
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--motion);
+}
+
+/* Opening the menu focuses its first item, so any focus gets the tint; keyboard focus also gets
+   the app's focus ring, inset so the card doesn't clip it. */
+.menu-item:focus {
+  outline: none;
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.menu-item:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Signing out: the item stays in place but can't be chosen again. */
+.menu-item[aria-disabled="true"] {
+  color: var(--text-secondary);
+  cursor: progress;
+}
+
+@media (hover: hover) {
+  .menu-item:hover {
+    background: var(--accent-soft);
+  }
+}
+
+.account-error,
+.sign-in-problem {
+  color: var(--emphasis-text);
+  font-weight: 700;
+}
+
+.account-error {
+  margin: calc(var(--space) * 2) calc(var(--space) * 3) var(--space);
+  font-size: var(--text-small);
+}
+
+.sign-in,
+.prompt {
+  max-width: 480px;
+}
+
+/* Its own stacking context, so the loading note can sit beneath Google's button. */
+.google-button {
+  position: relative;
+  isolation: isolate;
+  min-height: 44px;
+  margin: calc(var(--space) * 6) 0;
+}
+
+.sign-in-problem-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+}
+
 .screen-note {
   color: var(--text-secondary);
 }
@@ -265,6 +404,16 @@ h1:focus {
 /* An empty status note waits for its next message without taking up space. */
 .screen-note:empty {
   margin: 0;
+}
+
+/* Beneath Google's button, so its iframe covers the note once it paints, however the script
+   inserts it. Out of the flow, so the area keeps its height either way. */
+.google-button .screen-note {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  margin: 0;
+  line-height: 44px;
 }
 
 .result-count {
@@ -289,6 +438,9 @@ h1:focus {
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--tap);
   padding: 0 calc(var(--space) * 5);
   border: none;
@@ -296,6 +448,7 @@ h1:focus {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 700;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -634,7 +787,18 @@ h1:focus {
 
   .account-rail {
     display: flex;
+    flex-direction: column;
     margin-top: auto;
+  }
+
+  /* Beside the rail, level with the foot of it. */
+  .account-rail .account-menu {
+    --menu-top: calc(var(--space) * 2 + env(safe-area-inset-top));
+    --menu-bottom: calc(var(--space) * 6 + env(safe-area-inset-bottom));
+    top: auto;
+    right: auto;
+    bottom: var(--menu-bottom);
+    left: calc(var(--rail-width) + env(safe-area-inset-left) + var(--space) * 2);
   }
 
   .account-top {

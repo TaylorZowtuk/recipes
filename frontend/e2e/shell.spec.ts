@@ -70,7 +70,23 @@ function rgb(scheme: Scheme, role: Role) {
 
 const isDesktop = (projectName: string) => projectName.startsWith("desktop");
 const places = (page: Page) => page.getByRole("navigation", { name: "Places" });
-const accountButton = (page: Page) => page.getByRole("link", { name: "Sign in" });
+const accountButton = (page: Page) => page.getByRole("button", { name: "Account" });
+const accountMenu = (page: Page) => page.getByRole("menu", { name: "Account" });
+
+// Opens the account menu and follows one of its items.
+async function chooseFromAccountMenu(page: Page, item: string) {
+  await accountButton(page).click();
+  await accountMenu(page).getByRole("menuitem", { name: item }).click();
+}
+
+// These screens load Google's sign-in script, which these tests don't need. In Playwright's WebKit,
+// which has no service workers anyway, page.route stops seeing requests once the app registers one.
+test.use({
+  serviceWorkers: async ({ browserName }, use) => use(browserName === "webkit" ? "block" : "allow"),
+});
+test.beforeEach(async ({ page }) => {
+  await page.route("https://accounts.google.com/gsi/client", (route) => route.abort());
+});
 
 async function expectTapTarget(target: Locator) {
   const box = await target.boundingBox();
@@ -135,10 +151,10 @@ test("each tab opens from the navigation, which stays in place", async ({ page }
   const accountBox = await accountButton(page).boundingBox();
   if (!navBox || !accountBox) throw new Error("no navigation or account box");
   if (isDesktop(testInfo.project.name)) {
-    await expect(places(page).getByRole("link", { name: "Sign in" })).toBeVisible();
+    await expect(places(page).getByRole("button", { name: "Account" })).toBeVisible();
     expect(accountBox.y).toBeGreaterThan(navBox.y + navBox.height / 2);
   } else {
-    await expect(page.getByRole("banner").getByRole("link", { name: "Sign in" })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("button", { name: "Account" })).toBeVisible();
     expect(accountBox.y).toBeLessThan(100);
   }
 });
@@ -179,13 +195,16 @@ test("moving focus to the new screen's title doesn't scroll the window", async (
   const clickScrollY = () =>
     page.evaluate(() => (window as unknown as { clickScrollY: number }).clickScrollY);
 
-  for (const { link, title } of [
-    { link: places(page).getByRole("link", { name: "Fridge", exact: true }), title: "Fridge" },
-    { link: accountButton(page).filter({ visible: true }), title: "Editor sign-in" },
+  for (const { follow, title } of [
+    {
+      follow: () => places(page).getByRole("link", { name: "Fridge", exact: true }).click(),
+      title: "Fridge",
+    },
+    { follow: () => chooseFromAccountMenu(page, "Sign in"), title: "Editor sign-in" },
   ]) {
     await page.evaluate(() => window.scrollTo(0, 1500));
     expect(await page.evaluate(() => window.scrollY)).toBe(1500);
-    await link.click();
+    await follow();
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeFocused();
     // WebKit scrolls a focused element into view after focus() returns, so wait two frames.
     await page.evaluate(
@@ -195,14 +214,71 @@ test("moving focus to the new screen's title doesn't scroll the window", async (
   }
 });
 
-test("the account button is current on the sign-in screen", async ({ page }) => {
-  await page.goto("/sign-in");
-  const account = accountButton(page).filter({ visible: true });
-  await expect(account).toHaveAttribute("aria-current", "page");
-  // Both account links, the rail's and the top bar's, whichever is hidden in this layout.
-  const links = page.locator('a[href="/sign-in"]');
-  await expect(links).toHaveCount(2);
-  for (const link of await links.all()) await expect(link).toHaveAttribute("aria-current", "page");
+test("the account button opens a visitor's menu", async ({ page }) => {
+  await page.goto("/recipes");
+  const account = accountButton(page);
+  await expect(account).toHaveAttribute("aria-haspopup", "menu");
+  await expect(account).toHaveAttribute("aria-expanded", "false");
+  await expect(accountMenu(page)).toBeHidden();
+
+  await account.click();
+  await expect(account).toHaveAttribute("aria-expanded", "true");
+  const items = accountMenu(page).getByRole("menuitem");
+  await expect(items).toHaveText(["Kitchen settings", "Sign in"]);
+  // Measured once the menu has finished sliding in, which leaves it at fractional pixels.
+  await accountMenu(page).evaluate((menu) =>
+    Promise.all(menu.parentElement?.getAnimations().map((a) => a.finished) ?? []),
+  );
+  for (const item of await items.all()) {
+    await expectTapTarget(item);
+    await expect(item).toBeInViewport({ ratio: 1 });
+  }
+  // Focus moves into the menu, and the arrow keys move through it.
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("End");
+  await expect(items.last()).toBeFocused();
+
+  // Escape closes it and gives focus back to the button.
+  await page.keyboard.press("Escape");
+  await expect(accountMenu(page)).toBeHidden();
+  await expect(account).toHaveAttribute("aria-expanded", "false");
+  await expect(account).toBeFocused();
+
+  // So does a tap anywhere else.
+  await account.click();
+  await expect(accountMenu(page)).toBeVisible();
+  await page.getByRole("heading", { level: 1 }).click();
+  await expect(accountMenu(page)).toBeHidden();
+});
+
+test("the account menu opens Kitchen settings", async ({ page }) => {
+  await page.goto("/fridge");
+  await chooseFromAccountMenu(page, "Kitchen settings");
+  await expect(page).toHaveURL(/\/kitchen-settings$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Kitchen settings" })).toBeFocused();
+  await expect(page.getByRole("main")).toContainText("coming soon");
+  await expect(accountMenu(page)).toBeHidden();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/fridge$/);
+});
+
+test("the account menu is drawn in the Plateful colours", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/recipes");
+  await accountButton(page).click();
+  await expect(accountMenu(page).locator("xpath=..")).toHaveCSS(
+    "background-color",
+    rgb(scheme, "--surface"),
+  );
+  const items = accountMenu(page).getByRole("menuitem");
+  // The focused item is an Accent soft fill; the others are plain text.
+  await expect(items.first()).toBeFocused();
+  await expect(items.first()).toHaveCSS("background-color", rgb(scheme, "--accent-soft"));
+  await expect(items.last()).toHaveCSS("color", rgb(scheme, "--text"));
 });
 
 test("the current place stands out in its layout's colours", async ({ page }, testInfo) => {
@@ -228,20 +304,22 @@ test("the rail scrolls to the account button on a short, wide window", async ({ 
   await page.setViewportSize({ width: 844, height: 340 });
   await page.goto("/recipes");
 
-  const account = places(page).getByRole("link", { name: "Sign in" });
+  const account = places(page).getByRole("button", { name: "Account" });
   await account.scrollIntoViewIfNeeded();
   await expect(account).toBeInViewport({ ratio: 1 });
   await account.click();
+  const signIn = accountMenu(page).getByRole("menuitem", { name: "Sign in" });
+  await expect(signIn).toBeInViewport({ ratio: 1 });
+  await signIn.click();
   await expect(page).toHaveURL(/\/sign-in$/);
 });
 
 test("the sign-in screen adds a back button beside the navigation", async ({ page }, testInfo) => {
   await page.goto("/week");
-  await accountButton(page).click();
+  await chooseFromAccountMenu(page, "Sign in");
 
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByRole("heading", { level: 1, name: "Editor sign-in" })).toBeVisible();
-  await expect(page.getByRole("main")).toContainText("Signing in isn’t available yet.");
   const back = page.getByRole("button", { name: "Back" });
   await expect(back).toBeVisible();
   await expectTapTarget(back);
@@ -267,7 +345,7 @@ test("back goes to Recipes when sign-in was opened directly", async ({ page }) =
 test("back stays in the app after re-opening sign-in from sign-in", async ({ page }) => {
   await page.goto("/sign-in");
   // Following a link to the current path replaces the history entry instead of pushing one.
-  await page.getByRole("link", { name: "Sign in" }).filter({ visible: true }).click();
+  await chooseFromAccountMenu(page, "Sign in");
   await expect(page).toHaveURL(/\/sign-in$/);
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/recipes$/);
@@ -316,11 +394,25 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
   await expect(page.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
 });
 
+test("keyboard focus in the account menu shows the focus ring", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/week");
+  await accountButton(page).focus();
+  await page.keyboard.press("Enter");
+  const first = accountMenu(page).getByRole("menuitem").first();
+  await expect(first).toBeFocused();
+  await expect(first).toHaveCSS("outline-style", "solid");
+  await expect(first).toHaveCSS("outline-width", "3px");
+  await expect(first).toHaveCSS("outline-color", rgb(scheme, "--accent"));
+  await expect(first).toHaveCSS("background-color", rgb(scheme, "--accent-soft"));
+});
+
 test("buttons have no borders and the button radius", async ({ page }) => {
   await page.goto("/sign-in");
   const back = page.getByRole("button", { name: "Back" });
   await expect(back).toHaveCSS("border-top-width", "0px");
   await expect(back).toHaveCSS("border-top-left-radius", "18px");
+  await expect(accountButton(page)).toHaveCSS("border-top-width", "0px");
 });
 
 test("animations are toned down under reduced motion", async ({ page }) => {

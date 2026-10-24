@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, R
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
+from recipes.auth import Auth
+from recipes.auth import router as auth_router
 from recipes.models import SCHEMA_VERSION, Card, KitchenSettings, Recipe, Ulid
 from recipes.store import Store, VersionConflict
 
@@ -133,9 +135,11 @@ def server_error(_request: Request, _exc: Exception) -> JSONResponse:
     )
 
 
-def create_app(*, store: Callable[[], Store] = Store.from_env) -> FastAPI:
-    """The API on the table `store` opens. On startup it bootstraps the table, or refuses to start
-    on another schema.
+def create_app(
+    *, store: Callable[[], Store] = Store.from_env, auth: Callable[[], Auth] = Auth.from_env
+) -> FastAPI:
+    """The API on the table `store` opens, signing editors in with `auth`. On startup it bootstraps
+    the table, or refuses to start on another schema. Sign-in reads its settings on first need.
     """
 
     @asynccontextmanager
@@ -143,10 +147,12 @@ def create_app(*, store: Callable[[], Store] = Store.from_env) -> FastAPI:
         opened = store()
         opened.bootstrap()
         app.state.store = opened
+        app.state.auth = auth()
         yield
 
     app = FastAPI(title="Plateful", lifespan=lifespan)
     app.include_router(router)
+    app.include_router(auth_router)
     app.middleware("http")(no_store_by_default)
     app.middleware("http")(noindex)
     app.add_exception_handler(VersionConflict, version_conflict)
