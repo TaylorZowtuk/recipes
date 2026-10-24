@@ -40,8 +40,10 @@ EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its
-# redirects still answer inside the API's 30 s: a read that stalls just before the deadline ends
-# by 22 s. Running out of either, of redirects, or of the size a body may decode to, is unreachable.
+# redirects still answer inside the API's 30 s: a request started just before the deadline ends by
+# about 25 s (a 3 s connect and one 8 s read). Running out of either, of redirects, or of the size a
+# body may decode to, is unreachable.
+CONNECT_SECONDS = 3
 TIMEOUT_SECONDS = 8
 DEADLINE_SECONDS = 14
 MAX_REDIRECTS = 5
@@ -222,11 +224,12 @@ class PoliteFetcher:
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise IngestFailed(reason="unreachable")
+        timeout = (min(CONNECT_SECONDS, remaining), min(TIMEOUT_SECONDS, remaining))
+        # requests resolves a redirect's Location even when not following it, and a malformed
+        # one raises ValueError there.
         try:
-            return self.session.get(
-                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=False, stream=True
-            )
-        except requests.RequestException:
+            return self.session.get(url, timeout=timeout, allow_redirects=False, stream=True)
+        except requests.RequestException, ValueError:
             raise IngestFailed(reason="unreachable") from None
 
 
@@ -246,6 +249,8 @@ def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
     waiting for a whole chunk.
     """
     body = bytearray()
+    if monotonic() > deadline:
+        raise IngestFailed(reason="unreachable")
     try:
         while chunk := response.raw.read1(CHUNK_BYTES, decode_content=True):
             body += chunk

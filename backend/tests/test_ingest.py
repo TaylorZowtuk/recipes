@@ -195,7 +195,7 @@ def test_importing_ingest_leaves_recipe_scrapers_for_the_first_parse() -> None:
     assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
 
 
-def test_the_fetcher_asks_robots_txt_first_as_plateful_once_within_8_seconds() -> None:
+def test_the_fetcher_asks_robots_txt_first_as_plateful_once_within_3_and_8_seconds() -> None:
     web = FakeWeb({ROBOTS: (200, "User-agent: *\nAllow: /\n"), URL: (200, "<html>page</html>")})
 
     fetched = web.fetcher()(URL)
@@ -204,7 +204,7 @@ def test_the_fetcher_asks_robots_txt_first_as_plateful_once_within_8_seconds() -
     assert web.urls == [ROBOTS, URL]
     assert all(r.headers["User-Agent"] == USER_AGENT for r in web.requests)
     assert USER_AGENT == "Plateful/1 (+https://github.com/TaylorZowtuk/recipes)"
-    assert web.timeouts == [8, 8]
+    assert web.timeouts == [(3, 8), (3, 8)]
 
 
 def test_a_missing_robots_txt_allows_the_fetch() -> None:
@@ -326,6 +326,17 @@ def test_a_redirect_loop_waits_for_the_fallback_after_five_redirects() -> None:
     assert web.urls == [ROBOTS, URL, other, URL, other, URL, other]
 
 
+@pytest.mark.parametrize("location", ["http://[::1/x", "//[zz"])
+def test_a_malformed_redirect_waits_for_the_fallback(location: str) -> None:
+    web = FakeWeb({ROBOTS: (404, ""), URL: Redirect(location)})
+
+    with pytest.raises(IngestFailed) as failed:
+        web.fetcher()(URL)
+
+    assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
+    assert web.urls == [ROBOTS, URL]
+
+
 def test_an_ingest_that_runs_past_its_deadline_waits_for_the_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -349,7 +360,7 @@ def test_a_request_near_the_deadline_is_given_only_the_time_left(
 
     web.fetcher()(URL)
 
-    assert web.timeouts == [8, 3.0]
+    assert web.timeouts == [(3, 8), (3, 3.0)]
 
 
 class _SlowRobots(BaseHTTPRequestHandler):
