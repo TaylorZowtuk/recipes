@@ -429,7 +429,7 @@ test("animations are toned down under reduced motion", async ({ page }) => {
   expect(await duration()).toBeLessThan(0.01);
 });
 
-test("the app installs as Plateful", async ({ page, request }) => {
+test("the app installs as Plateful", { tag: "@deployed" }, async ({ page, request }) => {
   await page.goto("/recipes");
   const href = await page.locator('link[rel="manifest"]').getAttribute("href");
   expect(href).toBeTruthy();
@@ -451,6 +451,8 @@ test("the app installs as Plateful", async ({ page, request }) => {
   expect(await (await request.get("/sw.js")).text()).toContain(".woff2");
 });
 
+// Neither robots test is @deployed: robots.txt and the noindex meta are build output, the same locally,
+// and smoke checks the deployed robots.txt and X-Robots-Tag.
 test("search engines are told not to index the app", async ({ page, request }) => {
   await page.goto("/fridge");
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
@@ -470,7 +472,7 @@ test("the service worker leaves robots.txt alone", async ({ page, browserName })
   await expect(page.locator("#root")).toHaveCount(0);
 });
 
-test("the fonts load offline from the service worker's cache", async ({
+test("the fonts load offline from the service worker's cache", { tag: "@deployed" }, async ({
   page,
   context,
   browserName,
