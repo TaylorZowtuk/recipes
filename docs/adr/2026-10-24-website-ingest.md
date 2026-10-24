@@ -12,11 +12,13 @@ We chose a client that returns the Original over keeping a draft on the server, 
 
 ## Fetch policy
 
-- **User agent:** an honest `Plateful/<version> (+https://github.com/TaylorZowtuk/recipes)`. The [research note](https://github.com/TaylorZowtuk/recipes/blob/research/recipe-scraping/docs/research/recipe-scraping.md) found sites that block a spoofed browser agent and allow an honest one.
+- **User agent:** an honest `Plateful/1 (+https://github.com/TaylorZowtuk/recipes)`. The [research note](https://github.com/TaylorZowtuk/recipes/blob/research/recipe-scraping/docs/research/recipe-scraping.md) found sites that block a spoofed browser agent and allow an honest one.
 - **robots.txt:** read with `protego` (RFC 9309). A 4xx on `robots.txt` means allowed. A 5xx or an unreachable `robots.txt` means disallowed for now, which is a transient failure, not a refusal (see below).
 - **Timeout and retries:** about 8 s per request, so robots.txt plus the page fit the 30 s CloudFront and Lambda limit. No retries: one editor-initiated request per recipe.
-- **Parse:** `recipe_scrapers.scrape_html(html, org_url=url, supported_only=False)`, recording `extractor = "recipe-scrapers"`.
+- **Body size and the deadline:** bodies are streamed, and the 20 s deadline is checked as each piece arrives, so a page that drips slowly can't outlast it. A page may decode to at most 5 MB and a robots.txt to at most 512 KB, decompression included. Past either limit the Source waits as unreachable.
+- **Parse:** `recipe_scrapers.scrape_html(html, org_url=<final URL>, supported_only=False)`, recording `extractor = "recipe-scrapers"`. The final URL, after redirects, picks the site's scraper, while the pasted URL stays the Source and its dedupe key. Any error from a scraper, or a recipe past an Original's size limits, is the no-recipe outcome.
 - **Redirects:** followed by hand, at most 5, each hop only if its own host's robots.txt allows it (each robots.txt read once per ingest). A refusal at any hop is the robots outcome. Too many redirects, or the whole fetch running past about 20 s, waits as unreachable.
+- **Public addresses only:** before each hop's robots check the host is resolved, and if any of its addresses is loopback, private, link-local or otherwise not global, nothing is requested and the Source needs its page (reason blocked). A pasted URL or a site's redirect can't reach the machine the API runs on or its network.
 - **Order:** the duplicate check comes first, before robots.txt or the page is requested.
 
 ## Queued Ingest
@@ -34,7 +36,8 @@ Which failure leads where:
 | Guard exists (recipe or Queued Ingest) | 409 naming what it points at, nothing fetched |
 | 404 or 410 | Final error "page not found", nothing stored |
 | robots.txt disallows | Queued Ingest in `needs_page`, reason robots. No automated fetch is tried later |
-| 403, 429, 5xx, timeout, connection error, unreachable or 5xx `robots.txt`, or a page with no recipe found | Queued Ingest in `waiting` |
+| The URL or a redirect leads to an address that isn't on the public internet | Queued Ingest in `needs_page`, reason blocked. No automated fetch is tried later |
+| 403 or any other 4xx, 429, 5xx, timeout, connection error, unreachable or 5xx `robots.txt`, or a page with no recipe found | Queued Ingest in `waiting` |
 
 Queued Ingests are **not cards and not in the Collection bundle**, so phones never download or cache them. Add a recipe lists them ("Waiting for the fallback") from an editor-only `GET /api/queued-ingests`, which the CLI also reads with the service token. Despite the name, a Queued Ingest has nothing to do with Enrichment Status *Pending*: that is a saved recipe waiting for enrichment, while a Queued Ingest is a Source with no recipe yet.
 
@@ -53,7 +56,7 @@ The website `dedupe_key` extends the data model ADR's summary with the exact rul
 
 ## Stated Times
 
-A Stated Time's `text` is the site's string exactly (`PT1H15M`, `1 hour`), read from the raw schema.org data (`scraper.schema.data`: `prepTime`, `cookTime`, `totalTime`), not from the integer minutes `recipe-scrapers` returns. Those minutes lose information, as the research note shows. `seconds` is parsed at ingest only when `text` is an ISO 8601 duration, and is otherwise null, left for enrichment. The UI humanises an ISO duration ("1 hr 15 min") and shows other text as written. Any of the three may be absent.
+A Stated Time's `text` is the site's string exactly (`PT1H15M`, `1 hour`), read from the raw schema.org data (`scraper.schema.data`: `prepTime`, `cookTime`, `totalTime`), not from the integer minutes `recipe-scrapers` returns. Those minutes lose information, as the research note shows. `seconds` is parsed at ingest only when `text` is an ISO 8601 duration of whole days, hours, minutes and seconds, and is otherwise null, left for enrichment. The UI humanises an ISO duration ("1 hr 15 min") and shows other text as written. Any of the three may be absent.
 
 ## Considered options
 
