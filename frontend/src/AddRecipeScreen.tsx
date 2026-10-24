@@ -80,7 +80,7 @@ type Message = { alert: boolean; body: ReactNode };
 
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 const NOT_AN_EDITOR = "Only the household’s editors can add recipes. Sign in again.";
-const CONFLICT = "Something changed while saving. Try again.";
+const CONFLICT = "Something changed in the meantime. Try again.";
 const PAUSED = "Editing is paused while Plateful updates.";
 
 function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): Message {
