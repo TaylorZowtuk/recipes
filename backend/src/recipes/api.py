@@ -1,16 +1,41 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
-from recipes.auth import Auth
+from recipes.auth import Auth, require_editor
 from recipes.auth import router as auth_router
-from recipes.models import SCHEMA_VERSION, Card, KitchenSettings, Recipe, Ulid
-from recipes.store import Store, VersionConflict
+from recipes.ingest import (
+    Fetcher,
+    FetchRefused,
+    IngestFailed,
+    InvalidUrl,
+    PageNotFound,
+    PoliteFetcher,
+    parse,
+    site_host,
+    website_dedupe_key,
+)
+from recipes.models import (
+    SCHEMA_VERSION,
+    Card,
+    Difficulty,
+    KitchenSettings,
+    Original,
+    QueuedIngest,
+    QueuedIngestState,
+    Recipe,
+    Ulid,
+    WebsiteSource,
+    WebUrl,
+    new_ulid,
+)
+from recipes.store import DuplicateSource, Store, VersionConflict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -40,11 +65,51 @@ class Collection(BaseModel):
     kitchen_settings: KitchenSettings
 
 
+class IngestUrl(BaseModel):
+    url: WebUrl
+
+
+class Ingested(BaseModel):
+    """What ingesting a website captured, for an editor to review before saving. Nothing is
+    stored yet: saving sends it back.
+    """
+
+    source: WebsiteSource
+    original: Original
+
+
+class NewRecipe(BaseModel):
+    """A recipe to add from a website: what ingest captured, plus the editor's own fields."""
+
+    source: WebsiteSource
+    original: Original
+    difficulty: Difficulty | None = None
+    tags: Annotated[
+        list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)
+    ] = []
+
+
+class Duplicate(BaseModel):
+    """A 409: the Source is already a recipe in the Collection, or already a Queued Ingest. With
+    neither id, its guard was there a moment ago and isn't now, so the editor can try again.
+    """
+
+    detail: str
+    recipe_id: Ulid | None
+    queued_ingest_id: Ulid | None
+
+
 def _store(request: Request) -> Store:
     return request.app.state.store
 
 
+def _fetcher(request: Request) -> Fetcher:
+    return request.app.state.fetcher
+
+
 StoreDep = Annotated[Store, Depends(_store)]
+FetcherDep = Annotated[Fetcher, Depends(_fetcher)]
+EDITORS_ONLY = [Depends(require_editor)]
 router = APIRouter(prefix="/api")
 
 
@@ -98,6 +163,138 @@ def get_recipe(
     return recipe
 
 
+INVALID_URL = {422: {"description": "Not an http(s) URL with a host"}}
+DUPLICATE: dict[int | str, dict[str, Any]] = {
+    409: {"model": Duplicate, "description": "The Source is already a recipe or a Queued Ingest"},
+    403: {"description": "Only an editor can do that"},
+}
+
+
+@router.post(
+    "/ingest",
+    response_model=Ingested,
+    dependencies=EDITORS_ONLY,
+    responses={
+        **DUPLICATE,
+        **INVALID_URL,
+        202: {"model": QueuedIngest, "description": "Couldn't be captured, so it was queued"},
+        404: {"description": "The website says the page isn't there"},
+    },
+)
+def post_ingest(body: IngestUrl, store: StoreDep, fetcher: FetcherDep) -> Ingested | Response:
+    """Capture a website's recipe for review, storing nothing, unless its Source is already
+    claimed. A page that can't be captured becomes a Queued Ingest that reserves the Source.
+    """
+    key = _dedupe_key(body.url)
+    # Before any fetch, robots.txt included, so a known Source never reaches the site.
+    if duplicate := _duplicate(store, key):
+        return duplicate
+    now = datetime.now(UTC)
+    try:
+        # Scraped as the site the page came from, while the pasted URL stays the Source.
+        page = fetcher(body.url)
+        captured = parse(page.html, page.url)
+    except PageNotFound:
+        raise HTTPException(404, "That page isn't on the website") from None
+    except IngestFailed as failed:
+        queued = QueuedIngest(
+            schema_version=SCHEMA_VERSION,
+            id=new_ulid(),
+            source=WebsiteSource(url=body.url, site_name=site_host(key), captured_at=now),
+            dedupe_key=key,
+            state=_queued_state(failed),
+            reason=failed.reason,
+            queued_at=now,
+        )
+        try:
+            store.queue_ingest(queued)
+        except DuplicateSource:
+            return _claimed(store, key)
+        return JSONResponse(queued.model_dump(mode="json"), status_code=202)
+    source = WebsiteSource(
+        url=body.url, site_name=captured.site_name or site_host(key), captured_at=now
+    )
+    return Ingested(source=source, original=captured.original)
+
+
+@router.post(
+    "/recipes",
+    response_model=Recipe,
+    status_code=201,
+    dependencies=EDITORS_ONLY,
+    responses=DUPLICATE,
+)
+def post_recipe(body: NewRecipe, store: StoreDep) -> Recipe | Response:
+    """Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard."""
+    key = _dedupe_key(body.source.url)
+    recipe = Recipe(
+        id=new_ulid(),
+        schema_version=SCHEMA_VERSION,
+        version=1,
+        source=body.source,
+        dedupe_key=key,
+        original=body.original,
+        tags=_tags(body.tags),
+        difficulty=body.difficulty,
+        status="pending",
+        ingest_channel="add_a_recipe",
+    )
+    try:
+        return store.add_recipe(recipe)
+    except DuplicateSource:
+        return _claimed(store, key)
+
+
+@router.get("/queued-ingests", dependencies=EDITORS_ONLY, responses={403: DUPLICATE[403]})
+def get_queued_ingests(store: StoreDep) -> list[QueuedIngest]:
+    """The Sources waiting for a fallback or for an editor to paste the page, oldest first."""
+    return store.queued_ingests()
+
+
+def _dedupe_key(url: str) -> str:
+    try:
+        return website_dedupe_key(url)
+    except InvalidUrl:
+        raise HTTPException(422, "That isn't a website's address") from None
+
+
+def _queued_state(failed: IngestFailed) -> QueuedIngestState:
+    """A refused fetch needs an editor to paste the page; any other failure waits for the CLI."""
+    return "needs_page" if isinstance(failed, FetchRefused) else "waiting"
+
+
+def _duplicate(store: Store, key: str) -> JSONResponse | None:
+    guard = store.source_guard(key)
+    return None if guard is None else _conflict(guard.recipe_id, guard.queued_ingest_id)
+
+
+def _claimed(store: Store, key: str) -> JSONResponse:
+    """The 409 for a write that found the Source's guard: the duplicate it names, or a retry when
+    the guard has gone again by the time it's read.
+    """
+    return _duplicate(store, key) or _conflict(None, None)
+
+
+def _conflict(recipe_id: str | None, queued_ingest_id: str | None) -> JSONResponse:
+    if recipe_id:
+        detail = "Already in the Collection"
+    elif queued_ingest_id:
+        detail = "Already waiting to be ingested"
+    else:
+        detail = "Try again"
+    duplicate = Duplicate(detail=detail, recipe_id=recipe_id, queued_ingest_id=queued_ingest_id)
+    return JSONResponse(duplicate.model_dump(mode="json"), status_code=409, headers=NO_STORE)
+
+
+def _tags(tags: list[str]) -> list[str]:
+    """Tags match case-insensitively, keeping the first spelling."""
+    kept: dict[str, str] = {}
+    for tag in (t.strip() for t in tags):
+        if tag:
+            kept.setdefault(tag.casefold(), tag)
+    return list(kept.values())
+
+
 def version_conflict(_request: Request, _exc: Exception) -> JSONResponse:
     return JSONResponse(
         {"detail": "Version conflict: reload and try again"}, status_code=409, headers=NO_STORE
@@ -136,10 +333,14 @@ def server_error(_request: Request, _exc: Exception) -> JSONResponse:
 
 
 def create_app(
-    *, store: Callable[[], Store] = Store.from_env, auth: Callable[[], Auth] = Auth.from_env
+    *,
+    store: Callable[[], Store] = Store.from_env,
+    auth: Callable[[], Auth] = Auth.from_env,
+    fetcher: Callable[[], Fetcher] = PoliteFetcher,
 ) -> FastAPI:
-    """The API on the table `store` opens, signing editors in with `auth`. On startup it bootstraps
-    the table, or refuses to start on another schema. Sign-in reads its settings on first need.
+    """The API on the table `store` opens, signing editors in with `auth` and fetching websites
+    with `fetcher`. On startup it bootstraps the table, or refuses to start on another schema.
+    Sign-in reads its settings on first need.
     """
 
     @asynccontextmanager
@@ -148,6 +349,7 @@ def create_app(
         opened.bootstrap()
         app.state.store = opened
         app.state.auth = auth()
+        app.state.fetcher = fetcher()
         yield
 
     app = FastAPI(title="Plateful", lifespan=lifespan)

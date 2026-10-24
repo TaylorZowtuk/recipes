@@ -1,4 +1,5 @@
-"""The single DynamoDB table: recipes, their cards, Source guards, Kitchen settings and meta items.
+"""The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Kitchen settings
+and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
 in the same transaction, and versioned items are written only if their version hasn't changed.
@@ -20,6 +21,7 @@ from recipes.models import (
     Card,
     CollectionMeta,
     KitchenSettings,
+    QueuedIngest,
     Recipe,
     SchemaMeta,
     SourceGuard,
@@ -54,7 +56,7 @@ class VersionConflict(Exception):
 
 
 class DuplicateSource(Exception):
-    """A recipe from this Source is already in the Collection."""
+    """A recipe from this Source is in the Collection, or a Queued Ingest has reserved it."""
 
 
 class SchemaMismatch(RuntimeError):
@@ -75,6 +77,11 @@ def card_key(recipe_id: str) -> Item:
 
 def source_key(dedupe_key: str) -> Item:
     return {"PK": {"S": f"SOURCE#{dedupe_key}"}, "SK": {"S": "SOURCE"}}
+
+
+def queued_ingest_key(ingest_id: str) -> Item:
+    # One partition, like the cards, so listing them is a query. ULIDs sort in queue order.
+    return {"PK": {"S": "INGEST"}, "SK": {"S": ingest_id}}
 
 
 _serializer = TypeSerializer()
@@ -209,7 +216,9 @@ class Store:
     def add_recipe(self, recipe: Recipe) -> Recipe:
         """Add a new recipe at version 1, with its card and its Source guard."""
         added = recipe.model_copy(update={"version": 1})
-        guard = self._guard_source(added)
+        guard = self._guard_source(
+            SourceGuard(schema_version=added.schema_version, recipe_id=added.id), added.dedupe_key
+        )
         try:
             self._transact(
                 [
@@ -248,21 +257,33 @@ class Store:
 
         `page_size` lets tests force several pages.
         """
-        query: QueryInputTypeDef = {
-            "TableName": self.table,
-            "KeyConditionExpression": "PK = :card",
-            "ExpressionAttributeValues": {":card": {"S": "CARD"}},
-            "ConsistentRead": True,
-        }
-        if page_size:
-            query["Limit"] = page_size
-        cards: list[Card] = []
-        while True:
-            page = self.client.query(**query)
-            cards += [_from_item(Card, item) for item in page.get("Items", [])]
-            if "LastEvaluatedKey" not in page:
-                return cards
-            query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+        return self._partition(Card, "CARD", page_size)
+
+    # Source guards and Queued Ingests
+
+    def source_guard(self, dedupe_key: str) -> SourceGuard | None:
+        """What has claimed the Source with this dedupe key, if anything has."""
+        item = self._get(source_key(dedupe_key), consistent=True)
+        return None if item is None else _from_item(SourceGuard, item)
+
+    def queue_ingest(self, queued: QueuedIngest) -> None:
+        """Add a Queued Ingest with the Source guard that reserves its Source. It isn't shared
+        collection data, so `META#collection` stays as it is.
+        """
+        guard = self._guard_source(
+            SourceGuard(schema_version=queued.schema_version, queued_ingest_id=queued.id),
+            queued.dedupe_key,
+        )
+        try:
+            self._transact([guard, self._create(queued, queued_ingest_key(queued.id))])
+        except _Cancelled as cancelled:
+            if cancelled.failed(guard):
+                raise DuplicateSource(queued.dedupe_key) from None
+            raise
+
+    def queued_ingests(self, page_size: int | None = None) -> list[QueuedIngest]:
+        """Every Queued Ingest, oldest first. `page_size` lets tests force several pages."""
+        return self._partition(QueuedIngest, "INGEST", page_size)
 
     # Kitchen settings
 
@@ -302,6 +323,24 @@ class Store:
                 raise VersionConflict(key["PK"]["S"]) from None
             raise
         return saved
+
+    def _partition[M: BaseModel](self, model: type[M], pk: str, page_size: int | None) -> list[M]:
+        """Every item in partition `pk`, in sort key order, read consistently."""
+        query: QueryInputTypeDef = {
+            "TableName": self.table,
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": {"S": pk}},
+            "ConsistentRead": True,
+        }
+        if page_size:
+            query["Limit"] = page_size
+        items: list[M] = []
+        while True:
+            page = self.client.query(**query)
+            items += [_from_item(model, item) for item in page.get("Items", [])]
+            if "LastEvaluatedKey" not in page:
+                return items
+            query["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
     def _get(self, key: Item, *, consistent: bool = False) -> Item | None:
         response = self.client.get_item(TableName=self.table, Key=key, ConsistentRead=consistent)
@@ -344,10 +383,9 @@ class Store:
             }
         }
 
-    def _guard_source(self, recipe: Recipe) -> TransactWriteItemTypeDef:
-        """Claim the recipe's Source, so a second recipe from it is refused."""
-        guard = SourceGuard(schema_version=recipe.schema_version, recipe_id=recipe.id)
-        return self._create(guard, source_key(recipe.dedupe_key))
+    def _guard_source(self, guard: SourceGuard, dedupe_key: str) -> TransactWriteItemTypeDef:
+        """Claim the Source, so a second recipe or Queued Ingest from it is refused."""
+        return self._create(guard, source_key(dedupe_key))
 
     def _put_card(self, recipe: Recipe) -> TransactWriteItemTypeDef:
         item = _to_item(card_for(recipe), card_key(recipe.id))

@@ -14,8 +14,11 @@ trap 'rm -rf "$stage"' EXIT
 
 cd "$repo/backend"
 uv export --locked --quiet --no-dev --no-emit-project --no-header --output-file "$stage/requirements.txt"
+# Wheels only, so nothing is compiled for this container's platform. jstyleson (recipe-scrapers,
+# through extruct) publishes only a source distribution, but it's one pure-Python module.
 uv pip install --quiet --no-config --target "$stage/package" --python-version "$python" \
-  --python-platform "$platform" --only-binary :all: --no-compile -r "$stage/requirements.txt"
+  --python-platform "$platform" --only-binary :all: --no-binary jstyleson --no-compile \
+  -r "$stage/requirements.txt"
 # bin/ holds console scripts pointing at this container's Python, and .lock is uv's own.
 rm -rf "$stage/package/bin" "$stage/package/.lock"
 cp -r src/recipes "$stage/package/recipes"

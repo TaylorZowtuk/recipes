@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 
 // Add a page here when a UI change needs before/after screenshots of it. `loaded` is text that
 // shows once a page's data has arrived, for pages that render before it does. `editor` signs in
-// first (with the local API's fake sign-in), and `menu` opens the account menu.
+// first (with the local API's fake sign-in), and `menu` opens the account menu. `ingest` fetches
+// that path on the local API's fake web in Add a recipe, made unique to the project.
 type Shot = {
   name: string;
   path: string;
@@ -11,6 +12,7 @@ type Shot = {
   loaded?: string;
   editor?: boolean;
   menu?: boolean;
+  ingest?: string;
 };
 const pages: Shot[] = [
   {
@@ -28,6 +30,23 @@ const pages: Shot[] = [
   { name: "kitchen-settings", path: "/kitchen-settings", ready: "Kitchen settings" },
   { name: "add-recipe", path: "/add", ready: "Add a recipe" },
   { name: "add-recipe-editor", path: "/add", ready: "Add a recipe", editor: true },
+  {
+    name: "add-recipe-review",
+    path: "/add",
+    ready: "Add a recipe",
+    editor: true,
+    ingest: "screenshot-lemon-rice",
+    loaded: "2 cups cooked rice",
+  },
+  {
+    name: "add-recipe-queued",
+    path: "/add",
+    ready: "Add a recipe",
+    editor: true,
+    ingest: "blocked/screenshot-soup",
+    loaded:
+      "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
+  },
   {
     name: "recipe",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
@@ -54,7 +73,7 @@ const fakeGoogle = `window.google = { accounts: { id: {
   },
 } } };`;
 
-for (const { name, path: url, ready, loaded, editor, menu } of pages) {
+for (const { name, path: url, ready, loaded, editor, menu, ingest } of pages) {
   test(name, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -82,6 +101,18 @@ for (const { name, path: url, ready, loaded, editor, menu } of pages) {
       test.skip(!shown, `no "${ready}" heading at ${url}: the page is new`);
     } else {
       await expect(heading).toBeVisible();
+    }
+    if (ingest) {
+      const field = page.getByRole("textbox", { name: "Recipe web address" });
+      if (mayBeMissing) {
+        const shown = await field.waitFor({ timeout: 3000 }).then(
+          () => true,
+          () => false,
+        );
+        test.skip(!shown, "no Add a recipe form on this branch");
+      }
+      await field.fill(`https://plateful.test/${ingest}-${testInfo.project.name}`);
+      await page.getByRole("button", { name: "Fetch" }).click();
     }
     if (loaded) {
       const content = page.getByText(loaded, { exact: true }).first();

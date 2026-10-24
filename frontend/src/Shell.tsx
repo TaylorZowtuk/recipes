@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router";
 import { AccountMenu } from "./AccountMenu";
-import type { Sync } from "./api/client";
-import { loadSync } from "./collection";
+import { useSync } from "./collection";
 import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
+import { useOnline } from "./online";
 import { focusTitle } from "./Screen";
 import { syncStatus } from "./syncStatus";
 
@@ -17,15 +17,12 @@ const tabs = [
 // The permanent frame: the four places as a bottom tab bar on phones or a left rail on desktop,
 // around whichever screen is open.
 export function Shell() {
-  const [status, setStatus] = useState("Checking…");
+  const sync = useSync();
+  const online = useOnline();
+  const status = sync === undefined ? "Checking…" : syncStatus({ sync, online });
   const { key } = useLocation();
   const navigationType = useNavigationType();
   const shownKey = useRef(key);
-
-  useEffect(() => {
-    const show = (sync: Sync | null) => setStatus(syncStatus({ sync, online: navigator.onLine }));
-    loadSync().then(show, () => show(null));
-  }, []);
 
   // After each navigation, focus moves to the new screen's title, without scrolling the window, so
   // screen readers announce it. The first screen opened, and a navigation that replaces the screen

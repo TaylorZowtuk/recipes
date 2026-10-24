@@ -91,7 +91,7 @@ test("Add a recipe asks a visitor to sign in, then opens for the editor", async 
   await page.getByRole("button", { name: "Sign in with Google" }).click();
 
   await expect(page).toHaveURL(/\/add$/);
-  await expect(page.getByRole("main")).toContainText("Adding recipes is coming soon.");
+  await expect(page.getByRole("textbox", { name: "Recipe web address" })).toBeVisible();
 });
 
 test("a Google account that isn't an editor is told so", async ({ page }) => {
