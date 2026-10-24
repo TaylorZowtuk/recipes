@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING, Any
 import boto3
 import pytest
 import requests
-from fake_web import FakeWeb, page
+from fake_web import FakeWeb, Redirect, page
 from fastapi.testclient import TestClient
 
+from recipes import api
 from recipes.api import create_app
 from recipes.auth import SERVICE_TOKEN_HEADER, Auth, AuthSettings, Claims, InvalidIdToken
-from recipes.ingest import PoliteFetcher
 from recipes.models import SCHEMA_VERSION, QueuedIngest, card_for
 from recipes.seed import RECIPES
-from recipes.store import Store
+from recipes.store import DuplicateSource, Store
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -53,7 +53,7 @@ def client(api_store: Store, web: FakeWeb) -> Iterator[TestClient]:
     app = create_app(
         store=lambda: api_store,
         auth=lambda: auth,
-        fetcher=lambda: PoliteFetcher(web.session()),
+        fetcher=web.fetcher,
     )
     with TestClient(app, follow_redirects=False) as client:
         yield client
@@ -210,6 +210,85 @@ def test_a_failed_ingest_waits_for_the_fallback_with_its_source_reserved(
     assert store.collection_version() == before, "a Queued Ingest isn't in the Collection"
 
 
+def test_a_url_off_the_public_internet_is_queued_for_its_page_without_a_request(
+    client: TestClient, web: FakeWeb
+) -> None:
+    response = ingest(client, "http://127.0.0.1/")
+
+    assert response.status_code == 202
+    assert (response.json()["state"], response.json()["reason"]) == ("needs_page", "blocked")
+    assert web.urls == []
+
+
+def test_a_redirected_page_is_scraped_as_where_it_landed_and_kept_as_the_pasted_source(
+    client: TestClient, store: Store, web: FakeWeb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    short = "https://plateful.test/s/7"
+    web.pages[short] = Redirect(URL)
+    parsed_as: list[str] = []
+    real_parse = api.parse
+
+    def recording(html: str, url: str) -> Any:
+        parsed_as.append(url)
+        return real_parse(html, url)
+
+    monkeypatch.setattr(api, "parse", recording)
+
+    captured = ingest(client, short).json()
+    recipe = save(client, captured).json()
+
+    assert parsed_as == [URL]
+    assert captured["source"]["url"] == short
+    assert recipe["dedupe_key"] == short
+    assert store.source_guard(KEY) is None
+
+
+@pytest.mark.parametrize("guarded", [True, False])
+def test_a_source_claimed_while_its_ingest_was_queued_is_a_duplicate_or_a_retry(
+    client: TestClient,
+    api_store: Store,
+    web: FakeWeb,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    guarded: bool,
+) -> None:
+    web.pages[URL] = (403, "Forbidden")
+    recipe = RECIPES[0].model_copy(update={"dedupe_key": KEY})
+
+    def raced(queued: QueuedIngest) -> None:
+        if guarded:
+            api_store.add_recipe(recipe)
+        raise DuplicateSource(queued.dedupe_key)
+
+    monkeypatch.setattr(api_store, "queue_ingest", raced)
+
+    response = ingest(client)
+
+    assert response.status_code == 409
+    expected = (
+        {"detail": "Already in the Collection", "recipe_id": recipe.id, "queued_ingest_id": None}
+        if guarded
+        else {"detail": "Try again", "recipe_id": None, "queued_ingest_id": None}
+    )
+    assert response.json() == expected
+
+
+def test_a_save_whose_guard_is_gone_again_is_a_retry(
+    client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = ingest(client).json()
+
+    def raced(recipe: Any) -> None:
+        raise DuplicateSource(recipe.dedupe_key)
+
+    monkeypatch.setattr(api_store, "add_recipe", raced)
+
+    response = save(client, captured)
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Try again", "recipe_id": None, "queued_ingest_id": None}
+
+
 @pytest.mark.parametrize("status", [404, 410])
 def test_a_page_that_is_not_there_is_final_and_stores_nothing(
     client: TestClient, store: Store, web: FakeWeb, status: int
@@ -274,6 +353,49 @@ def test_saving_adds_the_recipe_pending_with_its_card_and_guard(
     assert guard is not None
     assert guard.recipe_id == recipe["id"]
     assert store.collection_version() == before + 1
+
+
+def test_saving_keys_the_recipe_by_its_normalised_source(
+    client: TestClient, store: Store, web: FakeWeb
+) -> None:
+    tracked = "http://www.plateful.test/miso-soup?utm_source=x"
+    web.pages[tracked] = (200, page("json-ld-recipe.html"))
+
+    recipe = save(client, ingest(client, tracked).json()).json()
+
+    assert recipe["source"]["url"] == tracked
+    assert recipe["dedupe_key"] == KEY
+    guard = store.source_guard(KEY)
+    assert guard is not None
+    assert guard.recipe_id == recipe["id"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("title", "x" * 301),
+        ("author", "x" * 201),
+        ("description", "x" * 5001),
+        ("ingredients", [{"id": "i1", "text": "x" * 2001}]),
+        ("steps", [{"id": f"s{n}", "text": "Stir."} for n in range(501)]),
+    ],
+)
+def test_an_original_past_its_limits_is_refused(
+    client: TestClient, store: Store, field: str, value: object
+) -> None:
+    captured = ingest(client).json()
+
+    response = save(client, {**captured, "original": {**captured["original"], field: value}})
+
+    assert response.status_code == 422
+    assert store.cards() == []
+
+
+@pytest.mark.parametrize("tags", [["x" * 101], [f"tag {n}" for n in range(51)]])
+def test_tags_past_their_limits_are_refused(client: TestClient, tags: list[str]) -> None:
+    response = save(client, ingest(client).json(), tags=tags)
+
+    assert response.status_code == 422
 
 
 def test_saving_a_source_twice_is_a_duplicate(client: TestClient, store: Store) -> None:

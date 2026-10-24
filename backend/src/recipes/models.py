@@ -18,6 +18,10 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 Rating = Annotated[int, Field(ge=1, le=3)]
 # A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly.
 WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$")]
+# An Original's limits, so a save past them is a 422 rather than an item past DynamoDB's 400 KB.
+Line = Annotated[str, StringConstraints(max_length=2000)]
+Label = Annotated[str, StringConstraints(max_length=200)]
+MAX_LINES = 500
 
 
 def new_ulid() -> str:
@@ -50,19 +54,19 @@ Source = Annotated[WebsiteSource | SpreadsheetSource, Field(discriminator="kind"
 
 
 class IngredientLine(Model):
-    id: str
-    component: str | None = None
-    text: str
+    id: Label
+    component: Label | None = None
+    text: Line
 
 
 class Step(Model):
-    id: str
-    component: str | None = None
-    text: str
+    id: Label
+    component: Label | None = None
+    text: Line
 
 
 class RecipeYield(Model):
-    text: str
+    text: Label
     servings: int | None = None
     unit: str | None = None
 
@@ -70,7 +74,7 @@ class RecipeYield(Model):
 class StatedTime(Model):
     """A Stated Time as written, with its seconds when the text could be read."""
 
-    text: str
+    text: Label
     seconds: int | None = None
 
 
@@ -86,12 +90,12 @@ class Original(Model):
     # `yield` is a Python keyword, so the field has another name in code only.
     model_config = ConfigDict(validate_by_name=True, serialize_by_alias=True)
 
-    title: str
-    description: str | None = None
-    author: str | None = None
-    extractor: str
-    ingredients: list[IngredientLine]
-    steps: list[Step]
+    title: Annotated[str, StringConstraints(max_length=300)]
+    description: Annotated[str, StringConstraints(max_length=5000)] | None = None
+    author: Label | None = None
+    extractor: Label
+    ingredients: Annotated[list[IngredientLine], Field(max_length=MAX_LINES)]
+    steps: Annotated[list[Step], Field(max_length=MAX_LINES)]
     recipe_yield: RecipeYield | None = Field(
         default=None, validation_alias="yield", serialization_alias="yield"
     )
@@ -223,7 +227,8 @@ class SourceGuard(Model):
 # `waiting` is for the CLI's fallbacks; `needs_page` waits for an editor to paste the page.
 QueuedIngestState = Literal["waiting", "needs_page"]
 # Why the automated ingest stopped: robots.txt refused it, the site answered 403 or another 4xx
-# (blocked), 429 (rate_limited) or 5xx (server_error), it was unreachable, or had no recipe.
+# or led off the public internet (blocked), 429 (rate_limited) or 5xx (server_error), it was
+# unreachable, or had no recipe.
 QueuedIngestReason = Literal[
     "robots", "blocked", "rate_limited", "server_error", "unreachable", "no_recipe"
 ]

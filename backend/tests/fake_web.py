@@ -1,6 +1,7 @@
 """A fake web for the polite fetcher: a requests adapter serving canned pages."""
 
 import io
+import ipaddress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -8,10 +9,14 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.response import HTTPResponse
 
+from recipes.ingest import PoliteFetcher
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 PAGES = Path(__file__).parent / "pages"
+# What every named host resolves to: any address on the public internet, since nothing connects.
+PUBLIC_ADDRESS = "8.8.8.8"
 
 
 class Redirect(NamedTuple):
@@ -21,8 +26,22 @@ class Redirect(NamedTuple):
     status: int = 301
 
 
+class Served(NamedTuple):
+    """A body sent with `content_type`, all at once or, dripping, one byte per read."""
+
+    status: int
+    body: str | bytes
+    content_type: str = "text/html; charset=utf-8"
+    drip: bool = False
+
+
 # A page as its status and body, a redirect, or the error fetching it raises.
-type Page = tuple[int, str] | Redirect | requests.RequestException
+type Page = tuple[int, str] | Served | Redirect | requests.RequestException
+
+
+class _Drip(io.BytesIO):
+    def read1(self, size: int | None = -1, /) -> bytes:
+        return super().read1(1 if size else size)
 
 
 def page(name: str) -> str:
@@ -51,16 +70,18 @@ class FakeWeb(HTTPAdapter):
         served = self.pages.get(request.url or "", (404, "Not found"))
         if isinstance(served, requests.RequestException):
             raise served
-        headers = {"Content-Type": "text/html; charset=utf-8"}
+        headers: dict[str, str] = {}
         if isinstance(served, Redirect):
-            status, body = served.status, ""
             headers["Location"] = served.location
-        else:
-            status, body = served
+            served = Served(served.status, "")
+        elif not isinstance(served, Served):
+            served = Served(*served)
+        headers["Content-Type"] = served.content_type
+        body = served.body.encode() if isinstance(served.body, str) else served.body
         raw = HTTPResponse(
-            body=io.BytesIO(body.encode()),
+            body=(_Drip if served.drip else io.BytesIO)(body),
             headers=headers,
-            status=status,
+            status=served.status,
             preload_content=False,
         )
         return self.build_response(request, raw)
@@ -71,3 +92,15 @@ class FakeWeb(HTTPAdapter):
         session.mount("http://", self)
         session.mount("https://", self)
         return session
+
+    @staticmethod
+    def resolve(host: str) -> list[str]:
+        """An address literal as itself, and any name as a public address."""
+        try:
+            return [str(ipaddress.ip_address(host))]
+        except ValueError:
+            return [PUBLIC_ADDRESS]
+
+    def fetcher(self) -> PoliteFetcher:
+        """The polite fetcher, on this fake web."""
+        return PoliteFetcher(self.session(), resolve=self.resolve)

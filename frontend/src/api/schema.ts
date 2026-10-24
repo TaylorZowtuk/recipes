@@ -198,7 +198,8 @@ export interface components {
         };
         /**
          * Duplicate
-         * @description A 409: the Source is already a recipe in the Collection, or already a Queued Ingest.
+         * @description A 409: the Source is already a recipe in the Collection, or already a Queued Ingest. With
+         *     neither id, its guard was there a moment ago and isn't now, so the editor can try again.
          */
         Duplicate: {
             /** Detail */
