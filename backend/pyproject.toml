@@ -8,6 +8,8 @@ dependencies = [
     "cachecontrol>=0.14.4", # keeps Google's signing certs for as long as their Cache-Control says
     "fastapi>=0.142.2",
     "google-auth[requests]>=2.62.0", # verifies Sign in with Google ID tokens
+    "protego>=0.7.0", # reads robots.txt before a website is fetched
+    "recipe-scrapers>=15.13.0", # captures the Original from a website's schema.org data
     "uvicorn>=0.54.0", # run.sh serves the app with it behind the Lambda Web Adapter
 ]
 
