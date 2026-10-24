@@ -7,8 +7,9 @@ import re
 from dataclasses import dataclass
 from http import HTTPStatus
 from importlib.metadata import version
+from time import monotonic
 from typing import TYPE_CHECKING, Protocol, cast
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from protego import Protego
@@ -35,8 +36,11 @@ if TYPE_CHECKING:
 EXTRACTOR = "recipe-scrapers"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/{version('recipes')} (+https://github.com/TaylorZowtuk/recipes)"
-# Per request, so robots.txt and the page both fit in the API's 30 s.
+# Per request, and a deadline for the whole fetch, so robots.txt, a page and its redirects
+# still answer inside the API's 30 s. Running out of either, or of redirects, is unreachable.
 TIMEOUT_SECONDS = 8
+DEADLINE_SECONDS = 20
+MAX_REDIRECTS = 5
 
 # Query parameters that only say how someone reached the page. Any other, `ref` included, is kept.
 TRACKING = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"}
@@ -109,34 +113,60 @@ class Fetcher(Protocol):
 
 
 class PoliteFetcher:
-    """Fetches a page as Plateful, only if the site's robots.txt allows it, each request once."""
+    """Fetches a page as Plateful, each request once, following a redirect only where the
+    robots.txt of the host it leads to allows it.
+    """
 
     def __init__(self, session: requests.Session | None = None) -> None:
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
+        # Only robots.txt is fetched with requests following its redirects.
+        self.session.max_redirects = MAX_REDIRECTS
 
     def __call__(self, url: str) -> str:
-        if not self._allowed(url):
-            raise IngestFailed(state="needs_page", reason="robots")
-        response = self._get(url)
+        deadline = monotonic() + DEADLINE_SECONDS
+        robots: dict[str, Protego | None] = {}
+        for _ in range(MAX_REDIRECTS + 1):
+            if not self._allowed(url, robots, deadline):
+                raise IngestFailed(state="needs_page", reason="robots")
+            response = self._get(url, deadline, follow=False)
+            if not response.is_redirect:
+                break
+            url = urljoin(url, response.headers["Location"])
+        else:
+            # A redirect loop, like a page that never answers.
+            raise IngestFailed(state="waiting", reason="unreachable")
         if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
             raise PageNotFound(url)
         _raise_for_status(response)
         return _text(response)
 
-    def _allowed(self, url: str) -> bool:
+    def _allowed(self, url: str, robots: dict[str, Protego | None], deadline: float) -> bool:
+        """Whether the robots.txt of `url`'s origin allows it, reading each origin's once."""
         parts = urlsplit(url)
-        robots = self._get(urlunsplit((parts.scheme, parts.netloc, "/robots.txt", "", "")))
+        origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
+        if origin not in robots:
+            robots[origin] = self._robots(f"{origin}/robots.txt", deadline)
+        rules = robots[origin]
+        return rules is None or rules.can_fetch(url, ROBOTS_AGENT)
+
+    def _robots(self, url: str, deadline: float) -> Protego | None:
+        robots = self._get(url, deadline, follow=True)
         # RFC 9309: a robots.txt that's unavailable (4xx) allows everything, and one that's
         # unreachable (5xx) disallows everything for now, so the Source waits.
         if HTTPStatus.BAD_REQUEST <= robots.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
-            return True
+            return None
         _raise_for_status(robots)
-        return Protego.parse(_text(robots)).can_fetch(url, ROBOTS_AGENT)
+        return Protego.parse(_text(robots))
 
-    def _get(self, url: str) -> requests.Response:
+    def _get(self, url: str, deadline: float, *, follow: bool) -> requests.Response:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise IngestFailed(state="waiting", reason="unreachable")
         try:
-            return self.session.get(url, timeout=TIMEOUT_SECONDS)
+            return self.session.get(
+                url, timeout=min(TIMEOUT_SECONDS, remaining), allow_redirects=follow
+            )
         except requests.RequestException:
             raise IngestFailed(state="waiting", reason="unreachable") from None
 

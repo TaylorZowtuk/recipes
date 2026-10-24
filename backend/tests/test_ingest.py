@@ -2,7 +2,7 @@
 
 import pytest
 import requests
-from fake_web import FakeWeb, page
+from fake_web import FakeWeb, Redirect, page
 
 from recipes.ingest import (
     EXTRACTOR,
@@ -195,3 +195,98 @@ def test_a_page_that_is_not_there_is_final(status: int) -> None:
 
     with pytest.raises(PageNotFound):
         PoliteFetcher(web.session())(URL)
+
+
+def test_a_redirect_on_the_same_host_is_followed_under_the_same_robots_txt() -> None:
+    moved = "https://plateful.test/recipes/miso-soup"
+    web = FakeWeb(
+        {
+            ROBOTS: (200, "User-agent: *\nAllow: /\n"),
+            URL: Redirect("/recipes/miso-soup"),
+            moved: (200, "<html>page</html>"),
+        }
+    )
+
+    assert PoliteFetcher(web.session())(URL) == "<html>page</html>"
+    assert web.urls == [ROBOTS, URL, moved]
+
+
+def test_a_redirect_the_target_hosts_robots_txt_refuses_needs_the_page_and_is_not_followed() -> (
+    None
+):
+    moved = "https://elsewhere.test/miso-soup"
+    web = FakeWeb(
+        {
+            ROBOTS: (200, "User-agent: *\nAllow: /\n"),
+            URL: Redirect(moved),
+            "https://elsewhere.test/robots.txt": (200, "User-agent: Plateful\nDisallow: /\n"),
+            moved: (200, "<html/>"),
+        }
+    )
+
+    with pytest.raises(IngestFailed) as failed:
+        PoliteFetcher(web.session())(URL)
+
+    assert (failed.value.state, failed.value.reason) == ("needs_page", "robots")
+    assert moved not in web.urls
+
+
+def test_each_hosts_robots_txt_is_fetched_once_across_redirects() -> None:
+    other = "https://elsewhere.test"
+    web = FakeWeb(
+        {
+            ROBOTS: (200, "User-agent: *\nAllow: /\n"),
+            URL: Redirect(f"{other}/a"),
+            f"{other}/robots.txt": (200, "User-agent: *\nAllow: /\n"),
+            f"{other}/a": Redirect(f"{other}/b", status=302),
+            f"{other}/b": Redirect("https://plateful.test/c", status=308),
+            "https://plateful.test/c": (200, "<html>page</html>"),
+        }
+    )
+
+    assert PoliteFetcher(web.session())(URL) == "<html>page</html>"
+    assert web.urls == [
+        ROBOTS,
+        URL,
+        f"{other}/robots.txt",
+        f"{other}/a",
+        f"{other}/b",
+        "https://plateful.test/c",
+    ]
+
+
+def test_a_redirect_loop_waits_for_the_fallback_after_five_redirects() -> None:
+    other = "https://plateful.test/loop"
+    web = FakeWeb({ROBOTS: (404, ""), URL: Redirect(other), other: Redirect(URL)})
+
+    with pytest.raises(IngestFailed) as failed:
+        PoliteFetcher(web.session())(URL)
+
+    assert (failed.value.state, failed.value.reason) == ("waiting", "unreachable")
+    assert web.urls == [ROBOTS, URL, other, URL, other, URL, other]
+
+
+def test_an_ingest_that_runs_past_its_deadline_waits_for_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = iter([0.0, 1.0, 21.0])
+    monkeypatch.setattr("recipes.ingest.monotonic", lambda: next(clock))
+    web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
+
+    with pytest.raises(IngestFailed) as failed:
+        PoliteFetcher(web.session())(URL)
+
+    assert (failed.value.state, failed.value.reason) == ("waiting", "unreachable")
+    assert web.urls == [ROBOTS]
+
+
+def test_a_request_near_the_deadline_is_given_only_the_time_left(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = iter([0.0, 1.0, 17.0])
+    monkeypatch.setattr("recipes.ingest.monotonic", lambda: next(clock))
+    web = FakeWeb({ROBOTS: (404, ""), URL: (200, "<html/>")})
+
+    PoliteFetcher(web.session())(URL)
+
+    assert web.timeouts == [8, 3.0]

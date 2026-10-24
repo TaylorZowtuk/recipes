@@ -2,7 +2,7 @@
 
 import io
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -13,8 +13,16 @@ if TYPE_CHECKING:
 
 PAGES = Path(__file__).parent / "pages"
 
-# A page as its status and body, or the error fetching it raises.
-type Page = tuple[int, str] | requests.RequestException
+
+class Redirect(NamedTuple):
+    """A redirect to `location`, which may be relative."""
+
+    location: str
+    status: int = 301
+
+
+# A page as its status and body, a redirect, or the error fetching it raises.
+type Page = tuple[int, str] | Redirect | requests.RequestException
 
 
 def page(name: str) -> str:
@@ -43,10 +51,15 @@ class FakeWeb(HTTPAdapter):
         served = self.pages.get(request.url or "", (404, "Not found"))
         if isinstance(served, requests.RequestException):
             raise served
-        status, body = served
+        headers = {"Content-Type": "text/html; charset=utf-8"}
+        if isinstance(served, Redirect):
+            status, body = served.status, ""
+            headers["Location"] = served.location
+        else:
+            status, body = served
         raw = HTTPResponse(
             body=io.BytesIO(body.encode()),
-            headers={"Content-Type": "text/html; charset=utf-8"},
+            headers=headers,
             status=status,
             preload_content=False,
         )
