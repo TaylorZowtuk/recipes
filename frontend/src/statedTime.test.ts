@@ -34,11 +34,18 @@ describe("statedTimeText", () => {
     expect(statedTimeText("PT90M")).toBe("1 hr 30 min");
   });
 
-  it("reads days, seconds, fractions and lower case", () => {
+  it("reads days and seconds", () => {
     expect(statedTimeText("P1DT2H")).toBe("26 hr");
+    expect(statedTimeText("P1D")).toBe("24 hr");
     expect(statedTimeText("PT0H30M30S")).toBe("31 min");
-    expect(statedTimeText("PT1.5H")).toBe("1 hr 30 min");
-    expect(statedTimeText(" pt20m ")).toBe("20 min");
+    expect(statedTimeText(" PT20M ")).toBe("20 min");
+  });
+
+  // The backend's grammar, so humanized text always has the seconds a card shows.
+  it("shows fractions and lower case as written", () => {
+    expect(statedTimeText("PT1.5H")).toBe("PT1.5H");
+    expect(statedTimeText(" pt20m ")).toBe(" pt20m ");
+    expect(statedTimeText("PT20m")).toBe("PT20m");
   });
 
   it("shows any other text as written", () => {

@@ -9,9 +9,9 @@ export function formatStatedTime(seconds: number | null): string | null {
   return minutes === 0 ? `${hours} hr` : `${hours} hr ${minutes} min`;
 }
 
-// Days and a time part, as schema.org sites write durations. Months and years are ambiguous, so a
-// duration with them stays as written.
-const ISO_DURATION = /^P(?:([\d.]+)D)?(?:T(?:([\d.]+)H)?(?:([\d.]+)M)?(?:([\d.]+)S)?)?$/i;
+// Whole days, hours, minutes and seconds, the grammar ingest stores seconds for, so humanized text
+// always matches the time a card shows. Months, years, fractions and lower case stay as written.
+const ISO_DURATION = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/;
 const UNIT_SECONDS = [86400, 3600, 60, 1];
 
 // A Stated Time's text for display: an ISO 8601 duration ("PT1H15M") humanized ("1 hr 15 min"),

@@ -1,19 +1,64 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
 
-// Every project shares one local API, and each Source is ingested once, so each test's pages are
-// its own: a fresh path on the fake web per test and project.
-const pageUrl = (path: string, project: string) => `https://plateful.test/${path}-${project}`;
+// Every project shares one local API for the whole run, retries and repeats included, and each
+// Source is ingested once, so each attempt's pages are its own: a fresh path on the fake web.
+const pageUrl = (path: string, { project, retry, repeatEachIndex }: TestInfo) =>
+  `https://plateful.test/${path}-${project.name}-r${retry}-e${repeatEachIndex}`;
 
-async function openAddRecipe(page: Page) {
+// The fake web titles a page after its last path segment, as Python's str.title() does.
+const titleOf = (url: string) =>
+  (url.split("/").pop() ?? "")
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+
+async function signIn(page: Page) {
   const signedIn = await page.request.post("/api/session", {
     data: { credential: "fake:editor@example.com" },
   });
   expect(signedIn.ok(), "fake sign-in").toBe(true);
+}
+
+async function openAddRecipe(page: Page) {
+  await signIn(page);
   await page.goto("/add");
   await expect(page.getByRole("heading", { level: 1, name: "Add a recipe" })).toBeVisible();
+}
+
+async function openFromMenu(page: Page) {
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Add a recipe" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Add a recipe" })).toBeVisible();
+}
+
+// Opens the grid first, so this page load holds the Collection in memory, then Add a recipe from
+// the menu, so a save has to make the grid load the new version.
+async function openAddRecipeFromGrid(page: Page) {
+  await signIn(page);
+  await page.goto("/recipes");
+  await expect(page.getByRole("list", { name: "Recipes" })).toBeVisible();
+  await openFromMenu(page);
+}
+
+const syncStatus = (page: Page) => page.locator(".sync-status");
+
+async function collectionVersion(page: Page) {
+  await expect(syncStatus(page)).toHaveText(/collection v\d+$/);
+  return Number((await syncStatus(page).textContent())?.match(/v(\d+)$/)?.[1]);
+}
+
+// Saves a recipe from another device, as far as this page load knows.
+async function saveElsewhere(page: Page, url: string) {
+  const ingested = await page.request.post("/api/ingest", { data: { url } });
+  expect(ingested.status(), "ingest").toBe(200);
+  const { source, original } = await ingested.json();
+  const saved = await page.request.post("/api/recipes", {
+    data: { source, original, difficulty: null, tags: [] },
+  });
+  expect(saved.status(), "save").toBe(201);
 }
 
 const urlField = (page: Page) => page.getByRole("textbox", { name: "Recipe web address" });
@@ -28,14 +73,13 @@ const queuedItem = (page: Page, url: string) =>
     hasText: url,
   });
 
-test("an editor adds a recipe from a website and sees it pending in the grid", async ({ page }, {
-  project,
-}) => {
-  const url = pageUrl("lemon-skillet-rice", project.name);
-  const title = `Lemon Skillet Rice ${project.name.replace("-", " ")}`.replace(/\b\w/g, (c) =>
-    c.toUpperCase(),
-  );
-  await openAddRecipe(page);
+test("an editor adds a recipe from a website and sees it pending in the grid", async ({
+  page,
+}, testInfo) => {
+  const url = pageUrl("lemon-skillet-rice", testInfo);
+  const title = titleOf(url);
+  await openAddRecipeFromGrid(page);
+  const before = await collectionVersion(page);
   await fetchRecipe(page, url);
 
   // The review: the Original as captured, ISO Stated Times humanized and other text as written.
@@ -80,6 +124,7 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
   await expect(card).toContainText("Enrichment pending");
   await expect(card).toContainText("Plateful Test Kitchen");
   await expect(card).toContainText("45 min");
+  await expect.poll(() => collectionVersion(page)).toBeGreaterThan(before);
 
   // Its About tab shows the times as on the review.
   await card.click();
@@ -89,20 +134,40 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
     await expect(about).toContainText(fact);
   }
   await expect(about.getByRole("link")).toHaveAttribute("href", url);
+});
 
-  // Adding it again links to the recipe already in the Collection.
-  await page.goto("/add");
-  await fetchRecipe(page, url);
+test("a recipe already in the Collection links to it, though this page load hasn't seen it", async ({
+  page,
+}, testInfo) => {
+  const fetched = pageUrl("saved-elsewhere-soup", testInfo);
+  const reviewed = pageUrl("saved-while-reviewing-stew", testInfo);
+  await openAddRecipeFromGrid(page);
+
+  // Fetching it again.
+  await saveElsewhere(page, fetched);
+  await fetchRecipe(page, fetched);
   await expect(page.getByRole("status").filter({ hasText: "already" })).toHaveText(
     "This recipe is already in the Collection. Open it",
   );
   await page.getByRole("link", { name: "Open it" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: titleOf(fetched) })).toBeVisible();
+
+  // Saved by someone else while this editor reviews it.
+  await openFromMenu(page);
+  await fetchRecipe(page, reviewed);
+  await expect(page.getByRole("button", { name: "Save recipe" })).toBeVisible();
+  await saveElsewhere(page, reviewed);
+  await page.getByRole("button", { name: "Save recipe" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "This recipe is already in the Collection. Open it",
+  );
+  await page.getByRole("link", { name: "Open it" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: titleOf(reviewed) })).toBeVisible();
 });
 
-test("a page that can't be fetched waits for the fallback", async ({ page }, { project }) => {
-  const blocked = pageUrl("blocked/turned-away", project.name);
-  const robots = pageUrl("robots-denied/no-robots", project.name);
+test("a page that can't be fetched waits for the fallback", async ({ page }, testInfo) => {
+  const blocked = pageUrl("blocked/turned-away", testInfo);
+  const robots = pageUrl("robots-denied/no-robots", testInfo);
   await openAddRecipe(page);
 
   await fetchRecipe(page, blocked);
@@ -131,9 +196,9 @@ test("a page that can't be fetched waits for the fallback", async ({ page }, { p
   await expect(queuedItem(page, blocked)).toHaveCount(1);
 });
 
-test("a missing page or an invalid address is an inline error", async ({ page }, { project }) => {
+test("a missing page or an invalid address is an inline error", async ({ page }, testInfo) => {
   await openAddRecipe(page);
-  await fetchRecipe(page, pageUrl("missing/gone", project.name));
+  await fetchRecipe(page, pageUrl("missing/gone", testInfo));
   await expect(page.getByRole("alert")).toHaveText(
     "That page isn’t on the site. Check the address and try again.",
   );
@@ -144,29 +209,24 @@ test("a missing page or an invalid address is an inline error", async ({ page },
   await expect(urlField(page)).toHaveValue("not a web address");
 });
 
-test("Add a recipe opens with a fresh form every time", async ({ page }, { project }) => {
-  const openFromMenu = async () => {
-    await page.getByRole("button", { name: "Account" }).click();
-    await page.getByRole("menuitem", { name: "Add a recipe" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "Add a recipe" })).toBeVisible();
-  };
+test("Add a recipe opens with a fresh form every time", async ({ page }, testInfo) => {
   await openAddRecipe(page);
 
   // Typed in, then left and opened again.
   await urlField(page).fill("https://plateful.test/half-typed");
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/recipes$/);
-  await openFromMenu();
+  await openFromMenu(page);
   await expect(urlField(page)).toHaveValue("");
 
   // Opened again from the menu while reviewing a recipe, and after an error.
-  await fetchRecipe(page, pageUrl("fresh-form-pancakes", project.name));
+  await fetchRecipe(page, pageUrl("fresh-form-pancakes", testInfo));
   await expect(page.getByRole("button", { name: "Save recipe" })).toBeVisible();
-  await openFromMenu();
+  await openFromMenu(page);
   await expect(urlField(page)).toHaveValue("");
   await fetchRecipe(page, "not a web address");
   await expect(page.getByRole("alert")).toBeVisible();
-  await openFromMenu();
+  await openFromMenu(page);
   await expect(urlField(page)).toHaveValue("");
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
@@ -181,4 +241,38 @@ test("the form is off while offline", async ({ page, context }) => {
   );
   await context.setOffline(false);
   await expect(urlField(page)).toBeEnabled();
+});
+
+test("the Waiting list says it isn't available offline, and loads once back", async ({
+  page,
+  context,
+}) => {
+  const waiting = page.getByRole("region", { name: "Waiting for the fallback" });
+  await openAddRecipe(page);
+  await expect(waiting.getByRole("status")).not.toHaveText("Loading…");
+  await context.setOffline(true);
+  await openFromMenu(page);
+  await expect(waiting.getByRole("status")).toHaveText("The list isn’t available offline.");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await context.setOffline(false);
+  await expect(waiting.getByRole("status")).not.toHaveText(/offline|Loading/);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("while Plateful updates", () => {
+  // In WebKit, page.route stops seeing requests once a service worker registers.
+  test.use({ serviceWorkers: "block" });
+
+  test("the form is paused, as offline", async ({ page }) => {
+    await page.route("**/api/sync", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: { ...(await response.json()), read_only: "updating" },
+      });
+    });
+    await openAddRecipe(page);
+    await expect(urlField(page)).toBeDisabled();
+    await expect(page.getByRole("main")).toContainText("Editing is paused while Plateful updates.");
+  });
 });

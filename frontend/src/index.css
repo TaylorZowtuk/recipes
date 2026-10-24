@@ -8,6 +8,8 @@
   --text-secondary: #58645e;
   --divider: #d9dfda;
   --outline-strong: #7d8a83;
+  /* A field's boundary: at least 3:1 against --surface and --bg in both themes (WCAG 1.4.11). */
+  --field-border: var(--outline-strong);
   --accent: #2e5e45;
   --accent-text: #2e5e45;
   --on-accent: #ffffff;
@@ -772,7 +774,7 @@ h1:focus {
   min-width: 0;
   min-height: var(--tap);
   padding: 0 calc(var(--space) * 4);
-  border: 1px solid var(--divider);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius-button);
   background: var(--surface);
   color: var(--text);
@@ -915,9 +917,9 @@ h1:focus {
   display: flex;
   gap: var(--space);
   padding: var(--space);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius-pill);
   background: var(--surface);
-  box-shadow: var(--elevation-card);
 }
 
 .segments span {

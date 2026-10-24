@@ -3,9 +3,12 @@ import { Link, useLocation, useNavigate } from "react-router";
 import {
   chosenDifficulty,
   type DifficultyChoice,
+  editBlock,
   type IngestOutcome,
   ingestOutcome,
   parseTags,
+  type SaveOutcome,
+  saveOutcome,
 } from "./addRecipe";
 import {
   api,
@@ -14,7 +17,7 @@ import {
   type Ingested,
   type QueuedIngest,
 } from "./api/client";
-import { forgetCollection } from "./collection";
+import { forgetCollection, useSync } from "./collection";
 import { useOnline } from "./online";
 import { Plate } from "./Plate";
 import { Facts, Ingredients, Steps } from "./RecipeScreen";
@@ -44,9 +47,15 @@ export function AddRecipeScreen() {
   );
 }
 
+// Why editing is off, if it is: offline, or paused while the API is read-only.
+function useEditBlock() {
+  return editBlock(useOnline(), useSync());
+}
+
 function AddRecipe() {
   const [review, setReview] = useState<Ingested>();
-  const queued = useQueuedIngests();
+  const online = useOnline();
+  const queued = useQueuedIngests(online);
 
   if (review) {
     return (
@@ -62,7 +71,7 @@ function AddRecipe() {
   return (
     <div className="add-recipe">
       <UrlForm onIngested={setReview} onQueued={queued.reload} />
-      <QueuedIngests loaded={queued.loaded} retry={queued.reload} />
+      <QueuedIngests loaded={queued.loaded} online={online} retry={queued.reload} />
     </div>
   );
 }
@@ -71,6 +80,8 @@ type Message = { alert: boolean; body: ReactNode };
 
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 const NOT_AN_EDITOR = "Only the household’s editors can add recipes. Sign in again.";
+const CONFLICT = "Something changed while saving. Try again.";
+const PAUSED = "Editing is paused while Plateful updates.";
 
 function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): Message {
   switch (outcome.kind) {
@@ -93,6 +104,8 @@ function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): 
       };
     case "not-an-editor":
       return { alert: true, body: NOT_AN_EDITOR };
+    case "conflict":
+      return { alert: true, body: CONFLICT };
     case "failed":
       return { alert: true, body: UNREACHABLE };
   }
@@ -116,7 +129,7 @@ function DuplicateNote({ duplicate }: { duplicate: Duplicate }) {
   );
 }
 
-// The web address form. Off while offline: adding a recipe is never queued.
+// The web address form. Off while offline or paused: adding a recipe is never queued.
 function UrlForm({
   onIngested,
   onQueued,
@@ -124,7 +137,7 @@ function UrlForm({
   onIngested: (ingested: Ingested) => void;
   onQueued: () => void;
 }) {
-  const online = useOnline();
+  const blocked = useEditBlock();
   const [url, setUrl] = useState("");
   const [fetching, setFetching] = useState(false);
   const [message, setMessage] = useState<Message>();
@@ -156,7 +169,7 @@ function UrlForm({
 
   return (
     <form className="ingest-form" noValidate onSubmit={submit}>
-      <fieldset disabled={!online}>
+      <fieldset disabled={!!blocked}>
         <label htmlFor="recipe-url">Recipe web address</label>
         <div className="ingest-row">
           <input
@@ -174,8 +187,10 @@ function UrlForm({
           </button>
         </div>
       </fieldset>
-      {!online && (
-        <p className="screen-note">You’re offline. Add a recipe once you’re back online.</p>
+      {blocked && (
+        <p className="screen-note">
+          {blocked === "offline" ? "You’re offline. Add a recipe once you’re back online." : PAUSED}
+        </p>
       )}
       <p role="status" className="screen-note">
         {fetching ? "Fetching the recipe…" : message && !message.alert && message.body}
@@ -206,13 +221,15 @@ type QueuedLoad =
   | { state: "ready"; value: QueuedIngest[] };
 
 // The Queued Ingests, oldest first. A reload keeps the list on screen until the new one arrives.
-function useQueuedIngests() {
+// Offline it waits, and loads once the network is back.
+function useQueuedIngests(online: boolean) {
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<QueuedLoad>({ state: "loading" });
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` re-runs it on a reload.
   useEffect(() => {
+    if (!online) return;
     let current = true;
     api.GET("/api/queued-ingests").then(
       ({ data }) =>
@@ -222,7 +239,7 @@ function useQueuedIngests() {
     return () => {
       current = false;
     };
-  }, [attempt]);
+  }, [attempt, online]);
 
   return { loaded, reload };
 }
@@ -238,15 +255,25 @@ const reasons: Record<QueuedIngest["reason"], string> = {
 
 const since = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-function QueuedIngests({ loaded, retry }: { loaded: QueuedLoad; retry: () => void }) {
+function QueuedIngests({
+  loaded,
+  online,
+  retry,
+}: {
+  loaded: QueuedLoad;
+  online: boolean;
+  retry: () => void;
+}) {
+  const unavailable = !online && loaded.state !== "ready";
   return (
     <section className="queued" aria-labelledby="queued-heading">
       <h2 id="queued-heading">Waiting for the fallback</h2>
       <p role="status" className="screen-note">
-        {loaded.state === "loading" && "Loading…"}
+        {unavailable && "The list isn’t available offline."}
+        {!unavailable && loaded.state === "loading" && "Loading…"}
         {loaded.state === "ready" && loaded.value.length === 0 && "Nothing is waiting."}
       </p>
-      {loaded.state === "failed" && (
+      {!unavailable && loaded.state === "failed" && (
         <div className="screen-note">
           <p role="alert">The list couldn’t be loaded.</p>
           <button type="button" className="button" onClick={retry}>
@@ -296,7 +323,7 @@ const PARTS = [
 function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => void }) {
   const { source, original } = ingested;
   const navigate = useNavigate();
-  const online = useOnline();
+  const blocked = useEditBlock();
   const mounted = useMounted();
   const heading = useRef<HTMLHeadingElement>(null);
   const [difficulty, setDifficulty] = useState<DifficultyChoice>({});
@@ -316,29 +343,31 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
     if (!chosen.complete) return setProblem("Rate all of Prep, Cook and Cleanup, or clear them.");
     setProblem(undefined);
     setSaving(true);
-    let status = 0;
-    let duplicate: Duplicate | undefined;
+    let outcome: SaveOutcome;
     try {
-      const { error, response } = await api.POST("/api/recipes", {
-        body: { source, original, difficulty: chosen.difficulty, tags: parseTags(tags) },
-      });
-      status = response.status;
-      if (status === 409) duplicate = error as Duplicate;
+      outcome = saveOutcome(
+        await api.POST("/api/recipes", {
+          body: { source, original, difficulty: chosen.difficulty, tags: parseTags(tags) },
+        }),
+      );
     } catch {
       // Offline or unreachable: the problem below says to try again.
+      outcome = { kind: "failed" };
     }
     if (!mounted.current) return;
     setSaving(false);
-    if (status === 201) {
+    if (outcome.kind === "saved") {
       forgetCollection();
       return navigate("/recipes");
     }
-    if (duplicate?.recipe_id) forgetCollection();
+    if (outcome.kind === "duplicate" && outcome.duplicate.recipe_id) forgetCollection();
     setProblem(
-      duplicate ? (
-        <DuplicateNote duplicate={duplicate} />
-      ) : status === 403 ? (
+      outcome.kind === "duplicate" ? (
+        <DuplicateNote duplicate={outcome.duplicate} />
+      ) : outcome.kind === "not-an-editor" ? (
         NOT_AN_EDITOR
+      ) : outcome.kind === "conflict" ? (
+        CONFLICT
       ) : (
         "The recipe couldn’t be saved. Try again."
       ),
@@ -365,7 +394,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
         ]}
       />
       <form className="review-form" noValidate onSubmit={save}>
-        <fieldset disabled={!online} className="review-fields">
+        <fieldset disabled={!!blocked} className="review-fields">
           <fieldset className="difficulty">
             <legend>Difficulty</legend>
             <p className="field-hint">Optional. 1 is easy, 3 is hard.</p>
@@ -408,15 +437,19 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
           />
         </fieldset>
         <div className="review-actions">
-          <button type="submit" className="button" disabled={!online} aria-disabled={saving}>
+          <button type="submit" className="button" disabled={!!blocked} aria-disabled={saving}>
             {saving ? "Saving…" : "Save recipe"}
           </button>
           <button type="button" className="button button-secondary" onClick={onCancel}>
             Start over
           </button>
         </div>
-        {!online && (
-          <p className="screen-note">You’re offline. Save the recipe once you’re back online.</p>
+        {blocked && (
+          <p className="screen-note">
+            {blocked === "offline"
+              ? "You’re offline. Save the recipe once you’re back online."
+              : PAUSED}
+          </p>
         )}
         <p role="status" className="screen-note">
           {saving ? "Saving the recipe…" : ""}

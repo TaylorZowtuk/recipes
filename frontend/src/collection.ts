@@ -43,12 +43,36 @@ export function loadCollection(): Promise<Collection> {
   return collection;
 }
 
+const forgotten = new Set<() => void>();
+
 // Forgets the sync and the Collection after this device changes the Collection, so the next
-// screen to ask loads the new version instead of this page load's copy.
+// screen to ask loads the new version instead of this page load's copy, and `useSync` reloads.
 export function forgetCollection() {
   sync = undefined;
   collection = undefined;
   loadedCollection = undefined;
+  for (const listener of forgotten) listener();
+}
+
+// The sync poll: undefined until it answers, null when it failed. It loads again after this device
+// changes the Collection.
+export function useSync(): Sync | null | undefined {
+  const [polled, setPolled] = useState<{ sync: Sync | null }>();
+  useEffect(() => {
+    let current = true;
+    const load = () =>
+      loadSync().then(
+        (sync) => current && setPolled({ sync }),
+        () => current && setPolled({ sync: null }),
+      );
+    load();
+    forgotten.add(load);
+    return () => {
+      current = false;
+      forgotten.delete(load);
+    };
+  }, []);
+  return polled?.sync;
 }
 
 // A recipe at its card's version and the schema version, its immutable URL.
