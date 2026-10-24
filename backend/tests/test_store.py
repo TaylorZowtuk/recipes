@@ -1,8 +1,18 @@
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from pydantic import ValidationError
 
-from recipes.models import SCHEMA_VERSION, StatedTime, StatedTimes, card_for
+from recipes.models import (
+    SCHEMA_VERSION,
+    QueuedIngest,
+    SourceGuard,
+    StatedTime,
+    StatedTimes,
+    WebsiteSource,
+    card_for,
+)
 from recipes.seed import RECIPES
 from recipes.store import DuplicateSource, Store, VersionConflict, recipe_key
 
@@ -253,3 +263,81 @@ def test_numbers_survive_the_round_trip(store: Store) -> None:
 
     assert store.get_recipe(added.id) == added
     assert store.cards()[0].preview == added.preview
+
+
+QUEUED = QueuedIngest(
+    schema_version=SCHEMA_VERSION,
+    id="01K7Q0000000000000000000A1",
+    source=WebsiteSource(
+        url="https://plateful.test/blocked",
+        site_name="plateful.test",
+        captured_at=datetime(2026, 10, 1, 12, tzinfo=UTC),
+    ),
+    dedupe_key="https://plateful.test/blocked",
+    state="waiting",
+    reason="blocked",
+    queued_at=datetime(2026, 10, 1, 12, tzinfo=UTC),
+)
+
+
+def test_a_source_guard_points_at_its_recipe(store: Store) -> None:
+    store.add_recipe(RECIPES[0])
+
+    guard = store.source_guard(RECIPES[0].dedupe_key)
+
+    assert guard is not None
+    assert (guard.recipe_id, guard.queued_ingest_id) == (RECIPES[0].id, None)
+    assert store.source_guard("https://example.com/never-added") is None
+
+
+def test_a_queued_ingest_reserves_its_source_outside_the_collection(store: Store) -> None:
+    before = store.collection_version()
+
+    store.queue_ingest(QUEUED)
+
+    assert store.queued_ingests() == [QUEUED]
+    guard = store.source_guard(QUEUED.dedupe_key)
+    assert guard is not None
+    assert (guard.recipe_id, guard.queued_ingest_id) == (None, QUEUED.id)
+    assert store.cards() == []
+    assert store.collection_version() == before
+
+
+def test_a_queued_source_cannot_be_queued_or_added_again(store: Store) -> None:
+    store.queue_ingest(QUEUED)
+    again = QUEUED.model_copy(update={"id": "01K7Q0000000000000000000A2"})
+
+    with pytest.raises(DuplicateSource):
+        store.queue_ingest(again)
+    with pytest.raises(DuplicateSource):
+        store.add_recipe(RECIPES[0].model_copy(update={"dedupe_key": QUEUED.dedupe_key}))
+
+    assert store.queued_ingests() == [QUEUED]
+    assert store.cards() == []
+
+
+def test_a_recipe_source_cannot_be_queued(store: Store) -> None:
+    store.add_recipe(RECIPES[0])
+
+    with pytest.raises(DuplicateSource):
+        store.queue_ingest(QUEUED.model_copy(update={"dedupe_key": RECIPES[0].dedupe_key}))
+
+    assert store.queued_ingests() == []
+
+
+def test_queued_ingests_are_listed_across_pages(store: Store) -> None:
+    ids = [f"01K7Q0000000000000000000B{n}" for n in range(3)]
+    for n, ingest_id in enumerate(ids):
+        store.queue_ingest(
+            QUEUED.model_copy(update={"id": ingest_id, "dedupe_key": f"https://plateful.test/{n}"})
+        )
+
+    assert [q.id for q in store.queued_ingests(page_size=2)] == ids
+
+
+@pytest.mark.parametrize(
+    "fields", [{}, {"recipe_id": RECIPES[0].id, "queued_ingest_id": QUEUED.id}]
+)
+def test_a_source_guard_points_at_exactly_one_thing(fields: dict[str, str]) -> None:
+    with pytest.raises(ValidationError):
+        SourceGuard(schema_version=SCHEMA_VERSION, **fields)  # pyright: ignore[reportArgumentType]

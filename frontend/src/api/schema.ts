@@ -21,6 +21,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Ingest
+         * @description Capture a website's recipe for review, storing nothing, unless its Source is already
+         *     claimed. A page that can't be captured becomes a Queued Ingest that reserves the Source.
+         */
+        post: operations["post_ingest_api_ingest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queued-ingests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Queued Ingests
+         * @description The Sources waiting for a fallback or for an editor to paste the page, oldest first.
+         */
+        get: operations["get_queued_ingests_api_queued_ingests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Recipe
+         * @description Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard.
+         */
+        post: operations["post_recipe_api_recipes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipes/{recipe_id}": {
         parameters: {
             query?: never;
@@ -135,6 +196,18 @@ export interface components {
             /** Prep */
             prep: number;
         };
+        /**
+         * Duplicate
+         * @description A 409: the Source is already a recipe in the Collection, or already a Queued Ingest.
+         */
+        Duplicate: {
+            /** Detail */
+            detail: string;
+            /** Queued Ingest Id */
+            queued_ingest_id: string | null;
+            /** Recipe Id */
+            recipe_id: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -151,8 +224,31 @@ export interface components {
             /** Width */
             width: number;
         };
+        /** IngestUrl */
+        IngestUrl: {
+            /** Url */
+            url: string;
+        };
+        /**
+         * Ingested
+         * @description What ingesting a website captured, for an editor to review before saving. Nothing is
+         *     stored yet: saving sends it back.
+         */
+        Ingested: {
+            original: components["schemas"]["Original-Output"];
+            source: components["schemas"]["WebsiteSource-Output"];
+        };
         /** IngredientLine */
-        IngredientLine: {
+        "IngredientLine-Input": {
+            /** Component */
+            component?: string | null;
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /** IngredientLine */
+        "IngredientLine-Output": {
             /** Component */
             component: string | null;
             /** Id */
@@ -177,10 +273,45 @@ export interface components {
             unconfirmed: number;
         };
         /**
+         * NewRecipe
+         * @description A recipe to add from a website: what ingest captured, plus the editor's own fields.
+         */
+        NewRecipe: {
+            difficulty?: components["schemas"]["Difficulty"] | null;
+            original: components["schemas"]["Original-Input"];
+            source: components["schemas"]["WebsiteSource-Input"];
+            /**
+             * Tags
+             * @default []
+             */
+            tags: string[];
+        };
+        /**
          * Original
          * @description The recipe exactly as captured from its Source.
          */
-        Original: {
+        "Original-Input": {
+            /** Author */
+            author?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Extractor */
+            extractor: string;
+            /** Ingredients */
+            ingredients: components["schemas"]["IngredientLine-Input"][];
+            /** @default {} */
+            stated_times: components["schemas"]["StatedTimes-Input"];
+            /** Steps */
+            steps: components["schemas"]["Step-Input"][];
+            /** Title */
+            title: string;
+            yield?: components["schemas"]["RecipeYield-Input"] | null;
+        };
+        /**
+         * Original
+         * @description The recipe exactly as captured from its Source.
+         */
+        "Original-Output": {
             /** Author */
             author: string | null;
             /** Description */
@@ -188,14 +319,14 @@ export interface components {
             /** Extractor */
             extractor: string;
             /** Ingredients */
-            ingredients: components["schemas"]["IngredientLine"][];
+            ingredients: components["schemas"]["IngredientLine-Output"][];
             /** @default {} */
-            stated_times: components["schemas"]["StatedTimes"];
+            stated_times: components["schemas"]["StatedTimes-Output"];
             /** Steps */
-            steps: components["schemas"]["Step"][];
+            steps: components["schemas"]["Step-Output"][];
             /** Title */
             title: string;
-            yield: components["schemas"]["RecipeYield"] | null;
+            yield: components["schemas"]["RecipeYield-Output"] | null;
         };
         /** Preview */
         Preview: {
@@ -205,6 +336,36 @@ export interface components {
             focal_y: number;
             /** Image Id */
             image_id: string;
+        };
+        /**
+         * QueuedIngest
+         * @description `INGEST` / `<id>`: a Source an automated ingest couldn't capture, kept until a fallback does.
+         *     Not a recipe, so it has no card and isn't in the Collection.
+         */
+        QueuedIngest: {
+            /** Dedupe Key */
+            dedupe_key: string;
+            /** Id */
+            id: string;
+            /**
+             * Queued At
+             * Format: date-time
+             */
+            queued_at: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "robots" | "blocked" | "rate_limited" | "server_error" | "unreachable" | "no_recipe";
+            /** Schema Version */
+            schema_version: number;
+            /** Source */
+            source: components["schemas"]["WebsiteSource-Output"] | components["schemas"]["SpreadsheetSource"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "waiting" | "needs_page";
         };
         /** Recipe */
         Recipe: {
@@ -218,12 +379,14 @@ export interface components {
              * @default []
              */
             images: components["schemas"]["Image"][];
-            original: components["schemas"]["Original"];
+            /** Ingest Channel */
+            ingest_channel: "add_a_recipe" | null;
+            original: components["schemas"]["Original-Output"];
             preview: components["schemas"]["Preview"] | null;
             /** Schema Version */
             schema_version: number;
             /** Source */
-            source: components["schemas"]["WebsiteSource"] | components["schemas"]["SpreadsheetSource"];
+            source: components["schemas"]["WebsiteSource-Output"] | components["schemas"]["SpreadsheetSource"];
             /**
              * Status
              * @enum {string}
@@ -238,7 +401,16 @@ export interface components {
             version: number;
         };
         /** RecipeYield */
-        RecipeYield: {
+        "RecipeYield-Input": {
+            /** Servings */
+            servings?: number | null;
+            /** Text */
+            text: string;
+            /** Unit */
+            unit?: string | null;
+        };
+        /** RecipeYield */
+        "RecipeYield-Output": {
             /** Servings */
             servings: number | null;
             /** Text */
@@ -289,20 +461,45 @@ export interface components {
          * StatedTime
          * @description A Stated Time as written, with its seconds when the text could be read.
          */
-        StatedTime: {
+        "StatedTime-Input": {
+            /** Seconds */
+            seconds?: number | null;
+            /** Text */
+            text: string;
+        };
+        /**
+         * StatedTime
+         * @description A Stated Time as written, with its seconds when the text could be read.
+         */
+        "StatedTime-Output": {
             /** Seconds */
             seconds: number | null;
             /** Text */
             text: string;
         };
         /** StatedTimes */
-        StatedTimes: {
-            cook: components["schemas"]["StatedTime"] | null;
-            prep: components["schemas"]["StatedTime"] | null;
-            total: components["schemas"]["StatedTime"] | null;
+        "StatedTimes-Input": {
+            cook?: components["schemas"]["StatedTime-Input"] | null;
+            prep?: components["schemas"]["StatedTime-Input"] | null;
+            total?: components["schemas"]["StatedTime-Input"] | null;
+        };
+        /** StatedTimes */
+        "StatedTimes-Output": {
+            cook: components["schemas"]["StatedTime-Output"] | null;
+            prep: components["schemas"]["StatedTime-Output"] | null;
+            total: components["schemas"]["StatedTime-Output"] | null;
         };
         /** Step */
-        Step: {
+        "Step-Input": {
+            /** Component */
+            component?: string | null;
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /** Step */
+        "Step-Output": {
             /** Component */
             component: string | null;
             /** Id */
@@ -347,7 +544,25 @@ export interface components {
             type: string;
         };
         /** WebsiteSource */
-        WebsiteSource: {
+        "WebsiteSource-Input": {
+            /**
+             * Captured At
+             * Format: date-time
+             */
+            captured_at: string;
+            /**
+             * Kind
+             * @default website
+             * @constant
+             */
+            kind: "website";
+            /** Site Name */
+            site_name: string;
+            /** Url */
+            url: string;
+        };
+        /** WebsiteSource */
+        "WebsiteSource-Output": {
             /**
              * Captured At
              * Format: date-time
@@ -398,6 +613,145 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_ingest_api_ingest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestUrl"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ingested"];
+                };
+            };
+            /** @description Couldn't be captured, so it was queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedIngest"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The website says the page isn't there */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Source is already a recipe or a Queued Ingest */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Duplicate"];
+                };
+            };
+            /** @description Not an http(s) URL with a host */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_queued_ingests_api_queued_ingests_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedIngest"][];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_recipe_api_recipes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewRecipe"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Source is already a recipe or a Queued Ingest */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Duplicate"];
+                };
             };
             /** @description Validation Error */
             422: {

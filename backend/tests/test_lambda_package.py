@@ -129,11 +129,14 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
         "fastapi/__init__.py",
     ):
         assert name in infos
-    assert "uvicorn/__init__.py" in infos
-    assert any(
-        name.startswith("pydantic_core/") and "aarch64-linux-gnu" in name and name.endswith(".so")
-        for name in infos
-    ), "pydantic_core should be the Linux arm64 build"
+    for name in ("uvicorn/__init__.py", "recipe_scrapers/__init__.py", "protego/__init__.py"):
+        assert name in infos
+    assert "jstyleson.py" in infos, "built from its source distribution"
+    for compiled in ("pydantic_core", "lxml"):
+        assert any(
+            name.startswith(f"{compiled}/") and "aarch64-linux-gnu" in name and name.endswith(".so")
+            for name in infos
+        ), f"{compiled} should be the Linux arm64 build"
 
     top_level = {name.split("/", 1)[0] for name in infos}
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
