@@ -28,7 +28,7 @@ _Avoid_: Guest, anonymous user
 
 **Demo**:
 A made-up Week Plan and Grocery List that a visitor sees in place of the household's own, built from recipes in the collection. A visitor can change it, but the changes are never saved.
-_Avoid_: Guest mode, preview, sample data
+_Avoid_: Guest mode, preview (that word belongs to the Preview Photo), sample data
 
 ### Recipes and where they come from
 
@@ -40,8 +40,24 @@ _Avoid_: Library, cookbook
 One dish in the collection, together with everything the household has recorded about it.
 
 **Card**:
-A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty, tags, Enrichment Status, photo and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
+A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty, tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
 _Avoid_: Tile, summary, listing
+
+**Candidate Photo**:
+A photo found on a recipe's Source during ingest, stored in the images bucket and offered to the editor to pick from. Every candidate is kept with the recipe, including those not picked.
+_Avoid_: Thumbnail, scraped image
+
+**Preview Photo**:
+The one Candidate Photo an editor picks to show a recipe, cropped round on its card and recipe header. A recipe may have none.
+_Avoid_: Cover photo, hero image, thumbnail
+
+**Focal Point**:
+The point of the Preview Photo that its round crop centres on, given as fractions of the photo's width and height. The crop is worked out when the photo is shown and never stored.
+_Avoid_: Crop, centre
+
+**Empty Plate**:
+What a card or recipe header shows in place of a Preview Photo when the recipe has none: an empty plate with the recipe's initial.
+_Avoid_: Default image, blank photo
 
 **Component**:
 A named part of a recipe with its own ingredients and steps, such as "For the marinade" or "For the sauce". A recipe without components has one unnamed part.
