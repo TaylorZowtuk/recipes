@@ -442,7 +442,7 @@ verify_dev_profile() {
   if [[ -n ${TABLE_prod:-} && -n ${IMAGES_prod:-} ]]; then expected=6
   else
     warn "prod isn't deployed, so this can't check the key is denied prod's stores."
-    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 14 once prod is deployed")
+    SKIPPED+=("check [$p] is denied prod's stores: re-run stage 15 once prod is deployed")
   fi
   while IFS=$'\t' read -r label want got; do
     n=$((n + 1))
@@ -480,7 +480,7 @@ verify_dev_profile() {
 
 run_wizard() {
 
-TOTAL_STAGES=16
+TOTAL_STAGES=17
 ENV_FILE=.aws-setup.env
 
 cd "$(git rev-parse --show-toplevel)"
@@ -510,7 +510,7 @@ printf '\n'
 say "${BOLD}Either${RESET} IAM Identity Center: open your AWS access portal, pick the account and"
 step "your admin role → Access keys, and copy AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN."
 say "${BOLD}Or${RESET}, without Identity Center: IAM → Users → your admin user → Security credentials"
-step "→ Create access key → Command Line Interface. Stage 16 has you delete it again."
+step "→ Create access key → Command Line Interface. Stage 17 has you delete it again."
 open_url "https://console.aws.amazon.com/iam/home?region=$REGION#/security_credentials"
 printf '\n'
 ask_secret AWS_ACCESS_KEY_ID "AWS_ACCESS_KEY_ID (hidden):"
@@ -789,10 +789,66 @@ stack_secrets prod
 pause
 
 # ── 14 ────────────────────────────────────────────────────────────────────
+stage "Test account for the watched browser"
+say "Agents drive a headed Chromium (make browser) on staging while you watch over noVNC. Google is"
+say "the only sign-in, so that browser needs a Google account of its own to sign in with."
+printf '\n'
+say "The rules: a fresh Google account used for nothing else, never a household account, and never"
+say "on prod's editor allowlist. This step adds it to staging's allowlist only."
+printf '\n'
+if ! load_outputs staging; then
+  warn "staging isn't deployed yet: re-run after stage 10."
+  SKIPPED+=("test account for the watched browser (stage 14)")
+else
+  domain_var=DOMAIN_staging
+  write_env STAGING_URL "https://${!domain_var}"
+  note "make browser reads STAGING_URL from $ENV_FILE. Prod's URL is never written there."
+  printf '\n'
+  TEST_EMAIL=""
+  ask TEST_EMAIL "Test account's email (Enter to skip):" || TEST_EMAIL=""
+  TEST_EMAIL=${TEST_EMAIL//[[:space:]]/}
+  if [[ -z $TEST_EMAIL ]]; then
+    SKIPPED+=("test account for the watched browser (stage 14)")
+  elif [[ $TEST_EMAIL != ?*@?*.?* || $TEST_EMAIL == *,* ]]; then
+    warn "That doesn't look like a single email address: skipped."
+    SKIPPED+=("test account for the watched browser (stage 14)")
+  else
+    ALLOW=/plateful/staging/editor-allowlist
+    ALLOW_VERSION=$(param_version "$ALLOW" 2>/dev/null || true)
+    if [[ -z $ALLOW_VERSION || $ALLOW_VERSION == 1 ]]; then
+      warn "$ALLOW isn't set yet: finish stage 12 first, then re-run."
+      SKIPPED+=("test account for the watched browser (stage 14)")
+    else
+      ALLOW_VALUE=$(in_aws "aws ssm get-parameter --name $ALLOW --with-decryption --query Parameter.Value --output text" 2>/dev/null || true)
+      if [[ -z $ALLOW_VALUE ]]; then
+        warn "can't read $ALLOW: skipped."
+        SKIPPED+=("test account for the watched browser (stage 14)")
+      elif [[ ,${ALLOW_VALUE,,}, == *",${TEST_EMAIL,,},"* ]]; then
+        say "${GREEN}✓${RESET} $TEST_EMAIL is already on staging's editor allowlist."
+      else
+        printf '%s,%s' "$ALLOW_VALUE" "$TEST_EMAIL" | put_param "$ALLOW" ||
+          SKIPPED+=("add the test account to $ALLOW (stage 14)")
+        note "A running Lambda reads it again every 5 minutes, so a change applies within 5 minutes."
+      fi
+      printf '\n'
+      say "Google's test users are per project, and both stacks' OAuth clients live in one project, so"
+      say "this account is a test user for prod's client too. Prod's editor allowlist keeps it out of"
+      say "prod, and each stack's API only accepts ID tokens issued for its own client."
+      open_url "https://console.cloud.google.com/auth/audience"
+      step "Audience → Test users → Add users: $TEST_EMAIL"
+      step "Save it. The publishing status stays ${BOLD}Testing${RESET}."
+      pause "Press Enter once $TEST_EMAIL is a test user"
+    fi
+  fi
+  unset ALLOW_VALUE
+fi
+pause
+
+# ── 15 ────────────────────────────────────────────────────────────────────
 stage "Staging dev profile for make dev"
 if ! load_outputs staging || [[ -z ${DEV_USER:-} ]]; then
   warn "staging isn't deployed with its dev user yet: re-run after stage 10."
-  SKIPPED+=("staging dev profile (stage 14)")
+  SKIPPED+=("staging dev profile (stage 15)")
 else
   load_outputs prod || true
   say "$DEV_USER (made by Terraform, staging's data only) gets an access key, saved as a profile"
@@ -830,7 +886,7 @@ else
   pause "Press Enter once make dev works against staging"
 fi
 
-# ── 15 ────────────────────────────────────────────────────────────────────
+# ── 16 ────────────────────────────────────────────────────────────────────
 stage "Check both URLs"
 for s in "${STACKS[@]}"; do
   if ! load_outputs "$s"; then warn "$s isn't deployed yet."; SKIPPED+=("deploy $s"); continue; fi
@@ -842,11 +898,11 @@ for s in "${STACKS[@]}"; do
 done
 printf '\n'
 say "The spend alarm topic and each stack's kill switch:"
-check_kill_switches 15
+check_kill_switches 16
 step "Open both URLs on a phone too. Staging's is for checks before a release."
 pause
 
-# ── 16 ────────────────────────────────────────────────────────────────────
+# ── 17 ────────────────────────────────────────────────────────────────────
 stage "Put the admin credentials away"
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN TF_STATE_BUCKET
 if [[ $USED_ACCESS_KEY == yes ]]; then
