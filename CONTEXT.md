@@ -44,7 +44,7 @@ A recipe's summary in the collection grid: its title, source site, a single tota
 _Avoid_: Tile, summary, listing
 
 **Candidate Photo**:
-A photo found on a recipe's Source during ingest, stored in the images bucket and offered to the editor to pick from. Every candidate is kept with the recipe, including those not picked.
+A photo found on a recipe's Source during ingest, stored in the images bucket and offered to the editor to pick from. Every candidate that stores is kept with the recipe, including those not picked; one that fails to store is dropped.
 _Avoid_: Thumbnail, scraped image
 
 **Preview Photo**:
@@ -52,7 +52,7 @@ The one Candidate Photo an editor picks to show a recipe, cropped round on its c
 _Avoid_: Cover photo, hero image, thumbnail
 
 **Focal Point**:
-The point of the Preview Photo that its round crop centres on, given as fractions of the photo's width and height. The crop is worked out when the photo is shown and never stored.
+The point of the Preview Photo that its round crop keeps in view, given as fractions of the photo's width and height; the crop places it at the same fractions across and down the plate. The crop is worked out when the photo is shown and never stored.
 _Avoid_: Crop, centre
 
 **Empty Plate**:
