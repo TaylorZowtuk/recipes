@@ -6,7 +6,6 @@ import {
   editBlock,
   ingestOutcome,
   parseTags,
-  photoFields,
   previewPhoto,
   saveOutcome,
   stillStoring,
@@ -211,23 +210,6 @@ describe("stillStoring", () => {
 
   it("is none once every candidate has settled", () => {
     expect(stillStoring(candidates.filter((c) => c.state !== "storing"))).toBe(0);
-  });
-});
-
-describe("photoFields", () => {
-  it("keeps every stored Candidate Photo beside the Preview Photo", () => {
-    const preview = { image_id: "d", focal_x: 0.2, focal_y: 0.7 };
-    expect(photoFields(candidates, preview)).toEqual({
-      images: [image("c"), image("d")],
-      preview,
-    });
-  });
-
-  it("is a null preview for no photo, still keeping the candidates", () => {
-    expect(photoFields(candidates, null)).toEqual({
-      images: [image("c"), image("d")],
-      preview: null,
-    });
   });
 });
 

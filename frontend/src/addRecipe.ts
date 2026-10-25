@@ -125,15 +125,10 @@ export type PhotoChoice = Preview | null | undefined;
 
 // The editor's choice stands once made, No photo included. Until then it's the default, but only
 // once every candidate has settled: while one stores it's undecided, so no option looks chosen.
+// So undefined here means a candidate is still storing, not just that the editor hasn't chosen.
 export function previewPhoto(candidates: Candidate[], choice: PhotoChoice): PhotoChoice {
   if (choice !== undefined) return choice;
   return stillStoring(candidates) > 0 ? undefined : defaultPreview(candidates);
-}
-
-// What a save sends about photos: every candidate that stored, picked or not, and the Preview
-// Photo, or null for none.
-export function photoFields(candidates: Candidate[], preview: Preview | null) {
-  return { images: storedImages(candidates), preview };
 }
 
 // Each deployed API runs only 3 requests at once, shared with the sync poll, and answers 429 (or

@@ -17,7 +17,6 @@ import {
   ingestOutcome,
   type PhotoChoice,
   parseTags,
-  photoFields,
   previewPhoto,
   type SaveOutcome,
   saveOutcome,
@@ -383,6 +382,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
+    // Once nothing is storing the preview is decided; the last check only narrows its type.
     if (saving || storing || preview === undefined) return;
     const chosen = chosenDifficulty(difficulty);
     if (!chosen.complete) return setProblem("Rate all of Prep, Cook and Cleanup, or clear them.");
@@ -397,7 +397,9 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
             original,
             difficulty: chosen.difficulty,
             tags: parseTags(tags),
-            ...photoFields(candidates, preview),
+            // Every candidate that stored, picked or not, and the Preview Photo, or null for none.
+            images: storedImages(candidates),
+            preview,
           },
         }),
       );

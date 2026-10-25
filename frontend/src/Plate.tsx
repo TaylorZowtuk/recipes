@@ -12,12 +12,12 @@ export function Plate({
 }: {
   title: string;
   size: "card" | "hero";
-  preview?: Preview | null;
+  preview: Preview | null;
 }) {
   const [failed, setFailed] = useState<string>();
-  const src = preview && (size === "card" ? cardImageUrl : imageUrl)(preview.image_id);
+  const src = preview ? (size === "card" ? cardImageUrl : imageUrl)(preview.image_id) : undefined;
   const initial = Array.from(title.trim())[0]?.toLocaleUpperCase() ?? "";
-  if (preview && src && src !== failed) {
+  if (preview && src !== failed) {
     return (
       <span className={`plate plate-${size} plate-photo`} aria-hidden="true">
         <img
