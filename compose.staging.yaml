@@ -1,10 +1,10 @@
-# `make dev STAGING_PROFILE=<staging dev profile>` adds this: the API serves staging's table in place
-# of the seeded fake, reading that profile from ~/.aws, mounted read-only. The profile must use
-# static keys, since SSO would need to write its cache.
+# `make dev STAGING_PROFILE=<staging dev profile>` adds this: the API serves staging's table and
+# images (recipes.staging) in place of the seeded fake, reading that profile from ~/.aws, mounted
+# read-only. The profile must use static keys, since SSO would need to write its cache.
 services:
   api:
     environment:
-      API_APP: recipes.api:app
+      API_APP: recipes.staging:app
       AWS_PROFILE: ${STAGING_PROFILE:?}
       AWS_CONFIG_FILE: /work/aws/config
       AWS_SHARED_CREDENTIALS_FILE: /work/aws/credentials

@@ -163,8 +163,8 @@ def test_a_photo_that_decodes_to_too_many_pixels_is_refused(images: ImageStore) 
 def test_a_palette_photo_is_shrunk_smoothly_not_to_its_nearest_pixels(
     images: ImageStore, mode: str
 ) -> None:
-    checkerboard = Image.new("L", (1600, 1200))
-    checkerboard.putdata([255 * ((x + y) % 2) for y in range(1200) for x in range(1600)])
+    pixels = bytes(255 * ((x + y) % 2) for y in range(1200) for x in range(1600))
+    checkerboard = Image.frombytes("L", (1600, 1200), pixels)
     out = io.BytesIO()
     checkerboard.convert(mode).save(out, "PNG")
 

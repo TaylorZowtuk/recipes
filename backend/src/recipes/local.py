@@ -15,8 +15,6 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import urlsplit
 
 import boto3
-from botocore.exceptions import ClientError
-from fastapi import HTTPException, Response
 from moto import mock_aws
 
 from recipes import seed
@@ -24,12 +22,13 @@ from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
 from recipes.images import ImageStore
 from recipes.ingest import FetchRefused, IngestFailed, Page, PageNotFound
+from recipes.staging import serve_images
 from recipes.store import Store, create_table
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from fastapi import Request
+    from fastapi import Request, Response
     from types_boto3_s3.literals import BucketLocationConstraintType
 
 TABLE_NAME = "plateful-local"
@@ -41,7 +40,7 @@ SERVICE_TOKEN = "local-dev-service-token"
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-west-2")
 
 
-def seeded_store() -> Store:
+def seeded_store(images: ImageStore) -> Store:
     """The fake table, bootstrapped and seeded, with the seed's photos in the fake bucket.
     Adding a recipe bumps `META#collection`, so the bootstrap comes first; the API's own start
     then finds the table at its schema version.
@@ -168,20 +167,14 @@ region = cast("BucketLocationConstraintType", os.environ["AWS_DEFAULT_REGION"])
 images.client.create_bucket(
     Bucket=IMAGES_BUCKET, CreateBucketConfiguration={"LocationConstraint": region}
 )
-app = create_app(store=seeded_store, auth=fake_auth, fetcher=FakeWebsite, images=lambda: images)
-
-
-@app.get("/images/{name}", include_in_schema=False)
-def _image(name: str) -> Response:
-    try:
-        stored = images.client.get_object(Bucket=images.bucket, Key=f"images/{name}")
-    except ClientError:
-        raise HTTPException(404, "No such image") from None
-    return Response(
-        stored["Body"].read(),
-        media_type=stored.get("ContentType"),
-        headers={"Cache-Control": stored.get("CacheControl", "no-store")},
+app = serve_images(
+    create_app(
+        store=lambda: seeded_store(images),
+        auth=fake_auth,
+        fetcher=FakeWebsite,
+        images=lambda: images,
     )
+)
 
 
 # moto's table isn't safe across the threads uvicorn runs routes on: overlapping transactions
