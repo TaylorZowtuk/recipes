@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fake_web import bomb, photo
-from PIL import ExifTags, Image
+from PIL import ExifTags, Image, ImageStat
 
 from recipes.images import NotAnImage, TooManyPixels
 
@@ -157,3 +157,19 @@ def test_a_photo_that_decodes_to_too_many_pixels_is_refused(images: ImageStore) 
         images.put(data, origin=ORIGIN)
 
     assert keys(images) == []
+
+
+@pytest.mark.parametrize("mode", ["P", "1"])
+def test_a_palette_photo_is_shrunk_smoothly_not_to_its_nearest_pixels(
+    images: ImageStore, mode: str
+) -> None:
+    checkerboard = Image.new("L", (1600, 1200))
+    checkerboard.putdata([255 * ((x + y) % 2) for y in range(1200) for x in range(1600)])
+    out = io.BytesIO()
+    checkerboard.convert(mode).save(out, "PNG")
+
+    image = images.put(out.getvalue(), origin=ORIGIN)
+
+    _, card = stored(images, f"images/{image.id}-card.webp")
+    (mean,) = ImageStat.Stat(card.convert("L")).mean
+    assert 100 < mean < 155

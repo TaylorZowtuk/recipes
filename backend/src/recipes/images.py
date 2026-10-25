@@ -109,6 +109,9 @@ def _encode(data: bytes) -> tuple[bytes, bytes, tuple[int, int]]:
             raise TooManyPixels
         try:
             ImageOps.exif_transpose(image, in_place=True)
+            # Pillow shrinks palette and 1-bit images to their nearest pixels, so they go jagged.
+            if image.mode in {"P", "PA", "1"}:
+                image = image.convert("RGBA" if image.has_transparency_data else "RGB")
             image.thumbnail((FULL_LONG_SIDE, FULL_LONG_SIDE))
             size, full = image.size, _webp(image)
             # Shrinks to the card's width, never growing a narrower photo.
