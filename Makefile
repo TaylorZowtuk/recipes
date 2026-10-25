@@ -6,9 +6,9 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
-	kill-switch-reset dev shell clean \
+	kill-switch-reset dev browser browser-run browser-stop shell clean \
 	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf tf-test \
-	links api-drift sh-lint workflows
+	links api-drift sh-lint sh-test workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
 $(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
@@ -48,6 +48,10 @@ COMPOSE := docker compose
 STAGING_ACCOUNT_ID ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
 	sed -n "s/^AWS_ACCOUNT_ID='\{0,1\}\([0-9]\{12\}\)'\{0,1\}$$/\1/p" | head -n1)
 export STAGING_ACCOUNT_ID
+# `make browser` opens staging only at exactly its URL: STAGING_URL, else from .aws-setup.env likewise.
+STAGING_URL ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
+	sed -n "s/^STAGING_URL='\{0,1\}\(https:\/\/[^']*\)'\{0,1\}$$/\1/p" | head -n1)
+export STAGING_URL
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
 RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
@@ -96,10 +100,20 @@ dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_POR
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
 
+browser: ## A watched browser at URL=<local make dev or staging URL>, seen through noVNC (TIME_LIMIT=2h)
+	TIME_LIMIT='$(or $(TIME_LIMIT),2h)' scripts/browser.sh start '$(URL)'
+
+browser-run: ## Run the step script on stdin against the watched browser's page (OUT=.screenshots/browser)
+	OUT='$(or $(OUT),.screenshots/browser)' scripts/browser.sh run
+
+browser-stop: ## Stop the watched browser and remove its container and network
+	scripts/browser.sh stop
+
 shell: ## A shell in the toolchain container, with dependencies installed
 	$(RUN) bash -c 'make deps && exec bash'
 
 clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
+	scripts/browser.sh stop
 	$(COMPOSE) down --volumes --remove-orphans --rmi all
 
 gitleaks: RUN_FLAGS := -T
@@ -119,7 +133,7 @@ deps:
 
 check: deps
 	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf tf-test links \
-		api-drift sh-lint workflows
+		api-drift sh-lint sh-test workflows
 	@echo "make check: all passed"
 
 fix: deps
@@ -193,10 +207,12 @@ links:
 # SC1087 is off: the wizard library at the top of scripts/aws-setup.sh writes `$$e[Enter …`, the
 # escape variable followed by a bracket, which shellcheck mistakes for an array index.
 sh-lint:
-	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh
+	shellcheck --severity=warning --exclude=SC1087 scripts/*.sh docker/*.sh
 	@# make and the workflows exec these directly, so git must record them as executable.
-	@bad=$$(git ls-files -s -- 'scripts/*.sh' | awk '$$1 != "100755" {print $$4}'); \
+	@bad=$$(git ls-files -s -- 'scripts/*.sh' 'docker/*.sh' | awk '$$1 != "100755" {print $$4}'); \
 	[ -z "$$bad" ] || { echo "Not executable (git update-index --chmod=+x): $$bad"; exit 1; }
+sh-test:
+	scripts/browser.test.sh
 workflows:
 	actionlint
 api-drift:
