@@ -119,6 +119,17 @@ export function defaultPreview(candidates: Candidate[]): Preview | null {
   return first ? { image_id: first.id, focal_x: 0.5, focal_y: 0.5 } : null;
 }
 
+// The editor's choice of Preview Photo: undefined until they choose, then a photo, or null for
+// No photo.
+export type PhotoChoice = Preview | null | undefined;
+
+// The editor's choice stands once made, No photo included. Until then it's the default, but only
+// once every candidate has settled: while one stores it's undecided, so no option looks chosen.
+export function previewPhoto(candidates: Candidate[], choice: PhotoChoice): PhotoChoice {
+  if (choice !== undefined) return choice;
+  return stillStoring(candidates) > 0 ? undefined : defaultPreview(candidates);
+}
+
 // What a save sends about photos: every candidate that stored, picked or not, and the Preview
 // Photo, or null for none.
 export function photoFields(candidates: Candidate[], preview: Preview | null) {

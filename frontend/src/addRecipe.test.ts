@@ -7,6 +7,7 @@ import {
   ingestOutcome,
   parseTags,
   photoFields,
+  previewPhoto,
   saveOutcome,
   stillStoring,
   storedImages,
@@ -166,6 +167,28 @@ describe("defaultPreview", () => {
 
   it("is no photo while none has stored", () => {
     expect(defaultPreview(candidates.slice(0, 2))).toBeNull();
+  });
+});
+
+describe("previewPhoto", () => {
+  const settled = candidates.filter((c) => c.state !== "storing");
+
+  it("is the first stored Candidate Photo, centred, until the editor chooses", () => {
+    expect(previewPhoto(settled, undefined)).toEqual(defaultPreview(settled));
+  });
+
+  it("is undecided while a candidate stores and the editor hasn't chosen", () => {
+    expect(previewPhoto(candidates, undefined)).toBeUndefined();
+  });
+
+  it("stays No photo once the editor chose it, after the candidates settle", () => {
+    expect(previewPhoto(candidates, null)).toBeNull();
+    expect(previewPhoto(settled, null)).toBeNull();
+  });
+
+  it("keeps the photo the editor picked", () => {
+    const picked = { image_id: "d", focal_x: 0.2, focal_y: 0.7 };
+    expect(previewPhoto(settled, picked)).toEqual(picked);
   });
 });
 

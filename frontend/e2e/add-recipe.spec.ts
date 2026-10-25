@@ -393,6 +393,41 @@ test.describe("while a Candidate Photo stores", () => {
     expect(body.preview).toBeNull();
     await expect(page).toHaveURL(/\/recipes$/);
   });
+
+  test("No photo chosen while the candidates store stays chosen once they settle", async ({
+    page,
+  }, testInfo) => {
+    const url = pageUrl("photo-early-choice-congee", testInfo);
+    const title = titleOf(url);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/images", async (route) => {
+      await held;
+      await route.continue();
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, url);
+
+    // Nothing has stored, so nothing is chosen yet; then the editor chooses No photo.
+    await expect(photoPicker(page).getByRole("status")).toHaveText("Getting the photos…");
+    const none = page.getByRole("radio", { name: "No photo" });
+    await expect(none).not.toBeChecked();
+    await pickPhoto(page, "No photo");
+
+    release();
+    await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+    await expect(none).toBeChecked();
+    await page.getByRole("button", { name: "Save recipe" }).click();
+
+    await expect(page).toHaveURL(/\/recipes$/);
+    const card = page
+      .getByRole("list", { name: "Recipes" })
+      .getByRole("link", { name: new RegExp(title) });
+    await expect(card.locator(".plate-initial")).toHaveText("P");
+    await expect(plateImage(card)).toHaveCount(0);
+  });
 });
 
 test.describe("while Plateful updates", () => {

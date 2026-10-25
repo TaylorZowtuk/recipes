@@ -12,12 +12,13 @@ import {
   type Candidate,
   chosenDifficulty,
   type DifficultyChoice,
-  defaultPreview,
   editBlock,
   type IngestOutcome,
   ingestOutcome,
+  type PhotoChoice,
   parseTags,
   photoFields,
+  previewPhoto,
   type SaveOutcome,
   saveOutcome,
   stillStoring,
@@ -369,9 +370,8 @@ function useCandidates(urls: string[]): Candidate[] {
 function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => void }) {
   const { source, original } = ingested;
   const candidates = useCandidates(ingested.candidate_photos);
-  // Undefined until the editor chooses: then the first stored candidate, centred.
-  const [picked, setPicked] = useState<Preview | null>();
-  const preview = picked === undefined ? defaultPreview(candidates) : picked;
+  const [picked, setPicked] = useState<PhotoChoice>();
+  const preview = previewPhoto(candidates, picked);
   const navigate = useNavigate();
   const blocked = useEditBlock();
   const mounted = useMounted();
@@ -389,7 +389,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (saving || storing) return;
+    if (saving || storing || preview === undefined) return;
     const chosen = chosenDifficulty(difficulty);
     if (!chosen.complete) return setProblem("Rate all of Prep, Cook and Cleanup, or clear them.");
     setProblem(undefined);
@@ -434,7 +434,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
   return (
     <div className="add-recipe review">
       <header className="hero">
-        <Plate title={original.title} size="hero" preview={preview} />
+        <Plate title={original.title} size="hero" preview={preview ?? null} />
         <p className="hero-site">{source.site_name}</p>
         <h2 ref={heading} tabIndex={-1} className="hero-title">
           {original.title}
@@ -542,7 +542,7 @@ function PhotoPicker({
 }: {
   title: string;
   candidates: Candidate[];
-  preview: Preview | null;
+  preview: PhotoChoice;
   onPick: (preview: Preview | null) => void;
 }) {
   const images = storedImages(candidates);
@@ -566,7 +566,7 @@ function PhotoPicker({
             type="radio"
             className="visually-hidden"
             name="photo"
-            checked={!preview}
+            checked={preview === null}
             onChange={() => onPick(null)}
           />
           <span className="photo-swatch photo-none" />
