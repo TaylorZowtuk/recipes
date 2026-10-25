@@ -3,7 +3,7 @@
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, HTTPException, Response
 
-from recipes.api import ImagesDep  # noqa: TC001  # FastAPI reads the annotation at runtime
+from recipes.api import ImagesDep
 
 # `/images/*` from the images bucket, as CloudFront serves it on a stack.
 dev_images = APIRouter(include_in_schema=False)
