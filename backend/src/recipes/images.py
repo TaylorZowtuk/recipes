@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 # A versioned URL never changes what it serves, so CloudFront and phones keep it for good.
 IMMUTABLE = "public, max-age=31536000, immutable"
 CARD_WIDTH = 400
+# The stored full-size copy is shrunk to this on its long side, never grown.
+FULL_LONG_SIDE = 1600
 # Decoding is refused past this many pixels, so a small file can't fill the API's 512 MB.
 MAX_PIXELS = 24_000_000
 # The formats websites serve photos in. Pillow's other decoders are never tried.
@@ -91,8 +93,9 @@ class ImageStore:
 
 
 def _encode(data: bytes) -> tuple[bytes, bytes, tuple[int, int]]:
-    """The photo and its card-size copy as WebP, and the photo's upright size. Saving writes
-    none of the source's EXIF, XMP or colour profile.
+    """The photo, at most FULL_LONG_SIDE on its long side, and its card-size copy as WebP, and
+    the stored photo's upright size. Saving writes none of the source's EXIF, XMP or colour
+    profile.
     """
     try:
         image = Pillow.open(io.BytesIO(data), formats=FORMATS)
@@ -106,6 +109,7 @@ def _encode(data: bytes) -> tuple[bytes, bytes, tuple[int, int]]:
             raise TooManyPixels
         try:
             ImageOps.exif_transpose(image, in_place=True)
+            image.thumbnail((FULL_LONG_SIDE, FULL_LONG_SIDE))
             size, full = image.size, _webp(image)
             # Shrinks to the card's width, never growing a narrower photo.
             image.thumbnail((CARD_WIDTH, image.height))

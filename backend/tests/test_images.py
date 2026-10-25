@@ -48,6 +48,28 @@ def test_a_photo_is_stored_as_webp_under_its_content_hash_with_a_card_size_copy(
         assert decoded.size == size
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param((3000, 2000), (1600, 1067), id="landscape, capped on its width"),
+        pytest.param((2000, 3000), (1067, 1600), id="portrait, capped on its height"),
+        pytest.param((1200, 800), (1200, 800), id="smaller than the cap, unchanged"),
+    ],
+)
+def test_the_full_size_copy_is_capped_on_its_long_side_and_never_grown(
+    images: ImageStore, source: tuple[int, int], expected: tuple[int, int]
+) -> None:
+    data = photo(*source)
+
+    image = images.put(data, origin=ORIGIN)
+
+    assert image.id == hashlib.sha256(data).hexdigest()[:32]
+    assert (image.width, image.height) == expected
+    _, full = stored(images, f"images/{image.id}.webp")
+    assert full.size == expected
+    assert abs(full.width / full.height - source[0] / source[1]) < 0.01
+
+
 def test_a_photo_narrower_than_a_card_is_not_upscaled(images: ImageStore) -> None:
     image = images.put(photo(300, 500), origin=ORIGIN)
 

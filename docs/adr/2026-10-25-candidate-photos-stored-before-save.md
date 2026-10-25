@@ -14,7 +14,7 @@ We chose a separate endpoint because ingest's page fetch can already take about 
 ## Storing an image
 
 - **Fetch:** the same fetch policy as ingest: the honest user agent, robots.txt, public addresses only, redirects followed by hand, a deadline and a body size cap. The image must also be under a pixel-count limit, checked before it's decoded, so a small file that decodes to a huge image can't exhaust the Lambda's memory.
-- **Key:** the content hash of the source bytes. The image is stored once as WebP at `images/<hash>.webp`, with a card-size copy about 400 px wide at `images/<hash>-card.webp`.
+- **Key:** the content hash of the source bytes. The image is stored once as WebP at `images/<hash>.webp`, at most 1600 px on its long side, with a card-size copy about 400 px wide at `images/<hash>-card.webp`.
 - **Dedupe:** if the object already exists, the upload is skipped. The same photo found on two Sources, or offered again on a re-ingest, is stored once.
 - **Cache headers:** immutable, since a key's content never changes.
 
