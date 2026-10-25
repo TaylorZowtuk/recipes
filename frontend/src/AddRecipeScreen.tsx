@@ -22,6 +22,7 @@ import {
   type SaveOutcome,
   saveOutcome,
   stillStoring,
+  storeCandidates,
   storedImages,
 } from "./addRecipe";
 import {
@@ -336,28 +337,21 @@ const PARTS = [
   ["cleanup", "Cleanup"],
 ] as const satisfies [keyof Difficulty, string][];
 
-// Stores each Candidate Photo in parallel, so the picker fills in as they arrive. One that fails
-// is unavailable and drops out.
+// Stores the Candidate Photos a couple at a time, retrying when the API is busy, so the picker
+// fills in as they arrive. One that fails is unavailable and drops out.
 function useCandidates(urls: string[]): Candidate[] {
   const [candidates, setCandidates] = useState<Candidate[]>(() =>
     urls.map((url) => ({ url, state: "storing" })),
   );
   useEffect(() => {
     let current = true;
-    const settle = (url: string, candidate: Candidate) =>
-      current && setCandidates((all) => all.map((c) => (c.url === url ? candidate : c)));
-    for (const url of urls) {
-      api.POST("/api/images", { body: { url } }).then(
-        ({ data, response }) =>
-          settle(
-            url,
-            response.ok && data
-              ? { url, state: "stored", image: data }
-              : { url, state: "unavailable" },
-          ),
-        () => settle(url, { url, state: "unavailable" }),
-      );
-    }
+    void storeCandidates(
+      urls,
+      (url) => api.POST("/api/images", { body: { url } }),
+      (candidate) =>
+        setCandidates((all) => all.map((c) => (c.url === candidate.url ? candidate : c))),
+      () => !current,
+    );
     return () => {
       current = false;
     };

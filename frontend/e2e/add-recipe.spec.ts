@@ -428,6 +428,24 @@ test.describe("while a Candidate Photo stores", () => {
     await expect(card.locator(".plate-initial")).toHaveText("P");
     await expect(plateImage(card)).toHaveCount(0);
   });
+
+  test("a candidate the busy API turns away with a 429 is tried again and stores", async ({
+    page,
+  }, testInfo) => {
+    let turnedAway: string | undefined;
+    await page.route("**/api/images", async (route) => {
+      const { url } = route.request().postDataJSON();
+      if (turnedAway !== undefined) return route.continue();
+      turnedAway = url;
+      return route.fulfill({ status: 429, json: { message: "Rate exceeded." } });
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, pageUrl("photo-busy-paella", testInfo));
+
+    await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+    await expect(photoPicker(page).getByRole("radio", { name: /^Photo \d$/ })).toHaveCount(3);
+    expect(turnedAway).toBeDefined();
+  });
 });
 
 test.describe("while Plateful updates", () => {

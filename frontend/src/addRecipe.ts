@@ -135,3 +135,50 @@ export function previewPhoto(candidates: Candidate[], choice: PhotoChoice): Phot
 export function photoFields(candidates: Candidate[], preview: Preview | null) {
   return { images: storedImages(candidates), preview };
 }
+
+// Each deployed API runs only 3 requests at once, shared with the sync poll, and answers 429 (or
+// 503) over that. So at most 2 candidates store at a time, and a 429 or 503 is tried twice more,
+// 1 s then 2 s later; any other refusal is final.
+const IN_FLIGHT = 2;
+const RETRY_DELAYS_MS = [1000, 2000];
+const RETRIED = new Set([429, 503]);
+
+async function storeCandidate(
+  url: string,
+  store: (url: string) => Promise<Answer<Image>>,
+  stopped: () => boolean,
+): Promise<Candidate> {
+  for (const delay of [...RETRY_DELAYS_MS, undefined]) {
+    let answer: Answer<Image>;
+    try {
+      answer = await store(url);
+    } catch {
+      return { url, state: "unavailable" };
+    }
+    const { data, response } = answer;
+    if (response.ok && data) return { url, state: "stored", image: data };
+    if (delay === undefined || !RETRIED.has(response.status) || stopped()) break;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (stopped()) break;
+  }
+  return { url, state: "unavailable" };
+}
+
+// Stores each Candidate Photo through `store`, settling each as it stores or turns out
+// unavailable. Once `stopped`, it starts no request and settles nothing more.
+export async function storeCandidates(
+  urls: string[],
+  store: (url: string) => Promise<Answer<Image>>,
+  settle: (candidate: Candidate) => void,
+  stopped: () => boolean,
+): Promise<void> {
+  const waiting = [...urls];
+  const worker = async () => {
+    for (let url = waiting.shift(); url !== undefined && !stopped(); url = waiting.shift()) {
+      const candidate = await storeCandidate(url, store, stopped);
+      if (stopped()) return;
+      settle(candidate);
+    }
+  };
+  await Promise.all(Array.from({ length: IN_FLIGHT }, worker));
+}
