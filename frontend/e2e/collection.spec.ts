@@ -41,9 +41,15 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   const [a, b] = [await items.nth(0).boundingBox(), await items.nth(1).boundingBox()];
   expect(a?.y).toBe(b?.y);
 
-  // A card without a photo shows an empty plate with its initial, then the title, site and time.
+  // A card shows its Preview Photo's card-size copy about its Focal Point, then the title, site
+  // and time. One without a photo shows the Empty Plate with its initial.
   const card = grid(page).getByRole("link", { name: new RegExp(recipeTitle) });
-  await expect(card.locator(".plate")).toHaveText("S");
+  const photo = card.locator(".plate img");
+  await expect(photo).toHaveAttribute("src", /^\/images\/[0-9a-f]+-card\.webp$/);
+  await expect(photo).toHaveCSS("object-position", "30% 40%");
+  await expect(grid(page).getByRole("link", { name: pendingTitle }).locator(".plate")).toHaveText(
+    "G",
+  );
   await expect(card).toContainText("Example Noodle House");
   await expect(card).toContainText("30 min");
   await expectTapTarget(card);
@@ -180,6 +186,17 @@ test.describe("with no service worker", () => {
       await expect(page.getByRole("main").getByRole("status")).toBeFocused();
     });
   }
+
+  test("a card whose photo fails to load shows the Empty Plate", async ({ page }) => {
+    await page.route("**/images/*-card.webp", (route) => route.fulfill({ status: 404 }));
+    await page.goto("/recipes");
+
+    // Scrolled into view, since a card's photo loads lazily.
+    const card = grid(page).getByRole("link", { name: new RegExp(recipeTitle) });
+    await card.scrollIntoViewIfNeeded();
+    await expect(card.locator(".plate-initial")).toHaveText("S");
+    await expect(card.locator(".plate img")).toHaveCount(0);
+  });
 });
 
 test("an unknown recipe says it isn't there", async ({ page }) => {

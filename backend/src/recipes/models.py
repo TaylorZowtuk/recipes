@@ -28,6 +28,10 @@ Line = Annotated[str, StringConstraints(max_length=2000)]
 Label = Annotated[str, StringConstraints(max_length=MAX_LABEL)]
 MAX_LINES = 500
 MAX_ORIGINAL_BYTES = 350 * 1024
+# A photo's content hash (recipes.images.image_id), which names its objects in the images bucket.
+ImageId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
+# Where a focal point sits across or down its photo, from 0 at the left or top to 1.
+Fraction = Annotated[float, Field(ge=0, le=1)]
 
 
 def new_ulid() -> str:
@@ -122,16 +126,18 @@ class Difficulty(Model):
 
 
 class Image(Model):
-    id: str  # content hash
-    width: int
-    height: int
-    origin: str
+    id: ImageId
+    width: Annotated[int, Field(gt=0)]
+    height: Annotated[int, Field(gt=0)]
+    origin: WebUrl  # where the photo was fetched from
 
 
 class Preview(Model):
-    image_id: str
-    focal_x: float
-    focal_y: float
+    """A recipe's Preview Photo, cropped round about its Focal Point."""
+
+    image_id: ImageId
+    focal_x: Fraction
+    focal_y: Fraction
 
 
 EnrichmentStatus = Literal["pending", "awaiting_review", "ready"]

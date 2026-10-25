@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Any
 import boto3
 import pytest
 import requests
-from fake_web import FakeWeb, Redirect, page
+from fake_web import FakeWeb, Redirect, Served, bomb, page, photo
 from fastapi.testclient import TestClient
 
 from recipes import api
 from recipes.api import create_app
 from recipes.auth import SERVICE_TOKEN_HEADER, Auth, AuthSettings, Claims, InvalidIdToken
+from recipes.ingest import MAX_PHOTO_BYTES
 from recipes.models import SCHEMA_VERSION, QueuedIngest, card_for
 from recipes.seed import RECIPES
 from recipes.store import DuplicateSource, Store
@@ -21,11 +22,14 @@ if TYPE_CHECKING:
 
     from httpx2 import Response
 
+    from recipes.images import ImageStore
+
 SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = {SERVICE_TOKEN_HEADER: SERVICE_TOKEN}
 URL = "https://plateful.test/miso-soup"
 KEY = "https://plateful.test/miso-soup"
 ROBOTS = "https://plateful.test/robots.txt"
+PHOTO = "https://plateful.test/photos/miso-soup.jpg"
 # 2001 characters, though its key, without the tracking parameter, is short.
 LONG_URL = f"{URL}?utm_source=" + "x" * (2001 - len(f"{URL}?utm_source="))
 
@@ -50,12 +54,13 @@ def api_store(table: str) -> Store:
 
 
 @pytest.fixture
-def client(api_store: Store, web: FakeWeb) -> Iterator[TestClient]:
+def client(api_store: Store, images: ImageStore, web: FakeWeb) -> Iterator[TestClient]:
     auth = Auth(settings=lambda: SETTINGS, verifier=no_sign_in)
     app = create_app(
         store=lambda: api_store,
         auth=lambda: auth,
         fetcher=web.fetcher,
+        images=lambda: images,
     )
     with TestClient(app, follow_redirects=False) as client:
         yield client
@@ -67,6 +72,10 @@ def ingest(client: TestClient, url: str = URL) -> Response:
 
 def save(client: TestClient, captured: dict[str, Any], **editor_fields: object) -> Response:
     return client.post("/api/recipes", json={**captured, **editor_fields}, headers=EDITOR)
+
+
+def add_photo(client: TestClient, url: str = PHOTO) -> Response:
+    return client.post("/api/images", json={"url": url}, headers=EDITOR)
 
 
 def queued(client: TestClient) -> list[dict[str, Any]]:
@@ -101,6 +110,8 @@ def test_ingesting_a_url_captures_its_original_and_stores_nothing(
     assert body["original"]["extractor"] == "recipe-scrapers"
     assert body["original"]["stated_times"]["total"] == {"text": "PT1H15M", "seconds": 4500}
     assert body["original"]["stated_times"]["cook"] == {"text": "about 20 minutes", "seconds": None}
+    assert body["candidate_photos"] == [PHOTO, "https://plateful.test/photos/miso-soup-wide.jpg"]
+    assert "candidate_photos" not in body["original"]
     assert web.urls == [ROBOTS, URL]
     assert store.source_guard(KEY) is None
     assert store.cards() == []
@@ -380,6 +391,7 @@ def test_saving_adds_the_recipe_pending_with_its_card_and_guard(
     assert recipe["difficulty"] == difficulty
     assert recipe["tags"] == ["Soup", "quick"]
     assert recipe["version"] == 1
+    assert (recipe["images"], recipe["preview"]) == ([], None)
     stored = store.get_recipe(recipe["id"])
     assert stored is not None
     assert stored.model_dump(mode="json") == recipe
@@ -488,6 +500,148 @@ def test_no_page_html_or_json_ld_is_ever_stored(
         assert fragment not in stored
 
 
+# Photos
+
+
+def stored_photo(images: ImageStore, colour: str = "tomato") -> dict[str, Any]:
+    return images.put(photo(colour=colour), origin=PHOTO).model_dump(mode="json")
+
+
+def test_a_candidate_photo_is_stored_and_described_for_the_review(
+    client: TestClient, images: ImageStore, web: FakeWeb
+) -> None:
+    data = photo(1200, 900)
+    web.pages[PHOTO] = Served(200, data, "image/jpeg")
+
+    response = add_photo(client)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    image = response.json()
+    assert image == {
+        "id": hashlib.sha256(data).hexdigest()[:32],
+        "width": 1200,
+        "height": 900,
+        "origin": PHOTO,
+    }
+    assert images.exists(image["id"])
+    assert web.urls == [ROBOTS, PHOTO]
+
+
+@pytest.mark.parametrize(
+    ("pages", "status"),
+    [
+        pytest.param({ROBOTS: (200, "User-agent: *\nDisallow: /photos/\n")}, 502, id="robots"),
+        pytest.param({PHOTO: (404, "")}, 404, id="not there"),
+        pytest.param({PHOTO: (403, "Forbidden")}, 502, id="blocked"),
+        pytest.param({PHOTO: (500, "Oops")}, 502, id="server error"),
+        pytest.param({PHOTO: requests.ReadTimeout()}, 502, id="unreachable"),
+        pytest.param({PHOTO: (200, page("no-recipe.html"))}, 422, id="not an image"),
+        pytest.param(
+            {PHOTO: Served(200, b"x" * (MAX_PHOTO_BYTES + 1), "image/jpeg")}, 422, id="too large"
+        ),
+        pytest.param({PHOTO: Served(200, bomb(), "image/png")}, 422, id="decompression bomb"),
+    ],
+)
+def test_a_candidate_photo_that_cannot_be_stored_is_unavailable(
+    client: TestClient,
+    images: ImageStore,
+    web: FakeWeb,
+    pages: dict[str, Any],
+    status: int,
+) -> None:
+    web.pages.update(pages)
+
+    response = add_photo(client)
+
+    assert response.status_code == status
+    assert isinstance(response.json()["detail"], str)
+    assert not images.client.list_objects_v2(Bucket=images.bucket).get("Contents")
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1/photo.png", "http://[::1]/photo.png"])
+def test_a_candidate_photo_off_the_public_internet_is_never_requested(
+    client: TestClient, web: FakeWeb, url: str
+) -> None:
+    response = add_photo(client, url)
+
+    assert response.status_code == 502
+    assert web.urls == []
+
+
+@pytest.mark.parametrize("url", ["ftp://plateful.test/photo.png", "photo.png", ""])
+def test_a_candidate_photo_that_isnt_a_web_address_is_refused(
+    client: TestClient, web: FakeWeb, url: str
+) -> None:
+    response = add_photo(client, url)
+
+    assert response.status_code == 422
+    assert web.urls == []
+
+
+def test_saving_keeps_the_chosen_photos_and_preview_on_the_recipe_and_its_card(
+    client: TestClient, store: Store, images: ImageStore
+) -> None:
+    first, second = stored_photo(images), stored_photo(images, "teal")
+    preview = {"image_id": second["id"], "focal_x": 0.25, "focal_y": 1}
+
+    response = save(client, ingest(client).json(), images=[first, second], preview=preview)
+
+    assert response.status_code == 201
+    recipe = response.json()
+    assert recipe["images"] == [first, second]
+    assert recipe["preview"] == {"image_id": second["id"], "focal_x": 0.25, "focal_y": 1.0}
+    stored = store.get_recipe(recipe["id"])
+    assert stored is not None
+    assert stored.model_dump(mode="json") == recipe
+    [card] = store.cards()
+    assert card.preview is not None
+    assert card.preview.model_dump(mode="json") == recipe["preview"]
+
+
+def test_saving_without_a_photo_keeps_none(client: TestClient, store: Store) -> None:
+    response = save(client, ingest(client).json(), images=[], preview=None)
+
+    assert response.status_code == 201
+    assert (response.json()["images"], response.json()["preview"]) == ([], None)
+    [card] = store.cards()
+    assert card.preview is None
+
+
+def invalid_photos(image: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Editor fields with photos that aren't valid, by what's wrong, around a stored `image`."""
+    other = "0" * 32  # a well-formed id, but not a stored image's
+
+    def preview(image_id: str = image["id"], x: float = 0.5, y: float = 0.5) -> dict[str, Any]:
+        return {"image_id": image_id, "focal_x": x, "focal_y": y}
+
+    return {
+        "a bad id": {"images": [{**image, "id": "../../etc/passwd"}]},
+        "an upper-case id": {"images": [{**image, "id": image["id"].upper()}]},
+        "no width": {"images": [{**image, "width": 0}]},
+        "a bad origin": {"images": [{**image, "origin": "photo.png"}]},
+        "the same image twice": {"images": [image, image]},
+        "too many": {"images": [{**image, "id": f"{n:032x}"} for n in range(21)]},
+        "focal x past 1": {"images": [image], "preview": preview(x=1.5)},
+        "focal y below 0": {"images": [image], "preview": preview(y=-0.1)},
+        "a preview of another image": {"images": [image], "preview": preview(other)},
+        "a preview without its image": {"preview": preview()},
+        "an image not stored": {"images": [image, {**image, "id": other}]},
+    }
+
+
+@pytest.mark.parametrize("case", list(invalid_photos({"id": ""})))
+def test_photos_that_are_not_valid_are_refused(
+    client: TestClient, store: Store, images: ImageStore, case: str
+) -> None:
+    captured = ingest(client).json()
+
+    response = save(client, captured, **invalid_photos(stored_photo(images))[case])
+
+    assert response.status_code == 422
+    assert store.cards() == []
+
+
 # Editors only
 
 
@@ -496,6 +650,7 @@ def test_no_page_html_or_json_ld_is_ever_stored(
     [
         ("POST", "/api/ingest", {"url": URL}),
         ("POST", "/api/recipes", {}),
+        ("POST", "/api/images", {"url": PHOTO}),
         ("GET", "/api/queued-ingests", None),
     ],
 )

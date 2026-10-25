@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
@@ -136,6 +136,101 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
   await expect(about.getByRole("link")).toHaveAttribute("href", url);
 });
 
+const photoPicker = (page: Page) => page.getByRole("group", { name: "Photo" });
+
+// Clicks the label: the radio itself is visually hidden behind its swatch.
+const pickPhoto = (page: Page, name: string) =>
+  photoPicker(page)
+    .locator("label", { has: page.getByRole("radio", { name, exact: true }) })
+    .click();
+
+const plateImage = (plate: Locator) => plate.locator(".plate img");
+const objectPositionOf = (image: Locator) =>
+  image.evaluate((img) => (img as HTMLImageElement).style.objectPosition);
+
+test("an editor picks a Preview Photo and drags its Focal Point, and the card and header show it", async ({
+  page,
+}, testInfo) => {
+  const url = pageUrl("photo-herb-omelette", testInfo);
+  const title = titleOf(url);
+  await openAddRecipeFromGrid(page);
+  await fetchRecipe(page, url);
+
+  // The candidates store, and the first is the Preview Photo, centred, in the hero plate.
+  await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+  await expect(photoPicker(page).getByRole("radio")).toHaveCount(4);
+  await expect(page.getByRole("radio", { name: "Photo 1" })).toBeChecked();
+  const preview = plateImage(page.locator(".review .hero"));
+  await expect(preview).toHaveCSS("object-position", "50% 50%");
+
+  // Another is picked, and its Focal Point dragged towards the top left, then nudged right.
+  await pickPhoto(page, "Photo 3");
+  await expect(page.getByRole("radio", { name: "Photo 3" })).toBeChecked();
+  const focal = page.getByRole("slider", { name: "Focal Point" });
+  await focal.scrollIntoViewIfNeeded();
+  const box = await focal.boundingBox();
+  if (!box) throw new Error("no Focal Point picker");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3, { steps: 5 });
+
+  // Mid-drag, the small plate beside the photo shows the round crop, in view with the photo.
+  const crop = plateImage(page.locator(".focal"));
+  await expect(crop).not.toHaveCSS("object-position", "50% 50%");
+  await expect(crop).toBeInViewport({ ratio: 1 });
+  await page.mouse.up();
+  await expect(focal).toHaveAttribute("aria-valuetext", /^(19|20|21)% across, (29|30|31)% down$/);
+  // A step is 5%, give or take the rounding of the dragged position.
+  const across = async () => Number(await focal.getAttribute("aria-valuenow"));
+  const dragged = await across();
+  await focal.press("ArrowRight");
+  await expect.poll(across).not.toBe(dragged);
+  expect(Math.abs((await across()) - (dragged + 5))).toBeLessThanOrEqual(1);
+  const position = await objectPositionOf(preview);
+  expect(position).not.toBe("50% 50%");
+  await expect(preview).toHaveCSS("object-position", position);
+  expect(await objectPositionOf(crop)).toBe(position);
+
+  await page.getByRole("button", { name: "Save recipe" }).click();
+
+  // The card shows the card-size copy, and the header the full one, both about that Focal Point.
+  await expect(page).toHaveURL(/\/recipes$/);
+  const card = page
+    .getByRole("list", { name: "Recipes" })
+    .getByRole("link", { name: new RegExp(title) });
+  await expect(plateImage(card)).toHaveAttribute("src", /^\/images\/[0-9a-f]+-card\.webp$/);
+  expect(await objectPositionOf(plateImage(card))).toBe(position);
+  await card.click();
+  const header = plateImage(page.locator(".hero"));
+  await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
+  expect(await objectPositionOf(header)).toBe(position);
+  await expect(header).toHaveJSProperty("complete", true);
+  expect(await header.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+});
+
+test("a recipe saved with No photo shows the Empty Plate", async ({ page }, testInfo) => {
+  const url = pageUrl("photo-less-porridge", testInfo);
+  const title = titleOf(url);
+  await openAddRecipe(page);
+  await fetchRecipe(page, url);
+  await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+
+  await pickPhoto(page, "No photo");
+  await expect(page.getByRole("radio", { name: "No photo" })).toBeChecked();
+  const hero = page.locator(".review .hero .plate");
+  await expect(hero.locator("img")).toHaveCount(0);
+  await expect(hero).toHaveText("P");
+  await expect(page.getByRole("slider", { name: "Focal Point" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Save recipe" }).click();
+
+  await expect(page).toHaveURL(/\/recipes$/);
+  const card = page
+    .getByRole("list", { name: "Recipes" })
+    .getByRole("link", { name: new RegExp(title) });
+  await expect(card.locator(".plate-initial")).toHaveText("P");
+  await expect(plateImage(card)).toHaveCount(0);
+});
+
 test("a recipe already in the Collection links to it, though this page load hasn't seen it", async ({
   page,
 }, testInfo) => {
@@ -257,6 +352,103 @@ test("the Waiting list says it isn't available offline, and loads once back", as
   await context.setOffline(false);
   await expect(waiting.getByRole("status")).not.toHaveText(/offline|Loading/);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("while a Candidate Photo stores", () => {
+  // In WebKit, page.route stops seeing requests once a service worker registers.
+  test.use({ serviceWorkers: "block" });
+
+  test("Save waits until every candidate has stored, and keeps them all", async ({
+    page,
+  }, testInfo) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    await page.route("**/api/images", async (route) => {
+      if (first) {
+        first = false;
+        await held;
+      }
+      await route.continue();
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, pageUrl("photo-slow-frittata", testInfo));
+
+    // Two have stored and one is still storing: Save is off, even with No photo chosen.
+    const save = page.getByRole("button", { name: "Save recipe" });
+    await expect(page.getByRole("radio", { name: "Photo 2" })).toBeAttached();
+    await expect(save).toBeDisabled();
+    await expect(page.locator(".review-form").getByRole("status")).toHaveText(
+      "Save waits until the photos are in.",
+    );
+    await pickPhoto(page, "No photo");
+    await expect(save).toBeDisabled();
+
+    release();
+    await expect(save).toBeEnabled();
+    await expect(page.locator(".review-form").getByRole("status")).toHaveText("");
+    const saved = page.waitForRequest("**/api/recipes");
+    await save.click();
+    const body = (await saved).postDataJSON();
+    expect(body.images).toHaveLength(3);
+    expect(body.preview).toBeNull();
+    await expect(page).toHaveURL(/\/recipes$/);
+  });
+
+  test("No photo chosen while the candidates store stays chosen once they settle", async ({
+    page,
+  }, testInfo) => {
+    const url = pageUrl("photo-early-choice-congee", testInfo);
+    const title = titleOf(url);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/images", async (route) => {
+      await held;
+      await route.continue();
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, url);
+
+    // Nothing has stored, so nothing is chosen yet; then the editor chooses No photo.
+    await expect(photoPicker(page).getByRole("status")).toHaveText("Getting the photos…");
+    const none = page.getByRole("radio", { name: "No photo" });
+    await expect(none).not.toBeChecked();
+    await pickPhoto(page, "No photo");
+
+    release();
+    await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+    await expect(none).toBeChecked();
+    await page.getByRole("button", { name: "Save recipe" }).click();
+
+    await expect(page).toHaveURL(/\/recipes$/);
+    const card = page
+      .getByRole("list", { name: "Recipes" })
+      .getByRole("link", { name: new RegExp(title) });
+    await expect(card.locator(".plate-initial")).toHaveText("P");
+    await expect(plateImage(card)).toHaveCount(0);
+  });
+
+  test("a candidate the busy API turns away with a 429 is tried again and stores", async ({
+    page,
+  }, testInfo) => {
+    let turnedAway: string | undefined;
+    await page.route("**/api/images", async (route) => {
+      const { url } = route.request().postDataJSON();
+      if (turnedAway !== undefined) return route.continue();
+      turnedAway = url;
+      return route.fulfill({ status: 429, json: { message: "Rate exceeded." } });
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, pageUrl("photo-busy-paella", testInfo));
+
+    await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+    await expect(photoPicker(page).getByRole("radio", { name: /^Photo \d$/ })).toHaveCount(3);
+    expect(turnedAway).toBeDefined();
+  });
 });
 
 test.describe("while Plateful updates", () => {

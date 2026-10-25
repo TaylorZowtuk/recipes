@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
     from httpx2 import Response
 
+    from recipes.images import ImageStore
+
 CLIENT_ID = "test-client.apps.googleusercontent.com"
 SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = "editor@example.com"
@@ -85,9 +87,9 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def app(table: str, settings: Settings, clock: Clock) -> FastAPI:
+def app(table: str, images: ImageStore, settings: Settings, clock: Clock) -> FastAPI:
     auth = Auth(settings=settings, verifier=fake_verifier, clock=clock)
-    app = create_app(store=lambda: Store(table), auth=lambda: auth)
+    app = create_app(store=lambda: Store(table), auth=lambda: auth, images=lambda: images)
 
     @app.get("/api/test-editors-only")
     def editors_only(editor: EditorDep) -> Editor:  # pyright: ignore[reportUnusedFunction]
@@ -334,13 +336,13 @@ def test_no_service_token_matches_an_unset_hash(client: TestClient, settings: Se
 # CurrentEditor and EditorDep
 
 
-def test_a_visitor_never_reads_the_settings(table: str, clock: Clock) -> None:
+def test_a_visitor_never_reads_the_settings(table: str, images: ImageStore, clock: Clock) -> None:
     def unreachable() -> AuthSettings:
         msg = "a visitor's request read the settings"
         raise AssertionError(msg)
 
     auth = Auth(settings=unreachable, verifier=fake_verifier, clock=clock)
-    app = create_app(store=lambda: Store(table), auth=lambda: auth)
+    app = create_app(store=lambda: Store(table), auth=lambda: auth, images=lambda: images)
 
     @app.get("/api/test-who")
     def who(editor: CurrentEditor) -> bool:  # pyright: ignore[reportUnusedFunction]

@@ -8,6 +8,7 @@ from moto import mock_aws
 
 from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
+from recipes.images import ImageStore
 from recipes.store import Store, create_table
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 TABLE_NAME = "plateful-test"
+IMAGES_BUCKET = "plateful-test-images"
 
 
 @pytest.fixture
@@ -25,6 +27,15 @@ def table(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     with mock_aws():
         create_table(boto3.client("dynamodb"), TABLE_NAME)
         yield TABLE_NAME
+
+
+@pytest.fixture
+def images(table: str) -> ImageStore:
+    """An empty images bucket on the same fake AWS."""
+    boto3.client("s3").create_bucket(
+        Bucket=IMAGES_BUCKET, CreateBucketConfiguration={"LocationConstraint": "us-west-2"}
+    )
+    return ImageStore(IMAGES_BUCKET)
 
 
 @pytest.fixture
@@ -44,8 +55,8 @@ UNCONFIGURED = Auth(settings=lambda: AuthSettings.parse({}), verifier=no_sign_in
 
 
 @pytest.fixture
-def app(table: str) -> FastAPI:
-    return create_app(store=lambda: Store(table), auth=lambda: UNCONFIGURED)
+def app(table: str, images: ImageStore) -> FastAPI:
+    return create_app(store=lambda: Store(table), auth=lambda: UNCONFIGURED, images=lambda: images)
 
 
 @pytest.fixture
