@@ -30,7 +30,7 @@ check() {
 
 project=${COMPOSE_PROJECT_NAME:?run through make}
 name=$project-browser
-image=$project-toolchain
+image=$project-browser-image
 # The browser container has no mounts, so its user only needs to be someone other than root (which
 # HOST_UID is under rootless Docker): root would own, and so could edit, the URL policy.
 uid=${HOST_UID:?run through make} gid=${HOST_GID:?run through make}
@@ -60,7 +60,7 @@ start() {
     network=$name
     docker network inspect "$network" >/dev/null 2>&1 || docker network create "$network" >/dev/null
   fi
-  docker compose --progress quiet build tools
+  docker compose --progress quiet build browser
 
   # Docker's default seccomp profile plus a rule for Chromium's sandbox (see the ADR); refresh it when Docker's default changes.
   docker create --name "$name" --rm --init --network "$network" --label "plateful.origin=$origin" \
