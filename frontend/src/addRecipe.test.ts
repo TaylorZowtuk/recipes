@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type Candidate,
   chosenDifficulty,
@@ -6,10 +6,10 @@ import {
   editBlock,
   ingestOutcome,
   parseTags,
-  photoFields,
   previewPhoto,
   saveOutcome,
   stillStoring,
+  storeCandidates,
   storedImages,
 } from "./addRecipe";
 import type { Duplicate, Image, Ingested, QueuedIngest, Sync } from "./api/client";
@@ -213,19 +213,162 @@ describe("stillStoring", () => {
   });
 });
 
-describe("photoFields", () => {
-  it("keeps every stored Candidate Photo beside the Preview Photo", () => {
-    const preview = { image_id: "d", focal_x: 0.2, focal_y: 0.7 };
-    expect(photoFields(candidates, preview)).toEqual({
-      images: [image("c"), image("d")],
-      preview,
-    });
+describe("storeCandidates", () => {
+  type Answer = { data?: Image; response: Response };
+  const ids = ["a", "b", "c", "d", "e"];
+  const urls = ids.map((id) => `https://plateful.test/photos/${id}.png`);
+  const stored = (id: string) => ({ data: image(id), response: response(200) });
+  const refused = (status: number) => ({ response: response(status) });
+
+  // A fake POST /api/images whose answers the test gives out one request at a time.
+  function fakeStore() {
+    const requests: { url: string; answer: (a: Answer) => void }[] = [];
+    let inFlight = 0;
+    let most = 0;
+    const store = (url: string) =>
+      new Promise<Answer>((resolve) => {
+        most = Math.max(most, ++inFlight);
+        requests.push({
+          url,
+          answer: (a) => {
+            inFlight--;
+            resolve(a);
+          },
+        });
+      });
+    const answer = (i: number, a: Answer) => {
+      const request = requests[i];
+      if (!request) throw new Error(`no request ${i}`);
+      request.answer(a);
+    };
+    return { store, requests, answer, most: () => most };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("is a null preview for no photo, still keeping the candidates", () => {
-    expect(photoFields(candidates, null)).toEqual({
-      images: [image("c"), image("d")],
-      preview: null,
-    });
+  const flush = () => vi.advanceTimersByTimeAsync(0);
+
+  it("keeps at most 2 requests in flight, starting the next as one answers", async () => {
+    const { store, requests, answer, most } = fakeStore();
+    const settled: Candidate[] = [];
+    void storeCandidates(
+      urls,
+      store,
+      (c) => settled.push(c),
+      () => false,
+    );
+    await flush();
+    expect(requests.map((r) => r.url)).toEqual(urls.slice(0, 2));
+    answer(0, stored("a"));
+    await flush();
+    expect(requests.map((r) => r.url)).toEqual(urls.slice(0, 3));
+    for (let i = 1; i < urls.length; i++) {
+      answer(i, stored(ids[i] ?? ""));
+      await flush();
+    }
+    expect(most()).toBe(2);
+    expect(settled.map((c) => c.state)).toEqual(Array(5).fill("stored"));
+  });
+
+  it("settles the candidates in the order they answer", async () => {
+    const { store, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    void storeCandidates(
+      urls.slice(0, 2),
+      store,
+      (c) => settled.push(c),
+      () => false,
+    );
+    await flush();
+    answer(1, stored("b"));
+    await flush();
+    answer(0, refused(502));
+    await flush();
+    expect(settled).toEqual([
+      { url: urls[1] ?? "", state: "stored", image: image("b") },
+      { url: urls[0], state: "unavailable" },
+    ]);
+  });
+
+  it("retries a 429 after 1 s and stores the photo when it then answers", async () => {
+    const { store, requests, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    void storeCandidates(
+      urls.slice(0, 1),
+      store,
+      (c) => settled.push(c),
+      () => false,
+    );
+    await flush();
+    answer(0, refused(429));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(requests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(requests).toHaveLength(2);
+    answer(1, stored("a"));
+    await flush();
+    expect(settled).toEqual([{ url: urls[0], state: "stored", image: image("a") }]);
+  });
+
+  it("gives up after three 429s or 503s, 1 s then 2 s apart", async () => {
+    const { store, requests, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    void storeCandidates(
+      urls.slice(0, 1),
+      store,
+      (c) => settled.push(c),
+      () => false,
+    );
+    await flush();
+    answer(0, refused(429));
+    await vi.advanceTimersByTimeAsync(1000);
+    answer(1, refused(503));
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(requests).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    answer(2, refused(429));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests).toHaveLength(3);
+    expect(settled).toEqual([{ url: urls[0], state: "unavailable" }]);
+  });
+
+  it("doesn't retry any other refusal, such as a 422", async () => {
+    const { store, requests, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    void storeCandidates(
+      urls.slice(0, 1),
+      store,
+      (c) => settled.push(c),
+      () => false,
+    );
+    await flush();
+    answer(0, refused(422));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests).toHaveLength(1);
+    expect(settled).toEqual([{ url: urls[0], state: "unavailable" }]);
+  });
+
+  it("starts no request and settles nothing once stopped", async () => {
+    const { store, requests, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    let stopped = false;
+    void storeCandidates(
+      urls,
+      store,
+      (c) => settled.push(c),
+      () => stopped,
+    );
+    await flush();
+    answer(0, refused(429));
+    stopped = true;
+    answer(1, stored("b"));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests).toHaveLength(2);
+    expect(settled).toEqual([]);
   });
 });

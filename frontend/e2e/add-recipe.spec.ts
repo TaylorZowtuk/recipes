@@ -180,9 +180,12 @@ test("an editor picks a Preview Photo and drags its Focal Point, and the card an
   await expect(crop).toBeInViewport({ ratio: 1 });
   await page.mouse.up();
   await expect(focal).toHaveAttribute("aria-valuetext", /^(19|20|21)% across, (29|30|31)% down$/);
-  const dragged = Number(await focal.getAttribute("aria-valuenow"));
+  // A step is 5%, give or take the rounding of the dragged position.
+  const across = async () => Number(await focal.getAttribute("aria-valuenow"));
+  const dragged = await across();
   await focal.press("ArrowRight");
-  await expect(focal).toHaveAttribute("aria-valuenow", String(dragged + 5));
+  await expect.poll(across).not.toBe(dragged);
+  expect(Math.abs((await across()) - (dragged + 5))).toBeLessThanOrEqual(1);
   const position = await objectPositionOf(preview);
   expect(position).not.toBe("50% 50%");
   await expect(preview).toHaveCSS("object-position", position);
@@ -427,6 +430,24 @@ test.describe("while a Candidate Photo stores", () => {
       .getByRole("link", { name: new RegExp(title) });
     await expect(card.locator(".plate-initial")).toHaveText("P");
     await expect(plateImage(card)).toHaveCount(0);
+  });
+
+  test("a candidate the busy API turns away with a 429 is tried again and stores", async ({
+    page,
+  }, testInfo) => {
+    let turnedAway: string | undefined;
+    await page.route("**/api/images", async (route) => {
+      const { url } = route.request().postDataJSON();
+      if (turnedAway !== undefined) return route.continue();
+      turnedAway = url;
+      return route.fulfill({ status: 429, json: { message: "Rate exceeded." } });
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, pageUrl("photo-busy-paella", testInfo));
+
+    await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+    await expect(photoPicker(page).getByRole("radio", { name: /^Photo \d$/ })).toHaveCount(3);
+    expect(turnedAway).toBeDefined();
   });
 });
 
