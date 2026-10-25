@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The watched browser's side of scripts/browser.sh, baked into the toolchain image as watched-browser.
 #   serve <url> <time limit> [<port>]: in the browser container, Chromium headed on Xvfb, shown through
-#     x11vnc and noVNC (port 6080) behind a one-time password, with CDP on port 9223. With a port, the
-#     URL is local `make dev`: localhost:<port> forwards to Vite (web:5173) on the Compose network.
-#   step <CDP URL>: in a step container, run the step script on stdin against the browser's page.
+#     x11vnc and noVNC (port 6080) behind a one-time password, with CDP on 127.0.0.1:9222 only. With a
+#     port, the URL is local `make dev`: localhost:<port> forwards to Vite (web:5173) on the Compose
+#     network.
+#   step <CDP URL> <origin>: in a step container in the browser's network namespace, run the step
+#     script on stdin against the first page at that origin.
 set -euo pipefail
 
 # forward <listen host> <listen port> <target host> <target port>: a TCP port forward, in the background.
@@ -35,11 +37,10 @@ serve() {
   websockify --web /usr/share/novnc 6080 localhost:5900 >"$HOME/run/websockify.log" 2>&1 &
   # The page keeps http://localhost:<port> as its origin, which Google's sign-in allows.
   [[ -z $port ]] || forward 127.0.0.1 "$port" web 5173
-  # Headed Chromium ignores --remote-debugging-address and listens on 127.0.0.1 only.
-  forward 0.0.0.0 9223 127.0.0.1 9222
 
   local chrome
-  chrome=$(echo /ms-playwright/chromium-*/chrome-linux64/chrome)
+  chrome=$(echo /ms-playwright/chromium-*/chrome-linux*/chrome) # chrome-linux64 or chrome-linux-arm64
+  [[ -x $chrome ]] || { echo "No Chromium at $chrome" >&2; exit 1; }
   # Launched directly, not through Playwright, which adds --enable-automation (Google then refuses
   # sign-in). The sandbox works through the seccomp profile scripts/browser.sh passes.
   exec timeout "$limit" "$chrome" \
@@ -51,23 +52,26 @@ serve() {
 }
 
 step() {
-  local cdp=$1 file
+  local cdp=$1 origin=$2 file
   file=$(mktemp --suffix=.mjs)
   cat >"$file"
   exec node --input-type=module -e '
     import { chromium } from "/work/repo/frontend/node_modules/@playwright/test/index.mjs";
-    const [cdp, file] = process.argv.slice(1);
+    const [cdp, origin, file] = process.argv.slice(1);
     const step = (await import(file)).default;
     const browser = await chromium.connectOverCDP(cdp);
     try {
       const context = browser.contexts()[0];
-      await step({ browser, context, page: context.pages()[0], out: "/out" });
+      // The human may have opened other tabs, or a sign-in popup: the app is the first page at its origin.
+      const page = context.pages().find((p) => p.url() === origin || p.url().startsWith(`${origin}/`));
+      if (!page) throw new Error(`No page at ${origin} in the watched browser: open it there again.`);
+      await step({ browser, context, page, out: "/out" });
     } finally {
       await browser.close(); // Over CDP this only disconnects: the page stays open.
-    }' "$cdp" "$file"
+    }' "$cdp" "$origin" "$file"
 }
 
 case ${1:-} in
   serve | step) "$@" ;;
-  *) echo "usage: watched-browser serve <url> <time limit> [<port>] | step <CDP URL>" >&2 && exit 1 ;;
+  *) echo "usage: watched-browser serve <url> <time limit> [<port>] | step <CDP URL> <origin>" >&2 && exit 1 ;;
 esac

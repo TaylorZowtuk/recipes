@@ -794,7 +794,7 @@ say "Agents drive a headed Chromium (make browser) on staging while you watch ov
 say "the only sign-in, so that browser needs a Google account of its own to sign in with."
 printf '\n'
 say "The rules: a fresh Google account used for nothing else, never a household account, and never"
-say "on prod's editor allowlist. This step adds it to staging's allowlist only."
+say "on prod's editor allowlist. This step checks prod's list, then adds it to staging's only."
 printf '\n'
 if ! load_outputs staging; then
   warn "staging isn't deployed yet: re-run after stage 10."
@@ -811,6 +811,14 @@ else
     SKIPPED+=("test account for the watched browser (stage 14)")
   elif [[ $TEST_EMAIL != ?*@?*.?* || $TEST_EMAIL == *,* ]]; then
     warn "That doesn't look like a single email address: skipped."
+    SKIPPED+=("test account for the watched browser (stage 14)")
+  elif ! PROD_ALLOW=$(in_aws "aws ssm get-parameter --name /plateful/prod/editor-allowlist --with-decryption --query Parameter.Value --output text" 2>/dev/null) ||
+    [[ -z $PROD_ALLOW ]]; then
+    # Fail closed: without prod's allowlist there's no telling whether this is a household account.
+    warn "can't read /plateful/prod/editor-allowlist to check the address isn't on it: skipped."
+    SKIPPED+=("test account for the watched browser (stage 14)")
+  elif PROD_ALLOW=${PROD_ALLOW//[[:space:]]/} && [[ ,${PROD_ALLOW,,}, == *",${TEST_EMAIL,,},"* ]]; then
+    warn "that address is on prod's allowlist: use a fresh account."
     SKIPPED+=("test account for the watched browser (stage 14)")
   else
     ALLOW=/plateful/staging/editor-allowlist
@@ -840,7 +848,7 @@ else
       pause "Press Enter once $TEST_EMAIL is a test user"
     fi
   fi
-  unset ALLOW_VALUE
+  unset ALLOW_VALUE PROD_ALLOW
 fi
 pause
 

@@ -48,10 +48,10 @@ COMPOSE := docker compose
 STAGING_ACCOUNT_ID ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
 	sed -n "s/^AWS_ACCOUNT_ID='\{0,1\}\([0-9]\{12\}\)'\{0,1\}$$/\1/p" | head -n1)
 export STAGING_ACCOUNT_ID
-# `make browser` opens staging only at exactly its URL: STAGING_URL, else from .aws-setup.env likewise.
-STAGING_URL ?= $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
+# `make browser` opens staging only at exactly its URL, read from .aws-setup.env (here or in the main
+# checkout) and nowhere else: `override` ignores STAGING_URL in the environment or on the command line.
+override STAGING_URL := $(shell cat .aws-setup.env "$(GIT_COMMON_DIR)/../.aws-setup.env" 2>/dev/null | \
 	sed -n "s/^STAGING_URL='\{0,1\}\(https:\/\/[^']*\)'\{0,1\}$$/\1/p" | head -n1)
-export STAGING_URL
 # Make the volume mountpoints so Docker doesn't create them owned by root, and the shared cache.
 PREPARE := mkdir -p frontend/node_modules backend/.venv && docker volume create recipes-cache >/dev/null
 RUN = $(PREPARE) && $(COMPOSE) --progress quiet run --rm --build $(RUN_FLAGS) tools
@@ -101,7 +101,7 @@ dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_POR
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
 
 browser: ## A watched browser at URL=<local make dev or staging URL>, seen through noVNC (TIME_LIMIT=2h)
-	TIME_LIMIT='$(or $(TIME_LIMIT),2h)' scripts/browser.sh start '$(URL)'
+	TIME_LIMIT='$(or $(TIME_LIMIT),2h)' scripts/browser.sh start '$(URL)' '$(STAGING_URL)'
 
 browser-run: ## Run the step script on stdin against the watched browser's page (OUT=.screenshots/browser)
 	OUT='$(or $(OUT),.screenshots/browser)' scripts/browser.sh run
