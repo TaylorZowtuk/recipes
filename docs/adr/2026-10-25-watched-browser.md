@@ -17,7 +17,7 @@ Google's test users are per Cloud project, and both stacks' OAuth clients live i
 
 ## Chromium's sandbox
 
-Chromium in Docker usually needs `--no-sandbox`. Here Docker's default seccomp profile, not AppArmor, is what breaks the sandbox: making AppArmor unconfined makes it worse, because this host sets `kernel.apparmor_restrict_unprivileged_userns`. So the container runs with a copy of Docker's default seccomp profile plus one rule allowing `chroot`, `clone` and `unshare` (`docker/browser-seccomp.json`), and AppArmor stays on. Chromium then has its namespace and seccomp-BPF sandboxes. The trade-off: the container may create user namespaces, which is more kernel attack surface, in exchange for a sandboxed renderer on pages that load Google's scripts. The profile copy must be refreshed when Docker's default changes.
+Chromium in Docker usually needs `--no-sandbox`. Here Docker's default seccomp profile, not AppArmor, is what breaks the sandbox: making AppArmor unconfined makes it worse, because this host sets `kernel.apparmor_restrict_unprivileged_userns`. So the container runs with a copy of Docker's default seccomp profile (moby/profiles seccomp v0.2.3, as in Docker 29.8) plus one rule, at the end, allowing `chroot`, `clone` and `unshare` (`docker/browser-seccomp.json`), and AppArmor stays on. Chromium then has its namespace and seccomp-BPF sandboxes. The trade-off: the container may create user namespaces, which is more kernel attack surface, in exchange for a sandboxed renderer on pages that load Google's scripts. The profile copy must be refreshed when Docker's default changes.
 
 ## Considered options
 

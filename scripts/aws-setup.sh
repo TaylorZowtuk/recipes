@@ -812,8 +812,13 @@ else
   elif [[ $TEST_EMAIL != ?*@?*.?* || $TEST_EMAIL == *,* ]]; then
     warn "That doesn't look like a single email address: skipped."
     SKIPPED+=("test account for the watched browser (stage 14)")
+  elif PROD_VERSION=$(param_version /plateful/prod/editor-allowlist 2>/dev/null || true) &&
+    [[ -z $PROD_VERSION || $PROD_VERSION == 1 ]]; then
+    # Fail closed: Terraform's placeholder says nothing about which addresses are the household's.
+    warn "prod's allowlist is unset or unreadable: set prod's allowlist (stage 13) first, then re-run."
+    SKIPPED+=("test account for the watched browser (stage 14)")
   elif ! PROD_ALLOW=$(in_aws "aws ssm get-parameter --name /plateful/prod/editor-allowlist --with-decryption --query Parameter.Value --output text" 2>/dev/null) ||
-    [[ -z $PROD_ALLOW ]]; then
+    [[ -z $PROD_ALLOW || $PROD_ALLOW == placeholder-set-by-hand ]]; then
     # Fail closed: without prod's allowlist there's no telling whether this is a household account.
     warn "can't read /plateful/prod/editor-allowlist to check the address isn't on it: skipped."
     SKIPPED+=("test account for the watched browser (stage 14)")

@@ -20,7 +20,8 @@ result() {
 }
 
 # expect accept|refuse <url> <staging's URL> [VAR=value]...: run the guard on the URL with only those
-# variables of CI and STAGING_URL set. STAGING_URL in the environment must never count.
+# variables of CI and STAGING_URL set. STAGING_URL in the environment must never count to the script;
+# the Makefile's own case is at the end.
 expect() {
   local want=$1 url=$2 stage=$3 got=refuse
   shift 3
@@ -82,18 +83,27 @@ for tool in docker tar; do
   printf '#!/bin/sh\necho "$0 $*" >>"%s/calls"\n' "$stub" >"$stub/$tool"
   chmod +x "$stub/$tool"
 done
+# The guard's own refusal, not any other early exit: its message must be on stderr.
 expect_start_refused() {
-  local url=$1 stage=$2 code=0
+  local url=$1 stage=$2 code=0 err
   shift 2
   rm -f "$stub/calls"
-  env -u CI -u STAGING_URL PATH="$stub:$PATH" COMPOSE_PROJECT_NAME=test HOST_UID=1000 HOST_GID=1000 \
-    "$@" scripts/browser.sh start "$url" "$stage" >/dev/null 2>&1 || code=$?
-  result refused "$( ((code)) && [[ ! -e $stub/calls ]] && echo refused || echo "exit $code, calls: $(cat "$stub/calls" 2>/dev/null)")" \
-    "start '$url' staging '$stage' $*: want a refusal before any docker or tar call"
+  err=$(env -u CI -u STAGING_URL PATH="$stub:$PATH" COMPOSE_PROJECT_NAME=test HOST_UID=1000 HOST_GID=1000 \
+    "$@" scripts/browser.sh start "$url" "$stage" 2>&1 >/dev/null) || code=$?
+  result refused "$( ((code)) && [[ ! -e $stub/calls ]] && [[ $err == *"refusing '"* || $err == *"never runs in CI"* ]] &&
+    echo refused || echo "exit $code, stderr: $err, calls: $(cat "$stub/calls" 2>/dev/null)")" \
+    "start '$url' staging '$stage' $*: want the guard's refusal before any docker or tar call"
 }
 expect_start_refused https://example.com "$staging"
 expect_start_refused "$prod" "$staging" STAGING_URL="$prod"
 expect_start_refused http://localhost:5190 '' CI=1
+
+# The Makefile passes staging's URL from .aws-setup.env only: `override` ignores STAGING_URL in the
+# environment and on the command line. Outside the container (no IN_CONTAINER), make -n prints the
+# host-side recipe. Its staging argument may be the real one from .aws-setup.env, so it's never printed.
+out=$(env -u IN_CONTAINER -u CI STAGING_URL="$prod" make -s -n browser URL="$prod" STAGING_URL="$prod" 2>/dev/null || true)
+result ok "$([[ $out == *"start '$prod' '"* && $out != *"'$prod' '$prod'"* ]] && echo ok || echo bad)" \
+  "make browser URL=<prod> STAGING_URL=<prod>: want STAGING_URL from the environment and command line ignored"
 
 echo "browser.test.sh: $passed passed"
 exit "$failed"

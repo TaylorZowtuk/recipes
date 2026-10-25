@@ -43,8 +43,9 @@ start() {
   mode=$(check "$1" "$2")
   [[ $limit =~ ^[1-9][0-9]*[smh]?$ ]] || die "TIME_LIMIT is a duration such as 90m or 2h, not '$limit'."
   ! running || die "This worktree's watched browser is already running: make browser-stop first."
-  # From here on, a failure removes whatever this run created.
-  trap stop EXIT
+  # Until this run's container exists, a failure removes only the network (which fails harmlessly while
+  # another run's browser uses it), never a browser that a concurrent start created.
+  trap 'docker network rm "$name" >/dev/null 2>&1 || true' EXIT
 
   if [[ $mode == local* ]]; then
     # Vite (web:5173) is on the worktree's Compose network; the page stays http://localhost:<port>.
@@ -68,6 +69,8 @@ start() {
     --shm-size 1g --tmpfs "/work/home:mode=700,uid=$uid,gid=$gid" \
     --publish 127.0.0.1::6080 \
     "$image" watched-browser serve "$url" "$limit" ${port:+"$port"} >/dev/null
+  # From here on, a failure removes whatever this run created.
+  trap stop EXIT
 
   # The run's URL policy, copied in as root before Chromium starts. It governs navigations (pages and
   # frames), so Google's sign-in and its button still load their subresources from *.gstatic.com.
@@ -84,6 +87,8 @@ start() {
 
   # Ready once the password is written and CDP and noVNC answer inside the container.
   for _ in {1..100}; do
+    # --rm deletes a container that exits, so its logs are gone too.
+    running || die "The watched browser exited during startup."
     password=$(docker exec "$name" cat /work/home/run/vnc-password 2>/dev/null) && [[ -n $password ]] &&
       docker exec "$name" node -e '
         Promise.all(["http://127.0.0.1:9222/json/version", "http://127.0.0.1:6080/vnc.html"].map((u) => fetch(u)))
