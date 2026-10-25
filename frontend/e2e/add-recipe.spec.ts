@@ -173,6 +173,11 @@ test("an editor picks a Preview Photo and drags its Focal Point, and the card an
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3, { steps: 5 });
+
+  // Mid-drag, the small plate beside the photo shows the round crop, in view with the photo.
+  const crop = plateImage(page.locator(".focal"));
+  await expect(crop).not.toHaveCSS("object-position", "50% 50%");
+  await expect(crop).toBeInViewport({ ratio: 1 });
   await page.mouse.up();
   await expect(focal).toHaveAttribute("aria-valuetext", /^(19|20|21)% across, (29|30|31)% down$/);
   const dragged = Number(await focal.getAttribute("aria-valuenow"));
@@ -181,6 +186,7 @@ test("an editor picks a Preview Photo and drags its Focal Point, and the card an
   const position = await objectPositionOf(preview);
   expect(position).not.toBe("50% 50%");
   await expect(preview).toHaveCSS("object-position", position);
+  expect(await objectPositionOf(crop)).toBe(position);
 
   await page.getByRole("button", { name: "Save recipe" }).click();
 
@@ -343,6 +349,50 @@ test("the Waiting list says it isn't available offline, and loads once back", as
   await context.setOffline(false);
   await expect(waiting.getByRole("status")).not.toHaveText(/offline|Loading/);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("while a Candidate Photo stores", () => {
+  // In WebKit, page.route stops seeing requests once a service worker registers.
+  test.use({ serviceWorkers: "block" });
+
+  test("Save waits until every candidate has stored, and keeps them all", async ({
+    page,
+  }, testInfo) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first = true;
+    await page.route("**/api/images", async (route) => {
+      if (first) {
+        first = false;
+        await held;
+      }
+      await route.continue();
+    });
+    await openAddRecipe(page);
+    await fetchRecipe(page, pageUrl("photo-slow-frittata", testInfo));
+
+    // Two have stored and one is still storing: Save is off, even with No photo chosen.
+    const save = page.getByRole("button", { name: "Save recipe" });
+    await expect(page.getByRole("radio", { name: "Photo 2" })).toBeAttached();
+    await expect(save).toBeDisabled();
+    await expect(page.locator(".review-form").getByRole("status")).toHaveText(
+      "Save waits until the photos are in.",
+    );
+    await pickPhoto(page, "No photo");
+    await expect(save).toBeDisabled();
+
+    release();
+    await expect(save).toBeEnabled();
+    await expect(page.locator(".review-form").getByRole("status")).toHaveText("");
+    const saved = page.waitForRequest("**/api/recipes");
+    await save.click();
+    const body = (await saved).postDataJSON();
+    expect(body.images).toHaveLength(3);
+    expect(body.preview).toBeNull();
+    await expect(page).toHaveURL(/\/recipes$/);
+  });
 });
 
 test.describe("while Plateful updates", () => {

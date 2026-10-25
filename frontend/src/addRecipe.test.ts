@@ -8,6 +8,7 @@ import {
   parseTags,
   photoFields,
   saveOutcome,
+  stillStoring,
   storedImages,
 } from "./addRecipe";
 import type { Duplicate, Image, Ingested, QueuedIngest, Sync } from "./api/client";
@@ -176,6 +177,16 @@ describe("storedImages", () => {
       image: image("c"),
     };
     expect(storedImages([...candidates, again])).toEqual([image("c"), image("d")]);
+  });
+});
+
+describe("stillStoring", () => {
+  it("counts the Candidate Photos not yet stored or unavailable", () => {
+    expect(stillStoring(candidates)).toBe(1);
+  });
+
+  it("is none once every candidate has settled", () => {
+    expect(stillStoring(candidates.filter((c) => c.state !== "storing"))).toBe(0);
   });
 });
 

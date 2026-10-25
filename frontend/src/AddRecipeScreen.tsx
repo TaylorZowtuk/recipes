@@ -20,6 +20,7 @@ import {
   photoFields,
   type SaveOutcome,
   saveOutcome,
+  stillStoring,
   storedImages,
 } from "./addRecipe";
 import {
@@ -364,7 +365,7 @@ function useCandidates(urls: string[]): Candidate[] {
 }
 
 // The captured Original, read-only, beside the editor's Preview Photo and optional Difficulty and
-// Tags. The hero plate is the live round-crop preview of the chosen photo.
+// Tags. The hero plate, and a small one beside the Focal Point picker, preview the round crop.
 function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => void }) {
   const { source, original } = ingested;
   const candidates = useCandidates(ingested.candidate_photos);
@@ -379,6 +380,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
   const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<ReactNode>();
+  const storing = stillStoring(candidates) > 0;
 
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
@@ -387,7 +389,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (saving) return;
+    if (saving || storing) return;
     const chosen = chosenDifficulty(difficulty);
     if (!chosen.complete) return setProblem("Rate all of Prep, Cook and Cleanup, or clear them.");
     setProblem(undefined);
@@ -439,7 +441,12 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
         </h2>
         {original.author && <p className="hero-site">By {original.author}</p>}
       </header>
-      <PhotoPicker candidates={candidates} preview={preview} onPick={setPicked} />
+      <PhotoPicker
+        title={original.title}
+        candidates={candidates}
+        preview={preview}
+        onPick={setPicked}
+      />
       {original.description && <p className="review-description">{original.description}</p>}
       <Facts original={original} />
       <Tabs
@@ -493,7 +500,12 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
           />
         </fieldset>
         <div className="review-actions">
-          <button type="submit" className="button" disabled={!!blocked} aria-disabled={saving}>
+          <button
+            type="submit"
+            className="button"
+            disabled={!!blocked || storing}
+            aria-disabled={saving}
+          >
             {saving ? "Saving…" : "Save recipe"}
           </button>
           <button type="button" className="button button-secondary" onClick={onCancel}>
@@ -508,7 +520,7 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
           </p>
         )}
         <p role="status" className="screen-note">
-          {saving ? "Saving the recipe…" : ""}
+          {saving ? "Saving the recipe…" : storing ? "Save waits until the photos are in." : ""}
         </p>
         {problem && (
           <p role="alert" className="form-problem">
@@ -523,16 +535,18 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
 // The Preview Photo: one of the stored Candidate Photos, or No photo for the Empty Plate. A chosen
 // photo gets its Focal Point picker below.
 function PhotoPicker({
+  title,
   candidates,
   preview,
   onPick,
 }: {
+  title: string;
   candidates: Candidate[];
   preview: Preview | null;
   onPick: (preview: Preview | null) => void;
 }) {
   const images = storedImages(candidates);
-  const storing = candidates.filter((c) => c.state === "storing").length;
+  const storing = stillStoring(candidates);
   const chosen = preview && images.find((image) => image.id === preview.image_id);
   return (
     <fieldset className="photo-picker">
@@ -580,6 +594,7 @@ function PhotoPicker({
       </div>
       {preview && chosen && (
         <FocalPointPicker
+          title={title}
           image={chosen}
           focal={preview}
           onChange={(focal) => onPick({ image_id: chosen.id, ...focal })}
@@ -590,12 +605,15 @@ function PhotoPicker({
 }
 
 // The chosen photo, whole, with the Focal Point on it. Dragging with a finger or a mouse moves
-// it, and so do the arrow keys once it has focus.
+// it, and so do the arrow keys once it has focus. A small plate at its corner shows the round crop,
+// so it stays in view while dragging.
 function FocalPointPicker({
+  title,
   image,
   focal,
   onChange,
 }: {
+  title: string;
   image: Image;
   focal: Focal;
   onChange: (focal: Focal) => void;
@@ -609,41 +627,46 @@ function FocalPointPicker({
       <p id="focal-hint" className="field-hint">
         Drag on the photo, or use the arrow keys, to choose the Focal Point the plate centres on.
       </p>
-      <div
-        className="focal-frame"
-        role="slider"
-        tabIndex={0}
-        aria-label="Focal Point"
-        aria-describedby="focal-hint"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={across}
-        aria-valuetext={`${across}% across, ${down}% down`}
-        style={{
-          aspectRatio: `${image.width} / ${image.height}`,
-          width: `min(100%, calc(60vh * ${image.width / image.height}))`,
-        }}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          event.currentTarget.focus({ preventScroll: true });
-          event.currentTarget.setPointerCapture(event.pointerId);
-          move(event);
-        }}
-        onPointerMove={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) move(event);
-        }}
-        onKeyDown={(event) => {
-          const next = focalStep(focal, event.key);
-          if (!next) return;
-          event.preventDefault();
-          onChange(next);
-        }}
-      >
-        <img src={imageUrl(image.id)} alt="" draggable={false} />
-        <span
-          className="focal-marker"
-          style={{ left: `${focal.focal_x * 100}%`, top: `${focal.focal_y * 100}%` }}
-        />
+      <div className="focal-stage">
+        <div
+          className="focal-frame"
+          role="slider"
+          tabIndex={0}
+          aria-label="Focal Point"
+          aria-describedby="focal-hint"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={across}
+          aria-valuetext={`${across}% across, ${down}% down`}
+          style={{
+            aspectRatio: `${image.width} / ${image.height}`,
+            width: `min(100%, calc(60vh * ${image.width / image.height}))`,
+          }}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            event.currentTarget.focus({ preventScroll: true });
+            event.currentTarget.setPointerCapture(event.pointerId);
+            move(event);
+          }}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) move(event);
+          }}
+          onKeyDown={(event) => {
+            const next = focalStep(focal, event.key);
+            if (!next) return;
+            event.preventDefault();
+            onChange(next);
+          }}
+        >
+          <img src={imageUrl(image.id)} alt="" draggable={false} />
+          <span
+            className="focal-marker"
+            style={{ left: `${focal.focal_x * 100}%`, top: `${focal.focal_y * 100}%` }}
+          />
+        </div>
+        <span className="focal-plate">
+          <Plate title={title} size="card" preview={{ image_id: image.id, ...focal }} />
+        </span>
       </div>
     </div>
   );

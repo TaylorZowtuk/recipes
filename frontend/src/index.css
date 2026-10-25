@@ -1062,10 +1062,34 @@ h1:focus {
   margin-top: calc(var(--space) * 5);
 }
 
+/* The photo with its crop plate over the top-right corner, clear of a dragging thumb and inside
+   the photo's width so it never widens the page. Pointers pass through it to the photo. */
+.focal-stage {
+  --focal-plate: 76px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: calc(var(--focal-plate) / 2);
+}
+
+.focal-plate {
+  position: relative;
+  flex: none;
+  width: var(--focal-plate);
+  margin: 0 var(--gutter) 0 calc(-1 * (var(--focal-plate) + var(--gutter)));
+  translate: 0 -50%;
+  pointer-events: none;
+}
+
+.focal-plate .plate {
+  width: 100%;
+}
+
 /* The chosen photo, whole. Touches on it drag the Focal Point rather than scroll the page. */
 .focal-frame {
   position: relative;
-  margin: 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   touch-action: none;
   cursor: crosshair;
   user-select: none;
@@ -1174,6 +1198,18 @@ h1:focus {
 
   .card-grid {
     grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  }
+
+  /* Beside the photo, clear of it. */
+  .focal-stage {
+    --focal-plate: 104px;
+    gap: calc(var(--space) * 5);
+    padding-top: 0;
+  }
+
+  .focal-plate {
+    margin: 0;
+    translate: none;
   }
 
   /* The rail already keeps the left inset clear. */

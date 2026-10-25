@@ -107,6 +107,12 @@ export function storedImages(candidates: Candidate[]): Image[] {
   });
 }
 
+// How many candidates are still storing. Save waits for none, so a save keeps every one that
+// stored.
+export function stillStoring(candidates: Candidate[]): number {
+  return candidates.filter((c) => c.state === "storing").length;
+}
+
 // Until the editor chooses, the Preview Photo is the first stored candidate, centred.
 export function defaultPreview(candidates: Candidate[]): Preview | null {
   const [first] = storedImages(candidates);
