@@ -180,9 +180,12 @@ test("an editor picks a Preview Photo and drags its Focal Point, and the card an
   await expect(crop).toBeInViewport({ ratio: 1 });
   await page.mouse.up();
   await expect(focal).toHaveAttribute("aria-valuetext", /^(19|20|21)% across, (29|30|31)% down$/);
-  const dragged = Number(await focal.getAttribute("aria-valuenow"));
+  // A step is 5%, give or take the rounding of the dragged position.
+  const across = async () => Number(await focal.getAttribute("aria-valuenow"));
+  const dragged = await across();
   await focal.press("ArrowRight");
-  await expect(focal).toHaveAttribute("aria-valuenow", String(dragged + 5));
+  await expect.poll(across).not.toBe(dragged);
+  expect(Math.abs((await across()) - (dragged + 5))).toBeLessThanOrEqual(1);
   const position = await objectPositionOf(preview);
   expect(position).not.toBe("50% 50%");
   await expect(preview).toHaveCSS("object-position", position);
