@@ -1,6 +1,7 @@
 """Ingest from a website: the dedupe key, the polite fetcher and the parse into an Original."""
 
 import gzip
+import json
 import socket
 import subprocess
 import sys
@@ -8,15 +9,17 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import chain, count, repeat
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 import requests
-from fake_web import PUBLIC_ADDRESS, FakeWeb, Redirect, Served, page
+from fake_web import PUBLIC_ADDRESS, FakeWeb, Redirect, Served, page, photo
 
 from recipes.ingest import (
     EXTRACTOR,
+    MAX_CANDIDATE_PHOTOS,
     MAX_PAGE_BYTES,
+    MAX_PHOTO_BYTES,
     MAX_ROBOTS_BYTES,
     USER_AGENT,
     FetchRefused,
@@ -25,6 +28,7 @@ from recipes.ingest import (
     Page,
     PageNotFound,
     PoliteFetcher,
+    TooLarge,
     dedupe_key,
     iso_seconds,
     parse,
@@ -187,6 +191,86 @@ def test_a_recipe_past_an_originals_limits_is_no_recipe() -> None:
         parse(html, URL)
 
     assert (type(failed.value), failed.value.reason) == (IngestFailed, "no_recipe")
+
+
+def recipe_page(image: object = None, og_images: tuple[str, ...] = ()) -> str:
+    """A minimal synthetic recipe page with `image` in its JSON-LD and `og_images` as og:image."""
+    recipe: dict[str, object] = {
+        "@context": "https://schema.org",
+        "@type": "Recipe",
+        "name": "Garlic Rice",
+        "recipeIngredient": ["2 cups rice"],
+        "recipeInstructions": "Cook the rice.",
+    }
+    if image is not None:
+        recipe["image"] = image
+    metas = "".join(f'<meta property="og:image" content="{url}">' for url in og_images)
+    return (
+        f"<!doctype html><html><head>{metas}"
+        f'<script type="application/ld+json">{json.dumps(recipe)}</script></head></html>'
+    )
+
+
+PAGE_URL = "https://plateful.test/recipes/garlic-rice"
+
+
+@pytest.mark.parametrize(
+    ("image", "og_images", "candidates"),
+    [
+        (None, (), []),
+        ("https://plateful.test/a.jpg", (), ["https://plateful.test/a.jpg"]),
+        (
+            ["https://plateful.test/a.jpg", "https://plateful.test/b.jpg"],
+            (),
+            ["https://plateful.test/a.jpg", "https://plateful.test/b.jpg"],
+        ),
+        (
+            {"@type": "ImageObject", "url": "https://plateful.test/a.jpg", "width": 800},
+            (),
+            ["https://plateful.test/a.jpg"],
+        ),
+        (
+            [{"@type": "ImageObject", "url": "/a.jpg"}, "b.jpg", {"@type": "ImageObject"}],
+            (),
+            ["https://plateful.test/a.jpg", "https://plateful.test/recipes/b.jpg"],
+        ),
+        (None, ("https://cdn.plateful.test/og.jpg",), ["https://cdn.plateful.test/og.jpg"]),
+        (
+            ["https://plateful.test/a.jpg", "https://plateful.test/a.jpg"],
+            ("/og.jpg",),
+            ["https://plateful.test/a.jpg", "https://plateful.test/og.jpg"],
+        ),
+        ("https://plateful.test/a.jpg", ("/a.jpg",), ["https://plateful.test/a.jpg"]),
+        (
+            ["data:image/png;base64,AAAA", "javascript:alert(1)", "ftp://plateful.test/a.jpg"],
+            ("https://plateful.test/" + "a" * 2000,),
+            [],
+        ),
+    ],
+    ids=[
+        "none",
+        "a string",
+        "a list",
+        "an ImageObject",
+        "relative, in ImageObjects and without a url",
+        "og:image",
+        "deduped in order, og:image last",
+        "og:image the same as the image",
+        "not a web address, or too long",
+    ],
+)
+def test_parsing_finds_the_candidate_photos_as_absolute_urls(
+    image: object, og_images: tuple[str, ...], candidates: list[str]
+) -> None:
+    assert parse(recipe_page(image, og_images), PAGE_URL).candidate_photos == candidates
+
+
+def test_parsing_keeps_only_the_first_candidate_photos() -> None:
+    images = [f"https://plateful.test/{n}.jpg" for n in range(MAX_CANDIDATE_PHOTOS + 2)]
+
+    candidates = parse(recipe_page(images), PAGE_URL).candidate_photos
+
+    assert candidates == images[:MAX_CANDIDATE_PHOTOS]
 
 
 def test_importing_ingest_leaves_recipe_scrapers_for_the_first_parse() -> None:
@@ -546,3 +630,64 @@ def test_a_redirect_to_a_host_that_cannot_be_encoded_waits_for_the_fallback() ->
 
     assert (type(failed.value), failed.value.reason) == (IngestFailed, "unreachable")
     assert web.urls == [ROBOTS, URL]
+
+
+# Photos
+
+PHOTO = "https://plateful.test/photos/miso-soup.png"
+
+
+def test_a_photo_is_fetched_as_its_bytes_after_robots_txt() -> None:
+    data = photo()
+    web = FakeWeb({ROBOTS: (404, ""), PHOTO: Served(200, data, "image/png")})
+
+    assert web.fetcher().photo(PHOTO) == data
+    assert web.urls == [ROBOTS, PHOTO]
+    assert all(r.headers["User-Agent"] == USER_AGENT for r in web.requests)
+
+
+def test_a_redirected_photo_is_fetched_where_it_landed() -> None:
+    moved = "https://cdn.plateful.test/miso-soup.png"
+    web = FakeWeb({PHOTO: Redirect(moved), moved: Served(200, photo(), "image/png")})
+
+    assert web.fetcher().photo(PHOTO) == photo()
+    assert web.urls == [ROBOTS, PHOTO, "https://cdn.plateful.test/robots.txt", moved]
+
+
+def test_a_photo_robots_txt_refuses_is_never_fetched() -> None:
+    web = FakeWeb({ROBOTS: (200, "User-agent: *\nDisallow: /photos/\n")})
+
+    with pytest.raises(FetchRefused) as refused:
+        web.fetcher().photo(PHOTO)
+
+    assert refused.value.reason == "robots"
+    assert web.urls == [ROBOTS]
+
+
+def test_a_photo_off_the_public_internet_is_refused_before_any_request() -> None:
+    web = FakeWeb()
+
+    with pytest.raises(FetchRefused) as refused:
+        web.fetcher().photo("http://10.0.0.1/photo.png")
+
+    assert refused.value.reason == "blocked"
+    assert web.urls == []
+
+
+@pytest.mark.parametrize("status", [404, 410])
+def test_a_photo_that_is_not_there_is_not_found(status: int) -> None:
+    web = FakeWeb({PHOTO: (status, "")})
+
+    with pytest.raises(PageNotFound):
+        web.fetcher().photo(PHOTO)
+
+
+@pytest.mark.parametrize("encoding", [None, "gzip"])
+def test_a_photo_past_its_size_limit_is_too_large(encoding: Literal["gzip"] | None) -> None:
+    served = Served(200, b"x" * (MAX_PHOTO_BYTES + 1), "image/png", encoding=encoding)
+    web = FakeWeb({PHOTO: served})
+
+    with pytest.raises(TooLarge):
+        web.fetcher().photo(PHOTO)
+
+    assert web.bodies[-1].read_bytes <= MAX_PHOTO_BYTES + 64 * 1024

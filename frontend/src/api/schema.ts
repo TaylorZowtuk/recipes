@@ -21,6 +21,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Image
+         * @description Store one of the candidate photos ingest found, fetched as politely as the page. Any
+         *     error means that candidate is unavailable.
+         */
+        post: operations["post_image_api_images_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ingest": {
         parameters: {
             query?: never;
@@ -236,6 +257,8 @@ export interface components {
          *     stored yet: saving sends it back.
          */
         Ingested: {
+            /** Candidate Photos */
+            candidate_photos: string[];
             original: components["schemas"]["Original-Output"];
             source: components["schemas"]["WebsiteSource-Output"];
         };
@@ -275,11 +298,15 @@ export interface components {
         };
         /**
          * NewRecipe
-         * @description A recipe to add from a website: what ingest captured, plus the editor's own fields.
+         * @description A recipe to add from a website: what ingest captured, plus the editor's own fields. Each
+         *     of its images was stored by POST /api/images, and its preview shows one of them.
          */
         NewRecipe: {
             difficulty?: components["schemas"]["Difficulty"] | null;
+            /** Images */
+            images?: components["schemas"]["Image"][];
             original: components["schemas"]["Original-Input"];
+            preview?: components["schemas"]["Preview"] | null;
             source: components["schemas"]["WebsiteSource-Input"];
             /**
              * Tags
@@ -329,7 +356,15 @@ export interface components {
             title: string;
             yield: components["schemas"]["RecipeYield-Output"] | null;
         };
-        /** Preview */
+        /** PhotoUrl */
+        PhotoUrl: {
+            /** Url */
+            url: string;
+        };
+        /**
+         * Preview
+         * @description The photo a card shows, cropped around its focal point.
+         */
         Preview: {
             /** Focal X */
             focal_x: number;
@@ -626,6 +661,58 @@ export interface operations {
             };
         };
     };
+    post_image_api_images_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhotoUrl"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Image"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The website says the photo isn't there */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not an http(s) URL, or not a photo Plateful can store */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The photo couldn't be fetched, or robots.txt refuses it */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     post_ingest_api_ingest_post: {
         parameters: {
             query?: never;
@@ -754,14 +841,12 @@ export interface operations {
                     "application/json": components["schemas"]["Duplicate"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Not a valid recipe, or an image isn't stored */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
+                content?: never;
             };
         };
     };

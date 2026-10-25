@@ -1,4 +1,4 @@
-"""A fake web for the polite fetcher: a requests adapter serving canned pages."""
+"""A fake web for the polite fetcher: a requests adapter serving canned pages and photos."""
 
 import gzip
 import io
@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 import requests
+from PIL import Image
 from requests.adapters import HTTPAdapter
 from urllib3.response import HTTPResponse
 
@@ -68,6 +69,30 @@ class _Drip(_Body):
 def page(name: str) -> str:
     """A synthetic page from tests/pages."""
     return (PAGES / name).read_text()
+
+
+def photo(
+    width: int = 800,
+    height: int = 600,
+    colour: str = "tomato",
+    image_format: str = "PNG",
+    exif: Image.Exif | None = None,
+) -> bytes:
+    """A generated placeholder photo: `colour` with a white square in its top-left quarter, so a
+    rotation shows, encoded as `image_format`.
+    """
+    image = Image.new("RGB", (width, height), colour)
+    image.paste("white", (0, 0, width // 2, height // 2))
+    out = io.BytesIO()
+    image.save(out, image_format, **({"exif": exif} if exif else {}))
+    return out.getvalue()
+
+
+def bomb() -> bytes:
+    """A small PNG that decodes to more pixels than a photo may have: 30 million."""
+    out = io.BytesIO()
+    Image.new("1", (6000, 5000)).save(out, "PNG")
+    return out.getvalue()
 
 
 class FakeWeb(HTTPAdapter):

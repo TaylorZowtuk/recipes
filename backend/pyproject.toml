@@ -8,6 +8,7 @@ dependencies = [
     "cachecontrol>=0.14.4", # keeps Google's signing certs for as long as their Cache-Control says
     "fastapi>=0.142.2",
     "google-auth[requests]>=2.62.0", # verifies Sign in with Google ID tokens
+    "pillow>=12.2,<13", # decodes recipe photos and stores them as WebP
     "protego>=0.7.0", # reads robots.txt before a website is fetched
     "recipe-scrapers>=15.13.0", # captures the Original from a website's schema.org data
     "uvicorn>=0.54.0", # run.sh serves the app with it behind the Lambda Web Adapter
@@ -20,11 +21,11 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
-    "moto[dynamodb,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; ssm: auth settings
+    "moto[dynamodb,s3,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; s3: images; ssm: auth settings
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
-    "types-boto3-lite[dynamodb,lambda,ssm]>=1.43.114",
+    "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.114",
     "types-requests>=2.33.0.20261006",
 ]
 
@@ -47,6 +48,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
+"src/recipes/images.py" = ["BLE001"] # Pillow fails in many ways on a file that isn't a photo
 "src/recipes/ingest.py" = [
     "BLE001",  # a site's scraper fails in its own ways, and any failure means no recipe
     "PLC0415", # recipe_scrapers is imported on first parse, to keep it out of cold starts
