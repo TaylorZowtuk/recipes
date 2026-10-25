@@ -165,7 +165,7 @@ def resolve(host: str) -> list[str]:
 
 
 class PoliteFetcher:
-    """Fetches a page as Plateful, each request once, following a redirect only where the
+    """Fetches a page or a photo as Plateful, each request once, following a redirect only where the
     robots.txt of the host it leads to allows it, and only to a host on the public internet.
     """
 

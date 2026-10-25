@@ -133,7 +133,7 @@ class Image(Model):
 
 
 class Preview(Model):
-    """The photo a card shows, cropped around its focal point."""
+    """A recipe's Preview Photo, cropped round about its Focal Point."""
 
     image_id: ImageId
     focal_x: Fraction

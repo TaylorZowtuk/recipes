@@ -363,7 +363,7 @@ export interface components {
         };
         /**
          * Preview
-         * @description The photo a card shows, cropped around its focal point.
+         * @description A recipe's Preview Photo, cropped round about its Focal Point.
          */
         Preview: {
             /** Focal X */
