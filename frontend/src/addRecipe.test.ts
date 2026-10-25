@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { chosenDifficulty, editBlock, ingestOutcome, parseTags, saveOutcome } from "./addRecipe";
-import type { Duplicate, Ingested, QueuedIngest, Sync } from "./api/client";
+import {
+  type Candidate,
+  chosenDifficulty,
+  defaultPreview,
+  editBlock,
+  ingestOutcome,
+  parseTags,
+  photoFields,
+  saveOutcome,
+  storedImages,
+} from "./addRecipe";
+import type { Duplicate, Image, Ingested, QueuedIngest, Sync } from "./api/client";
 
 const ingested = { source: { url: "https://plateful.test/a" } } as Ingested;
 const queuedIngest = { id: "01Q", state: "waiting" } as QueuedIngest;
@@ -132,5 +142,56 @@ describe("chosenDifficulty", () => {
   it("is incomplete with only some rated", () => {
     expect(chosenDifficulty({ prep: 2 })).toEqual({ complete: false });
     expect(chosenDifficulty({ prep: 2, cleanup: 1 })).toEqual({ complete: false });
+  });
+});
+
+const image = (id: string): Image => ({
+  id,
+  width: 1200,
+  height: 800,
+  origin: `https://plateful.test/photos/${id}.png`,
+});
+const candidates: Candidate[] = [
+  { url: "https://plateful.test/photos/a.png", state: "unavailable" },
+  { url: "https://plateful.test/photos/b.png", state: "storing" },
+  { url: "https://plateful.test/photos/c.png", state: "stored", image: image("c") },
+  { url: "https://plateful.test/photos/d.png", state: "stored", image: image("d") },
+];
+
+describe("defaultPreview", () => {
+  it("is the first stored Candidate Photo, centred", () => {
+    expect(defaultPreview(candidates)).toEqual({ image_id: "c", focal_x: 0.5, focal_y: 0.5 });
+  });
+
+  it("is no photo while none has stored", () => {
+    expect(defaultPreview(candidates.slice(0, 2))).toBeNull();
+  });
+});
+
+describe("storedImages", () => {
+  it("keeps the same photo once, though two candidates found it", () => {
+    const again: Candidate = {
+      url: "https://plateful.test/c-again.png",
+      state: "stored",
+      image: image("c"),
+    };
+    expect(storedImages([...candidates, again])).toEqual([image("c"), image("d")]);
+  });
+});
+
+describe("photoFields", () => {
+  it("keeps every stored Candidate Photo beside the Preview Photo", () => {
+    const preview = { image_id: "d", focal_x: 0.2, focal_y: 0.7 };
+    expect(photoFields(candidates, preview)).toEqual({
+      images: [image("c"), image("d")],
+      preview,
+    });
+  });
+
+  it("is a null preview for no photo, still keeping the candidates", () => {
+    expect(photoFields(candidates, null)).toEqual({
+      images: [image("c"), image("d")],
+      preview: null,
+    });
   });
 });

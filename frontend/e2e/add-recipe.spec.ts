@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
@@ -134,6 +134,92 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
     await expect(about).toContainText(fact);
   }
   await expect(about.getByRole("link")).toHaveAttribute("href", url);
+});
+
+const photoPicker = (page: Page) => page.getByRole("group", { name: "Photo" });
+
+// Clicks the label: the radio itself is visually hidden behind its swatch.
+const pickPhoto = (page: Page, name: string) =>
+  photoPicker(page)
+    .locator("label", { has: page.getByRole("radio", { name, exact: true }) })
+    .click();
+
+const plateImage = (plate: Locator) => plate.locator(".plate img");
+const objectPositionOf = (image: Locator) =>
+  image.evaluate((img) => (img as HTMLImageElement).style.objectPosition);
+
+test("an editor picks a Preview Photo and drags its Focal Point, and the card and header show it", async ({
+  page,
+}, testInfo) => {
+  const url = pageUrl("photo-herb-omelette", testInfo);
+  const title = titleOf(url);
+  await openAddRecipeFromGrid(page);
+  await fetchRecipe(page, url);
+
+  // The candidates store, and the first is the Preview Photo, centred, in the hero plate.
+  await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+  await expect(photoPicker(page).getByRole("radio")).toHaveCount(4);
+  await expect(page.getByRole("radio", { name: "Photo 1" })).toBeChecked();
+  const preview = plateImage(page.locator(".review .hero"));
+  await expect(preview).toHaveCSS("object-position", "50% 50%");
+
+  // Another is picked, and its Focal Point dragged towards the top left, then nudged right.
+  await pickPhoto(page, "Photo 3");
+  await expect(page.getByRole("radio", { name: "Photo 3" })).toBeChecked();
+  const focal = page.getByRole("slider", { name: "Focal Point" });
+  await focal.scrollIntoViewIfNeeded();
+  const box = await focal.boundingBox();
+  if (!box) throw new Error("no Focal Point picker");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.3, { steps: 5 });
+  await page.mouse.up();
+  await expect(focal).toHaveAttribute("aria-valuetext", /^(19|20|21)% across, (29|30|31)% down$/);
+  const dragged = Number(await focal.getAttribute("aria-valuenow"));
+  await focal.press("ArrowRight");
+  await expect(focal).toHaveAttribute("aria-valuenow", String(dragged + 5));
+  const position = await objectPositionOf(preview);
+  expect(position).not.toBe("50% 50%");
+  await expect(preview).toHaveCSS("object-position", position);
+
+  await page.getByRole("button", { name: "Save recipe" }).click();
+
+  // The card shows the card-size copy, and the header the full one, both about that Focal Point.
+  await expect(page).toHaveURL(/\/recipes$/);
+  const card = page
+    .getByRole("list", { name: "Recipes" })
+    .getByRole("link", { name: new RegExp(title) });
+  await expect(plateImage(card)).toHaveAttribute("src", /^\/images\/[0-9a-f]+-card\.webp$/);
+  expect(await objectPositionOf(plateImage(card))).toBe(position);
+  await card.click();
+  const header = plateImage(page.locator(".hero"));
+  await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
+  expect(await objectPositionOf(header)).toBe(position);
+  await expect(header).toHaveJSProperty("complete", true);
+  expect(await header.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+});
+
+test("a recipe saved with No photo shows the Empty Plate", async ({ page }, testInfo) => {
+  const url = pageUrl("photo-less-porridge", testInfo);
+  const title = titleOf(url);
+  await openAddRecipe(page);
+  await fetchRecipe(page, url);
+  await expect(photoPicker(page).getByRole("status")).toHaveText("3 photos");
+
+  await pickPhoto(page, "No photo");
+  await expect(page.getByRole("radio", { name: "No photo" })).toBeChecked();
+  const hero = page.locator(".review .hero .plate");
+  await expect(hero.locator("img")).toHaveCount(0);
+  await expect(hero).toHaveText("P");
+  await expect(page.getByRole("slider", { name: "Focal Point" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Save recipe" }).click();
+
+  await expect(page).toHaveURL(/\/recipes$/);
+  const card = page
+    .getByRole("list", { name: "Recipes" })
+    .getByRole("link", { name: new RegExp(title) });
+  await expect(card.locator(".plate-initial")).toHaveText("P");
+  await expect(plateImage(card)).toHaveCount(0);
 });
 
 test("a recipe already in the Collection links to it, though this page load hasn't seen it", async ({
