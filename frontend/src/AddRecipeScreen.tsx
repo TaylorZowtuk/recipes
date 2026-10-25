@@ -619,7 +619,7 @@ function FocalPointPicker({
   return (
     <div className="focal">
       <p id="focal-hint" className="field-hint">
-        Drag on the photo, or use the arrow keys, to choose the Focal Point the plate centres on.
+        Drag on the photo, or use the arrow keys, to choose the Focal Point the plate keeps in view.
       </p>
       <div className="focal-stage">
         <div
