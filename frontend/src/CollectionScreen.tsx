@@ -64,7 +64,7 @@ function RecipeCard({ card }: { card: Card }) {
   const time = formatStatedTime(card.stated_seconds);
   return (
     <Link to={recipePath(card)} className="card">
-      <Plate title={card.title} size="card" />
+      <Plate title={card.title} size="card" preview={card.preview} />
       <span className="card-title">{card.title}</span>
       {card.site_name && <span className="card-meta">{card.site_name}</span>}
       {time && <span className="card-meta">{time}</span>}

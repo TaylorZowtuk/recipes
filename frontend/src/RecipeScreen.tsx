@@ -47,7 +47,7 @@ export function RecipeScreen() {
           ? {
               above: (
                 <>
-                  <Plate title={card.title} size="hero" />
+                  <Plate title={card.title} size="hero" preview={card.preview} />
                   {card.site_name && <p className="hero-site">{card.site_name}</p>}
                 </>
               ),

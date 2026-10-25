@@ -1,4 +1,12 @@
-import type { Difficulty, Duplicate, Ingested, QueuedIngest, Sync } from "./api/client";
+import type {
+  Difficulty,
+  Duplicate,
+  Image,
+  Ingested,
+  Preview,
+  QueuedIngest,
+  Sync,
+} from "./api/client";
 
 // Why the API refused: a duplicate names the recipe or Queued Ingest the Source already is, and a
 // conflict is a race worth retrying.
@@ -81,4 +89,32 @@ export function chosenDifficulty(
   if (prep && cook && cleanup) return { complete: true, difficulty: { prep, cook, cleanup } };
   if (!prep && !cook && !cleanup) return { complete: true, difficulty: null };
   return { complete: false };
+}
+
+// A Candidate Photo on the review screen: being stored, stored, or unavailable (dropped).
+export type Candidate =
+  | { url: string; state: "storing" | "unavailable" }
+  | { url: string; state: "stored"; image: Image };
+
+// The candidates that stored, in the order ingest found them. Two that are the same photo are
+// one stored image, so it's kept once.
+export function storedImages(candidates: Candidate[]): Image[] {
+  const seen = new Set<string>();
+  return candidates.flatMap((c) => {
+    if (c.state !== "stored" || seen.has(c.image.id)) return [];
+    seen.add(c.image.id);
+    return [c.image];
+  });
+}
+
+// Until the editor chooses, the Preview Photo is the first stored candidate, centred.
+export function defaultPreview(candidates: Candidate[]): Preview | null {
+  const [first] = storedImages(candidates);
+  return first ? { image_id: first.id, focal_x: 0.5, focal_y: 0.5 } : null;
+}
+
+// What a save sends about photos: every candidate that stored, picked or not, and the Preview
+// Photo, or null for none.
+export function photoFields(candidates: Candidate[], preview: Preview | null) {
+  return { images: storedImages(candidates), preview };
 }

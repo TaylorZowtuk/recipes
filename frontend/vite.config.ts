@@ -3,8 +3,9 @@ import { VitePWA } from "vite-plugin-pwa";
 import { defineConfig } from "vitest/config";
 
 // FastAPI runs on this port in the same container under `make e2e`; `make dev` points API_URL at its
-// own container.
-const api = { "/api": process.env.API_URL ?? "http://127.0.0.1:8787" };
+// own container. Locally it serves the stored photos at /images too, as CloudFront does on a stack.
+const target = process.env.API_URL ?? "http://127.0.0.1:8787";
+const api = { "/api": target, "/images": target };
 
 export default defineConfig({
   plugins: [

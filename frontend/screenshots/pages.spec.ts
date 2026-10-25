@@ -36,7 +36,7 @@ const pages: Shot[] = [
     ready: "Add a recipe",
     editor: true,
     ingest: "screenshot-lemon-rice",
-    loaded: "2 cups cooked rice",
+    loaded: "3 photos",
   },
   {
     name: "add-recipe-queued",
@@ -134,6 +134,8 @@ for (const { name, path: url, ready, loaded, editor, menu, ingest } of pages) {
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
       if (editor) await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
     }
+    // Photos load after the data that names them.
+    await page.waitForFunction(() => Array.from(document.images).every((image) => image.complete));
     expect(errors, "uncaught errors").toEqual([]);
     await page.screenshot({
       path: path.join(outDir, testInfo.project.name, `${name}.png`),
