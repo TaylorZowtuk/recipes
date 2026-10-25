@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The watched browser's side of scripts/browser.sh, baked into the toolchain image as watched-browser.
+# The watched browser's side of scripts/browser.sh, baked into the browser image as watched-browser.
 #   serve <url> <time limit> [<port>]: in the browser container, Chromium headed on Xvfb, shown through
 #     x11vnc and noVNC (port 6080) behind a one-time password, with CDP on 127.0.0.1:9222 only. With a
 #     port, the URL is local `make dev`: localhost:<port> forwards to Vite (web:5173) on the Compose
