@@ -20,9 +20,9 @@ from moto import mock_aws
 from recipes import seed
 from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
+from recipes.dev import dev_images
 from recipes.images import ImageStore
 from recipes.ingest import FetchRefused, IngestFailed, Page, PageNotFound
-from recipes.staging import serve_images
 from recipes.store import Store, create_table
 
 if TYPE_CHECKING:
@@ -167,14 +167,13 @@ region = cast("BucketLocationConstraintType", os.environ["AWS_DEFAULT_REGION"])
 images.client.create_bucket(
     Bucket=IMAGES_BUCKET, CreateBucketConfiguration={"LocationConstraint": region}
 )
-app = serve_images(
-    create_app(
-        store=lambda: seeded_store(images),
-        auth=fake_auth,
-        fetcher=FakeWebsite,
-        images=lambda: images,
-    )
+app = create_app(
+    store=lambda: seeded_store(images),
+    auth=fake_auth,
+    fetcher=FakeWebsite,
+    images=lambda: images,
 )
+app.include_router(dev_images)
 
 
 # moto's table isn't safe across the threads uvicorn runs routes on: overlapping transactions
