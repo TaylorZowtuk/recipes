@@ -48,6 +48,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
+"src/recipes/images.py" = ["BLE001"] # Pillow fails in many ways on a file that isn't a photo
 "src/recipes/ingest.py" = [
     "BLE001",  # a site's scraper fails in its own ways, and any failure means no recipe
     "PLC0415", # recipe_scrapers is imported on first parse, to keep it out of cold starts

@@ -140,6 +140,10 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
             name.startswith(f"{compiled}/") and "aarch64-linux-gnu" in name and name.endswith(".so")
             for name in infos
         ), f"{compiled} should be the Linux arm64 build"
+    # Pillow's wheel builds WebP into its own extension, which stores every recipe photo.
+    assert any(name.startswith("PIL/_webp.") and "aarch64-linux-gnu" in name for name in infos), (
+        "Pillow should have its arm64 WebP codec"
+    )
 
     top_level = {name.split("/", 1)[0] for name in infos}
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):

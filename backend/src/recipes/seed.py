@@ -1,18 +1,23 @@
 """A synthetic Collection for `make dev` and the end-to-end tests, written for this repo.
 
-`load` adds it through the store, so the cards and `META#collection` come from card upkeep.
-The end-to-end tests rely on E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with
-components, whose slug is "sesame-noodles-with-crispy-tofu".
+`load` adds it through the store, so the cards and `META#collection` come from card upkeep,
+giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests rely on
+E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
+"sesame-noodles-with-crispy-tofu".
 """
 
+import io
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+from PIL import Image, ImageDraw
 
 from recipes.models import (
     SCHEMA_VERSION,
     Difficulty,
     IngredientLine,
     Original,
+    Preview,
     Recipe,
     RecipeYield,
     SpreadsheetSource,
@@ -23,6 +28,7 @@ from recipes.models import (
 )
 
 if TYPE_CHECKING:
+    from recipes.images import ImageStore
     from recipes.store import Store
 
 CAPTURED_AT = datetime(2026, 9, 1, 12, tzinfo=UTC)
@@ -296,6 +302,38 @@ RECIPES = [
 ]
 
 
-def load(store: Store) -> None:
+# The seeded recipes with a photo, by id: its colour and its focal point. The rest have none.
+PHOTOS = {
+    "01K7SEED000000000000000001": ("#C8743A", (0.5, 0.5)),
+    E2E_RECIPE_ID: ("#B5543C", (0.3, 0.4)),
+    "01K7SEED000000000000000003": ("#8E6FB0", (0.7, 0.3)),
+    "01K7SEED000000000000000004": ("#C2452D", (0.5, 0.75)),
+    "01K7SEED000000000000000007": ("#4F8A4A", (0.25, 0.6)),
+}
+
+
+def placeholder_photo(
+    colour: str, focal: tuple[float, float] = (0.5, 0.5), width: int = 1200, height: int = 800
+) -> bytes:
+    """A generated placeholder photo as PNG: a pale plate on `colour`, centred on `focal`."""
+    image = Image.new("RGB", (width, height), colour)
+    x, y, r = focal[0] * width, focal[1] * height, min(width, height) // 3
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((x - r, y - r, x + r, y + r), fill="#F4EFE6", outline="#FFFFFF", width=12)
+    draw.ellipse((x - r // 2, y - r // 2, x + r // 2, y + r // 2), fill=colour)
+    out = io.BytesIO()
+    image.save(out, "PNG")
+    return out.getvalue()
+
+
+def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
-        store.add_recipe(recipe)
+        store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
+
+
+def _with_photo(recipe: Recipe, images: ImageStore) -> Recipe:
+    colour, (focal_x, focal_y) = PHOTOS[recipe.id]
+    origin = f"https://example.com/photos/{recipe.id.lower()}.png"
+    image = images.put(placeholder_photo(colour, (focal_x, focal_y)), origin=origin)
+    preview = Preview(image_id=image.id, focal_x=focal_x, focal_y=focal_y)
+    return recipe.model_copy(update={"images": [image], "preview": preview})

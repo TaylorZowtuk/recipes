@@ -1,4 +1,5 @@
-"""Ingest from a website: a Source's dedupe key, a polite fetch, and the parse into an Original.
+"""Ingest from a website: a Source's dedupe key, a polite fetch, and the parse into an Original
+and its candidate photos.
 
 Only the Original is kept. The page's HTML and its schema.org data are read here and dropped.
 """
@@ -50,7 +51,10 @@ DEADLINE_SECONDS = 14
 MAX_REDIRECTS = 5
 MAX_PAGE_BYTES = 2 * 1024 * 1024
 MAX_ROBOTS_BYTES = 512 * 1024
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 CHUNK_BYTES = 64 * 1024
+# The review shows at most this many of a page's photos to choose from.
+MAX_CANDIDATE_PHOTOS = 8
 
 # Query parameters that only say how someone reached the page. Any other, `ref` included, is kept.
 TRACKING = {"fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "_ga", "igshid"}
@@ -75,6 +79,10 @@ class IngestFailed(Exception):
 
 class FetchRefused(IngestFailed):
     """No automated fetch may be tried: robots.txt refuses it, or it leads off the public web."""
+
+
+class TooLarge(Exception):
+    """A body that decodes to more than its size limit. A page past it is unreachable."""
 
 
 # Dedupe keys
@@ -136,6 +144,10 @@ class Fetcher(Protocol):
         """The page. Raises PageNotFound, or IngestFailed for a Queued Ingest."""
         ...
 
+    def photo(self, url: str) -> bytes:
+        """The photo's bytes, fetched as politely. Raises PageNotFound, IngestFailed or TooLarge."""
+        ...
+
 
 class UnredirectedSession(requests.Session):
     """A session that never resolves a redirect itself, as requests otherwise does even when not
@@ -168,6 +180,20 @@ class PoliteFetcher:
 
     def __call__(self, url: str) -> Page:
         deadline = monotonic() + DEADLINE_SECONDS
+        url, response = self._fetch(url, deadline)
+        with response:
+            return Page(html=_text(response, deadline, MAX_PAGE_BYTES), url=url)
+
+    def photo(self, url: str) -> bytes:
+        deadline = monotonic() + DEADLINE_SECONDS
+        _, response = self._fetch(url, deadline)
+        with response:
+            return _body(response, deadline, MAX_PHOTO_BYTES)
+
+    def _fetch(self, url: str, deadline: float) -> tuple[str, requests.Response]:
+        """Where `url` finally leads, each hop allowed by its robots.txt, and its successful
+        response, its body unread.
+        """
         robots: dict[str, Protego | None] = {}
 
         def allowed(hop: str) -> None:
@@ -175,11 +201,12 @@ class PoliteFetcher:
                 raise FetchRefused(reason="robots")
 
         url, response = self._follow(url, deadline, allowed)
-        with response:
-            if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
-                raise PageNotFound(url)
-            _raise_for_status(response)
-            return Page(html=_text(response, deadline, MAX_PAGE_BYTES), url=url)
+        if response.status_code >= HTTPStatus.BAD_REQUEST:
+            with response:
+                if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
+                    raise PageNotFound(url)
+                _raise_for_status(response)
+        return url, response
 
     def _follow(
         self, url: str, deadline: float, check: Callable[[str], None]
@@ -255,10 +282,10 @@ def _raise_for_status(response: requests.Response) -> None:
         raise IngestFailed(reason="blocked")
 
 
-def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
-    """The body as text, read as it arrives, so a page that drips past the deadline or decodes
-    to more than `max_bytes` is given up on. read1 returns whatever has arrived rather than
-    waiting for a whole chunk.
+def _body(response: requests.Response, deadline: float, max_bytes: int) -> bytes:
+    """The body, read as it arrives, so one that drips past the deadline is given up on, and
+    one that decodes to more than `max_bytes` is TooLarge. read1 returns whatever has arrived
+    rather than waiting for a whole chunk.
     """
     body = bytearray()
     if monotonic() > deadline:
@@ -266,9 +293,20 @@ def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
     try:
         while chunk := response.raw.read1(CHUNK_BYTES, decode_content=True):
             body += chunk
-            if len(body) > max_bytes or monotonic() > deadline:
+            if len(body) > max_bytes:
+                raise TooLarge
+            if monotonic() > deadline:
                 raise IngestFailed(reason="unreachable")
     except urllib3.exceptions.HTTPError, OSError:
+        raise IngestFailed(reason="unreachable") from None
+    return bytes(body)
+
+
+def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
+    """The body as text. Text past its size limit is unreachable, like a page that never ends."""
+    try:
+        body = _body(response, deadline, max_bytes)
+    except TooLarge:
         raise IngestFailed(reason="unreachable") from None
     # requests decodes text without a charset as ISO-8859-1, but such pages are nearly all UTF-8.
     charset = "charset" in response.headers.get("Content-Type", "").lower()
@@ -285,6 +323,7 @@ def _text(response: requests.Response, deadline: float, max_bytes: int) -> str:
 class Captured:
     original: Original
     site_name: str | None  # as the page names its site, if it does
+    candidate_photos: list[str]  # absolute http(s) URLs, in the page's order
 
 
 def parse(html: str, url: str) -> Captured:
@@ -304,7 +343,39 @@ def parse(html: str, url: str) -> Captured:
     if original is None:
         raise IngestFailed(reason="no_recipe")
     site_name = _optional(scraper.site_name)
-    return Captured(original=original, site_name=site_name and site_name[:MAX_LABEL])
+    return Captured(
+        original=original,
+        site_name=site_name and site_name[:MAX_LABEL],
+        candidate_photos=_candidate_photos(scraper, url),
+    )
+
+
+def _candidate_photos(scraper: AbstractScraper, url: str) -> list[str]:
+    """The Recipe's `image` (a URL, an ImageObject or a list of either), then og:image, resolved
+    against the page's URL. Only http(s) URLs short enough to be a WebUrl are kept, each once.
+    """
+    data = cast("dict[str, object]", scraper.schema.data)  # pyright: ignore[reportUnknownMemberType]
+    image = data.get("image")
+    found = cast("list[object]", image) if isinstance(image, list) else [image]
+    found.append(_optional(scraper.opengraph.image))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    urls = [cast("dict[str, object]", i).get("url") if isinstance(i, dict) else i for i in found]
+    candidates: dict[str, None] = {}
+    for item in urls:
+        if not isinstance(item, str):
+            continue
+        try:
+            absolute = urljoin(url, item.strip())
+            parts = urlsplit(absolute)
+        except ValueError:
+            continue
+        if (
+            parts.scheme in DEFAULT_PORTS
+            and parts.hostname
+            and len(absolute) <= MAX_KEY_BYTES
+            and not any(c.isspace() for c in absolute)
+        ):
+            candidates.setdefault(absolute, None)
+    return list(candidates)[:MAX_CANDIDATE_PHOTOS]
 
 
 def _original(scraper: AbstractScraper) -> Original | None:

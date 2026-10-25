@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from recipes.auth import Auth, require_editor
 from recipes.auth import router as auth_router
+from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
     Fetcher,
     FetchRefused,
@@ -17,6 +18,7 @@ from recipes.ingest import (
     InvalidUrl,
     PageNotFound,
     PoliteFetcher,
+    TooLarge,
     parse,
     site_host,
     website_dedupe_key,
@@ -25,8 +27,10 @@ from recipes.models import (
     SCHEMA_VERSION,
     Card,
     Difficulty,
+    Image,
     KitchenSettings,
     Original,
+    Preview,
     QueuedIngest,
     QueuedIngestState,
     Recipe,
@@ -40,12 +44,12 @@ from recipes.store import DuplicateSource, Store, VersionConflict
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
 
-# A versioned URL never changes what it serves, so CloudFront and phones keep it for good.
-IMMUTABLE = "public, max-age=31536000, immutable"
 NO_STORE = {"Cache-Control": "no-store"}
 REDIRECT: dict[int | str, dict[str, Any]] = {
     307: {"description": "Not the current version: redirects to it"}
 }
+# A recipe's photos: more than the review offers, for photos added later.
+MAX_IMAGES = 20
 
 
 class Sync(BaseModel):
@@ -76,10 +80,17 @@ class Ingested(BaseModel):
 
     source: WebsiteSource
     original: Original
+    candidate_photos: list[WebUrl]  # the page's photos, each to store with POST /api/images
+
+
+class PhotoUrl(BaseModel):
+    url: WebUrl
 
 
 class NewRecipe(BaseModel):
-    """A recipe to add from a website: what ingest captured, plus the editor's own fields."""
+    """A recipe to add from a website: what ingest captured, plus the editor's own fields. Each
+    of its images was stored by POST /api/images, and its preview shows one of them.
+    """
 
     source: WebsiteSource
     original: Original
@@ -87,6 +98,20 @@ class NewRecipe(BaseModel):
     tags: Annotated[
         list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)
     ] = []
+    # A factory, not a default, so the schema leaves it optional for clients that send none.
+    images: Annotated[list[Image], Field(max_length=MAX_IMAGES, default_factory=list)]
+    preview: Preview | None = None
+
+    @model_validator(mode="after")
+    def _previews_one_of_its_images(self) -> NewRecipe:
+        ids = [image.id for image in self.images]
+        if len(set(ids)) < len(ids):
+            msg = "Each image is in a recipe once"
+            raise ValueError(msg)
+        if self.preview and self.preview.image_id not in ids:
+            msg = "The preview shows one of the recipe's images"
+            raise ValueError(msg)
+        return self
 
 
 class Duplicate(BaseModel):
@@ -107,8 +132,13 @@ def _fetcher(request: Request) -> Fetcher:
     return request.app.state.fetcher
 
 
+def _images(request: Request) -> ImageStore:
+    return request.app.state.images
+
+
 StoreDep = Annotated[Store, Depends(_store)]
 FetcherDep = Annotated[Fetcher, Depends(_fetcher)]
+ImagesDep = Annotated[ImageStore, Depends(_images)]
 EDITORS_ONLY = [Depends(require_editor)]
 router = APIRouter(prefix="/api")
 
@@ -214,7 +244,35 @@ def post_ingest(body: IngestUrl, store: StoreDep, fetcher: FetcherDep) -> Ingest
     source = WebsiteSource(
         url=body.url, site_name=captured.site_name or site_host(key), captured_at=now
     )
-    return Ingested(source=source, original=captured.original)
+    return Ingested(
+        source=source, original=captured.original, candidate_photos=captured.candidate_photos
+    )
+
+
+@router.post(
+    "/images",
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "The website says the photo isn't there"},
+        422: {"description": "Not an http(s) URL, or not a photo Plateful can store"},
+        502: {"description": "The photo couldn't be fetched, or robots.txt refuses it"},
+    },
+)
+def post_image(body: PhotoUrl, fetcher: FetcherDep, images: ImagesDep) -> Image:
+    """Store one of the candidate photos ingest found, fetched as politely as the page. Any
+    error means that candidate is unavailable.
+    """
+    try:
+        return images.put(fetcher.photo(body.url), origin=body.url)
+    except PageNotFound:
+        raise HTTPException(404, "That photo isn't on the website") from None
+    except TooLarge, TooManyPixels:
+        raise HTTPException(422, "That photo is too large") from None
+    except NotAnImage:
+        raise HTTPException(422, "That isn't a photo") from None
+    except IngestFailed as failed:
+        raise HTTPException(502, f"That photo couldn't be fetched ({failed.reason})") from None
 
 
 @router.post(
@@ -222,11 +280,13 @@ def post_ingest(body: IngestUrl, store: StoreDep, fetcher: FetcherDep) -> Ingest
     response_model=Recipe,
     status_code=201,
     dependencies=EDITORS_ONLY,
-    responses=DUPLICATE,
+    responses={**DUPLICATE, 422: {"description": "Not a valid recipe, or an image isn't stored"}},
 )
-def post_recipe(body: NewRecipe, store: StoreDep) -> Recipe | Response:
+def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe | Response:
     """Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard."""
     key = _dedupe_key(body.source.url)
+    if not all(images.exists(image.id) for image in body.images):
+        raise HTTPException(422, "Store each image with POST /api/images first")
     recipe = Recipe(
         id=new_ulid(),
         schema_version=SCHEMA_VERSION,
@@ -236,6 +296,8 @@ def post_recipe(body: NewRecipe, store: StoreDep) -> Recipe | Response:
         original=body.original,
         tags=_tags(body.tags),
         difficulty=body.difficulty,
+        images=body.images,
+        preview=body.preview,
         status="pending",
         ingest_channel="add_a_recipe",
     )
@@ -337,10 +399,11 @@ def create_app(
     store: Callable[[], Store] = Store.from_env,
     auth: Callable[[], Auth] = Auth.from_env,
     fetcher: Callable[[], Fetcher] = PoliteFetcher,
+    images: Callable[[], ImageStore] = ImageStore.from_env,
 ) -> FastAPI:
-    """The API on the table `store` opens, signing editors in with `auth` and fetching websites
-    with `fetcher`. On startup it bootstraps the table, or refuses to start on another schema.
-    Sign-in reads its settings on first need.
+    """The API on the table `store` opens, signing editors in with `auth`, fetching websites
+    with `fetcher` and keeping photos in the bucket `images` opens. On startup it bootstraps the
+    table, or refuses to start on another schema. Sign-in reads its settings on first need.
     """
 
     @asynccontextmanager
@@ -350,6 +413,7 @@ def create_app(
         app.state.store = opened
         app.state.auth = auth()
         app.state.fetcher = fetcher()
+        app.state.images = images()
         yield
 
     app = FastAPI(title="Plateful", lifespan=lifespan)

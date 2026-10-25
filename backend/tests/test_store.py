@@ -256,7 +256,7 @@ def test_a_transaction_that_keeps_conflicting_is_a_version_conflict(
 
 
 def test_numbers_survive_the_round_trip(store: Store) -> None:
-    preview = {"image_id": "abc123", "focal_x": 0.25, "focal_y": 0.5}
+    preview = {"image_id": "abc123" * 5 + "ab", "focal_x": 0.25, "focal_y": 0.5}
     recipe = RECIPES[0].model_validate(RECIPES[0].model_dump() | {"preview": preview})
 
     added = store.add_recipe(recipe)
