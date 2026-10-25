@@ -371,4 +371,23 @@ describe("storeCandidates", () => {
     expect(requests).toHaveLength(2);
     expect(settled).toEqual([]);
   });
+
+  it("sends no retry and settles nothing when stopped during the backoff", async () => {
+    const { store, requests, answer } = fakeStore();
+    const settled: Candidate[] = [];
+    let stopped = false;
+    void storeCandidates(
+      urls.slice(0, 1),
+      store,
+      (c) => settled.push(c),
+      () => stopped,
+    );
+    await flush();
+    answer(0, refused(429));
+    await flush();
+    stopped = true;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requests).toHaveLength(1);
+    expect(settled).toEqual([]);
+  });
 });

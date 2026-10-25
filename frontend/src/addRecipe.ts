@@ -152,7 +152,7 @@ async function storeCandidate(
     }
     const { data, response } = answer;
     if (response.ok && data) return { url, state: "stored", image: data };
-    if (delay === undefined || !RETRIED.has(response.status) || stopped()) break;
+    if (delay === undefined || !RETRIED.has(response.status)) break;
     await new Promise((resolve) => setTimeout(resolve, delay));
     if (stopped()) break;
   }
@@ -169,7 +169,7 @@ export async function storeCandidates(
 ): Promise<void> {
   const waiting = [...urls];
   const worker = async () => {
-    for (let url = waiting.shift(); url !== undefined && !stopped(); url = waiting.shift()) {
+    for (let url = waiting.shift(); url !== undefined; url = waiting.shift()) {
       const candidate = await storeCandidate(url, store, stopped);
       if (stopped()) return;
       settle(candidate);
