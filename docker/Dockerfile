@@ -18,7 +18,15 @@ FROM amazon/aws-cli:2.37.5 AS awscli
 # The browsers only work with their own Playwright release, so the tag follows the lockfile.
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
 
-RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
+# make, plus the watched browser's display (`make browser`): the base image already has Xvfb; x11vnc
+# serves it over VNC and noVNC (websockify) in a web page.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends make x11vnc novnc websockify \
+ && rm -rf /var/lib/apt/lists/*
+
+# Playwright's Chromium (Chrome for Testing) reads managed policies from here. `make browser` copies
+# each run's policy in as root, so the browser's user can't change it.
+RUN mkdir -p -m 755 /etc/opt/chrome_for_testing/policies/managed
 
 # Node from .nvmrc replaces the image's own Node.
 COPY --from=node /usr/local/bin/node /usr/local/bin/
@@ -50,3 +58,6 @@ ENV HOME=/work/home \
     PYTHONDONTWRITEBYTECODE=1 \
     IN_CONTAINER=1
 WORKDIR /work/repo
+
+# Last, so editing it rebuilds only this layer.
+COPY --chmod=755 browser.sh /usr/local/bin/watched-browser
