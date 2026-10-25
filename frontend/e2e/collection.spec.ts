@@ -186,6 +186,17 @@ test.describe("with no service worker", () => {
       await expect(page.getByRole("main").getByRole("status")).toBeFocused();
     });
   }
+
+  test("a card whose photo fails to load shows the Empty Plate", async ({ page }) => {
+    await page.route("**/images/*-card.webp", (route) => route.fulfill({ status: 404 }));
+    await page.goto("/recipes");
+
+    // Scrolled into view, since a card's photo loads lazily.
+    const card = grid(page).getByRole("link", { name: new RegExp(recipeTitle) });
+    await card.scrollIntoViewIfNeeded();
+    await expect(card.locator(".plate-initial")).toHaveText("S");
+    await expect(card.locator(".plate img")).toHaveCount(0);
+  });
 });
 
 test("an unknown recipe says it isn't there", async ({ page }) => {

@@ -4,7 +4,7 @@ import { cardImageUrl, imageUrl, objectPosition } from "./photo";
 
 // A recipe's round plate: its Preview Photo cropped round about the Focal Point, or the Empty
 // Plate with the title's initial, also shown if the photo fails to load. Either is decoration:
-// the title is always written beside it.
+// the title is always written beside it. A card's photo loads once it nears the screen.
 export function Plate({
   title,
   size,
@@ -24,6 +24,8 @@ export function Plate({
           src={src}
           alt=""
           draggable={false}
+          loading={size === "card" ? "lazy" : "eager"}
+          decoding="async"
           style={{ objectPosition: objectPosition(preview) }}
           onError={() => setFailed(src)}
         />
