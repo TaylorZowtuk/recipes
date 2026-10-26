@@ -3,6 +3,7 @@
 import pytest
 from pint import UnitRegistry
 
+from recipes.models import MAX_LABEL
 from recipes.parse import parse_line
 
 
@@ -126,3 +127,56 @@ def test_a_line_the_parser_is_unsure_of_has_lower_confidence() -> None:
     unsure = parse_line("1 can (796 ml) diced tomatoes").confidence
 
     assert unsure < 0.9 < sure
+
+
+@pytest.mark.parametrize(
+    ("line", "low", "high"),
+    [
+        ("2 dozen cookies", 24, 24),
+        ("1 1/2 dozen rolls", 18, 18),
+        ("½ dozen eggs", 6, 6),
+        ("a dozen eggs", 12, 12),
+        ("2-3 dozen eggs", 24, 36),
+    ],
+)
+def test_dozens_are_counted_in_twelves(line: str, low: float, high: float) -> None:
+    fact = parse_line(line)
+
+    assert fact.quantity is not None
+    assert (fact.quantity.low, fact.quantity.high) == (low, high)
+    assert (fact.unit, fact.unit_kind) == (None, "count")
+
+
+def test_an_amount_that_isnt_a_number_is_kept_in_the_comment_and_flagged_for_review() -> None:
+    fact = parse_line("a few sprigs thyme")
+
+    assert (fact.quantity, fact.name) == (None, "thyme")
+    assert fact.comment == "few sprigs"
+    assert fact.confidence <= 0.5
+
+
+def test_an_unread_amount_joins_the_lines_remark() -> None:
+    fact = parse_line("a few sprigs thyme, or to taste")
+
+    assert fact.comment == "or to taste, few sprigs"
+
+
+@pytest.mark.parametrize("line", ["1 (14 oz) can", "For garnish"])
+def test_a_line_whose_name_the_parser_cant_find_is_named_by_its_text(line: str) -> None:
+    assert parse_line(line).name == line
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["x" * 300, "salt, " + "very " * 60 + "fine", "1 tbsp oil (" + "y " * 150 + ")"],
+    ids=["one long word", "a long remark", "a long bracket"],
+)
+def test_a_long_line_is_cut_to_fit_each_part(line: str) -> None:
+    fact = parse_line(line)
+
+    for part in (fact.name, fact.preparation, fact.comment):
+        assert part is None or len(part) <= MAX_LABEL
+
+
+def test_a_name_past_its_limit_ends_in_an_ellipsis() -> None:
+    assert parse_line("x" * 300).name == "x" * (MAX_LABEL - 1) + "…"
