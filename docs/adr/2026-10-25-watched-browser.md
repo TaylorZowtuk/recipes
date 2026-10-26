@@ -29,4 +29,4 @@ Chromium in Docker usually needs `--no-sandbox`. Here Docker's default seccomp p
 
 - The human must take part in every session that signs in: forward the port, type the password, sign in with the test account.
 - A session's traffic counts against staging's WAF limit and the API's reserved concurrency like anyone else's.
-- Chromium is launched directly, not through Playwright's `launch()`, which adds `--enable-automation`, a flag Google's sign-in refuses. This assumes Google accepts sign-in from Chrome for Testing otherwise. If it doesn't, the watched browser still serves local `make dev` and signed-out checks, and signing in on staging needs a new ADR.
+- Chromium is launched directly, not through Playwright's `launch()`, which adds `--enable-automation`, a flag Google's sign-in refuses. Launched this way, Chrome for Testing signs in to Google: the first walkthrough signed the test account in on staging as an editor.
