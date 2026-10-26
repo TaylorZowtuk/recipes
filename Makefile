@@ -129,6 +129,10 @@ TF_ROOTS := infra/bootstrap $(wildcard infra/stacks/*)
 
 deps:
 	cd backend && uv sync --locked --quiet
+# The ingredient parser's NLTK tagger, fetched once into the shared cache so the enrich CLI and its
+# tests then run offline.
+	[ -d "$$NLTK_DATA/taggers/averaged_perceptron_tagger_eng" ] || (cd backend && \
+		uv run --locked python -m nltk.downloader -q -d "$$NLTK_DATA" averaged_perceptron_tagger_eng)
 	cd frontend && pnpm install --frozen-lockfile --silent
 
 check: deps
