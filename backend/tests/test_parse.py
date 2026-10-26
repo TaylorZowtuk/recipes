@@ -83,6 +83,9 @@ def test_the_name_and_preparation_come_from_the_parser() -> None:
         ("3 cloves garlic, minced, plus more for serving", "plus more for serving"),
         ("salt, to taste", "to taste"),
         ("1/4 cup cilantro (optional)", "optional"),
+        # The parser's purpose, after its comment when there are both.
+        ("olive oil, for frying", "for frying"),
+        ("2 tbsp oil, or more, for frying", "or more, for frying"),
         ("2 eggs", None),
     ],
 )

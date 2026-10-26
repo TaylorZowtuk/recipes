@@ -17,7 +17,7 @@ SHORT_UNITS = {"cp": "cup"}
 
 def parse_line(text: str) -> ParseFact:
     """The parser's reading of one line. Its confidence is the lowest of the parser's own
-    confidences in the parts it filled: the name, the amount, the preparation and the comment.
+    confidences in the parts it filled: the name, the amount, the preparation and the remarks.
     """
     parsed = parse_ingredient(text, separate_names=False)
     # A line can state several amounts, as "1 can (796 ml)" does. The first is the one the line
@@ -26,8 +26,10 @@ def parse_line(text: str) -> ParseFact:
     confidences = [name.confidence for name in parsed.name]
     if parsed.preparation:
         confidences.append(parsed.preparation.confidence)
-    if parsed.comment:
-        confidences.append(parsed.comment.confidence)
+    # The line's remarks are the parser's comment, unbracketed, then its purpose ("for frying").
+    remarks = [part for part in (parsed.comment, parsed.purpose) if part]
+    confidences.extend(part.confidence for part in remarks)
+    comment = ", ".join(part.text.removeprefix("(").removesuffix(")") for part in remarks)
     quantity, unit, unit_kind = None, None, None
     if amount:
         quantity, written, confidence = amount
@@ -42,7 +44,7 @@ def parse_line(text: str) -> ParseFact:
         unit_kind=unit_kind,
         name=" ".join(name.text for name in parsed.name) or text,
         preparation=parsed.preparation.text if parsed.preparation else None,
-        comment=parsed.comment.text.removeprefix("(").removesuffix(")") if parsed.comment else None,
+        comment=comment or None,
         optional=bool(OPTIONAL.search(text)),
     )
 
