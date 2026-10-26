@@ -106,7 +106,7 @@ export function Ingredients({ original, facts }: { original: Original; facts?: R
 }
 
 function ParsedLine({ parse }: { parse: ParseFact }) {
-  const amount = parse.quantity && [formatQuantity(parse.quantity), parse.unit].filter(Boolean);
+  const amount = parse.quantity && formatAmount(parse.quantity, parse.unit);
   // The preparation and the line's remark follow the name, as in "garlic, minced, to taste".
   const remarks = [parse.preparation, parse.comment].filter(Boolean).join(", ");
   return (
@@ -115,7 +115,7 @@ function ParsedLine({ parse }: { parse: ParseFact }) {
         {parse.name}
         {remarks && <span className="ingredient-prep">, {remarks}</span>}
       </span>
-      {amount && <span className="ingredient-amount">{amount.join(" ")}</span>}
+      {amount && <span className="ingredient-amount">{amount}</span>}
     </>
   );
 }
@@ -132,6 +132,13 @@ const FRACTIONS: [number, string][] = [
 // ends. Anything else stays a decimal of at most two places.
 export function formatQuantity({ low, high }: Quantity): string {
   return low === high ? kitchenNumber(low) : `${kitchenNumber(low)}–${kitchenNumber(high)}`;
+}
+
+// An amount for display. Units are stored as pint's symbols, which are singular, and of those
+// only "cup" is a word that takes a plural.
+export function formatAmount(quantity: Quantity, unit: string | null): string {
+  const shown = unit === "cup" && quantity.high > 1 ? "cups" : unit;
+  return [formatQuantity(quantity), shown].filter(Boolean).join(" ");
 }
 
 function kitchenNumber(value: number): string {

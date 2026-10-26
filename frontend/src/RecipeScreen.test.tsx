@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Original, ParseFact } from "./api/client";
-import { formatQuantity, Ingredients } from "./RecipeScreen";
+import { formatAmount, formatQuantity, Ingredients } from "./RecipeScreen";
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",
@@ -59,6 +59,21 @@ describe("formatQuantity", () => {
 
   it("keeps an amount with no kitchen fraction as a short decimal", () => {
     expect(formatQuantity({ low: 1.15, high: 1.15 })).toBe("1.15");
+  });
+});
+
+describe("formatAmount", () => {
+  it("writes cups in the plural above one", () => {
+    expect(formatAmount({ low: 8, high: 8 }, "cup")).toBe("8 cups");
+    expect(formatAmount({ low: 1, high: 2 }, "cup")).toBe("1–2 cups");
+    expect(formatAmount({ low: 1, high: 1 }, "cup")).toBe("1 cup");
+    expect(formatAmount({ low: 0.75, high: 0.75 }, "cup")).toBe("¾ cup");
+  });
+
+  it("leaves other units as stored, and a count without one", () => {
+    expect(formatAmount({ low: 2, high: 2 }, "tbsp")).toBe("2 tbsp");
+    expect(formatAmount({ low: 3, high: 3 }, "cloves")).toBe("3 cloves");
+    expect(formatAmount({ low: 2, high: 2 }, null)).toBe("2");
   });
 });
 
