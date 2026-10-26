@@ -74,8 +74,9 @@ start() {
 
   # The run's URL policy, copied in as root before Chromium starts. It governs navigations (pages and
   # frames), so Google's sign-in and its button still load their subresources from *.gstatic.com.
+  # After sign-in Google passes through its country domain (accounts.google.ca/accounts/SetSID here).
   tmp=$(mktemp -d)
-  printf '{"URLBlocklist": ["*"], "URLAllowlist": ["%s", "https://accounts.google.com"]}\n' \
+  printf '{"URLBlocklist": ["*"], "URLAllowlist": ["%s", "https://accounts.google.com", "https://accounts.google.ca"]}\n' \
     "$origin" >"$tmp/watched-browser.json"
   chmod 644 "$tmp/watched-browser.json"
   # GNU tar and bsdtar (macOS) spell a root-owned header differently.
