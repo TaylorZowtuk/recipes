@@ -15,6 +15,7 @@ OPTIONAL = re.compile(r"\boptional\b|\bgarnish\b|\bto serve\b", re.IGNORECASE)
 SHORT_UNITS = {"cp": "cup"}
 # The parser leaves "2 dozen" as text, writing "1 1/2" as "1#1$2" and "a dozen" as "dozen".
 DOZEN = re.compile(r"^(?P<low>[\d#$./]*)(?:-(?P<high>[\d#$./]+))?\s*dozen$")
+DOZEN_WORD = re.compile(r"\bdozen\b", re.IGNORECASE)
 # The most confidence a line can have when one of its amounts isn't a number ("a few sprigs"),
 # so an editor reviews it.
 UNREAD_AMOUNT_CONFIDENCE = 0.5
@@ -24,7 +25,8 @@ def parse_line(text: str) -> ParseFact:
     """The parser's reading of one line. Its confidence is the lowest of the parser's own
     confidences in the parts it filled: the name, the amount, the preparation and the remarks.
     """
-    parsed = parse_ingredient(text, separate_names=False)
+    # The parser keeps "N dozen" as an amount only when "dozen" is lowercase.
+    parsed = parse_ingredient(DOZEN_WORD.sub("dozen", text), separate_names=False)
     # A line can state several amounts, as "1 can (796 ml)" does. The first one read as a number is
     # the one the line counts in. Any amount that isn't a number is kept as written in the remarks.
     read = [(a, _amount(a)) for a in parsed.amount]

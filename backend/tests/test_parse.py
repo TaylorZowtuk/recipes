@@ -137,6 +137,8 @@ def test_a_line_the_parser_is_unsure_of_has_lower_confidence() -> None:
         ("½ dozen eggs", 6, 6),
         ("a dozen eggs", 12, 12),
         ("2-3 dozen eggs", 24, 36),
+        ("2 Dozen eggs", 24, 24),
+        ("2 DOZEN eggs", 24, 24),
     ],
 )
 def test_dozens_are_counted_in_twelves(line: str, low: float, high: float) -> None:
