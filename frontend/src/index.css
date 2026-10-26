@@ -703,6 +703,12 @@ h1:focus {
   gap: calc(var(--space) * 4);
 }
 
+/* A long word wraps rather than pushing the amount off a narrow screen. */
+.ingredient-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .ingredient-prep {
   color: var(--text-secondary);
 }
