@@ -1,4 +1,5 @@
-# The toolchain image every `make` command runs in (see compose.yaml).
+# The toolchain image every `make` command runs in (see compose.yaml), and after it the watched
+# browser's image, which only `make browser` builds.
 # Dependabot bumps the pinned tags below. The build args come from the Makefile: Node's version
 # from .nvmrc and Playwright's from frontend/pnpm-lock.yaml, so Dependabot leaves those two lines
 # alone. Python's version comes from backend/.python-version (uv installs it on first use).
@@ -16,7 +17,7 @@ FROM koalaman/shellcheck:v0.11.0 AS shellcheck
 FROM amazon/aws-cli:2.37.5 AS awscli
 
 # The browsers only work with their own Playwright release, so the tag follows the lockfile.
-FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble
+FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble AS toolchain
 
 RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
 
@@ -50,3 +51,14 @@ ENV HOME=/work/home \
     PYTHONDONTWRITEBYTECODE=1 \
     IN_CONTAINER=1
 WORKDIR /work/repo
+
+# The watched browser (`make browser`): the toolchain plus its display. The base image already has
+# Xvfb; x11vnc serves it over VNC and noVNC (websockify) in a web page. CI never builds this stage.
+FROM toolchain AS browser
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends x11vnc novnc websockify \
+ && rm -rf /var/lib/apt/lists/*
+# Playwright's Chromium (Chrome for Testing) reads managed policies from here. `make browser` copies
+# each run's policy in as root, so the browser's user can't change it.
+RUN mkdir -p -m 755 /etc/opt/chrome_for_testing/policies/managed
+COPY --chmod=755 browser.sh /usr/local/bin/watched-browser

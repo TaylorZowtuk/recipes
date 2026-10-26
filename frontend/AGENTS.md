@@ -6,3 +6,12 @@
 - To screenshot a new page for UI PRs, add it to `screenshots/pages.spec.ts`.
 - To test as an editor in e2e, do what `e2e/sign-in.spec.ts` does: stub `https://accounts.google.com/gsi/client` with `page.route`, block service workers in that context (in WebKit, `page.route` stops seeing requests once one registers), and sign in with a `fake:<email>` credential, which only the local API accepts (`fake:editor@example.com` is an editor). Such specs skip when `E2E_BASE_URL` is set.
 - Under local e2e and `make dev`, `https://plateful.test/<slug>` serves a synthetic recipe (see `backend/src/recipes/local.py`), and each Source can be ingested once on the run's one shared server. So add-recipe specs give every page a path unique per project and attempt (`testInfo.project.name`, `retry` and `repeatEachIndex`), aren't `@deployed`, and skip when `E2E_BASE_URL` is set.
+- A step script for the [watched browser](../AGENTS.md#watched-browser) (`make browser-run < step.mjs`) is an ES module whose default export gets `{ browser, context, page, out }`: the CDP-connected Playwright `Browser`, its default context, the app's page (the first tab at the app's origin; the step fails when there is none) and `/out`, which is the host's `OUT` (default `.screenshots/browser`, gitignored). Import only Node builtins, no packages. Never close `page` (pages you open yourself you may close); afterwards the runner calls `browser.close()`, which over CDP only disconnects. A step that throws exits non-zero. The step runs in the browser container's network namespace, so it reaches the app's origin as the browser does, and for local `make dev` also `web` and `api` on the worktree's Compose network.
+
+  ```js
+  export default async ({ page, out }) => {
+    await page.getByRole("link", { name: "Week" }).click();
+    console.log(await page.title());
+    await page.screenshot({ path: `${out}/week.png` });
+  };
+  ```

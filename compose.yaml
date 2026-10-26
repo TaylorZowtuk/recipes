@@ -4,6 +4,7 @@ x-toolchain: &toolchain
   image: ${COMPOSE_PROJECT_NAME:?run through make}-toolchain
   build:
     context: docker
+    target: toolchain # the Dockerfile's last stage is the watched browser's
     args:
       NODE_VERSION: ${NODE_VERSION:?run through make}
       PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:?run through make}
@@ -60,6 +61,18 @@ services:
     ports:
       - 127.0.0.1:${DEV_PORT:-5173}:5173
     depends_on: [api]
+
+  # `make browser`'s image: the toolchain plus x11vnc, noVNC and the watched-browser script. Only
+  # scripts/browser.sh builds it and runs containers from it, never `docker compose up` or run.
+  browser:
+    image: ${COMPOSE_PROJECT_NAME:?run through make}-browser-image
+    build:
+      context: docker
+      target: browser
+      args:
+        NODE_VERSION: ${NODE_VERSION:?run through make}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:?run through make}
+    profiles: [browser]
 
 volumes:
   node_modules:
