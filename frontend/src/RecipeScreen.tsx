@@ -127,11 +127,15 @@ function ParsedLine({ parse }: { parse: ParseFact }) {
 }
 
 const FRACTIONS: [number, string][] = [
+  [1 / 8, "⅛"],
   [1 / 4, "¼"],
   [1 / 3, "⅓"],
+  [3 / 8, "⅜"],
   [1 / 2, "½"],
+  [5 / 8, "⅝"],
   [2 / 3, "⅔"],
   [3 / 4, "¾"],
+  [7 / 8, "⅞"],
 ];
 
 // A quantity for display, with kitchen fractions where one fits and an en dash between a range's

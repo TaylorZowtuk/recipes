@@ -52,6 +52,11 @@ describe("formatQuantity", () => {
     expect(formatQuantity({ low: 0.25, high: 0.25 })).toBe("¼");
     expect(formatQuantity({ low: 0.75, high: 0.75 })).toBe("¾");
     expect(formatQuantity({ low: 1 / 3, high: 1 / 3 })).toBe("⅓");
+    expect(formatQuantity({ low: 0.125, high: 0.125 })).toBe("⅛");
+    expect(formatQuantity({ low: 1.125, high: 1.125 })).toBe("1⅛");
+    expect(formatQuantity({ low: 0.375, high: 0.375 })).toBe("⅜");
+    expect(formatQuantity({ low: 2.625, high: 2.625 })).toBe("2⅝");
+    expect(formatQuantity({ low: 0.875, high: 0.875 })).toBe("⅞");
     expect(formatQuantity({ low: 2, high: 2 })).toBe("2");
     expect(formatQuantity({ low: 1, high: 2 })).toBe("1–2");
     expect(formatQuantity({ low: 0.5, high: 1 })).toBe("½–1");
