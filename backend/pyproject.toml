@@ -28,6 +28,14 @@ dev = [
     "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.114",
     "types-requests>=2.33.0.20261006",
 ]
+# The enrich CLI's parser, kept out of the Lambda zip since the API never parses lines.
+enrich = [
+    "ingredient-parser-nlp>=2.9.1",
+    "pint>=0.26.2",
+]
+
+[tool.uv]
+default-groups = ["dev", "enrich"]
 
 [tool.ruff]
 line-length = 100
