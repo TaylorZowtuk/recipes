@@ -115,7 +115,13 @@ function ParsedLine({ parse }: { parse: ParseFact }) {
         {parse.name}
         {remarks && <span className="ingredient-prep">, {remarks}</span>}
       </span>
-      {amount && <span className="ingredient-amount">{amount}</span>}
+      {/* The space is invisible in the flex row, but copied text reads "tahini 3 tbsp". */}
+      {amount && (
+        <>
+          {" "}
+          <span className="ingredient-amount">{amount}</span>
+        </>
+      )}
     </>
   );
 }

@@ -101,6 +101,7 @@ describe("Ingredients", () => {
       ],
     ]);
     expect(markup).toContain('<span class="ingredient-prep">, minced</span>');
+    expect(markup.replace(/<[^>]+>/g, "")).toBe("garlic, minced 3 cloves");
   });
 
   it("follows the preparation with the line's remark, in the same secondary style", () => {
