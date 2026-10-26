@@ -8,17 +8,21 @@ E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug i
 
 import io
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from PIL import Image, ImageDraw
 
 from recipes.models import (
     SCHEMA_VERSION,
     Difficulty,
+    IngredientFacts,
     IngredientLine,
     Original,
+    ParseFact,
     Preview,
+    Quantity,
     Recipe,
+    RecipeFacts,
     RecipeYield,
     SpreadsheetSource,
     StatedTime,
@@ -55,6 +59,29 @@ def _website(path: str, site_name: str = "Example Kitchen") -> WebsiteSource:
 
 def _time(text: str, seconds: int) -> StatedTime:
     return StatedTime(text=text, seconds=seconds)
+
+
+def _parse(
+    amount: float | tuple[float, float],
+    unit: str | None,
+    unit_kind: Literal["mass", "volume", "count"],
+    name: str,
+    preparation: str | None = None,
+) -> IngredientFacts:
+    """A parser's reading of a line, written by hand for the seed. A pair is a range."""
+    low, high = amount if isinstance(amount, tuple) else (amount, amount)
+    return IngredientFacts(
+        parse=ParseFact(
+            provenance="parser",
+            confidence=0.9,
+            estimated=False,
+            quantity=Quantity(low=low, high=high),
+            unit=unit,
+            unit_kind=unit_kind,
+            name=name,
+            preparation=preparation,
+        )
+    )
 
 
 RECIPES = [
@@ -108,7 +135,7 @@ RECIPES = [
                 *_ingredients(
                     "3 tbsp tahini",
                     "2 tbsp soy sauce",
-                    "1 tbsp rice vinegar",
+                    "1 1/2 tbsp rice vinegar",
                     "1 tsp chili oil, or to taste",
                     component="For the sauce",
                 ),
@@ -121,7 +148,7 @@ RECIPES = [
                 ),
                 *_ingredients(
                     "250 g wheat noodles",
-                    "2 green onions, sliced",
+                    "1-2 green onions, sliced",
                     component="For the noodles",
                     start=8,
                 ),
@@ -153,6 +180,20 @@ RECIPES = [
         tags=["weeknight", "vegetarian"],
         difficulty=Difficulty(prep=2, cook=2, cleanup=2),
         status="ready",
+        facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(3, "tbsp", "volume", "tahini"),
+                "i2": _parse(2, "tbsp", "volume", "soy sauce"),
+                "i3": _parse(1.5, "tbsp", "volume", "rice vinegar"),
+                "i4": _parse(1, "tsp", "volume", "chili oil"),
+                "i5": _parse(400, "g", "mass", "firm tofu", "cubed"),
+                "i6": _parse(2, "tbsp", "volume", "cornstarch"),
+                "i7": _parse(3, "tbsp", "volume", "neutral oil"),
+                "i8": _parse(250, "g", "mass", "wheat noodles"),
+                "i9": _parse((1, 2), None, "count", "green onions", "sliced"),
+            }
+        ),
+        enrichment_version=1,
     ),
     Recipe(
         id="01K7SEED000000000000000003",

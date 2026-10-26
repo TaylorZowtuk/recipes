@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import type { Original, Recipe } from "./api/client";
+import type { Original, ParseFact, Quantity, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
@@ -76,7 +76,10 @@ export function RecipeScreen() {
         <Tabs
           label="Recipe"
           tabs={[
-            { label: "Ingredients", panel: <Ingredients original={recipe.value.original} /> },
+            {
+              label: "Ingredients",
+              panel: <Ingredients original={recipe.value.original} facts={recipe.value.facts} />,
+            },
             { label: "Steps", panel: <Steps original={recipe.value.original} /> },
             { label: "About", panel: <About recipe={recipe.value} /> },
           ]}
@@ -86,18 +89,56 @@ export function RecipeScreen() {
   );
 }
 
-// The ingredient lines as captured, under a heading wherever the Component changes.
-export function Ingredients({ original }: { original: Original }) {
+// The ingredient lines under a heading wherever the Component changes. A line with a parse fact
+// shows its name and preparation with the amount beside them; one without shows its raw text.
+export function Ingredients({ original, facts }: { original: Original; facts?: RecipeFacts }) {
   return byComponent(original.ingredients).map((part) => (
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ul className="ingredients">
-        {part.lines.map((line) => (
-          <li key={line.id}>{line.text}</li>
-        ))}
+        {part.lines.map((line) => {
+          const parse = facts?.ingredients[line.id]?.parse;
+          return <li key={line.id}>{parse ? <ParsedLine parse={parse} /> : line.text}</li>;
+        })}
       </ul>
     </section>
   ));
+}
+
+function ParsedLine({ parse }: { parse: ParseFact }) {
+  const amount = parse.quantity && [formatQuantity(parse.quantity), parse.unit].filter(Boolean);
+  return (
+    <>
+      <span className="ingredient-name">
+        {parse.name}
+        {parse.preparation && <span className="ingredient-prep">, {parse.preparation}</span>}
+      </span>
+      {amount && <span className="ingredient-amount">{amount.join(" ")}</span>}
+    </>
+  );
+}
+
+const FRACTIONS: [number, string][] = [
+  [1 / 4, "¼"],
+  [1 / 3, "⅓"],
+  [1 / 2, "½"],
+  [2 / 3, "⅔"],
+  [3 / 4, "¾"],
+];
+
+// A quantity for display, with kitchen fractions where one fits and an en dash between a range's
+// ends. Anything else stays a decimal of at most two places.
+export function formatQuantity({ low, high }: Quantity): string {
+  return low === high ? kitchenNumber(low) : `${kitchenNumber(low)}–${kitchenNumber(high)}`;
+}
+
+function kitchenNumber(value: number): string {
+  const whole = Math.floor(value);
+  const rest = value - whole;
+  if (rest < 0.01) return String(whole);
+  const fraction = FRACTIONS.find(([part]) => Math.abs(rest - part) < 0.01);
+  if (fraction) return `${whole || ""}${fraction[1]}`;
+  return String(Math.round(value * 100) / 100);
 }
 
 // The steps as captured, numbered through the whole recipe across its Components.

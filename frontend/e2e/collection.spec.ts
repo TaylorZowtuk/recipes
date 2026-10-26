@@ -82,7 +82,8 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await expect(main).toContainText("30 min");
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
 
-  // Ingredients first: the raw lines under their Component headings.
+  // Ingredients first, under their Component headings: each line's name and preparation on the
+  // left and its amount right-aligned, with kitchen fractions and ranges.
   const tabs = page.getByRole("tablist", { name: "Recipe" });
   const ingredientsTab = tabs.getByRole("tab", { name: "Ingredients" });
   await expect(ingredientsTab).toHaveAttribute("aria-selected", "true");
@@ -93,8 +94,27 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
     "For the tofu",
     "For the noodles",
   ]);
-  await expect(panel.getByRole("listitem").first()).toHaveText("3 tbsp tahini");
-  await expect(panel.getByRole("listitem")).toHaveCount(9);
+  const lines = panel.getByRole("listitem");
+  await expect(lines).toHaveCount(9);
+  await expect(lines.locator(".ingredient-amount")).toHaveText([
+    "3 tbsp",
+    "2 tbsp",
+    "1½ tbsp",
+    "1 tsp",
+    "400 g",
+    "2 tbsp",
+    "3 tbsp",
+    "250 g",
+    "1–2",
+  ]);
+  const tofu = lines.nth(4);
+  await expect(tofu.locator(".ingredient-name")).toHaveText("firm tofu, cubed");
+  const line = await tofu.boundingBox();
+  const name = await tofu.locator(".ingredient-name").boundingBox();
+  const amount = await tofu.locator(".ingredient-amount").boundingBox();
+  expect(name!.x).toBeLessThan(line!.x + 1);
+  expect(amount!.x).toBeGreaterThan(name!.x + name!.width);
+  expect(amount!.x + amount!.width).toBeCloseTo(line!.x + line!.width, 0);
 
   // The arrow keys move between the tabs. Steps are numbered through the whole recipe.
   await ingredientsTab.focus();
