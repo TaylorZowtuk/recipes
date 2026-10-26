@@ -399,6 +399,8 @@ export interface components {
          * @description An ingredient line read into its parts. No quantity means no amount, as in "to taste".
          */
         "ParseFact-Input": {
+            /** Comment */
+            comment?: string | null;
             /** Confidence */
             confidence: number;
             /** Confirm Batch */
@@ -441,6 +443,8 @@ export interface components {
          * @description An ingredient line read into its parts. No quantity means no amount, as in "to taste".
          */
         "ParseFact-Output": {
+            /** Comment */
+            comment: string | null;
             /** Confidence */
             confidence: number;
             /** Confirm Batch */
