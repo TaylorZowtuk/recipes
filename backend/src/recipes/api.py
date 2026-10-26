@@ -2,9 +2,11 @@
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
@@ -27,6 +29,7 @@ from recipes.models import (
     SCHEMA_VERSION,
     Card,
     Difficulty,
+    Enrichment,
     Image,
     KitchenSettings,
     Original,
@@ -34,7 +37,6 @@ from recipes.models import (
     QueuedIngest,
     QueuedIngestState,
     Recipe,
-    RecipeFacts,
     Ulid,
     WebsiteSource,
     WebUrl,
@@ -113,13 +115,6 @@ class NewRecipe(BaseModel):
             msg = "The preview shows one of the recipe's images"
             raise ValueError(msg)
         return self
-
-
-class Enrichment(BaseModel):
-    """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids."""
-
-    enrichment_version: int
-    facts: RecipeFacts
 
 
 class Duplicate(BaseModel):
@@ -404,6 +399,14 @@ def version_conflict(_request: Request, _exc: Exception) -> JSONResponse:
     )
 
 
+def invalid_request(_request: Request, exc: Exception) -> JSONResponse:
+    # FastAPI reads NaN and Infinity in a JSON body, which JSON can't write back, so a 422 names
+    # each error without the input that caused it.
+    errors = cast("RequestValidationError", exc).errors()
+    detail = [{key: value for key, value in error.items() if key != "input"} for error in errors]
+    return JSONResponse({"detail": jsonable_encoder(detail)}, status_code=422)
+
+
 async def no_store_by_default(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
@@ -463,6 +466,7 @@ def create_app(
     app.middleware("http")(no_store_by_default)
     app.middleware("http")(noindex)
     app.add_exception_handler(VersionConflict, version_conflict)
+    app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(Exception, server_error)
     return app
 

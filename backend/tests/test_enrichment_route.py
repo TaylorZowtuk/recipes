@@ -1,11 +1,13 @@
 """The enrich CLI writes a Pending recipe's parse facts, which moves its Enrichment Status."""
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR
 
 from recipes.auth import SERVICE_TOKEN_HEADER
+from recipes.models import MAX_LABEL
 from recipes.seed import RECIPES
 
 if TYPE_CHECKING:
@@ -152,3 +154,45 @@ def test_only_an_editor_can_enrich(editor_client: TestClient, api_store: Store) 
 
 def test_an_unknown_recipe_is_not_found(editor_client: TestClient) -> None:
     assert enrich(editor_client, MISSING_ID).status_code == 404
+
+
+def with_beef(**fields: object) -> dict[str, Any]:
+    """The facts, with the first line's parse fact changed."""
+    beef = {**FACTS["ingredients"]["i1"]["parse"], **fields}
+    return {"ingredients": {"i1": {"parse": beef}}}
+
+
+@pytest.mark.parametrize(
+    ("low", "high"),
+    [(float("nan"), 1), (1, float("inf")), (-1, 1), (3, 2)],
+    ids=["NaN", "Infinity", "negative", "downward"],
+)
+def test_a_quantity_that_isnt_an_upward_range_of_amounts_is_refused(
+    editor_client: TestClient, api_store: Store, low: float, high: float
+) -> None:
+    recipe = add(api_store)
+    # Sent as written, since JSON's own encoders refuse NaN and Infinity, and FastAPI reads them.
+    body = {"enrichment_version": 1, "facts": with_beef(quantity={"low": low, "high": high})}
+
+    response = editor_client.put(
+        f"/api/recipes/{recipe.id}/enrichment",
+        content=json.dumps(body),
+        headers={**EDITOR, "content-type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    stored = editor_client.get(f"/api/recipes/{recipe.id}", follow_redirects=True)
+    assert stored.status_code == 200
+    assert stored.json()["status"] == "pending"
+
+
+@pytest.mark.parametrize("field", ["unit", "confirmed_by", "confirm_batch"])
+def test_a_fact_string_past_a_labels_limit_is_refused(
+    editor_client: TestClient, api_store: Store, field: str
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich(editor_client, recipe.id, with_beef(**{field: "x" * (MAX_LABEL + 1)}))
+
+    assert response.status_code == 422
+    assert fetch(editor_client, recipe.id)["status"] == "pending"

@@ -146,11 +146,21 @@ EnrichmentStatus = Literal["pending", "awaiting_review", "ready"]
 IngestChannel = Literal["add_a_recipe", "bulk_import"]
 
 
+Amount = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
 class Quantity(Model):
     """An amount as a range, with `low` equal to `high` for a single value."""
 
-    low: float
-    high: float
+    low: Amount
+    high: Amount
+
+    @model_validator(mode="after")
+    def _runs_upward(self) -> Quantity:
+        if self.high < self.low:
+            msg = "A quantity's high is at least its low"
+            raise ValueError(msg)
+        return self
 
 
 class Fact(Model):
@@ -160,16 +170,16 @@ class Fact(Model):
     confidence: Fraction
     estimated: bool
     confirmed: bool = False
-    confirmed_by: str | None = None
+    confirmed_by: Label | None = None
     confirmed_at: datetime | None = None
-    confirm_batch: str | None = None
+    confirm_batch: Label | None = None
 
 
 class ParseFact(Fact):
     """An ingredient line read into its parts. No quantity means no amount, as in "to taste"."""
 
     quantity: Quantity | None
-    unit: str | None
+    unit: Label | None
     unit_kind: Literal["mass", "volume", "count"] | None
     name: Label
     short_name: Label | None = None
@@ -188,6 +198,13 @@ class RecipeFacts(Model):
     """
 
     ingredients: dict[str, IngredientFacts] = {}
+
+
+class Enrichment(Model):
+    """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids."""
+
+    enrichment_version: int
+    facts: RecipeFacts
 
 
 class Recipe(Model):
