@@ -242,6 +242,7 @@ RECIPES = [
             stated_times=StatedTimes(total=_time("About 3 hours", 10800)),
         ),
         status="pending",
+        ingest_channel="add_a_recipe",
     ),
     Recipe(
         id="01K7SEED000000000000000006",

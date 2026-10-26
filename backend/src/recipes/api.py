@@ -34,6 +34,7 @@ from recipes.models import (
     QueuedIngest,
     QueuedIngestState,
     Recipe,
+    RecipeFacts,
     Ulid,
     WebsiteSource,
     WebUrl,
@@ -112,6 +113,13 @@ class NewRecipe(BaseModel):
             msg = "The preview shows one of the recipe's images"
             raise ValueError(msg)
         return self
+
+
+class Enrichment(BaseModel):
+    """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids."""
+
+    enrichment_version: int
+    facts: RecipeFacts
 
 
 class Duplicate(BaseModel):
@@ -305,6 +313,39 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
         return store.add_recipe(recipe)
     except DuplicateSource:
         return _claimed(store, key)
+
+
+@router.put(
+    "/recipes/{recipe_id}/enrichment",
+    response_model=Recipe,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "No such recipe"},
+        409: {"description": "The recipe isn't Pending, or changed meanwhile"},
+        422: {"description": "A fact is for a line the recipe doesn't have"},
+    },
+)
+def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep) -> Recipe:
+    """Store a Pending recipe's facts. A bulk import's recipe is then Ready, and any other waits
+    in Awaiting Review for an editor to check it.
+    """
+    recipe = store.get_recipe(recipe_id)
+    if recipe is None:
+        raise HTTPException(404, "No such recipe")
+    if recipe.status != "pending":
+        raise HTTPException(409, "Only a Pending recipe can be enriched")
+    lines = {line.id for line in recipe.original.ingredients}
+    if unknown := sorted(body.facts.ingredients.keys() - lines):
+        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    enriched = recipe.model_copy(
+        update={
+            "facts": body.facts,
+            "enrichment_version": body.enrichment_version,
+            "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
+        }
+    )
+    return store.update_recipe(enriched)
 
 
 @router.get("/queued-ingests", dependencies=EDITORS_ONLY, responses={403: DUPLICATE[403]})

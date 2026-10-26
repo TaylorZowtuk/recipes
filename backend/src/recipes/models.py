@@ -1,6 +1,6 @@
 """The domain model: one shape for DynamoDB items and the API (recipe data model ADR).
 
-Enrichment facts (parses, matches, segments, issues) and Our Version join these models when the
+The other enrichment facts (matches, segments, issues) and Our Version join these models when the
 features that write them arrive.
 """
 
@@ -141,8 +141,52 @@ class Preview(Model):
 
 
 EnrichmentStatus = Literal["pending", "awaiting_review", "ready"]
-# How a recipe came into the Collection: "add_a_recipe" is an editor adding it from a website.
-IngestChannel = Literal["add_a_recipe"]
+# How a recipe came into the Collection: "add_a_recipe" is an editor adding it from a website, and
+# "bulk_import" skips Awaiting Review once enriched.
+IngestChannel = Literal["add_a_recipe", "bulk_import"]
+
+
+class Quantity(Model):
+    """An amount as a range, with `low` equal to `high` for a single value."""
+
+    low: float
+    high: float
+
+
+class Fact(Model):
+    """What every enriched fact records: where it came from, and whether an editor confirmed it."""
+
+    provenance: Literal["source", "parser", "fdc", "llm", "editor"]
+    confidence: Fraction
+    estimated: bool
+    confirmed: bool = False
+    confirmed_by: str | None = None
+    confirmed_at: datetime | None = None
+    confirm_batch: str | None = None
+
+
+class ParseFact(Fact):
+    """An ingredient line read into its parts. No quantity means no amount, as in "to taste"."""
+
+    quantity: Quantity | None
+    unit: str | None
+    unit_kind: Literal["mass", "volume", "count"] | None
+    name: Label
+    short_name: Label | None = None
+    preparation: Label | None
+    optional: bool = False  # "optional", "for garnish" or "to serve"
+
+
+class IngredientFacts(Model):
+    parse: ParseFact | None = None
+
+
+class RecipeFacts(Model):
+    """A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
+    `ingredients["i3"].parse`.
+    """
+
+    ingredients: dict[str, IngredientFacts] = {}
 
 
 class Recipe(Model):
@@ -158,6 +202,8 @@ class Recipe(Model):
     preview: Preview | None = None
     status: EnrichmentStatus
     ingest_channel: IngestChannel | None = None
+    facts: RecipeFacts = RecipeFacts()
+    enrichment_version: int | None = None
 
 
 class NeedsReview(Model):
@@ -202,7 +248,7 @@ def card_for(recipe: Recipe) -> Card:
         tags=recipe.tags,
         status=recipe.status,
         preview=recipe.preview,
-        # Enrichment issues and facts aren't stored yet, so there's nothing to review.
+        # Enrichment Issues aren't stored yet, and unconfirmed facts aren't counted yet.
         needs_review=NeedsReview(open_issues=0, unconfirmed=0),
         recipe_version=recipe.version,
     )
