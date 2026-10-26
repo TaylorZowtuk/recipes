@@ -67,6 +67,8 @@ def _parse(
     unit_kind: Literal["mass", "volume", "count"],
     name: str,
     preparation: str | None = None,
+    *,
+    comment: str | None = None,
 ) -> IngredientFacts:
     """A parser's reading of a line, written by hand for the seed. A pair is a range."""
     low, high = amount if isinstance(amount, tuple) else (amount, amount)
@@ -80,6 +82,7 @@ def _parse(
             unit_kind=unit_kind,
             name=name,
             preparation=preparation,
+            comment=comment,
         )
     )
 
@@ -185,7 +188,7 @@ RECIPES = [
                 "i1": _parse(3, "tbsp", "volume", "tahini"),
                 "i2": _parse(2, "tbsp", "volume", "soy sauce"),
                 "i3": _parse(1.5, "tbsp", "volume", "rice vinegar"),
-                "i4": _parse(1, "tsp", "volume", "chili oil"),
+                "i4": _parse(1, "tsp", "volume", "chili oil", comment="or to taste"),
                 "i5": _parse(400, "g", "mass", "firm tofu", "cubed"),
                 "i6": _parse(2, "tbsp", "volume", "cornstarch"),
                 "i7": _parse(3, "tbsp", "volume", "neutral oil"),

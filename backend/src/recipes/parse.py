@@ -11,11 +11,13 @@ from pint import Unit
 from recipes.models import ParseFact, Quantity
 
 OPTIONAL = re.compile(r"\boptional\b|\bgarnish\b|\bto serve\b", re.IGNORECASE)
+# Pint's short symbols, except where a kitchen writes it otherwise. Pint reads each back.
+SHORT_UNITS = {"cp": "cup"}
 
 
 def parse_line(text: str) -> ParseFact:
     """The parser's reading of one line. Its confidence is the lowest of the parser's own
-    confidences in the parts it filled: the name, the amount and the preparation.
+    confidences in the parts it filled: the name, the amount, the preparation and the comment.
     """
     parsed = parse_ingredient(text, separate_names=False)
     # A line can state several amounts, as "1 can (796 ml)" does. The first is the one the line
@@ -24,10 +26,12 @@ def parse_line(text: str) -> ParseFact:
     confidences = [name.confidence for name in parsed.name]
     if parsed.preparation:
         confidences.append(parsed.preparation.confidence)
+    if parsed.comment:
+        confidences.append(parsed.comment.confidence)
     quantity, unit, unit_kind = None, None, None
     if amount:
         quantity, written, confidence = amount
-        unit, unit_kind = str(written) or None, _kind(written)  # "2 eggs" has no unit
+        unit, unit_kind = _short(written), _kind(written)
         confidences.append(confidence)
     return ParseFact(
         provenance="parser",
@@ -38,6 +42,7 @@ def parse_line(text: str) -> ParseFact:
         unit_kind=unit_kind,
         name=" ".join(name.text for name in parsed.name) or text,
         preparation=parsed.preparation.text if parsed.preparation else None,
+        comment=parsed.comment.text.removeprefix("(").removesuffix(")") if parsed.comment else None,
         optional=bool(OPTIONAL.search(text)),
     )
 
@@ -54,6 +59,16 @@ def _amount(
         return None
     quantity = Quantity(low=float(amount.quantity), high=float(amount.quantity_max))
     return quantity, amount.unit, amount.confidence
+
+
+def _short(unit: Unit | str) -> str | None:
+    """A unit pint knows as its short symbol ("tbsp", "g"), and any other as written ("cloves").
+    "2 eggs" has no unit.
+    """
+    if isinstance(unit, str):
+        return unit or None
+    symbol = f"{unit:~}"
+    return SHORT_UNITS.get(symbol, symbol)
 
 
 def _kind(unit: Unit | str) -> Literal["mass", "volume", "count"]:

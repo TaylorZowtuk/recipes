@@ -113,7 +113,8 @@ def test_a_pending_recipe_gets_a_parse_fact_for_every_line_across_its_components
     assert sorted(facts) == ["i1", "i2", "i3", "i4"]
     chili = facts["i3"]["parse"]
     assert chili["quantity"] == {"low": 1, "high": 2}
-    assert (chili["unit"], chili["unit_kind"], chili["name"]) == ("teaspoon", "volume", "chili oil")
+    assert (chili["unit"], chili["unit_kind"], chili["name"]) == ("tsp", "volume", "chili oil")
+    assert chili["comment"] == "or to taste"
     assert facts["i2"]["parse"]["preparation"] == "minced"
     assert facts["i4"]["parse"]["quantity"] is None
     for fact in facts.values():

@@ -1,6 +1,7 @@
 """Reading an ingredient line into its parse fact: quantity, unit, name and preparation."""
 
 import pytest
+from pint import UnitRegistry
 
 from recipes.parse import parse_line
 
@@ -39,17 +40,22 @@ def test_an_amount_with_or_to_taste_keeps_its_amount() -> None:
     fact = parse_line("1 tsp chili oil, or to taste")
 
     assert fact.quantity is not None
-    assert (fact.quantity.low, fact.unit, fact.unit_kind) == (1, "teaspoon", "volume")
-    assert fact.name == "chili oil"
+    assert (fact.quantity.low, fact.unit, fact.unit_kind) == (1, "tsp", "volume")
+    assert (fact.name, fact.comment) == ("chili oil", "or to taste")
 
 
 @pytest.mark.parametrize(
     ("line", "unit", "kind"),
     [
-        ("900 g stewing beef, cubed", "gram", "mass"),
-        ("2 1/2 lbs chicken thighs", "pound", "mass"),
-        ("1-2 tbsp olive oil", "tablespoon", "volume"),
+        ("900 g stewing beef, cubed", "g", "mass"),
+        ("1 kg flour", "kg", "mass"),
+        ("2 1/2 lbs chicken thighs", "lb", "mass"),
+        ("4 oz cheddar", "oz", "mass"),
+        ("1-2 tbsp olive oil", "tbsp", "volume"),
+        ("1 teaspoon cumin", "tsp", "volume"),
         ("½ cup sugar", "cup", "volume"),
+        ("250 ml milk", "ml", "volume"),
+        ("1 litre stock", "l", "volume"),
         ("2 eggs", None, "count"),
         ("3 cloves garlic, minced", "cloves", "count"),
         # The first of several amounts: the can, not the volume it holds.
@@ -69,6 +75,26 @@ def test_the_name_and_preparation_come_from_the_parser() -> None:
 
     assert (fact.name, fact.preparation) == ("stewing beef", "cubed")
     assert parse_line("2 eggs").preparation is None
+
+
+@pytest.mark.parametrize(
+    ("line", "comment"),
+    [
+        ("3 cloves garlic, minced, plus more for serving", "plus more for serving"),
+        ("salt, to taste", "to taste"),
+        ("1/4 cup cilantro (optional)", "optional"),
+        ("2 eggs", None),
+    ],
+)
+def test_the_lines_remark_is_its_comment_unbracketed(line: str, comment: str | None) -> None:
+    assert parse_line(line).comment == comment
+
+
+def test_a_unit_is_written_short_and_pint_reads_it_back() -> None:
+    unit = parse_line("1-2 tbsp olive oil").unit
+
+    assert unit is not None
+    assert str(UnitRegistry().Unit(unit)) == "tablespoon"
 
 
 @pytest.mark.parametrize(

@@ -174,6 +174,7 @@ class ParseFact(Fact):
     name: Label
     short_name: Label | None = None
     preparation: Label | None
+    comment: Label | None = None  # the line's remark: "or to taste", "plus more for serving"
     optional: bool = False  # "optional", "for garnish" or "to serve"
 
 

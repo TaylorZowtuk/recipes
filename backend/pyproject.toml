@@ -64,6 +64,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
     "PLC0415", # recipe_scrapers is imported on first parse, to keep it out of cold starts
 ]
 "src/recipes/local.py" = ["S105"] # the fake stack's made-up service token
+"src/recipes/seed.py" = ["PLR0913"] # a hand-written parse fact names each of its parts
 "tests/**" = [
     "ANN401",  # stubs pass boto3's keyword arguments and responses straight through
     "ARG001",  # fixtures take others they need only for their side effects
