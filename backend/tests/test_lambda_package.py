@@ -149,7 +149,10 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
         assert dev_only not in top_level
     for enrich_only in ("ingredient_parser", "nltk", "pint", "numpy"):
-        assert enrich_only not in top_level, "the enrich group stays out of the zip"
+        assert enrich_only not in top_level, (
+            "the enrich group stays out of the zip for now: the Our Version ticket decides "
+            "whether the API parses lines on save"
+        )
     assert not any("__pycache__" in name for name in infos)
 
 
