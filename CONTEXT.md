@@ -92,7 +92,7 @@ Structured facts added to a recipe once, after it is ingested, and stored with i
 _Avoid_: AI processing, augmentation
 
 **Fact**:
-One piece of enrichment that an editor confirms in one tap, such as an ingredient line's parse (its quantity, unit, name and preparation). It records its provenance (source, parser, FDC, LLM or editor), a confidence and whether it is estimated. Its id is its path, e.g. `i3.parse` for line `i3`'s parse. Facts are kept apart from the Original.
+One piece of enrichment that an editor confirms in one tap, such as an ingredient line's parse (its quantity, unit, name and preparation). It records its provenance (source, parser, FDC, LLM or editor), a confidence and whether it is estimated. Each fact belongs to one ingredient line, one step or the recipe. Facts are kept apart from the Original.
 _Avoid_: Annotation, field
 
 **Enrichment Version**:
