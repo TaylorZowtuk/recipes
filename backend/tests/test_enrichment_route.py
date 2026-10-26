@@ -186,7 +186,10 @@ def test_a_quantity_that_isnt_an_upward_range_of_amounts_is_refused(
     assert stored.json()["status"] == "pending"
 
 
-@pytest.mark.parametrize("field", ["unit", "confirmed_by", "confirm_batch"])
+@pytest.mark.parametrize(
+    "field",
+    ["name", "short_name", "preparation", "comment", "unit", "confirmed_by", "confirm_batch"],
+)
 def test_a_fact_string_past_a_labels_limit_is_refused(
     editor_client: TestClient, api_store: Store, field: str
 ) -> None:
