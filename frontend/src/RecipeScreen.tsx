@@ -107,11 +107,13 @@ export function Ingredients({ original, facts }: { original: Original; facts?: R
 
 function ParsedLine({ parse }: { parse: ParseFact }) {
   const amount = parse.quantity && [formatQuantity(parse.quantity), parse.unit].filter(Boolean);
+  // The preparation and the line's remark follow the name, as in "garlic, minced, to taste".
+  const remarks = [parse.preparation, parse.comment].filter(Boolean).join(", ");
   return (
     <>
       <span className="ingredient-name">
         {parse.name}
-        {parse.preparation && <span className="ingredient-prep">, {parse.preparation}</span>}
+        {remarks && <span className="ingredient-prep">, {remarks}</span>}
       </span>
       {amount && <span className="ingredient-amount">{amount.join(" ")}</span>}
     </>

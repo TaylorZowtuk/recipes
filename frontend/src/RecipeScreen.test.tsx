@@ -22,6 +22,7 @@ const parse = (fact: Partial<ParseFact>): { parse: ParseFact } => ({
     name: "ingredient",
     short_name: null,
     preparation: null,
+    comment: null,
     optional: false,
     provenance: "parser",
     confidence: 0.9,
@@ -85,6 +86,36 @@ describe("Ingredients", () => {
       ],
     ]);
     expect(markup).toContain('<span class="ingredient-prep">, minced</span>');
+  });
+
+  it("follows the preparation with the line's remark, in the same secondary style", () => {
+    const markup = renderToStaticMarkup(
+      <Ingredients
+        original={original(
+          ["i1", "3 cloves garlic, minced, plus more for serving", null],
+          ["i2", "1 tsp chili oil, or to taste", null],
+        )}
+        facts={{
+          ingredients: {
+            i1: parse({ name: "garlic", preparation: "minced", comment: "plus more for serving" }),
+            i2: parse({
+              quantity: { low: 1, high: 1 },
+              unit: "tsp",
+              name: "chili oil",
+              comment: "or to taste",
+            }),
+          },
+        }}
+      />,
+    );
+    expect(lines(markup)).toEqual([
+      [["ingredient-name", "garlic, minced, plus more for serving"]],
+      [
+        ["ingredient-name", "chili oil, or to taste"],
+        ["ingredient-amount", "1 tsp"],
+      ],
+    ]);
+    expect(markup).toContain('<span class="ingredient-prep">, or to taste</span>');
   });
 
   it("formats ranges, fractions and unit-less amounts, and shows no amount without a quantity", () => {

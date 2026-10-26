@@ -82,8 +82,8 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await expect(main).toContainText("30 min");
   await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
 
-  // Ingredients first, under their Component headings: each line's name and preparation on the
-  // left and its amount right-aligned, with kitchen fractions and ranges.
+  // Ingredients first, under their Component headings: each line's name, preparation and remark
+  // on the left and its amount right-aligned, with kitchen fractions and ranges.
   const tabs = page.getByRole("tablist", { name: "Recipe" });
   const ingredientsTab = tabs.getByRole("tab", { name: "Ingredients" });
   await expect(ingredientsTab).toHaveAttribute("aria-selected", "true");
@@ -107,6 +107,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
     "250 g",
     "1–2",
   ]);
+  await expect(lines.nth(3).locator(".ingredient-name")).toHaveText("chili oil, or to taste");
   const tofu = lines.nth(4);
   await expect(tofu.locator(".ingredient-name")).toHaveText("firm tofu, cubed");
   const line = await tofu.boundingBox();
