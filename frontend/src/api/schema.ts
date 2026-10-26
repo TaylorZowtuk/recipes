@@ -123,6 +123,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipes/{recipe_id}/enrichment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Enrichment
+         * @description Store a Pending recipe's facts. A bulk import's recipe is then Ready, and any other waits
+         *     in Awaiting Review for an editor to check it.
+         */
+        put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session": {
         parameters: {
             query?: never;
@@ -230,6 +251,15 @@ export interface components {
             /** Recipe Id */
             recipe_id: string | null;
         };
+        /**
+         * Enrichment
+         * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids.
+         */
+        Enrichment: {
+            /** Enrichment Version */
+            enrichment_version: number;
+            facts: components["schemas"]["RecipeFacts-Input"];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -261,6 +291,14 @@ export interface components {
             candidate_photos: string[];
             original: components["schemas"]["Original-Output"];
             source: components["schemas"]["WebsiteSource-Output"];
+        };
+        /** IngredientFacts */
+        "IngredientFacts-Input": {
+            parse?: components["schemas"]["ParseFact-Input"] | null;
+        };
+        /** IngredientFacts */
+        "IngredientFacts-Output": {
+            parse: components["schemas"]["ParseFact-Output"] | null;
         };
         /** IngredientLine */
         "IngredientLine-Input": {
@@ -356,6 +394,90 @@ export interface components {
             title: string;
             yield: components["schemas"]["RecipeYield-Output"] | null;
         };
+        /**
+         * ParseFact
+         * @description An ingredient line read into its parts. No quantity means no amount, as in "to taste".
+         */
+        "ParseFact-Input": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Optional
+             * @default false
+             */
+            optional: boolean;
+            /** Preparation */
+            preparation: string | null;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            quantity: components["schemas"]["Quantity"] | null;
+            /** Short Name */
+            short_name?: string | null;
+            /** Unit */
+            unit: string | null;
+            /** Unit Kind */
+            unit_kind: ("mass" | "volume" | "count") | null;
+        };
+        /**
+         * ParseFact
+         * @description An ingredient line read into its parts. No quantity means no amount, as in "to taste".
+         */
+        "ParseFact-Output": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Name */
+            name: string;
+            /**
+             * Optional
+             * @default false
+             */
+            optional: boolean;
+            /** Preparation */
+            preparation: string | null;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            quantity: components["schemas"]["Quantity"] | null;
+            /** Short Name */
+            short_name: string | null;
+            /** Unit */
+            unit: string | null;
+            /** Unit Kind */
+            unit_kind: ("mass" | "volume" | "count") | null;
+        };
         /** PhotoUrl */
         PhotoUrl: {
             /** Url */
@@ -372,6 +494,16 @@ export interface components {
             focal_y: number;
             /** Image Id */
             image_id: string;
+        };
+        /**
+         * Quantity
+         * @description An amount as a range, with `low` equal to `high` for a single value.
+         */
+        Quantity: {
+            /** High */
+            high: number;
+            /** Low */
+            low: number;
         };
         /**
          * QueuedIngest
@@ -408,6 +540,14 @@ export interface components {
             /** Dedupe Key */
             dedupe_key: string;
             difficulty: components["schemas"]["Difficulty"] | null;
+            /** Enrichment Version */
+            enrichment_version: number | null;
+            /**
+             * @default {
+             *       "ingredients": {}
+             *     }
+             */
+            facts: components["schemas"]["RecipeFacts-Output"];
             /** Id */
             id: string;
             /**
@@ -416,7 +556,7 @@ export interface components {
              */
             images: components["schemas"]["Image"][];
             /** Ingest Channel */
-            ingest_channel: "add_a_recipe" | null;
+            ingest_channel: ("add_a_recipe" | "bulk_import") | null;
             original: components["schemas"]["Original-Output"];
             preview: components["schemas"]["Preview"] | null;
             /** Schema Version */
@@ -435,6 +575,34 @@ export interface components {
             tags: string[];
             /** Version */
             version: number;
+        };
+        /**
+         * RecipeFacts
+         * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
+         *     `ingredients["i3"].parse`.
+         */
+        "RecipeFacts-Input": {
+            /**
+             * Ingredients
+             * @default {}
+             */
+            ingredients: {
+                [key: string]: components["schemas"]["IngredientFacts-Input"];
+            };
+        };
+        /**
+         * RecipeFacts
+         * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
+         *     `ingredients["i3"].parse`.
+         */
+        "RecipeFacts-Output": {
+            /**
+             * Ingredients
+             * @default {}
+             */
+            ingredients: {
+                [key: string]: components["schemas"]["IngredientFacts-Output"];
+            };
         };
         /** RecipeYield */
         "RecipeYield-Input": {
@@ -895,6 +1063,60 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    put_enrichment_api_recipes__recipe_id__enrichment_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Enrichment"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe isn't Pending, or changed meanwhile */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A fact is for a line the recipe doesn't have */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
