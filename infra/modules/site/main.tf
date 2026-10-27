@@ -176,7 +176,9 @@ resource "aws_cloudfront_distribution" "this" {
   # Versioned reads, with every part of the key in the path: the managed policies that key on query
   # strings also forward Host, which a function URL origin rejects. No origin request policy, so no
   # cookie or viewer Host reaches the API: a cached read can't depend on who asked, and the function
-  # URL gets its own host. The 1 s minimum TTL also caches no-store redirects and errors for 1 s.
+  # URL gets its own host. The 1 s minimum TTL caches FastAPI's no-store redirects and errors for up
+  # to 1 s; a 502 or 504 from Lambda or the Web Adapter has no Cache-Control, so CloudFront caches it
+  # for its default 10 s error caching minimum TTL.
   ordered_cache_behavior {
     path_pattern               = "/api/v/*"
     target_origin_id           = local.api_origin
