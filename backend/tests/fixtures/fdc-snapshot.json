@@ -1,0 +1,86 @@
+{
+  "release": "foundation-2001-01-01+sr_legacy-2018-04",
+  "foods": [
+    {
+      "fdc_id": 1001,
+      "dataset": "foundation",
+      "description": "Zorbleberries, raw",
+      "per_100g": { "kcal": 57.0, "protein_g": 0.7, "fat_g": 0.3, "carbs_g": 14.5, "sodium_mg": 1.0 },
+      "portions": [
+        { "id": 501, "amount": 1.0, "unit": "cup", "modifier": null, "gram_weight": 144.0 },
+        { "id": 502, "amount": 5.0, "unit": "berry", "modifier": null, "gram_weight": 10.0 }
+      ]
+    },
+    {
+      "fdc_id": 1002,
+      "dataset": "foundation",
+      "description": "Quill eggs, whole, raw",
+      "per_100g": { "kcal": 148.0, "protein_g": 12.4, "fat_g": 9.96, "carbs_g": 0.96, "sodium_mg": 129.0 },
+      "portions": [
+        { "id": 503, "amount": 1.0, "unit": "each", "modifier": "large", "gram_weight": 50.0 }
+      ]
+    },
+    {
+      "fdc_id": 2001,
+      "dataset": "sr_legacy",
+      "description": "Zorbleberries, frozen, unsweetened",
+      "per_100g": { "kcal": 51.0, "protein_g": 0.4, "fat_g": 0.6, "carbs_g": 12.2, "sodium_mg": null },
+      "portions": [
+        { "id": 601, "amount": 1.0, "unit": "cup, unthawed", "modifier": null, "gram_weight": 155.0 },
+        { "id": 602, "amount": 3.0, "unit": "oz", "modifier": null, "gram_weight": 85.0 }
+      ]
+    },
+    {
+      "fdc_id": 2003,
+      "dataset": "sr_legacy",
+      "description": "Quill egg, whole, raw, fresh",
+      "per_100g": { "kcal": 143.0, "protein_g": 12.6, "fat_g": 9.5, "carbs_g": 0.7, "sodium_mg": 142.0 },
+      "portions": [
+        { "id": 603, "amount": 1.0, "unit": "large", "modifier": null, "gram_weight": 50.0 },
+        { "id": 604, "amount": 1.0, "unit": "serving (1 egg)", "modifier": null, "gram_weight": 46.0 },
+        { "id": 605, "amount": 0.0, "unit": "medium", "modifier": null, "gram_weight": 44.0 }
+      ]
+    },
+    {
+      "fdc_id": 2004,
+      "dataset": "sr_legacy",
+      "description": "Glimmer oil",
+      "per_100g": { "kcal": 884.0, "protein_g": 0.0, "fat_g": 100.0, "carbs_g": 0.0, "sodium_mg": 0.0 },
+      "portions": [
+        { "id": 606, "amount": 1.0, "unit": "tbsp", "modifier": null, "gram_weight": 13.5 },
+        { "id": 607, "amount": 1.0, "unit": "fl oz", "modifier": null, "gram_weight": 27.0 }
+      ]
+    },
+    {
+      "fdc_id": 2007,
+      "dataset": "sr_legacy",
+      "description": "Snorp garlic, raw",
+      "per_100g": { "kcal": 149.0, "protein_g": 6.4, "fat_g": 0.5, "carbs_g": 33.1, "sodium_mg": 17.0 },
+      "portions": [
+        { "id": 608, "amount": 1.0, "unit": "clove", "modifier": null, "gram_weight": 3.0 },
+        { "id": 609, "amount": 1.0, "unit": "undetermined", "modifier": null, "gram_weight": 9.0 }
+      ]
+    },
+    {
+      "fdc_id": 2006,
+      "dataset": "sr_legacy",
+      "description": "Plonk beans, dry",
+      "per_100g": { "kcal": null, "protein_g": null, "fat_g": null, "carbs_g": null, "sodium_mg": null },
+      "portions": []
+    },
+    {
+      "fdc_id": 2005,
+      "dataset": "sr_legacy",
+      "description": "Plonk beans, dry",
+      "per_100g": { "kcal": 333.0, "protein_g": 23.6, "fat_g": 0.8, "carbs_g": 60.0, "sodium_mg": 5.0 },
+      "portions": []
+    },
+    {
+      "fdc_id": 3001,
+      "dataset": "foundation",
+      "description": "Snorp garlic, raw",
+      "per_100g": { "kcal": 143.0, "protein_g": 6.6, "fat_g": 0.4, "carbs_g": 28.2, "sodium_mg": 11.0 },
+      "portions": []
+    }
+  ]
+}

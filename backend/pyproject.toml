@@ -62,6 +62,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
     "S105",   # names the service token's variable, which isn't the token
 ]
 "src/recipes/dev.py" = ["TC001"] # FastAPI reads a route's annotations at runtime
+"src/recipes/fdc.py" = ["PLR0911"] # convert returns each reason a portion converts nothing
 "src/recipes/images.py" = ["BLE001"] # Pillow fails in many ways on a file that isn't a photo
 "src/recipes/ingest.py" = [
     "BLE001",  # a site's scraper fails in its own ways, and any failure means no recipe
