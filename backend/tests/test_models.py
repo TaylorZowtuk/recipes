@@ -9,6 +9,7 @@ from recipes.models import (
     Step,
     WebsiteSource,
     new_ulid,
+    normalize_wording,
 )
 from recipes.seed import CAPTURED_AT
 
@@ -56,3 +57,17 @@ def test_an_original_fits_a_dynamodb_item_at_its_size_limit() -> None:
     assert len(original(steps, "x" * room).model_dump_json()) == MAX_ORIGINAL_BYTES
     with pytest.raises(ValidationError):
         original(steps, "x" * (room + 1))
+
+
+@pytest.mark.parametrize(
+    ("name", "wording"),
+    [
+        ("Boneless Chicken Thighs", "boneless chicken thighs"),
+        ("  red   onion\t", "red onion"),
+        ('"fresh basil."', "fresh basil"),
+        ("salt, to taste", "salt, to taste"),
+        ("eggs", "eggs"),
+    ],
+)
+def test_a_wording_is_normalized_without_singularizing(name: str, wording: str) -> None:
+    assert normalize_wording(name) == wording

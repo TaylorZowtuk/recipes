@@ -1,14 +1,22 @@
 """The domain model: one shape for DynamoDB items and the API (recipe data model ADR).
 
-The other enrichment facts (matches, segments, issues) and Our Version join these models when the
+The other enrichment facts (segments, substitutions) and Our Version join these models when the
 features that write them arrive.
 """
 
 import secrets
+import string
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 SCHEMA_VERSION = 1
 
@@ -188,8 +196,43 @@ class ParseFact(Fact):
     optional: bool = False  # "optional", "for garnish" or "to serve"
 
 
+class MatchFact(Fact):
+    """The line's Canonical Ingredient, with the FDC food and portion row the model chose."""
+
+    canonical_id: Ulid
+    fdc_id: int
+    portion_id: int | None
+
+
+class Per100g(Model):
+    """The FDC snapshot's nutrition for 100 g of the matched food."""
+
+    kcal: Amount | None
+    protein_g: Amount | None
+    fat_g: Amount | None
+    carbs_g: Amount | None
+    sodium_mg: Amount | None
+
+
+class ConversionFact(Fact):
+    """How the line converts to grams, copied from the FDC snapshot: a density for a volume, the
+    grams in one count unit for a count, or the reason it doesn't convert.
+    """
+
+    fdc_id: int
+    dataset: Literal["foundation", "sr_legacy"]
+    release: Label
+    density_g_per_ml: Amount | None
+    grams_per_count: Amount | None
+    count_unit: Label | None
+    refused: Label | None
+    per_100g: Per100g
+
+
 class IngredientFacts(Model):
     parse: ParseFact | None = None
+    match: MatchFact | None = None
+    conversion: ConversionFact | None = None
 
 
 class RecipeFacts(Model):
@@ -200,11 +243,85 @@ class RecipeFacts(Model):
     ingredients: dict[str, IngredientFacts] = {}
 
 
+class EnrichmentIssue(Model):
+    """Something enrichment corrected or was unsure about, on the fact `fact_id` names."""
+
+    id: Ulid
+    fact_id: Label  # e.g. "i3.match"
+    before: Line | None = None
+    after: Line | None = None
+    reason: Line
+    model: Label | None = None
+    status: Literal["open", "resolved"] = "open"
+    confirm_batch: Label | None = None
+
+
+def normalize_wording(name: str) -> str:
+    """The wording cache's key for an ingredient's name: lowercase, with its whitespace collapsed
+    and the punctuation around it stripped. Plurals stay as written.
+    """
+    return " ".join(name.lower().split()).strip(string.punctuation + string.whitespace)
+
+
+def _normalized(name: str) -> str:
+    wording = normalize_wording(name)
+    if not wording:
+        msg = "A wording is more than punctuation"
+        raise ValueError(msg)
+    return wording
+
+
+class CanonicalIngredient(Model):
+    """`CANON` / `<id>`: the one name every wording of an ingredient maps to."""
+
+    id: Ulid
+    name: Label
+    family: Annotated[Label, AfterValidator(str.lower)]  # e.g. "chicken"
+    store_category_id: str  # one of the Kitchen settings' Store Categories
+    pantry_staple: bool = False
+    confirmed: bool = False
+    version: int
+    schema_version: int
+
+
+class Wording(Model):
+    """`WORDING` / `<wording>`: the wording cache's entry for one normalized wording. Enrichment
+    may replace it until an editor confirms it.
+    """
+
+    wording: Annotated[Label, AfterValidator(_normalized)]
+    canonical_id: Ulid
+    confirmed: bool = False
+    schema_version: int
+
+
+# A transaction holds at most 100 items: the recipe, its card and META#collection, and these.
+MAX_LEARNED = 97
+
+
 class Enrichment(Model):
-    """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids."""
+    """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
+    Canonical Ingredients it creates and the wordings it learns.
+    """
 
     enrichment_version: int
+    fdc_release: Label | None = None
     facts: RecipeFacts
+    issues: list[EnrichmentIssue] = []
+    canonical_ingredients: list[CanonicalIngredient] = []
+    wordings: list[Wording] = []
+
+    @model_validator(mode="after")
+    def _fits_a_transaction(self) -> Enrichment:
+        ids = [canonical.id for canonical in self.canonical_ingredients]
+        wordings = [wording.wording for wording in self.wordings]
+        if len(set(ids)) < len(ids) or len(set(wordings)) < len(wordings):
+            msg = "Each Canonical Ingredient and wording is in an enrichment once"
+            raise ValueError(msg)
+        if len(ids) + len(wordings) > MAX_LEARNED:
+            msg = f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
+            raise ValueError(msg)
+        return self
 
 
 class Recipe(Model):
@@ -222,6 +339,8 @@ class Recipe(Model):
     ingest_channel: IngestChannel | None = None
     facts: RecipeFacts = RecipeFacts()
     enrichment_version: int | None = None
+    fdc_release: Label | None = None
+    issues: list[EnrichmentIssue] = []
 
 
 class NeedsReview(Model):
@@ -266,8 +385,10 @@ def card_for(recipe: Recipe) -> Card:
         tags=recipe.tags,
         status=recipe.status,
         preview=recipe.preview,
-        # Enrichment Issues aren't stored yet, and unconfirmed facts aren't counted yet.
-        needs_review=NeedsReview(open_issues=0, unconfirmed=0),
+        # Unconfirmed facts aren't counted yet.
+        needs_review=NeedsReview(
+            open_issues=sum(issue.status == "open" for issue in recipe.issues), unconfirmed=0
+        ),
         recipe_version=recipe.version,
     )
 
