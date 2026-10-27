@@ -106,8 +106,9 @@ def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set(
 def lambda_zips(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     out = tmp_path_factory.mktemp("lambda")
     first, second = out / "first.zip", out / "second.zip"
-    for zip_path in (first, second):
-        subprocess.run([BUILD, zip_path], check=True)
+    # Two independent builds, each in its own staging directory, run side by side.
+    builds = [subprocess.Popen([BUILD, zip_path]) for zip_path in (first, second)]
+    assert [build.wait() for build in builds] == [0, 0]
     return first, second
 
 
@@ -148,6 +149,11 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     top_level = {name.split("/", 1)[0] for name in infos}
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
         assert dev_only not in top_level
+    for enrich_only in ("ingredient_parser", "nltk", "pint", "numpy"):
+        assert enrich_only not in top_level, (
+            "the enrich group stays out of the zip for now: the Our Version ticket decides "
+            "whether the API parses lines on save"
+        )
     assert not any("__pycache__" in name for name in infos)
 
 

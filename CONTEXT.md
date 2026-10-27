@@ -91,6 +91,18 @@ _Avoid_: Duplicate check, dedupe index
 Structured facts added to a recipe once, after it is ingested, and stored with it. This includes parsed ingredients, substitutions, nutrition estimates and grocery categories.
 _Avoid_: AI processing, augmentation
 
+**Fact**:
+One piece of enrichment that an editor confirms in one tap, such as an ingredient line's parse (its quantity, unit, name and preparation). It records its provenance (source, parser, FDC, LLM or editor), a confidence and whether it is estimated. Each fact belongs to one ingredient line, one step or the recipe. Facts are kept apart from the Original.
+_Avoid_: Annotation, field
+
+**Enrichment Version**:
+The version of enrichment a recipe was enriched with, recorded on the recipe so out-of-date recipes can be found for re-enrichment.
+_Avoid_: Enrichment run, parser version
+
+**Ingest Channel**:
+How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import).
+_Avoid_: Origin, import type
+
 **Enrichment Status**:
 Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. Only a Ready recipe is used for the grocery list and fridge matching.
 _Avoid_: Processing state

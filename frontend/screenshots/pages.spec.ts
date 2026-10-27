@@ -51,7 +51,7 @@ const pages: Shot[] = [
     name: "recipe",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
     ready: "Sesame Noodles with Crispy Tofu",
-    loaded: "3 tbsp tahini",
+    loaded: "For the sauce",
   },
 ];
 

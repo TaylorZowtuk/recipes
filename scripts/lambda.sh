@@ -13,7 +13,10 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 
 cd "$repo/backend"
-uv export --locked --quiet --no-dev --no-emit-project --no-header --output-file "$stage/requirements.txt"
+# No dependency groups: dev's tools stay out of the zip, and so does enrich's parser for now, until
+# the Our Version ticket decides whether the API parses lines on save.
+uv export --locked --quiet --no-default-groups --no-emit-project --no-header \
+  --output-file "$stage/requirements.txt"
 # Wheels only, so nothing is compiled for this container's platform. jstyleson (recipe-scrapers,
 # through extruct) publishes only a source distribution, but it's one pure-Python module.
 uv pip install --quiet --no-config --target "$stage/package" --python-version "$python" \

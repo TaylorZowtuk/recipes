@@ -48,6 +48,7 @@ ENV HOME=/work/home \
     UV_CACHE_DIR=/work/cache/uv \
     UV_PYTHON_INSTALL_DIR=/work/cache/python \
     UV_LINK_MODE=copy \
+    NLTK_DATA=/work/cache/nltk_data \
     PYTHONDONTWRITEBYTECODE=1 \
     IN_CONTAINER=1
 WORKDIR /work/repo

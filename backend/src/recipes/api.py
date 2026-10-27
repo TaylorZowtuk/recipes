@@ -2,9 +2,11 @@
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
@@ -27,6 +29,7 @@ from recipes.models import (
     SCHEMA_VERSION,
     Card,
     Difficulty,
+    Enrichment,
     Image,
     KitchenSettings,
     Original,
@@ -307,6 +310,39 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
         return _claimed(store, key)
 
 
+@router.put(
+    "/recipes/{recipe_id}/enrichment",
+    response_model=Recipe,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "No such recipe"},
+        409: {"description": "The recipe isn't Pending, or changed meanwhile"},
+        422: {"description": "A fact is for a line the recipe doesn't have"},
+    },
+)
+def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep) -> Recipe:
+    """Store a Pending recipe's facts. A bulk import's recipe is then Ready, and any other waits
+    in Awaiting Review for an editor to check it.
+    """
+    recipe = store.get_recipe(recipe_id)
+    if recipe is None:
+        raise HTTPException(404, "No such recipe")
+    if recipe.status != "pending":
+        raise HTTPException(409, "Only a Pending recipe can be enriched")
+    lines = {line.id for line in recipe.original.ingredients}
+    if unknown := sorted(body.facts.ingredients.keys() - lines):
+        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    enriched = recipe.model_copy(
+        update={
+            "facts": body.facts,
+            "enrichment_version": body.enrichment_version,
+            "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
+        }
+    )
+    return store.update_recipe(enriched)
+
+
 @router.get("/queued-ingests", dependencies=EDITORS_ONLY, responses={403: DUPLICATE[403]})
 def get_queued_ingests(store: StoreDep) -> list[QueuedIngest]:
     """The Sources waiting for a fallback or for an editor to paste the page, oldest first."""
@@ -361,6 +397,14 @@ def version_conflict(_request: Request, _exc: Exception) -> JSONResponse:
     return JSONResponse(
         {"detail": "Version conflict: reload and try again"}, status_code=409, headers=NO_STORE
     )
+
+
+def invalid_request(_request: Request, exc: Exception) -> JSONResponse:
+    # FastAPI reads NaN and Infinity in a JSON body, which JSON can't write back, so a 422 names
+    # each error without the input that caused it.
+    errors = cast("RequestValidationError", exc).errors()
+    detail = [{key: value for key, value in error.items() if key != "input"} for error in errors]
+    return JSONResponse({"detail": jsonable_encoder(detail)}, status_code=422)
 
 
 async def no_store_by_default(
@@ -422,6 +466,7 @@ def create_app(
     app.middleware("http")(no_store_by_default)
     app.middleware("http")(noindex)
     app.add_exception_handler(VersionConflict, version_conflict)
+    app.add_exception_handler(RequestValidationError, invalid_request)
     app.add_exception_handler(Exception, server_error)
     return app
 

@@ -695,6 +695,31 @@ h1:focus {
   border-bottom: 1px solid var(--divider);
 }
 
+/* A parsed line: name and preparation on the left, the amount right-aligned in even-width figures. */
+.ingredients li:has(.ingredient-name) {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--space) * 4);
+}
+
+/* A long word wraps rather than pushing the amount off a narrow screen. */
+.ingredient-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ingredient-prep {
+  color: var(--text-secondary);
+}
+
+.ingredient-amount {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .steps {
   margin: 0;
   padding-left: 1.75em;

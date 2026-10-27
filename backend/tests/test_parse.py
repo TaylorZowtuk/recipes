@@ -1,0 +1,184 @@
+"""Reading an ingredient line into its parse fact: quantity, unit, name and preparation."""
+
+import pytest
+from pint import UnitRegistry
+
+from recipes.models import MAX_LABEL
+from recipes.parse import parse_line
+
+
+@pytest.mark.parametrize(
+    ("line", "low", "high"),
+    [
+        ("1-2 tbsp olive oil", 1, 2),
+        ("1 to 2 cups flour", 1, 2),
+        ("2-3 cloves garlic", 2, 3),
+        ("1 1/2 cups milk", 1.5, 1.5),
+        ("½ cup sugar", 0.5, 0.5),
+        ("1½ cups water", 1.5, 1.5),
+        ("1 ½ cups rice", 1.5, 1.5),
+        ("900 g stewing beef, cubed", 900, 900),
+        ("1 lb 8 oz pork shoulder", 1.5, 1.5),
+    ],
+)
+def test_a_quantity_is_a_range_equal_at_both_ends_for_one_value(
+    line: str, low: float, high: float
+) -> None:
+    quantity = parse_line(line).quantity
+
+    assert quantity is not None
+    assert (quantity.low, quantity.high) == (low, high)
+
+
+@pytest.mark.parametrize("line", ["salt, to taste", "Berries, to serve", "olive oil, for frying"])
+def test_a_line_without_an_amount_has_no_quantity_unit_or_kind(line: str) -> None:
+    fact = parse_line(line)
+
+    assert (fact.quantity, fact.unit, fact.unit_kind) == (None, None, None)
+
+
+def test_an_amount_with_or_to_taste_keeps_its_amount() -> None:
+    fact = parse_line("1 tsp chili oil, or to taste")
+
+    assert fact.quantity is not None
+    assert (fact.quantity.low, fact.unit, fact.unit_kind) == (1, "tsp", "volume")
+    assert (fact.name, fact.comment) == ("chili oil", "or to taste")
+
+
+@pytest.mark.parametrize(
+    ("line", "unit", "kind"),
+    [
+        ("900 g stewing beef, cubed", "g", "mass"),
+        ("1 kg flour", "kg", "mass"),
+        ("2 1/2 lbs chicken thighs", "lb", "mass"),
+        ("4 oz cheddar", "oz", "mass"),
+        ("1-2 tbsp olive oil", "tbsp", "volume"),
+        ("1 teaspoon cumin", "tsp", "volume"),
+        ("½ cup sugar", "cup", "volume"),
+        ("250 ml milk", "ml", "volume"),
+        ("1 litre stock", "l", "volume"),
+        ("2 eggs", None, "count"),
+        ("3 cloves garlic, minced", "cloves", "count"),
+        # The first of several amounts: the can, not the volume it holds.
+        ("1 can (796 ml) diced tomatoes", "can", "count"),
+    ],
+)
+def test_the_unit_kind_comes_from_the_units_dimension(
+    line: str, unit: str | None, kind: str
+) -> None:
+    fact = parse_line(line)
+
+    assert (fact.unit, fact.unit_kind) == (unit, kind)
+
+
+def test_the_name_and_preparation_come_from_the_parser() -> None:
+    fact = parse_line("900 g stewing beef, cubed")
+
+    assert (fact.name, fact.preparation) == ("stewing beef", "cubed")
+    assert parse_line("2 eggs").preparation is None
+
+
+@pytest.mark.parametrize(
+    ("line", "comment"),
+    [
+        ("3 cloves garlic, minced, plus more for serving", "plus more for serving"),
+        ("salt, to taste", "to taste"),
+        ("1/4 cup cilantro (optional)", "optional"),
+        # The parser's purpose, after its comment when there are both.
+        ("olive oil, for frying", "for frying"),
+        ("2 tbsp oil, or more, for frying", "or more, for frying"),
+        ("2 eggs", None),
+    ],
+)
+def test_the_lines_remark_is_its_comment_unbracketed(line: str, comment: str | None) -> None:
+    assert parse_line(line).comment == comment
+
+
+def test_a_unit_is_written_short_and_pint_reads_it_back() -> None:
+    unit = parse_line("1-2 tbsp olive oil").unit
+
+    assert unit is not None
+    assert str(UnitRegistry().Unit(unit)) == "tablespoon"
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["1/4 cup cilantro (optional)", "2 tbsp parsley, chopped, for garnish", "Berries, to serve"],
+)
+def test_optional_garnish_and_to_serve_lines_are_optional(line: str) -> None:
+    assert parse_line(line).optional
+
+
+@pytest.mark.parametrize("line", ["salt, to taste", "2 eggs"])
+def test_other_lines_are_not_optional(line: str) -> None:
+    assert not parse_line(line).optional
+
+
+def test_the_fact_is_the_parsers_unconfirmed_and_not_estimated() -> None:
+    fact = parse_line("2 tbsp parsley, chopped, for garnish")
+
+    assert (fact.provenance, fact.estimated, fact.confirmed) == ("parser", False, False)
+    assert (fact.confirmed_by, fact.confirmed_at, fact.short_name) == (None, None, None)
+    assert 0 < fact.confidence <= 1
+
+
+def test_a_line_the_parser_is_unsure_of_has_lower_confidence() -> None:
+    sure = parse_line("1 1/2 cups milk").confidence
+    unsure = parse_line("1 can (796 ml) diced tomatoes").confidence
+
+    assert unsure < 0.9 < sure
+
+
+@pytest.mark.parametrize(
+    ("line", "low", "high"),
+    [
+        ("2 dozen cookies", 24, 24),
+        ("1 1/2 dozen rolls", 18, 18),
+        ("½ dozen eggs", 6, 6),
+        ("a dozen eggs", 12, 12),
+        ("2-3 dozen eggs", 24, 36),
+        ("2 Dozen eggs", 24, 24),
+        ("2 DOZEN eggs", 24, 24),
+    ],
+)
+def test_dozens_are_counted_in_twelves(line: str, low: float, high: float) -> None:
+    fact = parse_line(line)
+
+    assert fact.quantity is not None
+    assert (fact.quantity.low, fact.quantity.high) == (low, high)
+    assert (fact.unit, fact.unit_kind) == (None, "count")
+
+
+def test_an_amount_that_isnt_a_number_is_kept_in_the_comment_and_flagged_for_review() -> None:
+    fact = parse_line("a few sprigs thyme")
+
+    assert (fact.quantity, fact.name) == (None, "thyme")
+    assert fact.comment == "few sprigs"
+    assert fact.confidence <= 0.5
+
+
+def test_an_unread_amount_joins_the_lines_remark() -> None:
+    fact = parse_line("a few sprigs thyme, or to taste")
+
+    assert fact.comment == "or to taste, few sprigs"
+
+
+@pytest.mark.parametrize("line", ["1 (14 oz) can", "For garnish"])
+def test_a_line_whose_name_the_parser_cant_find_is_named_by_its_text(line: str) -> None:
+    assert parse_line(line).name == line
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["x" * 300, "salt, " + "very " * 60 + "fine", "1 tbsp oil (" + "y " * 150 + ")"],
+    ids=["one long word", "a long remark", "a long bracket"],
+)
+def test_a_long_line_is_cut_to_fit_each_part(line: str) -> None:
+    fact = parse_line(line)
+
+    for part in (fact.name, fact.preparation, fact.comment):
+        assert part is None or len(part) <= MAX_LABEL
+
+
+def test_a_name_past_its_limit_ends_in_an_ellipsis() -> None:
+    assert parse_line("x" * 300).name == "x" * (MAX_LABEL - 1) + "…"

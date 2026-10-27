@@ -7,8 +7,8 @@ SHELL := bash
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
 	kill-switch-reset dev browser browser-run browser-stop shell clean \
-	gitleaks aws deps dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf tf-test \
-	links api-drift sh-lint sh-test workflows
+	gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
+	tf-test links api-drift sh-lint sh-test workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
 $(error GNU make 4 or later is required (macOS: `brew install make`, then run `gmake`))
@@ -110,7 +110,7 @@ browser-stop: ## Stop the watched browser and remove its container and network
 	scripts/browser.sh stop
 
 shell: ## A shell in the toolchain container, with dependencies installed
-	$(RUN) bash -c 'make deps && exec bash'
+	$(RUN) bash -c 'make deps nltk-data && exec bash'
 
 clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
 	scripts/browser.sh stop
@@ -131,7 +131,15 @@ deps:
 	cd backend && uv sync --locked --quiet
 	cd frontend && pnpm install --frozen-lockfile --silent
 
-check: deps
+# The ingredient parser's NLTK tagger, fetched once into the shared cache so the enrich CLI and its
+# tests then run offline. nltk.download returns False on a failed download rather than raising.
+NLTK_TAGGER := averaged_perceptron_tagger_eng
+nltk-data: deps
+	[ -f "$$NLTK_DATA/taggers/$(NLTK_TAGGER)/$(NLTK_TAGGER).weights.json" ] || (cd backend && \
+		uv run --locked python -c 'import os, sys, nltk; sys.exit(not nltk.download( \
+			"$(NLTK_TAGGER)", download_dir=os.environ["NLTK_DATA"], quiet=True))')
+
+check: deps nltk-data
 	@$(MAKE) --no-print-directory -j -O py-lint py-types py-test ts-lint ts-types ts-test tf tf-test links \
 		api-drift sh-lint sh-test workflows
 	@echo "make check: all passed"
