@@ -204,14 +204,23 @@ class MatchFact(Fact):
     portion_id: int | None
 
 
-class Per100g(Model):
-    """The FDC snapshot's nutrition for 100 g of the matched food."""
+# The FDC Snapshot's two datasets.
+Dataset = Literal["foundation", "sr_legacy"]
 
-    kcal: Amount | None
-    protein_g: Amount | None
-    fat_g: Amount | None
-    carbs_g: Amount | None
-    sodium_mg: Amount | None
+
+# A nutrient as FDC states it, which may be a little below zero: carbohydrate "by difference"
+# is what's left of 100 g after the rest, rounding and all.
+Nutrient = Annotated[float, Field(allow_inf_nan=False)]
+
+
+class Per100g(Model):
+    """The FDC snapshot's nutrition for 100 g of the matched food, as FDC states it."""
+
+    kcal: Nutrient | None
+    protein_g: Nutrient | None
+    fat_g: Nutrient | None
+    carbs_g: Nutrient | None
+    sodium_mg: Nutrient | None
 
 
 class ConversionFact(Fact):
@@ -220,7 +229,7 @@ class ConversionFact(Fact):
     """
 
     fdc_id: int
-    dataset: Literal["foundation", "sr_legacy"]
+    dataset: Dataset
     release: Label
     density_g_per_ml: Amount | None
     grams_per_count: Amount | None

@@ -32,6 +32,7 @@ from recipes.models import (
     Difficulty,
     Enrichment,
     Image,
+    IngredientFacts,
     KitchenSettings,
     Original,
     Preview,
@@ -334,8 +335,9 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
             "Ingredient's id is taken, or an editor confirmed a wording"
         },
         422: {
-            "description": "A fact is for a line the recipe doesn't have, or names an unknown "
-            "Canonical Ingredient or Store Category"
+            "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, a "
+            "fact names an unknown Canonical Ingredient or Store Category, or a new Canonical "
+            "Ingredient or wording is confirmed"
         },
     },
 )
@@ -352,6 +354,9 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
+    if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
+        raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     _check_canonical_ingredients(body, store)
     enriched = recipe.model_copy(
         update={
@@ -380,6 +385,9 @@ def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
     learned = [*body.canonical_ingredients, *body.wordings]
     if any(item.schema_version != SCHEMA_VERSION for item in learned):
         raise HTTPException(422, f"Each new item is at schema version {SCHEMA_VERSION}")
+    # Only an editor's review confirms, never enrichment.
+    if any(item.confirmed for item in learned):
+        raise HTTPException(422, "A new Canonical Ingredient or wording isn't confirmed")
     known = {canonical.id for canonical in store.canonical_ingredients()} | {
         new.id for new in body.canonical_ingredients
     }

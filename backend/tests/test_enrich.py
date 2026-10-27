@@ -1,7 +1,11 @@
-"""The enrich CLI parses each Pending recipe's lines and writes the facts through the API."""
+"""The enrich CLI hands a model a work packet of every Pending recipe, then checks the model's
+answer against what the packet offered and writes the facts through the API.
+"""
 
 import hashlib
 import io
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -10,26 +14,31 @@ from requests.adapters import BaseAdapter
 from requests.models import PreparedRequest, Response
 from requests.structures import CaseInsensitiveDict
 
+from recipes import fdc
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.enrich import (
-    ENRICHMENT_VERSION,
     SameOriginSession,
     Send,
+    apply,
     checked_base_url,
     main,
-    run,
+    packet,
+    read_answer,
     send_with,
 )
 from recipes.models import (
     MAX_LABEL,
     SCHEMA_VERSION,
+    CanonicalIngredient,
     IngestChannel,
     IngredientLine,
     Original,
     Recipe,
     WebsiteSource,
+    Wording,
     new_ulid,
 )
+from recipes.packet import ENRICHMENT_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,6 +48,7 @@ if TYPE_CHECKING:
     from recipes.store import Store
 
 BASE_URL = "http://testserver"
+SNAPSHOT = fdc.load_snapshot(Path(__file__).parent / "fixtures" / "fdc-snapshot.json")
 # Answers a request with its status, headers and body.
 type Handler = Callable[[PreparedRequest], tuple[int, dict[str, str], bytes]]
 
@@ -96,9 +106,9 @@ def add(
 ) -> Recipe:
     slug = title.lower().replace(" ", "-")
     lines = lines or [
-        IngredientLine(id="i1", component="For the marinade", text="2 tbsp soy sauce"),
-        IngredientLine(id="i2", component="For the marinade", text="3 cloves garlic, minced"),
-        IngredientLine(id="i3", component="For the sauce", text="1-2 tsp chili oil, or to taste"),
+        IngredientLine(id="i1", component="For the marinade", text="2 tbsp glimmer oil"),
+        IngredientLine(id="i2", component="For the marinade", text="3 cloves snorp garlic, minced"),
+        IngredientLine(id="i3", component="For the sauce", text="1-2 quill eggs, or to taste"),
         IngredientLine(id="i4", component="For the sauce", text="salt, to taste"),
     ]
     recipe = Recipe(
@@ -122,68 +132,254 @@ def stored(client: TestClient, recipe_id: str) -> dict[str, Any]:
     return client.get(f"/api/recipes/{recipe_id}", follow_redirects=True).json()
 
 
-def test_a_pending_recipe_gets_a_parse_fact_for_every_line_across_its_components(
-    editor_client: TestClient, api_store: Store
+def bundle(client: TestClient) -> dict[str, Any]:
+    return client.get("/api/collection", follow_redirects=True).json()
+
+
+def work_packet(send: Send, capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    """The packet `enrich packet` prints."""
+    assert packet(BASE_URL, send, SNAPSHOT) == 0
+    return json.loads(capsys.readouterr().out)
+
+
+NEW_GLIMMER = {"new": {"name": "glimmer oil", "family": "oil", "store_category_id": "aisles"}}
+
+
+def oil_line(**fields: Any) -> dict[str, Any]:
+    """An answer for "2 tbsp glimmer oil" within the offers: a new canonical, its food and tbsp."""
+    return {
+        "line_id": "i1",
+        "canonical": NEW_GLIMMER,
+        "fdc_id": 2004,
+        "portion_id": 606,
+        **fields,
+    }
+
+
+def answer_text(offered: dict[str, Any], *lines: dict[str, Any]) -> str:
+    """A model's answer to the packet: `lines` for every recipe in it."""
+    return json.dumps(
+        {
+            "packet_id": offered["packet_id"],
+            "model": "a-model",
+            "recipes": [
+                {"recipe_id": r["recipe_id"], "lines": list(lines or [oil_line()])}
+                for r in offered["recipes"]
+            ],
+        }
+    )
+
+
+def test_packet_prints_every_pending_recipe_and_writes_nothing(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pending = add(api_store, "Garlic Tofu")
+    add(api_store, "Ready Stew", status="ready")
+    adapter = api(editor_client)
+    before = bundle(editor_client)
+
+    offered = work_packet(through(adapter), capsys)
+
+    assert {request.method for request in adapter.requests} == {"GET"}
+    assert bundle(editor_client) == before
+    assert offered["fdc_release"] == SNAPSHOT.release
+    assert [r["recipe_id"] for r in offered["recipes"]] == [pending.id]
+    lines = offered["recipes"][0]["lines"]
+    assert [ln["line_id"] for ln in lines] == ["i1", "i2", "i3", "i4"]
+    assert lines[2]["parse"]["quantity"] == {"low": 1, "high": 2}
+    assert lines[2]["readable_quantities"] == [1, 2]
+    assert [food["fdc_id"] for food in lines[0]["fdc_candidates"]] == [2004]
+    assert [c["id"] for c in offered["store_categories"]][:3] == ["household", "produce", "meat"]
+
+
+def test_apply_writes_each_answered_lines_match_and_conversion_and_learns_its_wording(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     recipe = add(api_store, "Garlic Tofu")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
 
-    failed = run(BASE_URL, through(api(editor_client)))
+    failed = apply(BASE_URL, send, SNAPSHOT, answer_text(offered))
 
     assert failed == 0
+    assert "Garlic Tofu → awaiting_review" in capsys.readouterr().out
     enriched = stored(editor_client, recipe.id)
-    assert enriched["status"] == "awaiting_review"
-    assert enriched["enrichment_version"] == ENRICHMENT_VERSION
+    assert enriched["enrichment_version"] == ENRICHMENT_VERSION == 2
+    assert enriched["fdc_release"] == SNAPSHOT.release
     facts = enriched["facts"]["ingredients"]
     assert sorted(facts) == ["i1", "i2", "i3", "i4"]
     chili = facts["i3"]["parse"]
-    assert chili["quantity"] == {"low": 1, "high": 2}
-    assert (chili["unit"], chili["unit_kind"], chili["name"]) == ("tsp", "volume", "chili oil")
-    assert chili["comment"] == "or to taste"
-    assert facts["i2"]["parse"]["preparation"] == "minced"
-    assert facts["i4"]["parse"]["quantity"] is None
-    for fact in facts.values():
-        parse = fact["parse"]
-        assert (parse["provenance"], parse["estimated"], parse["confirmed"]) == (
-            "parser",
-            False,
-            False,
-        )
-        assert (parse["confirmed_by"], parse["confirmed_at"]) == (None, None)
-        assert 0 < parse["confidence"] <= 1
+    assert (chili["quantity"], chili["name"], chili["comment"]) == (
+        {"low": 1, "high": 2},
+        "quill eggs",
+        "or to taste",
+    )
+    assert facts["i2"]["match"] is None
+    (created,) = bundle(editor_client)["canonical_ingredients"]
+    assert (created["name"], created["family"], created["store_category_id"]) == (
+        "glimmer oil",
+        "oil",
+        "aisles",
+    )
+    oil = facts["i1"]
+    assert oil["match"]["provenance"] == "llm"
+    assert (oil["match"]["canonical_id"], oil["match"]["fdc_id"]) == (created["id"], 2004)
+    assert oil["conversion"]["provenance"] == "fdc"
+    assert oil["conversion"]["density_g_per_ml"] == pytest.approx(13.5 / 14.78676478125)
+    assert oil["conversion"]["per_100g"]["kcal"] == 884
+    assert [
+        (w["wording"], w["canonical_id"], w["confirmed"]) for w in bundle(editor_client)["wordings"]
+    ] == [("glimmer oil", created["id"], False)]
+    (issue,) = enriched["issues"]
+    assert issue["reason"] == "new Canonical Ingredient glimmer oil (oil, Aisles)"
+
+
+def test_a_new_canonical_named_in_two_recipes_is_created_once(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = add(api_store, "Garlic Tofu")
+    second = add(api_store, "Chili Noodles")
+    send = through(api(editor_client))
+
+    failed = apply(BASE_URL, send, SNAPSHOT, answer_text(work_packet(send, capsys)))
+
+    assert failed == 0
+    (created,) = bundle(editor_client)["canonical_ingredients"]
+    for recipe in (first, second):
+        match = stored(editor_client, recipe.id)["facts"]["ingredients"]["i1"]["match"]
+        assert match["canonical_id"] == created["id"]
+
+
+def test_the_answer_is_read_from_a_file_or_stdin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "answer.json"
+    path.write_text('{"from": "file"}')
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"from": "stdin"}'))
+
+    assert read_answer(str(path)) == '{"from": "file"}'
+    assert read_answer("-") == '{"from": "stdin"}'
+
+
+def test_a_stale_packet_is_rejected_and_nothing_is_written(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = add(api_store, "Garlic Tofu")
+    adapter = api(editor_client)
+    offered = work_packet(through(adapter), capsys)
+    add(api_store, "Chili Noodles")  # the Collection changed since the packet
+
+    failed = apply(BASE_URL, through(adapter), SNAPSHOT, answer_text(offered))
+
+    assert failed != 0
+    assert "packet" in capsys.readouterr().out
+    assert {request.method for request in adapter.requests} == {"GET"}
+    assert stored(editor_client, recipe.id)["status"] == "pending"
+
+
+def test_an_answer_that_isnt_an_answer_is_rejected_before_anything_is_read(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    adapter = Adapter(lambda _: (500, {}, b""))
+
+    failed = apply(BASE_URL, through(adapter), SNAPSHOT, '{"packet_id": "x", "density": 1}')
+
+    assert failed != 0
+    assert adapter.requests == []
+    assert "density" in capsys.readouterr().out
+
+
+def test_a_rejected_recipe_is_not_written_and_the_others_are(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bad = add(api_store, "Garlic Tofu")
+    good = add(api_store, "Chili Noodles")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    answered = json.loads(answer_text(offered))
+    for recipe in answered["recipes"]:
+        if recipe["recipe_id"] == bad.id:
+            recipe["lines"] = [oil_line(fdc_id=9999), oil_line(line_id="i3", quantity={"low": 7})]
+
+    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(answered))
+
+    assert failed == 1
+    out = capsys.readouterr().out
+    assert "i1: FDC food 9999 wasn't offered" in out
+    assert "i3: 7 isn't a number in the line" in out
+    assert stored(editor_client, bad.id) == bad.model_dump(mode="json")
+    assert stored(editor_client, good.id)["status"] == "awaiting_review"
+
+
+def test_a_recipe_the_answer_leaves_out_stays_pending(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = add(api_store, "Garlic Tofu")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    answered: dict[str, Any] = {
+        "packet_id": offered["packet_id"],
+        "model": "a-model",
+        "recipes": [],
+    }
+
+    assert apply(BASE_URL, send, SNAPSHOT, json.dumps(answered)) == 0
+    assert stored(editor_client, recipe.id)["status"] == "pending"
+
+
+def test_a_wording_an_editor_confirmed_is_used_and_not_learned_again(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    glimmer = CanonicalIngredient(
+        id=new_ulid(),
+        name="glimmer oil",
+        family="oil",
+        store_category_id="aisles",
+        confirmed=True,
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+    confirmed = Wording(
+        wording="glimmer oil", canonical_id=glimmer.id, confirmed=True, schema_version=1
+    )
+    api_store.enrich_recipe(add(api_store, "Ready Stew", status="ready"), [glimmer], [confirmed])
+    recipe = add(api_store, "Garlic Tofu")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    (oil, *_) = offered["recipes"][0]["lines"]
+    assert [c["id"] for c in oil["canonical_candidates"]] == [glimmer.id]
+
+    failed = apply(
+        BASE_URL, send, SNAPSHOT, answer_text(offered, oil_line(canonical={"id": glimmer.id}))
+    )
+
+    assert failed == 0
+    assert (
+        stored(editor_client, recipe.id)["facts"]["ingredients"]["i1"]["match"]["canonical_id"]
+        == glimmer.id
+    )
+    assert bundle(editor_client)["wordings"] == [confirmed.model_dump(mode="json")]
 
 
 def test_a_bulk_import_recipe_goes_straight_to_ready(
-    editor_client: TestClient, api_store: Store
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     recipe = add(api_store, "Bulk Curry", channel="bulk_import")
+    send = through(api(editor_client))
 
-    run(BASE_URL, through(api(editor_client)))
+    apply(BASE_URL, send, SNAPSHOT, answer_text(work_packet(send, capsys)))
 
     assert stored(editor_client, recipe.id)["status"] == "ready"
 
 
-def test_recipes_that_are_not_pending_are_left_alone(
-    editor_client: TestClient, api_store: Store
-) -> None:
-    ready = add(api_store, "Ready Stew", status="ready")
-    awaiting = add(api_store, "Awaiting Soup", status="awaiting_review")
-    adapter = api(editor_client)
-
-    failed = run(BASE_URL, through(adapter))
-
-    assert failed == 0
-    assert stored(editor_client, ready.id) == ready.model_dump(mode="json")
-    assert stored(editor_client, awaiting.id) == awaiting.model_dump(mode="json")
-    assert {request.method for request in adapter.requests} == {"GET"}
-
-
 def test_every_request_carries_the_service_token_and_writes_their_bodys_sha256(
-    editor_client: TestClient, api_store: Store
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     add(api_store, "Garlic Tofu")
     adapter = api(editor_client)
+    offered = work_packet(through(adapter), capsys)
 
-    run(BASE_URL, through(adapter))
+    apply(BASE_URL, through(adapter), SNAPSHOT, answer_text(offered))
 
     assert all(r.headers[SERVICE_TOKEN_HEADER] == SERVICE_TOKEN for r in adapter.requests)
     writes = [request for request in adapter.requests if request.method == "PUT"]
@@ -194,12 +390,14 @@ def test_every_request_carries_the_service_token_and_writes_their_bodys_sha256(
     assert writes[0].headers["content-type"] == "application/json"
 
 
-def test_a_recipe_that_fails_is_reported_and_the_run_goes_on(
+def test_a_recipe_that_fails_to_write_is_reported_and_the_run_goes_on(
     editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     first = add(api_store, "Garlic Tofu")
     second = add(api_store, "Chili Noodles")
     send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    lines = [{**oil_line(), "canonical": {"new": {**NEW_GLIMMER["new"], "name": "glim"}}}]
 
     def enrich_first_meanwhile(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
         # Someone else enriches the first recipe between the CLI's read and its write.
@@ -207,21 +405,20 @@ def test_a_recipe_that_fails_is_reported_and_the_run_goes_on(
             send("PUT", url, body)
         return send(method, url, body)
 
-    failed = run(BASE_URL, enrich_first_meanwhile)
+    failed = apply(BASE_URL, enrich_first_meanwhile, SNAPSHOT, answer_text(offered, *lines))
 
     assert failed == 1
     assert stored(editor_client, second.id)["status"] == "awaiting_review"
     out = capsys.readouterr().out
-    assert "Garlic Tofu" in out
-    assert "409" in out
+    assert "Garlic Tofu → failed: 409" in out
     assert "Chili Noodles → awaiting_review" in out
 
 
-def test_a_collection_the_cli_cant_list_fails_the_run_and_writes_nothing() -> None:
+def test_a_collection_the_cli_cant_list_fails_and_writes_nothing() -> None:
     # The API lists the Collection to anyone, so the 403 is CloudFront's, as for a blocked IP.
     adapter = Adapter(lambda _: (403, {"content-type": "application/json"}, b'{"message": "no"}'))
 
-    failed = run("https://plateful.example", through(adapter))
+    failed = packet("https://plateful.example", through(adapter), SNAPSHOT)
 
     assert failed != 0
     assert [request.url for request in adapter.requests] == [
@@ -233,16 +430,23 @@ def test_a_collection_the_cli_cant_list_fails_the_run_and_writes_nothing() -> No
     "text", ["", "   ", "x" * 300], ids=["empty", "whitespace", "300 characters"]
 )
 def test_a_line_the_parser_cant_read_leaves_its_recipe_and_the_next_still_enriched(
-    editor_client: TestClient, api_store: Store, text: str
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str], text: str
 ) -> None:
     odd = add(
         api_store,
         "Odd Line Stew",
-        lines=[IngredientLine(id="i1", text=text), IngredientLine(id="i2", text="2 eggs")],
+        lines=[IngredientLine(id="i1", text=text), IngredientLine(id="i2", text="2 quill eggs")],
     )
     after = add(api_store, "Garlic Tofu")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    answered: dict[str, Any] = {
+        "packet_id": offered["packet_id"],
+        "model": "a-model",
+        "recipes": [{"recipe_id": r["recipe_id"], "lines": []} for r in offered["recipes"]],
+    }
 
-    failed = run(BASE_URL, through(api(editor_client)))
+    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(answered))
 
     assert failed == 0
     enriched = stored(editor_client, odd.id)
@@ -316,8 +520,7 @@ def test_any_other_base_url_is_refused_before_the_token_is_sent(url: str) -> Non
 def test_main_without_the_service_token_stops_and_says_so(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("sys.argv", ["enrich", "https://d111111abcdef8.cloudfront.net"])
     monkeypatch.delenv("PLATEFUL_SERVICE_TOKEN", raising=False)
 
     with pytest.raises(SystemExit, match="PLATEFUL_SERVICE_TOKEN"):
-        main()
+        main(["packet", "https://d111111abcdef8.cloudfront.net"])

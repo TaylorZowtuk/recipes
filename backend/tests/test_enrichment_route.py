@@ -414,3 +414,45 @@ def test_a_canonical_ingredient_that_exists_is_not_created_again(
     after = bundle(editor_client)
     assert after["canonical_ingredients"] == before["canonical_ingredients"]
     assert after["wordings"] == before["wordings"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"canonical_ingredients": [{**BEEF, "confirmed": True}]},
+        {
+            "wordings": [
+                {
+                    "wording": "stewing beef",
+                    "canonical_id": BEEF_ID,
+                    "confirmed": True,
+                    "schema_version": 1,
+                }
+            ]
+        },
+    ],
+    ids=["confirmed canonical", "confirmed wording"],
+)
+def test_enrichment_cant_confirm_what_it_learns(
+    editor_client: TestClient, api_store: Store, fields: dict[str, Any]
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(editor_client, recipe.id, **fields)
+
+    assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)
+
+
+@pytest.mark.parametrize(
+    "fact_id", ["i10.match", "i1.segments", "i1"], ids=["no such line", "no such fact", "no fact"]
+)
+def test_an_issue_on_a_fact_enrichment_doesnt_write_is_refused(
+    editor_client: TestClient, api_store: Store, fact_id: str
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(editor_client, recipe.id, issues=[{**issue(1), "fact_id": fact_id}])
+
+    assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)

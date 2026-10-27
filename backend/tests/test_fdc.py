@@ -34,7 +34,12 @@ def test_a_snapshot_names_its_release(snapshot: fdc.Snapshot) -> None:
 
 def test_candidates_rank_the_closest_description_first(snapshot: fdc.Snapshot) -> None:
     # "Quill eggs, whole, raw" shares more of its words with the name than the longer SR one.
-    assert ids(snapshot.candidates("whole quill eggs")) == [1002, 2003]
+    assert ids(snapshot.candidates("whole quill eggs")) == [1002, 2003, 2008]
+
+
+def test_a_description_that_starts_with_the_name_ranks_first(snapshot: fdc.Snapshot) -> None:
+    # "Quill bread, egg" shares more of its words with "quill egg", but it's bread.
+    assert ids(snapshot.candidates("quill egg")) == [1002, 2003, 2008]
 
 
 def test_candidates_put_foundation_before_sr_legacy_on_a_tie(snapshot: fdc.Snapshot) -> None:

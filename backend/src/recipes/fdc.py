@@ -17,16 +17,16 @@ import zipfile
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import requests
 from pint import UnitRegistry
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
+from recipes.models import Dataset, Per100g
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-type Dataset = Literal["foundation", "sr_legacy"]
 
 
 class Source(NamedTuple):
@@ -92,14 +92,6 @@ class Frozen(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-class Per100g(Frozen):
-    kcal: float | None
-    protein_g: float | None
-    fat_g: float | None
-    carbs_g: float | None
-    sodium_mg: float | None
-
-
 class Portion(Frozen):
     """One of a food's portions: `amount` of `unit` weighs `gram_weight`. SR Legacy writes its
     unit out in the modifier ("cup, chopped"), which becomes the unit.
@@ -135,31 +127,36 @@ class Snapshot(Frozen):
     release: str
     foods: tuple[Food, ...]
     _by_id: dict[int, Food] = PrivateAttr()
-    _tokens: list[tuple[Food, frozenset[str]]] = PrivateAttr()
+    # Each food's words, and the words of its description's first part ("Egg" in "Egg, whole").
+    _tokens: list[tuple[Food, frozenset[str], frozenset[str]]] = PrivateAttr()
 
     def model_post_init(self, _context: object, /) -> None:
         self._by_id = {food.fdc_id: food for food in self.foods}
-        self._tokens = [(food, _tokens(food.description)) for food in self.foods]
+        self._tokens = [
+            (food, words(food.description), words(food.description.split(",")[0]))
+            for food in self.foods
+        ]
 
     def food(self, fdc_id: int) -> Food:
         """The food with this FDC id. KeyError if the snapshot has none."""
         return self._by_id[fdc_id]
 
     def candidates(self, name: str, limit: int = 8) -> list[Food]:
-        """The foods whose descriptions share words with an ingredient's name, best first: by the
-        share of their words in common, then Foundation before SR Legacy, then by FDC id.
+        """The foods whose descriptions share words with an ingredient's name, best first: those
+        whose description starts with the name ("Egg, whole" for "egg", before "Bread, egg"), then
+        by the share of their words in common, then Foundation before SR Legacy, then by FDC id.
         """
-        wanted = _tokens(name)
+        wanted = words(name)
         scored = [
-            (Fraction(len(wanted & tokens), len(wanted | tokens)), food)
-            for food, tokens in self._tokens
+            (head != wanted, -Fraction(len(wanted & tokens), len(wanted | tokens)), food)
+            for food, tokens, head in self._tokens
             if wanted & tokens
         ]
-        scored.sort(key=lambda pair: (-pair[0], pair[1].dataset != "foundation", pair[1].fdc_id))
-        return [food for _, food in scored[:limit]]
+        scored.sort(key=lambda s: (s[0], s[1], s[2].dataset != "foundation", s[2].fdc_id))
+        return [food for _, _, food in scored[:limit]]
 
 
-def _tokens(text: str) -> frozenset[str]:
+def words(text: str) -> frozenset[str]:
     """A text's words, lowercase and singular enough to match ("berries" and "berry")."""
     return frozenset(_singular(word) for word in WORDS.findall(text.lower()))
 

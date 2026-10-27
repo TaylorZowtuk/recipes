@@ -108,8 +108,16 @@ Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiti
 _Avoid_: Processing state
 
 **Enrichment Issue**:
-Something enrichment corrected or was unsure about, and which an editor should check.
+Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason.
 _Avoid_: Warning, error
+
+**Work Packet**:
+The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered is not written.
+_Avoid_: Prompt, batch
+
+**FDC Snapshot**:
+The pinned copy of USDA FoodData Central's Foundation Foods and SR Legacy kept in the repo, which every density, gram weight and nutrient value comes from. Its release is recorded on each recipe enriched with it.
+_Avoid_: Nutrition database, USDA API
 
 **Needs Review**:
 The list of open enrichment issues and unconfirmed facts, across all recipes.
@@ -148,8 +156,12 @@ _Avoid_: Bookmark, source (a source is where particular recipes came from)
 ### Cooking and shopping
 
 **Canonical Ingredient**:
-The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Canonical ingredients are grouped into families, e.g. *chicken*.
+The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Each one belongs to a **family**, a lowercase word that groups canonical ingredients, e.g. *chicken* for *chicken thigh* and *chicken breast*, and to a Store Category. Enrichment creates them; an editor confirms them.
 _Avoid_: Normalized ingredient, food item
+
+**Wording Cache**:
+What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it.
+_Avoid_: Alias table, synonym list
 
 **Pantry Staple**:
 A canonical ingredient the household always has on hand. Pantry staples are left out of grocery lists and ignored in fridge matching.
