@@ -392,6 +392,13 @@ h1:focus {
   margin: calc(var(--space) * 6) 0;
 }
 
+/* Google's button is an iframe whose document declares no colour scheme. When an iframe's scheme
+   differs from the page's, the browser paints its canvas opaque, which would put a white box around
+   the button in dark mode; matching its light scheme keeps the canvas transparent. */
+.google-button iframe {
+  color-scheme: light;
+}
+
 .sign-in-problem-row {
   display: flex;
   flex-wrap: wrap;

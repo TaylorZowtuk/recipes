@@ -394,6 +394,29 @@ test("the Plateful tokens follow the colour scheme", async ({ page }, testInfo) 
   await expect(page.locator('link[href*="fonts.googleapis.com"]')).toHaveCount(0);
 });
 
+test("the status bar takes the scheme's colour", async ({ page }, testInfo) => {
+  const scheme = schemeOf(testInfo);
+  await page.goto("/recipes");
+  // A dark status bar matches the dark background; a light one is the Plateful green.
+  const role: Role = scheme === "dark" ? "--bg" : "--accent";
+  const colours = await page.evaluate((role) => {
+    const probe = document.body.appendChild(document.createElement("i"));
+    const resolve = (colour: string) => {
+      probe.style.color = colour;
+      return getComputedStyle(probe).color;
+    };
+    const metas = [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')];
+    const current = metas.filter((meta) => !meta.media || matchMedia(meta.media).matches);
+    const result = {
+      theme: current.map((meta) => resolve(meta.content)),
+      wanted: resolve(`var(${role})`),
+    };
+    probe.remove();
+    return result;
+  }, role);
+  expect(colours.theme).toEqual([colours.wanted]);
+});
+
 test("keyboard focus in the account menu shows the focus ring", async ({ page }, testInfo) => {
   const scheme = schemeOf(testInfo);
   await page.goto("/week");
