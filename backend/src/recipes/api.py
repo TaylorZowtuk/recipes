@@ -1,5 +1,6 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, R
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
 
 from recipes.auth import Auth, require_editor
 from recipes.auth import router as auth_router
@@ -56,6 +57,18 @@ TO_CURRENT: dict[int | str, dict[str, Any]] = {
 }
 # A recipe's photos: more than the review offers, for photos added later.
 MAX_IMAGES = 20
+
+
+def _canonical(segment: str) -> str:
+    if not re.fullmatch(r"0|[1-9][0-9]*", segment):
+        msg = "A version is written in digits, with no leading zero"
+        raise ValueError(msg)
+    return segment
+
+
+# A version in a cache key. Only its canonical spelling is accepted, since 02, +2 or 2.0 would
+# each be a year-long CloudFront cache key of its own.
+Version = Annotated[int, BeforeValidator(_canonical), Path()]
 
 
 class Sync(BaseModel):
@@ -160,7 +173,7 @@ def get_sync(store: StoreDep, response: Response) -> Sync:
     )
 
 
-@router.get("/collection", status_code=307, responses=TO_CURRENT)
+@router.get("/collection", status_code=307, response_class=RedirectResponse, responses=TO_CURRENT)
 def get_current_collection(store: StoreDep) -> RedirectResponse:
     """Redirects to the Collection at its current version."""
     return _redirect(_collection_path(store.collection_version()))
@@ -170,7 +183,7 @@ def get_current_collection(store: StoreDep) -> RedirectResponse:
 # check for an editor: that answer depends on the cookie, and may re-issue it.
 @router.get("/v/collection/{collection_version}", response_model=Collection, responses=REDIRECT)
 def get_collection(
-    collection_version: Annotated[int, Path()], store: StoreDep, response: Response
+    collection_version: Version, store: StoreDep, response: Response
 ) -> Collection | Response:
     current = store.collection_version()
     if collection_version != current:
@@ -187,7 +200,12 @@ def get_collection(
 NO_SUCH_RECIPE: dict[int | str, dict[str, Any]] = {404: {"description": "No such recipe"}}
 
 
-@router.get("/recipes/{recipe_id}", status_code=307, responses={**TO_CURRENT, **NO_SUCH_RECIPE})
+@router.get(
+    "/recipes/{recipe_id}",
+    status_code=307,
+    response_class=RedirectResponse,
+    responses={**TO_CURRENT, **NO_SUCH_RECIPE},
+)
 def get_current_recipe(recipe_id: Annotated[Ulid, Path()], store: StoreDep) -> RedirectResponse:
     """Redirects to the recipe at its current version and schema version."""
     return _redirect(_recipe_path(_recipe(store, recipe_id)))
@@ -200,8 +218,8 @@ def get_current_recipe(recipe_id: Annotated[Ulid, Path()], store: StoreDep) -> R
 )
 def get_recipe(
     recipe_id: Annotated[Ulid, Path()],
-    recipe_version: Annotated[int, Path()],
-    schema_version: Annotated[int, Path()],
+    recipe_version: Version,
+    schema_version: Version,
     store: StoreDep,
     response: Response,
 ) -> Recipe | Response:

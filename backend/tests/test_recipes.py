@@ -74,3 +74,18 @@ def test_a_malformed_recipe_id_or_version_is_refused(client: TestClient) -> None
 
         assert response.status_code == 422, path
         assert response.headers["cache-control"] == "no-store"
+
+
+def test_another_spelling_of_the_current_versions_is_refused(
+    client: TestClient, store: Store
+) -> None:
+    recipe = store.add_recipe(RECIPES[1])
+    v, s = recipe.version, SCHEMA_VERSION
+
+    spellings = (f"0{v}/{s}", f"+{v}/{s}", f"{v}.0/{s}", f"{v}/0{s}", f"{v}/+{s}", f"{v}/{s}.0")
+
+    for versions in spellings:
+        response = client.get(f"/api/v/recipes/{recipe.id}/{versions}")
+
+        assert response.status_code == 422, versions
+        assert response.headers["cache-control"] == "no-store"
