@@ -29,8 +29,8 @@ export function loadSync(): Promise<Sync> {
 export function loadCollection(): Promise<Collection> {
   collection ??= remembered(
     loadSync().then(async ({ collection_version }) => {
-      const { data } = await api.GET("/api/collection", {
-        params: { query: { v: collection_version } },
+      const { data } = await api.GET("/api/v/collection/{collection_version}", {
+        params: { path: { collection_version } },
       });
       if (!data) throw new Error("No collection response");
       loadedCollection = data;
@@ -83,12 +83,12 @@ export async function loadRecipe(card: Card): Promise<Recipe> {
   const known = recipes.get(key);
   if (known) return known;
   const { schema_version } = await loadSync();
-  const { data, response } = await api.GET("/api/recipes/{recipe_id}", {
-    params: {
-      path: { recipe_id: card.id },
-      query: { v: card.recipe_version, s: schema_version },
+  const { data, response } = await api.GET(
+    "/api/v/recipes/{recipe_id}/{recipe_version}/{schema_version}",
+    {
+      params: { path: { recipe_id: card.id, recipe_version: card.recipe_version, schema_version } },
     },
-  });
+  );
   if (response.status === 404) throw new NotFound(card.id);
   if (!data) throw new Error(`No recipe ${card.id}`);
   recipes.set(key, data);
