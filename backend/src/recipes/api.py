@@ -66,9 +66,20 @@ def _canonical(segment: str) -> str:
     return segment
 
 
-# A version in a cache key. Only its canonical spelling is accepted, since 02, +2 or 2.0 would
-# each be a year-long CloudFront cache key of its own.
+# A version in a cache key, accepted only as digits with no leading zero: 02, +2 or 2.0 would
+# each be a year-long CloudFront cache key of its own. ONE_SPELLING refuses %31 for 1.
 Version = Annotated[int, BeforeValidator(_canonical), Path()]
+
+
+def _not_percent_encoded(request: Request) -> None:
+    if b"%" in request.scope["raw_path"]:
+        msg = "A versioned read is not percent-encoded"
+        raise RequestValidationError([{"type": "percent_encoded", "loc": ("path",), "msg": msg}])
+
+
+# Starlette decodes a path before routing, so a percent-encoded character anywhere in a
+# versioned read would be another year-long cache key. The PWA and enrich never send one.
+ONE_SPELLING = [Depends(_not_percent_encoded)]
 
 
 class Sync(BaseModel):
@@ -181,7 +192,12 @@ def get_current_collection(store: StoreDep) -> RedirectResponse:
 
 # Everything under /api/v/ is cached by CloudFront for whoever asks, so no route there may
 # check for an editor: that answer depends on the cookie, and may re-issue it.
-@router.get("/v/collection/{collection_version}", response_model=Collection, responses=REDIRECT)
+@router.get(
+    "/v/collection/{collection_version}",
+    response_model=Collection,
+    dependencies=ONE_SPELLING,
+    responses=REDIRECT,
+)
 def get_collection(
     collection_version: Version, store: StoreDep, response: Response
 ) -> Collection | Response:
@@ -214,6 +230,7 @@ def get_current_recipe(recipe_id: Annotated[Ulid, Path()], store: StoreDep) -> R
 @router.get(
     "/v/recipes/{recipe_id}/{recipe_version}/{schema_version}",
     response_model=Recipe,
+    dependencies=ONE_SPELLING,
     responses={**REDIRECT, **NO_SUCH_RECIPE},
 )
 def get_recipe(

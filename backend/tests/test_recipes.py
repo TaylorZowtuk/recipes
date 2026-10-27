@@ -76,16 +76,26 @@ def test_a_malformed_recipe_id_or_version_is_refused(client: TestClient) -> None
         assert response.headers["cache-control"] == "no-store"
 
 
+def encoded(text: str) -> str:
+    """Every character percent-encoded, as no client of the API writes it."""
+    return "".join(f"%{ord(char):02X}" for char in text)
+
+
 def test_another_spelling_of_the_current_versions_is_refused(
     client: TestClient, store: Store
 ) -> None:
     recipe = store.add_recipe(RECIPES[1])
-    v, s = recipe.version, SCHEMA_VERSION
+    i, v, s = recipe.id, recipe.version, SCHEMA_VERSION
+    spellings = (
+        *(f"{i}/{versions}" for versions in (f"0{v}/{s}", f"+{v}/{s}", f"{v}.0/{s}")),
+        *(f"{i}/{versions}" for versions in (f"{v}/0{s}", f"{v}/+{s}", f"{v}/{s}.0")),
+        f"{i}/{encoded(str(v))}/{s}",
+        f"{i}/{v}/{encoded(str(s))}",
+        f"{encoded(i[0])}{i[1:]}/{v}/{s}",
+    )
 
-    spellings = (f"0{v}/{s}", f"+{v}/{s}", f"{v}.0/{s}", f"{v}/0{s}", f"{v}/+{s}", f"{v}/{s}.0")
+    for spelling in spellings:
+        response = client.get(f"/api/v/recipes/{spelling}")
 
-    for versions in spellings:
-        response = client.get(f"/api/v/recipes/{recipe.id}/{versions}")
-
-        assert response.status_code == 422, versions
+        assert response.status_code == 422, spelling
         assert response.headers["cache-control"] == "no-store"

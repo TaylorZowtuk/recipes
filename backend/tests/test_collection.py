@@ -63,7 +63,9 @@ def test_another_spelling_of_the_current_version_is_refused(
 ) -> None:
     version = store.collection_version()
 
-    for spelling in (f"0{version}", f"+{version}", f"{version}.0"):
+    encoded = "".join(f"%{ord(digit):02X}" for digit in str(version))
+
+    for spelling in (f"0{version}", f"+{version}", f"{version}.0", encoded):
         response = client.get(f"/api/v/collection/{spelling}")
 
         assert response.status_code == 422, spelling
