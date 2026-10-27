@@ -7,9 +7,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from recipes.api import create_app
+from recipes.api import router as api_router
 from recipes.auth import (
     SERVICE_TOKEN_HEADER,
     SESSION_COOKIE,
@@ -20,13 +22,19 @@ from recipes.auth import (
     Editor,
     EditorDep,
     InvalidIdToken,
+    current_editor,
+    require_editor,
 )
+from recipes.auth import router as auth_router
+from recipes.models import SCHEMA_VERSION
+from recipes.seed import RECIPES
 from recipes.store import Store
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from fastapi import FastAPI
+    from fastapi.dependencies.models import Dependant
     from httpx2 import Response
 
     from recipes.images import ImageStore
@@ -365,3 +373,44 @@ def test_editor_only_routes_serve_a_signed_in_editor(client: TestClient) -> None
     response = client.get("/api/test-editors-only", headers=with_cookie(value))
     assert response.status_code == 200
     assert response.json() == {"name": EDITOR, "email": EDITOR}
+
+
+# Versioned reads, which CloudFront caches whoever asked
+
+
+def calls(dependant: Dependant) -> Iterator[object]:
+    for dependency in dependant.dependencies:
+        yield dependency.call
+        yield from calls(dependency)
+
+
+def test_no_versioned_read_checks_for_an_editor() -> None:
+    # The app's own routes nest its routers, so this walks the routers create_app includes.
+    routes = [r for r in [*api_router.routes, *auth_router.routes] if isinstance(r, APIRoute)]
+    editor_checks = {current_editor, require_editor}
+    versioned = [route for route in routes if route.path.startswith("/api/v/")]
+
+    assert len(versioned) == 2
+    for route in versioned:
+        assert not set(calls(route.dependant)) & editor_checks, route.path
+    session_route = next(r for r in routes if r.path == "/api/session" and r.methods == {"GET"})
+    assert set(calls(session_route.dependant)) & editor_checks, "the walk finds an editor check"
+
+
+def test_a_versioned_read_never_reissues_the_session_cookie(
+    client: TestClient, clock: Clock, table: str
+) -> None:
+    recipe = Store(table).add_recipe(RECIPES[0])
+    value = cookie_value(sign_in(client))
+    clock.advance(hours=24, minutes=1)
+    version = client.get("/api/sync").json()["collection_version"]
+
+    for path in (
+        f"/api/v/collection/{version}",
+        f"/api/v/recipes/{recipe.id}/{recipe.version}/{SCHEMA_VERSION}",
+    ):
+        response = client.get(path, headers=with_cookie(value))
+
+        assert response.status_code == 200, path
+        assert "set-cookie" not in response.headers, path
+    assert set_cookie(session(client, value)) is not None, "old enough to be re-issued"

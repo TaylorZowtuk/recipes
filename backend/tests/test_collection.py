@@ -17,7 +17,7 @@ def test_the_current_version_serves_the_cards_and_kitchen_settings(
         store.add_recipe(recipe)
     version = store.collection_version()
 
-    response = client.get(f"/api/collection?v={version}")
+    response = client.get(f"/api/v/collection/{version}")
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == IMMUTABLE
@@ -34,16 +34,25 @@ def test_a_stale_version_redirects_to_the_current_one(client: TestClient, store:
     stale = store.collection_version()
     store.add_recipe(RECIPES[0])
 
-    response = client.get(f"/api/collection?v={stale}")
+    response = client.get(f"/api/v/collection/{stale}")
 
     assert response.status_code == 307
-    assert response.headers["location"] == f"/api/collection?v={stale + 1}"
+    assert response.headers["location"] == f"/api/v/collection/{stale + 1}"
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_a_missing_version_redirects_to_the_current_one(client: TestClient, store: Store) -> None:
+def test_the_unversioned_collection_redirects_to_the_current_version(
+    client: TestClient, store: Store
+) -> None:
     response = client.get("/api/collection")
 
     assert response.status_code == 307
-    assert response.headers["location"] == f"/api/collection?v={store.collection_version()}"
+    assert response.headers["location"] == f"/api/v/collection/{store.collection_version()}"
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_a_non_integer_version_is_refused(client: TestClient) -> None:
+    response = client.get("/api/v/collection/latest")
+
+    assert response.status_code == 422
     assert response.headers["cache-control"] == "no-store"

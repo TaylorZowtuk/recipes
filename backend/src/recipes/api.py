@@ -51,6 +51,9 @@ NO_STORE = {"Cache-Control": "no-store"}
 REDIRECT: dict[int | str, dict[str, Any]] = {
     307: {"description": "Not the current version: redirects to it"}
 }
+TO_CURRENT: dict[int | str, dict[str, Any]] = {
+    307: {"description": "Redirects to the current version"}
+}
 # A recipe's photos: more than the review offers, for photos added later.
 MAX_IMAGES = 20
 
@@ -157,13 +160,21 @@ def get_sync(store: StoreDep, response: Response) -> Sync:
     )
 
 
-@router.get("/collection", response_model=Collection, responses=REDIRECT)
+@router.get("/collection", status_code=307, responses=TO_CURRENT)
+def get_current_collection(store: StoreDep) -> RedirectResponse:
+    """Redirects to the Collection at its current version."""
+    return _redirect(_collection_path(store.collection_version()))
+
+
+# Everything under /api/v/ is cached by CloudFront for whoever asks, so no route there may
+# check for an editor: that answer depends on the cookie, and may re-issue it.
+@router.get("/v/collection/{collection_version}", response_model=Collection, responses=REDIRECT)
 def get_collection(
-    store: StoreDep, response: Response, v: int | None = None
+    collection_version: Annotated[int, Path()], store: StoreDep, response: Response
 ) -> Collection | Response:
     current = store.collection_version()
-    if v != current:
-        return RedirectResponse(f"/api/collection?v={current}", 307, headers=NO_STORE)
+    if collection_version != current:
+        return _redirect(_collection_path(current))
     # Read after the counter, so the cards are never older than the version they're cached as.
     response.headers["Cache-Control"] = IMMUTABLE
     return Collection(
@@ -173,27 +184,52 @@ def get_collection(
     )
 
 
+NO_SUCH_RECIPE: dict[int | str, dict[str, Any]] = {404: {"description": "No such recipe"}}
+
+
+@router.get("/recipes/{recipe_id}", status_code=307, responses={**TO_CURRENT, **NO_SUCH_RECIPE})
+def get_current_recipe(recipe_id: Annotated[Ulid, Path()], store: StoreDep) -> RedirectResponse:
+    """Redirects to the recipe at its current version and schema version."""
+    return _redirect(_recipe_path(_recipe(store, recipe_id)))
+
+
 @router.get(
-    "/recipes/{recipe_id}",
+    "/v/recipes/{recipe_id}/{recipe_version}/{schema_version}",
     response_model=Recipe,
-    responses={**REDIRECT, 404: {"description": "No such recipe"}},
+    responses={**REDIRECT, **NO_SUCH_RECIPE},
 )
 def get_recipe(
     recipe_id: Annotated[Ulid, Path()],
+    recipe_version: Annotated[int, Path()],
+    schema_version: Annotated[int, Path()],
     store: StoreDep,
     response: Response,
-    v: int | None = None,
-    s: int | None = None,
 ) -> Recipe | Response:
-    """A recipe at its version (`v`) and schema version (`s`), which make up its cache key."""
+    """A recipe at its version and schema version, which make up its cache key."""
+    recipe = _recipe(store, recipe_id)
+    if (recipe_version, schema_version) != (recipe.version, SCHEMA_VERSION):
+        return _redirect(_recipe_path(recipe))
+    response.headers["Cache-Control"] = IMMUTABLE
+    return recipe
+
+
+def _recipe(store: Store, recipe_id: str) -> Recipe:
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
         raise HTTPException(404, "No such recipe", headers=NO_STORE)
-    if (v, s) != (recipe.version, SCHEMA_VERSION):
-        url = f"/api/recipes/{recipe_id}?v={recipe.version}&s={SCHEMA_VERSION}"
-        return RedirectResponse(url, 307, headers=NO_STORE)
-    response.headers["Cache-Control"] = IMMUTABLE
     return recipe
+
+
+def _collection_path(version: int) -> str:
+    return f"/api/v/collection/{version}"
+
+
+def _recipe_path(recipe: Recipe) -> str:
+    return f"/api/v/recipes/{recipe.id}/{recipe.version}/{SCHEMA_VERSION}"
+
+
+def _redirect(path: str) -> RedirectResponse:
+    return RedirectResponse(path, 307, headers=NO_STORE)
 
 
 INVALID_URL = {422: {"description": "Not an http(s) URL with a host"}}
