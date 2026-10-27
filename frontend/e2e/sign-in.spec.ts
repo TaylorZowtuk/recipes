@@ -277,7 +277,10 @@ test("sign-in shows that Google's button and the sign-in are on their way", asyn
   });
 
   await page.goto("/sign-in");
-  await expect(page.getByText("Loading Google sign-in…")).toBeVisible();
+  const loading = page.getByText("Loading Google sign-in…");
+  await expect(loading).toBeVisible();
+  // Only Google's iframe is forced to the light scheme; the note keeps the page's.
+  await expect(loading).not.toHaveCSS("color-scheme", "light");
   releaseGoogle();
   await page.getByRole("button", { name: "Sign in with Google" }).click();
   await expect(page.getByText("Loading Google sign-in…")).toHaveCount(0);
