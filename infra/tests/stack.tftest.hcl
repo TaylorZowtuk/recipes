@@ -92,12 +92,14 @@ run "site" {
     false)
     error_message = "A /api/v/* behaviour comes before /api/*, so versioned reads are cached."
   }
+  # The managed policies' fixed IDs, as modules/site sets them: CachingOptimized, CachingDisabled,
+  # AllViewerExceptHostHeader and SecurityHeadersPolicy.
   assert {
     condition = length([for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b if
       b.path_pattern == "/api/v/*" && b.target_origin_id == "api" &&
       toset(b.allowed_methods) == toset(["GET", "HEAD"]) && toset(b.cached_methods) == toset(["GET", "HEAD"]) &&
-      b.cache_policy_id == data.aws_cloudfront_cache_policy.optimized.id &&
-      b.response_headers_policy_id == data.aws_cloudfront_response_headers_policy.security.id &&
+      b.cache_policy_id == "658327ea-f89d-4fab-a63d-7e88639e58f6" &&
+      b.response_headers_policy_id == "67f7725c-6f97-4210-82d7-5512b31e9d03" &&
       anytrue([for f in b.function_association : f.event_type == "viewer-response" && f.function_arn == "arn:aws:cloudfront::123456789012:function/plateful-test-noindex"])
     ]) == 1
     error_message = "/api/v/* reads the API with GET and HEAD only, on Managed-CachingOptimized, the security headers policy and noindex.js."
@@ -109,19 +111,17 @@ run "site" {
   }
   assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :
-      contains([data.aws_cloudfront_cache_policy.disabled.id, data.aws_cloudfront_cache_policy.optimized.id], b.cache_policy_id) &&
-      contains(["", data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id], b.origin_request_policy_id == null ? "" : b.origin_request_policy_id) &&
-      contains(["", data.aws_cloudfront_response_headers_policy.security.id], b.response_headers_policy_id == null ? "" : b.response_headers_policy_id)
+      contains(["658327ea-f89d-4fab-a63d-7e88639e58f6", "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"], b.cache_policy_id) &&
+      contains(["", "b689b0a8-53d0-40ab-baf2-68738e2966ac"], b.origin_request_policy_id == null ? "" : b.origin_request_policy_id) &&
+      b.response_headers_policy_id == "67f7725c-6f97-4210-82d7-5512b31e9d03"
     ])
-    error_message = "Every behaviour uses only the managed policies this module looks up: the Free plan forbids custom ones."
+    error_message = "Every behaviour uses only the managed policies: the Free plan forbids custom ones."
   }
+  # Keeps the policy asserts above from passing on nulls: the behaviours use two distinct cache policies.
   assert {
-    condition = alltrue([for n in [
-      data.aws_cloudfront_cache_policy.disabled.name, data.aws_cloudfront_cache_policy.optimized.name,
-      data.aws_cloudfront_origin_request_policy.all_viewer_except_host.name,
-      data.aws_cloudfront_response_headers_policy.security.name,
-    ] : startswith(n, "Managed-")])
-    error_message = "The policies looked up are AWS-managed ones."
+    condition = length(toset([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :
+    b.cache_policy_id if b.cache_policy_id != null])) == 2
+    error_message = "The behaviours' cache policy IDs are set and differ, so the policy asserts compare real values."
   }
   assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :

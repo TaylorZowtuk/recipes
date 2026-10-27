@@ -13,28 +13,36 @@ failed=0
 # header <name>: the last response's value for that header.
 header() { sed -n "s/^$1: *//Ip" "$tmp/headers" | tr -d '\r' | tail -n1; }
 
-# check [-c <cache-control part>]... [-x <name>: <value>]... [-X <method>] [-H <header>]... <path>
+# check [-r] [-c <cache-control part>]... [-x <name>: <value>]... [-X <method>] [-H <header>]... <path>
 # <status> <content-type prefix> [body pattern]: request the path (GET unless -X) until the response
 # has that status, Content-Type, X-Robots-Tag: noindex, every -c part in its Cache-Control, every -x
-# header and the body pattern.
+# header and the body pattern. With -r, each attempt requests the Location the path redirects to.
 check() {
-  local caches=() expects=() req=() method=GET part got problems attempt
+  local caches=() expects=() req=() method=GET resolve="" target part got problems attempt
   while [[ $1 == -* ]]; do
     case $1 in
       -c) caches+=("$2") ;;
       -x) expects+=("$2") ;;
       -X) method=$2 ;;
       -H) req+=(-H "$2") ;;
+      -r) resolve=1 && shift && continue ;;
     esac
     shift 2
   done
   local path=$1 status=$2 type=$3 pattern=${4:-} label=$1
   [[ $method == GET ]] || label="$method $path"
   for attempt in 1 2 3 4 5 6; do
+    target=$path
+    if [[ -n $resolve ]]; then
+      : >"$tmp/headers"
+      curl -sS --max-time 20 -o /dev/null -D "$tmp/headers" "$url$path" || true
+      target=$(header location) && label="$path -> $target"
+    fi
     # curl writes 000 itself when it can't connect; empty files keep the checks below quiet.
     : >"$tmp/headers" && : >"$tmp/body"
-    got=$(curl -sS --max-time 20 -X "$method" "${req[@]}" -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' "$url$path") || true
+    got=$(curl -sS --max-time 20 -X "$method" "${req[@]}" -D "$tmp/headers" -o "$tmp/body" -w '%{http_code}' "$url$target") || true
     problems=()
+    [[ -n $target ]] || problems+=("no Location from $path")
     [[ $got == "$status" ]] || problems+=("status $got, want $status")
     header content-type | grep -qi "^$type" || problems+=("Content-Type '$(header content-type)', want $type")
     header x-robots-tag | grep -qi noindex || problems+=("X-Robots-Tag '$(header x-robots-tag)', want noindex")
@@ -70,14 +78,10 @@ fi
 check /api/does-not-exist 404 application/json '"detail"'
 check /api/sync 200 application/json '"collection_version"'
 # The current Collection version is cached at the edge: the first GET may fill it, the next must hit.
-version=$(grep -o '"collection_version": *[0-9]*' "$tmp/body" | grep -o '[0-9]*$') || true
-if [[ -n $version ]]; then
-  check "/api/v/collection/$version" 200 application/json
-  check -c immutable -x 'X-Cache: Hit from cloudfront' "/api/v/collection/$version" 200 application/json
-else
-  echo "FAIL /api/sync: no collection_version"
-  failed=1
-fi
+# Each attempt follows the 307 from the uncached /api/collection, so a version that moves between
+# attempts re-points the check.
+check -r /api/collection 200 application/json
+check -r -c immutable -x 'X-Cache: Hit from cloudfront' /api/collection 200 application/json
 # A visitor's session, which reads the stack's SSM parameters (with KMS decryption) on a cold start.
 check -c no-store /api/session 200 application/json '"google_client_id"'
 # OAC signs a write to the function URL only with the body's SHA-256 in x-amz-content-sha256 (here the

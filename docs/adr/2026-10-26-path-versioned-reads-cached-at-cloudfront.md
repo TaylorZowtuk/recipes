@@ -5,7 +5,7 @@ Versioned reads live under one prefix, with every part of the cache key in the p
 ## Why not a query string
 
 - The Free plan allows only managed cache policies, and custom ones stay out of scope.
-- The managed policies that put all query strings in the cache key are `UseOriginCacheControlHeaders-QueryStrings` and the Amplify ones. The first also keys on `Host` and every cookie. A header in the cache key is forwarded to the origin, and a Lambda function URL rejects the distribution's host: the CloudFront console greys the policy out for our API origin ("Lambda Function URL origins expect the origin's host and cannot resolve the distribution's host"), checked on staging on 2026-10-20. AWS says the Amplify policies are for Amplify only, and they key on `Host` or cookies too.
+- The [managed cache policies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html) that put all query strings in the cache key are `UseOriginCacheControlHeaders-QueryStrings` and the Amplify ones. The first also keys on `Host` and every cookie. A header in the cache key is forwarded to the origin, and a Lambda function URL rejects the distribution's host: the CloudFront console greys the policy out for our API origin ("Lambda Function URL origins expect the origin's host and cannot resolve the distribution's host"), checked by hand in the console on staging on 2026-10-20. AWS says the Amplify policies are for Amplify only, and they key on `Host` or cookies too.
 - So with the version in a query string, `/api/*` had to stay on `CachingDisabled`, and every phone's first fetch of a new version reached Lambda and DynamoDB.
 
 ## The behaviour
@@ -23,6 +23,6 @@ Versioned reads live under one prefix, with every part of the cache key in the p
 ## Consequences
 
 - A versioned read answers `immutable` when its versions are current. When they aren't, it answers a `no-store` 307 to the current path; an unknown recipe is a `no-store` 404.
-- `CachingOptimized` has a 1 s minimum TTL, which CloudFront applies even over `no-store`. A 307, 404 or 5xx under `/api/v/*` may be served from one edge for up to 1 s. This is accepted: a phone that follows a stale redirect lands on a version at most a second old, and its next poll catches up.
+- `CachingOptimized` has a 1 s minimum TTL, which CloudFront applies even over `no-store`, so the API's `no-store` 307s, 404s and 5xx under `/api/v/*` may be served from one edge for up to 1 s. A 502 or 504 from Lambda or the Web Adapter carries no `Cache-Control`, so CloudFront caches it for its [error caching minimum TTL](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/HTTPStatusCodes.html), 10 s by default (the distribution sets no `custom_error_response`). This is accepted: a phone that follows a stale redirect lands on a version at most a second old, and its next poll catches up; a cached 502 or 504 holds up a phone's read of that version by up to 10 s.
 - The unversioned entry points, `GET /api/collection` and `GET /api/recipes/<recipe_id>`, stay under the uncached `/api/*` and 307 (`no-store`) to the current versioned path.
 - `make smoke` checks that the second fetch of the current Collection version is a CloudFront cache hit.
