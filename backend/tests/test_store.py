@@ -1,20 +1,30 @@
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 from pydantic import ValidationError
 
 from recipes.models import (
     SCHEMA_VERSION,
+    CanonicalIngredient,
+    EnrichmentIssue,
     QueuedIngest,
     SourceGuard,
     StatedTime,
     StatedTimes,
     WebsiteSource,
+    Wording,
     card_for,
 )
 from recipes.seed import RECIPES
-from recipes.store import DuplicateSource, Store, VersionConflict, recipe_key
+from recipes.store import (
+    CanonicalExists,
+    DuplicateSource,
+    Store,
+    VersionConflict,
+    WordingConfirmed,
+    recipe_key,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -62,6 +72,86 @@ def test_card_upkeep_states_the_total_time_or_else_prep_plus_cook(
     recipe = RECIPES[0].model_copy(update={"original": original})
 
     assert card_for(recipe).stated_seconds == stated_seconds
+
+
+def test_card_upkeep_counts_the_open_enrichment_issues() -> None:
+    def issue(n: int, status: Literal["open", "resolved"]) -> EnrichmentIssue:
+        return EnrichmentIssue(
+            id=f"01K7Q0000000000000000000D{n}", fact_id="i1.match", reason="unsure", status=status
+        )
+
+    issues = [issue(1, "open"), issue(2, "resolved"), issue(3, "open")]
+    recipe = RECIPES[0].model_copy(update={"issues": issues})
+
+    assert card_for(recipe).needs_review.open_issues == 2
+
+
+CHICKEN = CanonicalIngredient(
+    id="01K7Q0000000000000000000C1",
+    name="chicken thigh",
+    family="chicken",
+    store_category_id="meat",
+    version=1,
+    schema_version=SCHEMA_VERSION,
+)
+THIGHS = Wording(
+    wording="boneless chicken thighs", canonical_id=CHICKEN.id, schema_version=SCHEMA_VERSION
+)
+
+
+def test_enriching_writes_the_recipe_its_canonical_ingredients_and_wordings_at_once(
+    store: Store,
+) -> None:
+    added = store.add_recipe(RECIPES[0])
+    before = store.collection_version()
+
+    enriched = store.enrich_recipe(added, [CHICKEN], [THIGHS])
+
+    assert enriched.version == added.version + 1
+    assert store.get_recipe(added.id) == enriched
+    assert store.cards() == [card_for(enriched)]
+    assert store.canonical_ingredients() == [CHICKEN]
+    assert store.wordings() == [THIGHS]
+    assert store.collection_version() == before + 1
+
+
+def test_a_confirmed_wording_refuses_the_whole_enrichment(store: Store) -> None:
+    confirmed = THIGHS.model_copy(update={"confirmed": True})
+    store.enrich_recipe(store.add_recipe(RECIPES[0]), [], [confirmed])
+    second = store.add_recipe(RECIPES[1])
+    before = store.collection_version()
+
+    with pytest.raises(WordingConfirmed):
+        store.enrich_recipe(second, [CHICKEN], [THIGHS])
+
+    assert store.get_recipe(second.id) == second
+    assert store.canonical_ingredients() == []
+    assert store.wordings() == [confirmed]
+    assert store.collection_version() == before
+
+
+def test_an_existing_canonical_ingredient_refuses_the_whole_enrichment(store: Store) -> None:
+    store.enrich_recipe(store.add_recipe(RECIPES[0]), [CHICKEN], [])
+    second = store.add_recipe(RECIPES[1])
+    before = store.collection_version()
+
+    with pytest.raises(CanonicalExists):
+        store.enrich_recipe(second, [CHICKEN.model_copy(update={"name": "thigh"})], [THIGHS])
+
+    assert store.get_recipe(second.id) == second
+    assert store.canonical_ingredients() == [CHICKEN]
+    assert store.wordings() == []
+    assert store.collection_version() == before
+
+
+def test_canonical_ingredients_and_wordings_are_read_across_pages(store: Store) -> None:
+    ids = [f"01K7Q0000000000000000000C{n}" for n in range(3)]
+    canonicals = [CHICKEN.model_copy(update={"id": i}) for i in ids]
+    wordings = [THIGHS.model_copy(update={"wording": f"thighs {n}"}) for n in range(3)]
+    store.enrich_recipe(store.add_recipe(RECIPES[0]), canonicals, wordings)
+
+    assert [c.id for c in store.canonical_ingredients(page_size=2)] == ids
+    assert store.wordings(page_size=2) == wordings
 
 
 def test_adding_a_recipe_writes_its_card_and_bumps_the_collection(store: Store) -> None:

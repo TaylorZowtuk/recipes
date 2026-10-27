@@ -27,6 +27,7 @@ from recipes.ingest import (
 )
 from recipes.models import (
     SCHEMA_VERSION,
+    CanonicalIngredient,
     Card,
     Difficulty,
     Enrichment,
@@ -40,9 +41,16 @@ from recipes.models import (
     Ulid,
     WebsiteSource,
     WebUrl,
+    Wording,
     new_ulid,
 )
-from recipes.store import DuplicateSource, Store, VersionConflict
+from recipes.store import (
+    CanonicalExists,
+    DuplicateSource,
+    Store,
+    VersionConflict,
+    WordingConfirmed,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -69,6 +77,8 @@ class Collection(BaseModel):
 
     collection_version: int
     cards: list[Card]
+    canonical_ingredients: list[CanonicalIngredient]
+    wordings: list[Wording]  # the wording cache
     kitchen_settings: KitchenSettings
 
 
@@ -169,6 +179,8 @@ def get_collection(
     return Collection(
         collection_version=current,
         cards=store.cards(),
+        canonical_ingredients=store.canonical_ingredients(),
+        wordings=store.wordings(),
         kitchen_settings=store.kitchen_settings(),
     )
 
@@ -317,12 +329,19 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
     responses={
         403: DUPLICATE[403],
         404: {"description": "No such recipe"},
-        409: {"description": "The recipe isn't Pending, or changed meanwhile"},
-        422: {"description": "A fact is for a line the recipe doesn't have"},
+        409: {
+            "description": "The recipe isn't Pending or changed meanwhile, a new Canonical "
+            "Ingredient's id is taken, or an editor confirmed a wording"
+        },
+        422: {
+            "description": "A fact is for a line the recipe doesn't have, or names an unknown "
+            "Canonical Ingredient or Store Category"
+        },
     },
 )
 def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep) -> Recipe:
-    """Store a Pending recipe's facts. A bulk import's recipe is then Ready, and any other waits
+    """Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
+    create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
     in Awaiting Review for an editor to check it.
     """
     recipe = store.get_recipe(recipe_id)
@@ -333,14 +352,42 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    _check_canonical_ingredients(body, store)
     enriched = recipe.model_copy(
         update={
             "facts": body.facts,
             "enrichment_version": body.enrichment_version,
+            "fdc_release": body.fdc_release,
+            "issues": body.issues,
             "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
         }
     )
-    return store.update_recipe(enriched)
+    try:
+        return store.enrich_recipe(enriched, body.canonical_ingredients, body.wordings)
+    except CanonicalExists:
+        raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
+    except WordingConfirmed:
+        raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
+    """Refuse a match or wording for an unknown Canonical Ingredient, and a new one in a Store
+    Category that isn't in the Kitchen settings.
+    """
+    categories = {category.id for category in store.kitchen_settings().store_categories}
+    if any(new.store_category_id not in categories for new in body.canonical_ingredients):
+        raise HTTPException(422, "A new Canonical Ingredient's Store Category doesn't exist")
+    learned = [*body.canonical_ingredients, *body.wordings]
+    if any(item.schema_version != SCHEMA_VERSION for item in learned):
+        raise HTTPException(422, f"Each new item is at schema version {SCHEMA_VERSION}")
+    known = {canonical.id for canonical in store.canonical_ingredients()} | {
+        new.id for new in body.canonical_ingredients
+    }
+    matched = {
+        facts.match.canonical_id for facts in body.facts.ingredients.values() if facts.match
+    } | {wording.canonical_id for wording in body.wordings}
+    if unknown := sorted(matched - known):
+        raise HTTPException(422, f"No Canonical Ingredient {', '.join(unknown)}")
 
 
 @router.get("/queued-ingests", dependencies=EDITORS_ONLY, responses={403: DUPLICATE[403]})
