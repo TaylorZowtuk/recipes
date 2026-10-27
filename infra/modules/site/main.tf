@@ -180,9 +180,27 @@ resource "aws_cloudfront_distribution" "this" {
     origin_access_control_id = var.origin_access_control_ids.images
   }
 
-  # The API. Nothing is cached yet: the only managed policies that put query strings in the cache
-  # key also forward the Host header, which a function URL origin rejects. Caching versioned reads
-  # (/api/collection?v=, recipes by version) is an open decision; see infra/AGENTS.md.
+  # Versioned reads, with every part of the key in the path: the managed policies that key on query
+  # strings also forward Host, which a function URL origin rejects. No origin request policy, so no
+  # cookie or viewer Host reaches the API: a cached read can't depend on who asked, and the function
+  # URL gets its own host. The 1 s minimum TTL also caches no-store redirects and errors for 1 s.
+  ordered_cache_behavior {
+    path_pattern               = "/api/v/*"
+    target_origin_id           = local.api_origin
+    viewer_protocol_policy     = "https-only"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.noindex.arn
+    }
+  }
+
+  # The rest of the API, uncached, with the viewer's cookies and headers but not its Host.
   ordered_cache_behavior {
     path_pattern               = "/api/*"
     target_origin_id           = local.api_origin

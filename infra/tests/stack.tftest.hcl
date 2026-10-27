@@ -1,7 +1,8 @@
 # The Free plan and capacity rules (hosting and stacks ADRs), checked offline against mock
 # providers: provisioned DynamoDB at the stacks' capacities, managed CloudFront policies only, at
-# most five behaviours, no distribution-wide error responses, noindex.js on every behaviour,
-# spa.js on the default one only, and the bootstrap-made OAC on every origin. Also the spend guard:
+# most five behaviours, a cached /api/v/* ahead of /api/* with no origin request policy, no
+# distribution-wide error responses, noindex.js on every behaviour, spa.js on the default one
+# only, and the bootstrap-made OAC on every origin. Also the spend guard:
 # the API's reserved concurrency, the WAF rate limit, the kill switch's wiring in each stack, and
 # bootstrap's subscription of each stack's kill switch to the account's spend alarm topic.
 
@@ -83,6 +84,28 @@ run "site" {
   assert {
     condition     = length(aws_cloudfront_distribution.this.ordered_cache_behavior) + 1 <= 5
     error_message = "The Free plan allows at most five cache behaviours."
+  }
+  assert {
+    condition = try(
+      index(aws_cloudfront_distribution.this.ordered_cache_behavior[*].path_pattern, "/api/v/*") <
+      index(aws_cloudfront_distribution.this.ordered_cache_behavior[*].path_pattern, "/api/*"),
+    false)
+    error_message = "A /api/v/* behaviour comes before /api/*, so versioned reads are cached."
+  }
+  assert {
+    condition = length([for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b if
+      b.path_pattern == "/api/v/*" && b.target_origin_id == "api" &&
+      toset(b.allowed_methods) == toset(["GET", "HEAD"]) && toset(b.cached_methods) == toset(["GET", "HEAD"]) &&
+      b.cache_policy_id == data.aws_cloudfront_cache_policy.optimized.id &&
+      b.response_headers_policy_id == data.aws_cloudfront_response_headers_policy.security.id &&
+      anytrue([for f in b.function_association : f.event_type == "viewer-response" && f.function_arn == "arn:aws:cloudfront::123456789012:function/plateful-test-noindex"])
+    ]) == 1
+    error_message = "/api/v/* reads the API with GET and HEAD only, on Managed-CachingOptimized, the security headers policy and noindex.js."
+  }
+  assert {
+    condition = alltrue([for b in aws_cloudfront_distribution.this.ordered_cache_behavior :
+    b.origin_request_policy_id == null || b.origin_request_policy_id == "" if b.path_pattern == "/api/v/*"])
+    error_message = "/api/v/* has no origin request policy: no cookie or viewer Host may reach the API."
   }
   assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :
