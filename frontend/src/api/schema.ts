@@ -773,7 +773,7 @@ export interface components {
         };
         /**
          * Per100g
-         * @description The FDC snapshot's nutrition for 100 g of the matched food.
+         * @description The FDC snapshot's nutrition for 100 g of the matched food, as FDC states it.
          */
         Per100g: {
             /** Carbs G */
@@ -1463,7 +1463,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact is for a line the recipe doesn't have, or names an unknown Canonical Ingredient or Store Category */
+            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed */
             422: {
                 headers: {
                     [name: string]: unknown;
