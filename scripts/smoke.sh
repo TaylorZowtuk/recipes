@@ -13,14 +13,16 @@ failed=0
 # header <name>: the last response's value for that header.
 header() { sed -n "s/^$1: *//Ip" "$tmp/headers" | tr -d '\r' | tail -n1; }
 
-# check [-c <cache-control part>]... [-X <method>] [-H <header>]... <path> <status> <content-type
-# prefix> [body pattern]: request the path (GET unless -X) until the response has that status,
-# Content-Type, X-Robots-Tag: noindex, every -c part in its Cache-Control and the body pattern.
+# check [-c <cache-control part>]... [-x <name>: <value>]... [-X <method>] [-H <header>]... <path>
+# <status> <content-type prefix> [body pattern]: request the path (GET unless -X) until the response
+# has that status, Content-Type, X-Robots-Tag: noindex, every -c part in its Cache-Control, every -x
+# header and the body pattern.
 check() {
-  local caches=() req=() method=GET part got problems attempt
+  local caches=() expects=() req=() method=GET part got problems attempt
   while [[ $1 == -* ]]; do
     case $1 in
       -c) caches+=("$2") ;;
+      -x) expects+=("$2") ;;
       -X) method=$2 ;;
       -H) req+=(-H "$2") ;;
     esac
@@ -38,6 +40,9 @@ check() {
     header x-robots-tag | grep -qi noindex || problems+=("X-Robots-Tag '$(header x-robots-tag)', want noindex")
     for part in "${caches[@]}"; do
       header cache-control | grep -qiF "$part" || problems+=("Cache-Control '$(header cache-control)', want $part")
+    done
+    for part in "${expects[@]}"; do
+      header "${part%%:*}" | grep -qixF "${part#*: }" || problems+=("${part%%:*} '$(header "${part%%:*}")', want ${part#*: }")
     done
     [[ -z $pattern ]] || grep -qF "$pattern" "$tmp/body" || problems+=("body lacks $pattern")
     ((${#problems[@]})) || { echo "ok   $label ($got $(header content-type))"; return; }
@@ -64,6 +69,15 @@ fi
 # CloudFront runs no viewer-response function on a 404, so its X-Robots-Tag comes from FastAPI.
 check /api/does-not-exist 404 application/json '"detail"'
 check /api/sync 200 application/json '"collection_version"'
+# The current Collection version is cached at the edge: the first GET may fill it, the next must hit.
+version=$(grep -o '"collection_version": *[0-9]*' "$tmp/body" | grep -o '[0-9]*$') || true
+if [[ -n $version ]]; then
+  check "/api/v/collection/$version" 200 application/json
+  check -c immutable -x 'X-Cache: Hit from cloudfront' "/api/v/collection/$version" 200 application/json
+else
+  echo "FAIL /api/sync: no collection_version"
+  failed=1
+fi
 # A visitor's session, which reads the stack's SSM parameters (with KMS decryption) on a cold start.
 check -c no-store /api/session 200 application/json '"google_client_id"'
 # OAC signs a write to the function URL only with the body's SHA-256 in x-amz-content-sha256 (here the
