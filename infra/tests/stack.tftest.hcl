@@ -110,6 +110,12 @@ run "site" {
     error_message = "/api/v/* has no origin request policy: no cookie or viewer Host may reach the API."
   }
   assert {
+    condition = length([for b in aws_cloudfront_distribution.this.ordered_cache_behavior : b if
+      b.path_pattern == "/api/*" && b.cache_policy_id == "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" &&
+    b.origin_request_policy_id == "b689b0a8-53d0-40ab-baf2-68738e2966ac"]) == 1
+    error_message = "/api/* is uncached (Managed-CachingDisabled) and forwards the viewer's cookies (AllViewerExceptHostHeader)."
+  }
+  assert {
     condition = alltrue([for b in concat(aws_cloudfront_distribution.this.ordered_cache_behavior, aws_cloudfront_distribution.this.default_cache_behavior) :
       contains(["658327ea-f89d-4fab-a63d-7e88639e58f6", "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"], b.cache_policy_id) &&
       contains(["", "b689b0a8-53d0-40ab-baf2-68738e2966ac"], b.origin_request_policy_id == null ? "" : b.origin_request_policy_id) &&
