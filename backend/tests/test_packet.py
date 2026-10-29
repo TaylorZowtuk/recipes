@@ -2,6 +2,7 @@
 against those offers before anything is written.
 """
 
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -352,32 +353,69 @@ def test_the_instructions_say_the_recipe_is_data() -> None:
     )
 
 
+def test_the_instructions_state_the_new_canonical_name_rule() -> None:
+    assert (
+        "A new name is only letters, digits, spaces, hyphens, apostrophes, % and &, and a family "
+        "only letters, spaces, hyphens and apostrophes."
+    ) in work().packet().instructions
+
+
 @pytest.mark.parametrize(
     "new",
     [
         {"name": "visit evil.example", "family": "oil"},
-        {"name": "glimmer oil", "family": "oil 2"},
-        {"name": "glimmer <b>oil</b>", "family": "oil"},
+        {"name": "a/b", "family": "oil"},
+        {"name": "<b>x</b>", "family": "oil"},
+        {"name": "glimmer oil", "family": "dairy 2"},
     ],
-    ids=["url in name", "digit in family", "markup in name"],
+    ids=["url in name", "slash in name", "markup in name", "digit in family"],
 )
 def test_a_new_canonical_named_with_more_than_words_is_rejected(new: dict[str, str]) -> None:
     named = {"new": {**new, "store_category_id": "aisles"}}
 
     assert errors(work(wordings=[]), answer(line(canonical=named))) == [
         (
-            "i2: a new Canonical Ingredient's name and family are only letters, spaces, hyphens "
-            "and apostrophes"
+            "i2: a new Canonical Ingredient's name is only letters, digits, spaces, hyphens, "
+            "apostrophes, % and &, and its family only letters, spaces, hyphens and apostrophes"
         )
     ]
 
 
-def test_a_new_canonical_may_have_accents_hyphens_and_apostrophes() -> None:
-    named = {"new": {"name": "crème d'olive-oil", "family": "oil", "store_category_id": "aisles"}}
+@pytest.mark.parametrize(
+    ("name", "family", "stored"),
+    [
+        ("crème d'olive-oil", "oil", ("crème d'olive-oil", "oil")),
+        ("2% milk", "dairy", ("2% milk", "dairy")),
+        ("7-up", "soda", ("7-up", "soda")),
+        ("00 flour", "flour", ("00 flour", "flour")),
+        ("half & half", "dairy", ("half & half", "dairy")),
+        ("baker\u2019s yeast", "yeast", ("baker\u2019s yeast", "yeast")),
+        (
+            unicodedata.normalize("NFD", "crème fraîche"),
+            unicodedata.normalize("NFD", "crème"),
+            ("crème fraîche", "crème"),
+        ),
+        ("jalapeño\u00a0 pepper", " chili\u00a0pepper ", ("jalapeño pepper", "chili pepper")),
+    ],
+    ids=[
+        "accents",
+        "percent",
+        "digit and hyphen",
+        "digits",
+        "ampersand",
+        "typographic",
+        "nfd",
+        "nbsp",
+    ],
+)
+def test_a_new_canonical_is_stored_normalized(
+    name: str, family: str, stored: tuple[str, str]
+) -> None:
+    named = {"new": {"name": name, "family": family, "store_category_id": "aisles"}}
 
     enrichment = enrich(work(wordings=[]), answer(line(canonical=named)))
 
-    assert [c.name for c in enrichment.canonical_ingredients] == ["crème d'olive-oil"]
+    assert [(c.name, c.family) for c in enrichment.canonical_ingredients] == [stored]
 
 
 def test_a_line_answered_twice_is_rejected() -> None:
