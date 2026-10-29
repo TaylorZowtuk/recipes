@@ -198,12 +198,13 @@ class PacketLine(Strict):
 
 class PacketRecipe(Strict):
     recipe_id: str
+    # The SHA-256 of what this recipe is offered, so an answer to an older offer is refused.
+    offer_id: str = ""
     title: str
     lines: list[PacketLine]
 
 
 class Packet(Strict):
-    packet_id: str = ""  # the SHA-256 of the rest, so an answer to an older packet is refused
     fdc_release: str
     store_categories: list[StoreCategory]
     families: list[str]
@@ -247,11 +248,11 @@ class AnsweredLine(Strict):
 
 class AnsweredRecipe(Strict):
     recipe_id: str
+    offer_id: str  # the offer_id of the recipe it answers
     lines: list[AnsweredLine]
 
 
 class Answer(Strict):
-    packet_id: str
     model: Label
     recipes: list[AnsweredRecipe]
 
@@ -286,21 +287,24 @@ class Work:
         for canonical in canonical_ingredients:
             self.by_name.setdefault(normalize_wording(canonical.name), canonical)
         self.recipes = {recipe.id: (recipe, facts_for(recipe)) for recipe in recipes}
-        packet = Packet(
+        offers = [self._offer(recipe, facts) for recipe, facts in self.recipes.values()]
+        for offer in offers:
+            # What every recipe is offered too: the FDC foods' release and the Store Categories.
+            offered = {
+                "fdc_release": snapshot.release,
+                "store_categories": [category.model_dump() for category in store_categories],
+                "recipe": offer.model_dump(mode="json", exclude={"offer_id"}),
+            }
+            canonical_json = json.dumps(offered, sort_keys=True, separators=(",", ":"))
+            offer.offer_id = hashlib.sha256(canonical_json.encode()).hexdigest()
+        self._packet = Packet(
             fdc_release=snapshot.release,
             store_categories=store_categories,
             families=sorted({canonical.family for canonical in canonical_ingredients}),
-            recipes=[self._offer(recipe, facts) for recipe, facts in self.recipes.values()],
+            recipes=offers,
             instructions=INSTRUCTIONS,
         )
-        canonical_json = json.dumps(
-            packet.model_dump(mode="json", exclude={"packet_id"}),
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        packet.packet_id = hashlib.sha256(canonical_json.encode()).hexdigest()
-        self._packet = packet
-        self._offered = {offered.recipe_id: offered for offered in packet.recipes}
+        self._offered = {offer.recipe_id: offer for offer in offers}
 
     def packet(self) -> Packet:
         return self._packet
@@ -362,8 +366,9 @@ class Work:
     def enrich(self, answered: AnsweredRecipe, model: str) -> Enrichment:
         """The enrichment a model's answer gives one recipe: every line's parse, and a match and
         conversion for each answered line, with the Enrichment Issues, new Canonical Ingredients
-        and wordings that come of it. Raises Rejected, with every error, when any line chose
-        something it wasn't offered, or the enrichment is more than one write holds.
+        and wordings that come of it. Raises Rejected, with every error, when the recipe's offer
+        changed since the answer's packet, any line chose something it wasn't offered, or the
+        enrichment is more than one write holds.
         """
         try:
             return self._enrich(answered, model)
@@ -374,6 +379,10 @@ class Work:
         offered = self._offered.get(answered.recipe_id)
         if offered is None:
             raise Rejected([f"{answered.recipe_id} isn't in the packet"])
+        if answered.offer_id != offered.offer_id:
+            raise Rejected(
+                ["its offer changed since the packet: make a new packet and answer that"]
+            )
         _, facts = self.recipes[answered.recipe_id]
         lines = {line.line_id: line for line in offered.lines}
         recipe = _Answering(self, facts, model)

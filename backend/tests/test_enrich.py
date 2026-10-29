@@ -160,10 +160,13 @@ def answer_text(offered: dict[str, Any], *lines: dict[str, Any]) -> str:
     """A model's answer to the packet: `lines` for every recipe in it."""
     return json.dumps(
         {
-            "packet_id": offered["packet_id"],
             "model": "a-model",
             "recipes": [
-                {"recipe_id": r["recipe_id"], "lines": list(lines or [oil_line()])}
+                {
+                    "recipe_id": r["recipe_id"],
+                    "offer_id": r["offer_id"],
+                    "lines": list(lines or [oil_line()]),
+                }
                 for r in offered["recipes"]
             ],
         }
@@ -261,20 +264,29 @@ def test_the_answer_is_read_from_a_file_or_stdin(
     assert read_answer("-") == '{"from": "stdin"}'
 
 
-def test_a_stale_packet_is_rejected_and_nothing_is_written(
+def test_a_recipe_whose_offer_changed_is_rejected_and_the_rest_are_written(
     editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    recipe = add(api_store, "Garlic Tofu")
+    changed = add(api_store, "Garlic Tofu")
+    unchanged = add(api_store, "Chili Noodles")
     adapter = api(editor_client)
     offered = work_packet(through(adapter), capsys)
-    add(api_store, "Chili Noodles")  # the Collection changed since the packet
+    # Meanwhile, an editor rewrites one of the first recipe's lines, and another recipe arrives.
+    lines = [*changed.original.ingredients]
+    lines[1] = lines[1].model_copy(update={"text": "4 cloves snorp garlic, minced"})
+    original = changed.original.model_copy(update={"ingredients": lines})
+    api_store.update_recipe(changed.model_copy(update={"original": original}))
+    add(api_store, "Plonk Bean Soup")
 
     failed = apply(BASE_URL, through(adapter), SNAPSHOT, answer_text(offered))
 
-    assert failed != 0
-    assert "packet" in capsys.readouterr().out
-    assert {request.method for request in adapter.requests} == {"GET"}
-    assert stored(editor_client, recipe.id)["status"] == "pending"
+    assert failed == 1
+    assert "Garlic Tofu → rejected, nothing written:\n  its offer changed since the packet" in (
+        capsys.readouterr().out
+    )
+    assert not any(changed.id in (r.url or "") for r in adapter.requests if r.method == "PUT")
+    assert stored(editor_client, changed.id)["status"] == "pending"
+    assert stored(editor_client, unchanged.id)["status"] == "awaiting_review"
 
 
 def test_an_answer_that_isnt_an_answer_is_rejected_before_anything_is_read(
@@ -282,7 +294,7 @@ def test_an_answer_that_isnt_an_answer_is_rejected_before_anything_is_read(
 ) -> None:
     adapter = Adapter(lambda _: (500, {}, b""))
 
-    failed = apply(BASE_URL, through(adapter), SNAPSHOT, '{"packet_id": "x", "density": 1}')
+    failed = apply(BASE_URL, through(adapter), SNAPSHOT, '{"model": "x", "density": 1}')
 
     assert failed != 0
     assert adapter.requests == []
@@ -351,12 +363,8 @@ def test_a_recipe_the_answer_leaves_out_stays_pending(
 ) -> None:
     recipe = add(api_store, "Garlic Tofu")
     send = through(api(editor_client))
-    offered = work_packet(send, capsys)
-    answered: dict[str, Any] = {
-        "packet_id": offered["packet_id"],
-        "model": "a-model",
-        "recipes": [],
-    }
+    work_packet(send, capsys)
+    answered: dict[str, Any] = {"model": "a-model", "recipes": []}
 
     assert apply(BASE_URL, send, SNAPSHOT, json.dumps(answered)) == 0
     assert stored(editor_client, recipe.id)["status"] == "pending"
@@ -476,9 +484,11 @@ def test_a_line_the_parser_cant_read_leaves_its_recipe_and_the_next_still_enrich
     send = through(api(editor_client))
     offered = work_packet(send, capsys)
     answered: dict[str, Any] = {
-        "packet_id": offered["packet_id"],
         "model": "a-model",
-        "recipes": [{"recipe_id": r["recipe_id"], "lines": []} for r in offered["recipes"]],
+        "recipes": [
+            {"recipe_id": r["recipe_id"], "offer_id": r["offer_id"], "lines": []}
+            for r in offered["recipes"]
+        ],
     }
 
     failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(answered))

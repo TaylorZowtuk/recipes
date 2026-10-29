@@ -11,6 +11,7 @@ from recipes import fdc
 from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
+    Enrichment,
     IngredientLine,
     Original,
     Recipe,
@@ -18,7 +19,7 @@ from recipes.models import (
     WebsiteSource,
     Wording,
 )
-from recipes.packet import Answer, Rejected, Work, readable_quantities
+from recipes.packet import Answer, AnsweredRecipe, Rejected, Work, readable_quantities
 from recipes.parse import parse_line
 
 FIXTURE = Path(__file__).parent / "fixtures" / "fdc-snapshot.json"
@@ -95,19 +96,33 @@ def line(line_id: str = "i2", **fields: Any) -> dict[str, Any]:
     }
 
 
-def answer(*lines: dict[str, Any], recipe_id: str = RECIPE_ID) -> Answer:
+def answer(*lines: dict[str, Any], recipe_id: str = RECIPE_ID, offer_id: str = "") -> Answer:
     return Answer.model_validate(
         {
-            "packet_id": "ignored here",
             "model": "a-model",
-            "recipes": [{"recipe_id": recipe_id, "lines": list(lines or [line()])}],
+            "recipes": [
+                {"recipe_id": recipe_id, "offer_id": offer_id, "lines": list(lines or [line()])}
+            ],
         }
     )
 
 
+def answering(work: Work, answered: Answer) -> AnsweredRecipe:
+    """The answer's recipe, to the offer `work` makes it unless it names one."""
+    (recipe,) = answered.recipes
+    offered = {offer.recipe_id: offer.offer_id for offer in work.packet().recipes}
+    if recipe.offer_id or recipe.recipe_id not in offered:
+        return recipe
+    return recipe.model_copy(update={"offer_id": offered[recipe.recipe_id]})
+
+
+def enrich(work: Work, answered: Answer) -> Enrichment:
+    return work.enrich(answering(work, answered), answered.model)
+
+
 def errors(work: Work, answered: Answer) -> list[str]:
     with pytest.raises(Rejected) as rejected:
-        work.enrich(answered.recipes[0], answered.model)
+        enrich(work, answered)
     return rejected.value.errors
 
 
@@ -165,11 +180,26 @@ def test_the_packet_offers_each_line_its_parse_candidates_and_readable_quantitie
     assert packet.instructions
 
 
-def test_the_packet_id_is_the_same_for_the_same_work_and_changes_with_it() -> None:
-    first = work().packet().packet_id
+def offer_id(work: Work) -> str:
+    return next(r.offer_id for r in work.packet().recipes if r.recipe_id == RECIPE_ID)
 
-    assert work().packet().packet_id == first
-    assert work(canonicals=[GLIMMER, canonical(2, "quill egg")]).packet().packet_id != first
+
+def test_a_recipes_offer_id_changes_with_its_offer_and_no_other_recipes() -> None:
+    first = offer_id(work())
+    other = recipe("1 cup zorbleberries", recipe_id="01K7Q0000000000000000000R2")
+
+    assert offer_id(work()) == first
+    assert offer_id(work(recipe(), other)) == first
+    assert offer_id(work(canonicals=[GLIMMER, canonical(2, "quill egg")])) != first
+    assert offer_id(work(recipe("3 quill eggs"))) != first
+
+
+def test_an_answer_to_an_older_offer_is_rejected() -> None:
+    older = offer_id(work(canonicals=[]))
+
+    assert errors(work(), answer(offer_id=older)) == [
+        "its offer changed since the packet: make a new packet and answer that"
+    ]
 
 
 def test_a_cached_wordings_canonical_comes_first_then_canonicals_sharing_a_word() -> None:
@@ -201,7 +231,7 @@ def test_a_confirmed_wording_offers_only_its_canonical() -> None:
 
 
 def test_an_answer_within_the_offers_gives_a_match_and_a_conversion_from_the_snapshot() -> None:
-    enrichment = work().enrich(answer().recipes[0], "a-model")
+    enrichment = enrich(work(), answer())
 
     assert enrichment.fdc_release == SNAPSHOT.release
     facts = enrichment.facts.ingredients
@@ -229,9 +259,7 @@ def test_an_answer_within_the_offers_gives_a_match_and_a_conversion_from_the_sna
 def test_a_new_canonical_ingredient_is_created_learned_and_raised_as_an_issue() -> None:
     new = {"new": {"name": "Quill Egg", "family": "Egg", "store_category_id": "dairy"}}
 
-    enrichment = work().enrich(
-        answer(line("i1", canonical=new, fdc_id=1002, portion_id=503)).recipes[0], "a-model"
-    )
+    enrichment = enrich(work(), answer(line("i1", canonical=new, fdc_id=1002, portion_id=503)))
 
     (created,) = enrichment.canonical_ingredients
     assert (created.name, created.family, created.store_category_id) == (
@@ -259,12 +287,12 @@ def test_two_lines_naming_the_same_new_canonical_create_it_once() -> None:
     new = {"new": {"name": "quill egg", "family": "egg", "store_category_id": "dairy"}}
     twice = recipe("2 quill eggs", "1 quill egg yolk")
 
-    enrichment = work(twice).enrich(
+    enrichment = enrich(
+        work(twice),
         answer(
             line("i1", canonical=new, fdc_id=1002, portion_id=503),
             line("i2", canonical=new, fdc_id=1002, portion_id=None),
-        ).recipes[0],
-        "a-model",
+        ),
     )
 
     (created,) = enrichment.canonical_ingredients
@@ -276,7 +304,7 @@ def test_a_wording_an_editor_confirmed_is_not_learned_again() -> None:
     confirmed = [wording("glimmer oil", confirmed=True)]
     work_ = work(wordings=confirmed)
 
-    enrichment = work_.enrich(answer().recipes[0], "a-model")
+    enrichment = enrich(work_, answer())
 
     assert enrichment.wordings == []
     new = {"new": {"name": "glimmer", "family": "oil", "store_category_id": "aisles"}}
@@ -347,7 +375,7 @@ def test_a_new_canonical_named_with_more_than_words_is_rejected(new: dict[str, s
 def test_a_new_canonical_may_have_accents_hyphens_and_apostrophes() -> None:
     named = {"new": {"name": "crème d'olive-oil", "family": "oil", "store_category_id": "aisles"}}
 
-    enrichment = work(wordings=[]).enrich(answer(line(canonical=named)).recipes[0], "a-model")
+    enrichment = enrich(work(wordings=[]), answer(line(canonical=named)))
 
     assert [c.name for c in enrichment.canonical_ingredients] == ["crème d'olive-oil"]
 
@@ -379,7 +407,7 @@ def test_a_quantity_for_a_line_without_a_parse_is_rejected(monkeypatch: pytest.M
 def test_a_line_without_a_parse_learns_no_wording(monkeypatch: pytest.MonkeyPatch) -> None:
     unparsed(monkeypatch, "1-2 tsp glimmer oil")
 
-    enrichment = work(wordings=[]).enrich(answer(line(portion_id=None)).recipes[0], "a-model")
+    enrichment = enrich(work(wordings=[]), answer(line(portion_id=None)))
 
     match = enrichment.facts.ingredients["i2"].match
     assert match is not None
@@ -433,7 +461,7 @@ def test_an_unknown_recipe_is_rejected() -> None:
 def test_a_readable_but_different_quantity_corrects_the_parse_and_raises_an_issue() -> None:
     corrected = line(quantity={"low": 2, "high": None}, corrections_reason="1 tsp is too little")
 
-    enrichment = work().enrich(answer(corrected).recipes[0], "a-model")
+    enrichment = enrich(work(), answer(corrected))
 
     parse = enrichment.facts.ingredients["i2"].parse
     assert parse is not None
@@ -452,7 +480,7 @@ def test_a_quantity_correction_says_why() -> None:
 
 
 def test_the_same_quantity_as_the_parse_changes_nothing() -> None:
-    enrichment = work().enrich(answer(line(quantity={"low": 1, "high": 2})).recipes[0], "a-model")
+    enrichment = enrich(work(), answer(line(quantity={"low": 1, "high": 2})))
 
     parse = enrichment.facts.ingredients["i2"].parse
     assert parse is not None
@@ -463,7 +491,7 @@ def test_the_same_quantity_as_the_parse_changes_nothing() -> None:
 def test_a_doubt_raises_an_issue_and_lowers_the_conversions_confidence() -> None:
     doubted = line(doubts=["Glimmer oil might be the toasted kind"])
 
-    enrichment = work().enrich(answer(doubted).recipes[0], "a-model")
+    enrichment = enrich(work(), answer(doubted))
 
     (issue,) = enrichment.issues
     assert (issue.fact_id, issue.before, issue.after) == ("i2.match", None, "glimmer oil")
@@ -482,8 +510,9 @@ def test_an_answer_with_unknown_fields_is_refused() -> None:
     with pytest.raises(ValueError, match="density"):
         Answer.model_validate(
             {
-                "packet_id": "x",
                 "model": "a-model",
-                "recipes": [{"recipe_id": RECIPE_ID, "lines": [line(density=0.9)]}],
+                "recipes": [
+                    {"recipe_id": RECIPE_ID, "offer_id": "x", "lines": [line(density=0.9)]}
+                ],
             }
         )

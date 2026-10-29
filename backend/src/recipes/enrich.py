@@ -76,8 +76,8 @@ def packet(base_url: str, send: Send, snapshot: Snapshot) -> int:
 
 def apply(base_url: str, send: Send, snapshot: Snapshot, text: str) -> int:
     """Check a model's answer against the packet it answers, rebuilt from the API, and write each
-    recipe whose every line chose among its offers. Prints each recipe's result and returns how
-    many were rejected or failed to write.
+    recipe whose offer hasn't changed since and whose every line chose among its offers. Prints
+    each recipe's result and returns how many were rejected or failed to write.
     """
     try:
         answer = Answer.model_validate_json(text)
@@ -86,12 +86,6 @@ def apply(base_url: str, send: Send, snapshot: Snapshot, text: str) -> int:
         return 1
     work = fetch_work(base_url, send, snapshot)
     if work is None:
-        return 1
-    if answer.packet_id != work.packet().packet_id:
-        print(
-            "The answer is to another packet: the Pending recipes, Canonical Ingredients or "
-            "wordings changed since. Make a new packet and answer that."
-        )
         return 1
     failed = 0
     for answered in answer.recipes:
