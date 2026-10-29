@@ -1,4 +1,4 @@
-"""The work packet: what enrichment offers a model for each line, and how its answer is checked
+"""The Work Packet: what enrichment offers a model for each line, and how its answer is checked
 against those offers before anything is written.
 """
 
@@ -335,7 +335,7 @@ def test_a_readable_but_different_quantity_corrects_the_parse_and_raises_an_issu
 
     parse = enrichment.facts.ingredients["i2"].parse
     assert parse is not None
-    assert (parse.provenance, parse.quantity) == ("llm", parse.quantity)
+    assert parse.provenance == "llm"
     assert parse.quantity is not None
     assert (parse.quantity.low, parse.quantity.high) == (2, 2)
     (issue,) = enrichment.issues
