@@ -136,6 +136,12 @@ export interface paths {
          * @description Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
          *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
          *     in Awaiting Review for an editor to check it.
+         *
+         *     Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
+         *     one of their facts and arrives open with no confirm batch, every wording is the normalized
+         *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
+         *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
+         *     exists, and every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -292,7 +298,7 @@ export interface components {
         };
         /**
          * ConversionFact
-         * @description How the line converts to grams, copied from the FDC snapshot: a density for a volume, the
+         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
          *     grams in one count unit for a count, or the reason it doesn't convert.
          */
         "ConversionFact-Input": {
@@ -337,7 +343,7 @@ export interface components {
         };
         /**
          * ConversionFact
-         * @description How the line converts to grams, copied from the FDC snapshot: a density for a volume, the
+         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
          *     grams in one count unit for a count, or the reason it doesn't convert.
          */
         "ConversionFact-Output": {
@@ -773,7 +779,7 @@ export interface components {
         };
         /**
          * Per100g
-         * @description The FDC snapshot's nutrition for 100 g of the matched food, as FDC states it.
+         * @description The FDC Snapshot's nutrition for 100 g of the matched food, as FDC states it.
          */
         Per100g: {
             /** Carbs G */
@@ -1100,7 +1106,7 @@ export interface components {
         };
         /**
          * Wording
-         * @description `WORDING` / `<wording>`: the wording cache's entry for one normalized wording. Enrichment
+         * @description `WORDING` / `<wording>`: the Wording Cache's entry for one normalized wording. Enrichment
          *     may replace it until an editor confirms it.
          */
         "Wording-Input": {
@@ -1118,7 +1124,7 @@ export interface components {
         };
         /**
          * Wording
-         * @description `WORDING` / `<wording>`: the wording cache's entry for one normalized wording. Enrichment
+         * @description `WORDING` / `<wording>`: the Wording Cache's entry for one normalized wording. Enrichment
          *     may replace it until an editor confirms it.
          */
         "Wording-Output": {
@@ -1463,7 +1469,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed */
+            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version */
             422: {
                 headers: {
                     [name: string]: unknown;
