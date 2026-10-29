@@ -58,20 +58,13 @@ module "pwa" {
   force_destroy = true
 }
 
-data "aws_cloudfront_cache_policy" "disabled" {
-  name = "Managed-CachingDisabled"
-}
-
-data "aws_cloudfront_cache_policy" "optimized" {
-  name = "Managed-CachingOptimized"
-}
-
-data "aws_cloudfront_origin_request_policy" "all_viewer_except_host" {
-  name = "Managed-AllViewerExceptHostHeader"
-}
-
-data "aws_cloudfront_response_headers_policy" "security" {
-  name = "Managed-SecurityHeadersPolicy"
+# The AWS-managed policies, by the fixed IDs in CloudFront's managed policy docs. Fixed IDs, not
+# name lookups, so the offline tests can tell the policies apart.
+locals {
+  caching_disabled        = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad" # Managed-CachingDisabled
+  caching_optimized       = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized
+  all_viewer_except_host  = "b689b0a8-53d0-40ab-baf2-68738e2966ac" # Managed-AllViewerExceptHostHeader
+  security_headers_policy = "67f7725c-6f97-4210-82d7-5512b31e9d03" # Managed-SecurityHeadersPolicy
 }
 
 variable "rate_limit" {
@@ -180,9 +173,29 @@ resource "aws_cloudfront_distribution" "this" {
     origin_access_control_id = var.origin_access_control_ids.images
   }
 
-  # The API. Nothing is cached yet: the only managed policies that put query strings in the cache
-  # key also forward the Host header, which a function URL origin rejects. Caching versioned reads
-  # (/api/collection?v=, recipes by version) is an open decision; see infra/AGENTS.md.
+  # Versioned reads, with every part of the key in the path: the managed policies that key on query
+  # strings also forward Host, which a function URL origin rejects. No origin request policy, so no
+  # cookie or viewer Host reaches the API: a cached read can't depend on who asked, and the function
+  # URL gets its own host. The 1 s minimum TTL caches FastAPI's no-store redirects and errors for up
+  # to 1 s; a 502 or 504 from Lambda or the Web Adapter has no Cache-Control, so CloudFront caches it
+  # for its default 10 s error caching minimum TTL.
+  ordered_cache_behavior {
+    path_pattern               = "/api/v/*"
+    target_origin_id           = local.api_origin
+    viewer_protocol_policy     = "https-only"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    compress                   = true
+    cache_policy_id            = local.caching_optimized
+    response_headers_policy_id = local.security_headers_policy
+
+    function_association {
+      event_type   = "viewer-response"
+      function_arn = aws_cloudfront_function.noindex.arn
+    }
+  }
+
+  # The rest of the API, uncached, with the viewer's cookies and headers but not its Host.
   ordered_cache_behavior {
     path_pattern               = "/api/*"
     target_origin_id           = local.api_origin
@@ -190,9 +203,9 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods             = ["GET", "HEAD"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.disabled.id
-    origin_request_policy_id   = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
-    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+    cache_policy_id            = local.caching_disabled
+    origin_request_policy_id   = local.all_viewer_except_host
+    response_headers_policy_id = local.security_headers_policy
 
     function_association {
       event_type   = "viewer-response"
@@ -208,8 +221,8 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods            = ["GET", "HEAD"]
     cached_methods             = ["GET", "HEAD"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
-    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+    cache_policy_id            = local.caching_optimized
+    response_headers_policy_id = local.security_headers_policy
 
     function_association {
       event_type   = "viewer-response"
@@ -223,8 +236,8 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods            = ["GET", "HEAD"]
     cached_methods             = ["GET", "HEAD"]
     compress                   = true
-    cache_policy_id            = data.aws_cloudfront_cache_policy.optimized.id
-    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security.id
+    cache_policy_id            = local.caching_optimized
+    response_headers_policy_id = local.security_headers_policy
 
     function_association {
       event_type   = "viewer-request"

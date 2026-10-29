@@ -31,8 +31,11 @@ def failing_route(app: FastAPI) -> Iterator[str]:
         ("GET", "/api/does-not-exist", 404),
         ("POST", "/api/sync", 405),
         ("GET", "/api/collection", 307),
+        ("GET", "/api/v/collection/0", 307),
         ("GET", "/api/recipes/01K7ZZZZZZZZZZZZZZZZZZZZZZ", 404),
+        ("GET", "/api/v/recipes/01K7ZZZZZZZZZZZZZZZZZZZZZZ/1/1", 404),
         ("GET", "/api/recipes/not-a-ulid", 422),
+        ("GET", "/api/v/recipes/not-a-ulid/1/1", 422),
     ],
 )
 def test_every_api_response_asks_not_to_be_indexed(
@@ -60,6 +63,18 @@ def test_the_api_answers_what_the_smoke_test_checks(
     assert response.status_code == status
     assert response.headers["content-type"].startswith("application/json")
     assert body in response.text
+
+
+def test_the_current_collection_version_answers_immutable_as_the_smoke_test_checks(
+    client: TestClient,
+) -> None:
+    version = client.get("/api/sync").json()["collection_version"]
+
+    response = client.get(f"/api/v/collection/{version}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert "immutable" in response.headers["cache-control"]
 
 
 def test_an_unhandled_error_asks_not_to_be_indexed_or_cached(

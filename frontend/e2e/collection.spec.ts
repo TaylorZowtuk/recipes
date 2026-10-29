@@ -171,7 +171,7 @@ test.describe("with no service worker", () => {
 
   test("a Collection that fails to load can be tried again", async ({ page }) => {
     let failed = false;
-    await page.route("**/api/collection*", (route) => {
+    await page.route("**/api/v/collection/*", (route) => {
       if (failed) return route.continue();
       failed = true;
       return route.fulfill({ status: 503 });
@@ -188,8 +188,8 @@ test.describe("with no service worker", () => {
   });
 
   for (const [what, url] of [
-    ["Collection", "**/api/collection*"],
-    ["recipe", `**/api/recipes/${recipeId}*`],
+    ["Collection", "**/api/v/collection/*"],
+    ["recipe", `**/api/v/recipes/${recipeId}/**`],
   ] as const) {
     test(`a recipe whose ${what} fails to load can be tried again`, async ({ page }) => {
       let failed = false;
