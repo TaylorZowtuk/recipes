@@ -473,3 +473,15 @@ def test_an_enrichment_learning_more_than_a_transaction_holds_is_refused(
     assert response.status_code == 422
     assert "at most" in response.json()["detail"]
     assert_nothing_written(editor_client, recipe)
+
+
+def test_an_enrichment_with_more_than_200_issues_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    issues = [{**issue(1), "id": f"01K7Q00000000000000000{n:04d}"} for n in range(201)]
+
+    response = enrich_matched(editor_client, recipe.id, issues=issues)
+
+    assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)

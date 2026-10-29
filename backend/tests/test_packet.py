@@ -387,23 +387,33 @@ def test_a_line_without_a_parse_learns_no_wording(monkeypatch: pytest.MonkeyPatc
     assert enrichment.wordings == []
 
 
-def test_a_recipe_learning_more_than_one_write_holds_is_rejected() -> None:
-    names = [f"zorb{a}{b} quill eggs" for a in "abcdefg" for b in "abcdefg"]
-    many = recipe(*(f"2 {name}" for name in names))
-    work_ = work(many, wordings=[])
+def many_new(count: int, **fields: Any) -> tuple[Work, Answer]:
+    """Work on a recipe of `count` lines, each a different name, and an answer making each new."""
+    names = [f"zorb{a}{b} quill eggs" for a in "abcdefg" for b in "abcdefg"][:count]
+    work_ = work(recipe(*(f"2 {name}" for name in names)), wordings=[])
     lines = [
         line(
             offered.line_id,
             canonical={"new": {"name": name, "family": "egg", "store_category_id": "dairy"}},
             fdc_id=offered.fdc_candidates[0].fdc_id,
             portion_id=None,
+            **fields,
         )
         for offered, name in zip(work_.packet().recipes[0].lines, names, strict=True)
     ]
+    return work_, answer(*lines)
 
-    assert errors(work_, answer(*lines)) == [
+
+def test_a_recipe_learning_more_than_one_write_holds_is_rejected() -> None:
+    assert errors(*many_new(49)) == [
         "learns 98 Canonical Ingredients and wordings, more than the 97 one write holds"
     ]
+
+
+def test_a_recipe_raising_more_issues_than_an_enrichment_holds_is_rejected() -> None:
+    (error,) = errors(*many_new(41, doubts=["Is it fresh?"] * 5))
+
+    assert "issues" in error
 
 
 def test_every_error_in_a_recipe_is_reported() -> None:
@@ -461,6 +471,11 @@ def test_a_doubt_raises_an_issue_and_lowers_the_conversions_confidence() -> None
     conversion = enrichment.facts.ingredients["i2"].conversion
     assert conversion is not None
     assert conversion.confidence <= 0.5
+
+
+def test_a_line_with_more_than_five_doubts_is_refused() -> None:
+    with pytest.raises(ValueError, match="doubts"):
+        answer(line(doubts=["Is it toasted?"] * 6))
 
 
 def test_an_answer_with_unknown_fields_is_refused() -> None:

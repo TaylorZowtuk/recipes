@@ -304,6 +304,10 @@ class Wording(Model):
     schema_version: int
 
 
+# The most Enrichment Issues one enrichment raises, so it can't swell the recipe item.
+MAX_ISSUES = 200
+
+
 class Enrichment(Model):
     """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
     Canonical Ingredients it creates and the wordings it learns.
@@ -312,7 +316,7 @@ class Enrichment(Model):
     enrichment_version: int
     fdc_release: Label | None = None
     facts: RecipeFacts
-    issues: list[EnrichmentIssue] = []
+    issues: Annotated[list[EnrichmentIssue], Field(max_length=MAX_ISSUES)] = []
     canonical_ingredients: list[CanonicalIngredient] = []
     wordings: list[Wording] = []
 

@@ -15,7 +15,7 @@ import sys
 import unicodedata
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from recipes import fdc
 from recipes.models import (
@@ -49,6 +49,8 @@ if TYPE_CHECKING:
 ENRICHMENT_VERSION = 2
 # The most Canonical Ingredients and FDC foods a line is offered.
 MAX_CANDIDATES = 8
+# The most doubts a line's answer may raise, so a steered model can't swell the recipe.
+MAX_DOUBTS = 5
 # A doubted line's match and conversion are at most this confident, so an editor checks them.
 DOUBTED_CONFIDENCE = 0.5
 INSTRUCTIONS = (
@@ -239,7 +241,7 @@ class AnsweredLine(Strict):
     fdc_id: int
     portion_id: int | None
     quantity: AnsweredQuantity | None = None  # only to correct the parse
-    doubts: list[Line] = []
+    doubts: Annotated[list[Line], Field(max_length=MAX_DOUBTS)] = []
     corrections_reason: Line | None = None
 
 
