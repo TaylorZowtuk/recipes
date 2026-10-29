@@ -300,6 +300,7 @@ def test_a_wording_an_editor_confirmed_is_not_learned_again() -> None:
         ),
         ({"quantity": {"low": 3, "high": None}}, "i2: 3 isn't a number in the line"),
         ({"quantity": {"low": 1, "high": 4}}, "i2: 4 isn't a number in the line"),
+        ({"quantity": {"low": 2, "high": 1}}, "i2: the quantity's high is less than its low"),
         ({"line_id": "i9"}, "no line i9"),
     ],
     ids=[
@@ -309,11 +310,36 @@ def test_a_wording_an_editor_confirmed_is_not_learned_again() -> None:
         "unknown store category",
         "invented quantity",
         "invented range end",
+        "downward range",
         "unknown line",
     ],
 )
 def test_an_answer_outside_the_offers_is_rejected(fields: dict[str, Any], error: str) -> None:
     assert errors(work(), answer(line(**fields))) == [error]
+
+
+def test_a_line_answered_twice_is_rejected() -> None:
+    assert errors(work(), answer(line(), line())) == ["i2: answered twice"]
+
+
+def unparsed(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    """The parser fails on lines written `text`, as it can on an odd line."""
+
+    def parse(line: str) -> Any:
+        if line == text:
+            raise ValueError(line)
+        return parse_line(line)
+
+    monkeypatch.setattr("recipes.packet.parse_line", parse)
+
+
+def test_a_quantity_for_a_line_without_a_parse_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    unparsed(monkeypatch, "1-2 tsp glimmer oil")
+    corrected = line(quantity={"low": 2, "high": None}, corrections_reason="2 is right")
+
+    assert errors(work(), answer(corrected)) == [
+        "i2: the line has no parse whose quantity to correct"
+    ]
 
 
 def test_every_error_in_a_recipe_is_reported() -> None:
