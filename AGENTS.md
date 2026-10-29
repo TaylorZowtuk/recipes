@@ -15,7 +15,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make lambda` | Build the API's Lambda zip (arm64, run by the Lambda Web Adapter) into `backend/dist/lambda.zip` |
 | `make build` | Build a release: the Lambda zip and the PWA bundle in `frontend/dist` |
 | `make deploy STACK=<staging\|prod>` | Apply the stack with the built zip and upload the PWA bundle, using the AWS credentials and `TF_STATE_BUCKET` in your environment. CI's deploy jobs run it |
-| `make smoke URL=<url>` | Check a deployed stack's responses through CloudFront (status, Content-Type, `Cache-Control`, `X-Robots-Tag`, and an OAC-signed POST) |
+| `make smoke URL=<url>` | Check a deployed stack's responses through CloudFront (status, Content-Type, `Cache-Control`, `X-Robots-Tag`, a cache hit on the current Collection version, and an OAC-signed POST) |
 | `make kill-switch-test STACK=<stack>` | Trip the stack's kill switch with a test message on its own SNS topic, wait for the API to reserve 0, check the API is throttled and the PWA still serves, then reset it. Uses the AWS credentials and `TF_STATE_BUCKET` in your environment; CI runs it on staging |
 | `make kill-switch-reset STACK=<stack>` | Re-enable the stack's API after its kill switch tripped (check the bill first), with the AWS credentials and `TF_STATE_BUCKET` in your environment. The [Kill switch reset](.github/workflows/kill-switch-reset.yml) workflow runs it with the stack's deploy role |
 | `make dev` | FastAPI and the Vite dev server with hot reload, at <http://localhost:5173> (`DEV_PORT=<port>` to change it). The API runs on a fake DynamoDB (moto) holding a synthetic Collection, which starts afresh on every reload |

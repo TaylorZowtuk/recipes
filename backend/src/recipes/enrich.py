@@ -69,7 +69,8 @@ def run(base_url: str, send: Send) -> int:
 
 class SameOriginSession(requests.Session):
     """Follows a redirect only on the same scheme and host, so the service token goes nowhere
-    else. The collection listing redirects to its current version on the same host.
+    else. The unversioned Collection and recipe reads redirect to their current versions on
+    the same host.
     """
 
     def get_redirect_target(self, resp: requests.Response) -> str | None:

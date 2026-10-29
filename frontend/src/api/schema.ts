@@ -11,8 +11,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Collection */
-        get: operations["get_collection_api_collection_get"];
+        /**
+         * Get Current Collection
+         * @description Redirects to the Collection at its current version.
+         */
+        get: operations["get_current_collection_api_collection_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -111,10 +114,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Recipe
-         * @description A recipe at its version (`v`) and schema version (`s`), which make up its cache key.
+         * Get Current Recipe
+         * @description Redirects to the recipe at its current version and schema version.
          */
-        get: operations["get_recipe_api_recipes__recipe_id__get"];
+        get: operations["get_current_recipe_api_recipes__recipe_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -178,6 +181,43 @@ export interface paths {
         };
         /** Get Sync */
         get: operations["get_sync_api_sync_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v/collection/{collection_version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Collection */
+        get: operations["get_collection_api_v_collection__collection_version__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v/recipes/{recipe_id}/{recipe_version}/{schema_version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Recipe
+         * @description A recipe at its version and schema version, which make up its cache key.
+         */
+        get: operations["get_recipe_api_v_recipes__recipe_id___recipe_version___schema_version__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -795,41 +835,21 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    get_collection_api_collection_get: {
+    get_current_collection_api_collection_get: {
         parameters: {
-            query?: {
-                v?: number | null;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Collection"];
-                };
-            };
-            /** @description Not the current version: redirects to it */
+            /** @description Redirects to the current version */
             307: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
             };
         };
     };
@@ -1022,12 +1042,9 @@ export interface operations {
             };
         };
     };
-    get_recipe_api_recipes__recipe_id__get: {
+    get_current_recipe_api_recipes__recipe_id__get: {
         parameters: {
-            query?: {
-                v?: number | null;
-                s?: number | null;
-            };
+            query?: never;
             header?: never;
             path: {
                 recipe_id: string;
@@ -1036,16 +1053,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Recipe"];
-                };
-            };
-            /** @description Not the current version: redirects to it */
+            /** @description Redirects to the current version */
             307: {
                 headers: {
                     [name: string]: unknown;
@@ -1232,6 +1240,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Sync"];
+                };
+            };
+        };
+    };
+    get_collection_api_v_collection__collection_version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                collection_version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Collection"];
+                };
+            };
+            /** @description Not the current version: redirects to it */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recipe_api_v_recipes__recipe_id___recipe_version___schema_version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+                recipe_version: number;
+                schema_version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Not the current version: redirects to it */
+            307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
