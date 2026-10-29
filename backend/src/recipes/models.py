@@ -36,6 +36,8 @@ Line = Annotated[str, StringConstraints(max_length=2000)]
 Label = Annotated[str, StringConstraints(max_length=MAX_LABEL)]
 MAX_LINES = 500
 MAX_ORIGINAL_BYTES = 350 * 1024
+# A whole recipe as JSON, below DynamoDB's 400 KB item limit with room for its other attributes.
+MAX_RECIPE_BYTES = 390_000
 # A photo's content hash (recipes.images.image_id), which names its objects in the images bucket.
 ImageId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 # Where a focal point sits across or down its photo, from 0 at the left or top to 1.

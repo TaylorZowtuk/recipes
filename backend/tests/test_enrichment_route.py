@@ -7,7 +7,13 @@ import pytest
 from conftest import EDITOR
 
 from recipes.auth import SERVICE_TOKEN_HEADER
-from recipes.models import MAX_LABEL, CanonicalIngredient, EnrichmentIssue, Wording
+from recipes.models import (
+    MAX_LABEL,
+    MAX_RECIPE_BYTES,
+    CanonicalIngredient,
+    EnrichmentIssue,
+    Wording,
+)
 from recipes.seed import RECIPES
 from recipes.store import MAX_LEARNED
 
@@ -486,6 +492,22 @@ def test_an_enrichment_with_more_than_200_issues_is_refused(
     response = enrich_matched(editor_client, recipe.id, issues=issues)
 
     assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)
+
+
+def test_an_enrichment_too_big_for_one_item_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    issues = [
+        {**issue(1), "id": f"01K7Q00000000000000000{n:04d}", "reason": "x" * 2000}
+        for n in range(200)
+    ]
+
+    response = enrich_matched(editor_client, recipe.id, issues=issues)
+
+    assert response.status_code == 422
+    assert f"at most {MAX_RECIPE_BYTES} bytes" in response.json()["detail"]
     assert_nothing_written(editor_client, recipe)
 
 

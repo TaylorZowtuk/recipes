@@ -26,6 +26,7 @@ from recipes.ingest import (
     website_dedupe_key,
 )
 from recipes.models import (
+    MAX_RECIPE_BYTES,
     SCHEMA_VERSION,
     CanonicalIngredient,
     Card,
@@ -340,7 +341,8 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
             "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, an "
             "issue isn't open, a wording isn't a parsed line's name, it learns more than one "
             "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a "
-            "new Canonical Ingredient or wording is confirmed or at another schema version"
+            "new Canonical Ingredient or wording is confirmed or at another schema version, or "
+            "the enriched recipe is too big to store"
         },
     },
 )
@@ -353,13 +355,43 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     one of their facts and arrives open with no confirm batch, every wording is the normalized
     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
     names a Canonical Ingredient that exists or is new here, every new one's Store Category
-    exists, and every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION.
+    exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
+    the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
         raise HTTPException(404, "No such recipe")
     if recipe.status != "pending":
         raise HTTPException(409, "Only a Pending recipe can be enriched")
+    _check_lines(body, recipe)
+    if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
+        raise HTTPException(
+            422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
+        )
+    _check_canonical_ingredients(body, store)
+    enriched = recipe.model_copy(
+        update={
+            "facts": body.facts,
+            "enrichment_version": body.enrichment_version,
+            "fdc_release": body.fdc_release,
+            "issues": body.issues,
+            "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
+        }
+    )
+    if len(enriched.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        raise HTTPException(422, f"An enriched recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
+    try:
+        return store.enrich_recipe(enriched, body.canonical_ingredients, body.wordings)
+    except CanonicalExists:
+        raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
+    except WordingConfirmed:
+        raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+def _check_lines(body: Enrichment, recipe: Recipe) -> None:
+    """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no fact or not
+    open, and a wording that isn't a parsed line's name.
+    """
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
@@ -376,26 +408,6 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     }
     if unknown := sorted({wording.wording for wording in body.wordings} - names):
         raise HTTPException(422, f"No parsed line is named {', '.join(unknown)}")
-    if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
-        raise HTTPException(
-            422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
-        )
-    _check_canonical_ingredients(body, store)
-    enriched = recipe.model_copy(
-        update={
-            "facts": body.facts,
-            "enrichment_version": body.enrichment_version,
-            "fdc_release": body.fdc_release,
-            "issues": body.issues,
-            "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
-        }
-    )
-    try:
-        return store.enrich_recipe(enriched, body.canonical_ingredients, body.wordings)
-    except CanonicalExists:
-        raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
-    except WordingConfirmed:
-        raise HTTPException(409, "An editor confirmed one of the wordings") from None
 
 
 def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
