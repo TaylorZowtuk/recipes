@@ -95,14 +95,19 @@ WORD_NUMBERS = {
     },
 }
 WORD_NUMBER = re.compile(rf"\b(?:{'|'.join(WORD_NUMBERS)})\b", re.IGNORECASE)
+# "1 and a half" or "one and a half" is 1.5.
+AND_A_HALF = re.compile(
+    rf"\b(?:(?P<digits>\d+)|(?P<word>{'|'.join(WORD_NUMBERS)}))\s+and\s+a\s+half\b",
+    re.IGNORECASE,
+)
 # How close a model's quantity is to a readable one to be it: "0.333" is ⅓.
 TOLERANCE = 1e-3
 
 
 def readable_quantities(text: str, parse: ParseFact | None) -> list[float]:
     """Every number a quantity can be read as from the line: each written as digits, a fraction,
-    a mixed number or a word ("a", "half", "one" to "twelve"), each end of a range, and the
-    parser's own reading ("2 dozen" is 24, "1 lb 2 oz" is 1.125 lb).
+    a mixed number or a word ("a", "half", "one" to "twelve"), a number "and a half", each end of
+    a range, and the parser's own reading ("2 dozen" is 24, "1 lb 2 oz" is 1.125 lb).
     """
     found: set[float] = set()
     # "\u2044" is the fraction slash.
@@ -118,6 +123,9 @@ def readable_quantities(text: str, parse: ParseFact | None) -> list[float]:
         else:
             found.add(float(match["decimal"]))
     found.update(WORD_NUMBERS[word.lower()] for word in WORD_NUMBER.findall(text))
+    for match in AND_A_HALF.finditer(text):
+        whole = float(match["digits"]) if match["digits"] else WORD_NUMBERS[match["word"].lower()]
+        found.add(whole + 0.5)
     if parse and parse.quantity:
         found.update((parse.quantity.low, parse.quantity.high))
     return sorted({round(value, 4) for value in found})

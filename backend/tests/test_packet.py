@@ -127,6 +127,8 @@ def errors(work: Work, answered: Answer) -> list[str]:
         ("twelve quill eggs", [12]),
         ("an quill egg", [1]),
         ("half a zorbleberry", [0.5, 1]),
+        ("one and a half cups zorbleberries", [0.5, 1, 1.5]),
+        ("2 and a half cups zorbleberries", [0.5, 1, 2, 2.5]),
         ("2 dozen quill eggs", [2, 24]),
         ("1 lb 2 oz plonk beans", [1, 1.125, 2]),
         ("salt, to taste", []),
