@@ -189,8 +189,10 @@ py-lint:
 	cd backend && uv run --locked ruff check . && uv run --locked ruff format --check .
 py-types:
 	cd backend && uv run --locked pyright
+# Four pytest-xdist workers: GitHub's runners have four CPUs, and more workers here only contend
+# with the other checks. loadgroup keeps each xdist_group's tests on one worker.
 py-test:
-	cd backend && uv run --locked pytest -q
+	cd backend && uv run --locked pytest -q -n 4 --dist loadgroup
 ts-lint:
 	cd frontend && pnpm exec biome check .
 ts-types:

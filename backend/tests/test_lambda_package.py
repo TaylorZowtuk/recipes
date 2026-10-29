@@ -102,6 +102,11 @@ def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set(
         server.wait(timeout=10)
 
 
+# Under pytest-xdist each worker would build its own pair of zips, so the tests that use them run
+# on one worker (`--dist loadgroup`), which builds them once.
+lambda_zip = pytest.mark.xdist_group("lambda_zip")
+
+
 @pytest.fixture(scope="module")
 def lambda_zips(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     out = tmp_path_factory.mktemp("lambda")
@@ -112,12 +117,14 @@ def lambda_zips(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     return first, second
 
 
+@lambda_zip
 def test_lambda_zip_builds_byte_for_byte_the_same_twice(lambda_zips: tuple[Path, Path]) -> None:
     first, second = lambda_zips
     digest = [hashlib.sha256(p.read_bytes()).hexdigest() for p in (first, second)]
     assert digest[0] == digest[1]
 
 
+@lambda_zip
 def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     lambda_zips: tuple[Path, Path],
 ) -> None:
@@ -161,6 +168,7 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
 IMPORT_FROM_ARGV = "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api, recipe_scrapers"
 
 
+@lambda_zip
 def test_the_api_imports_from_the_zip_without_installed_package_metadata(
     lambda_zips: tuple[Path, Path], tmp_path: Path
 ) -> None:
