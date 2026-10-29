@@ -46,6 +46,7 @@ from recipes.models import (
     new_ulid,
 )
 from recipes.store import (
+    MAX_LEARNED,
     CanonicalExists,
     DuplicateSource,
     Store,
@@ -357,6 +358,10 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
+    if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
+        raise HTTPException(
+            422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
+        )
     _check_canonical_ingredients(body, store)
     enriched = recipe.model_copy(
         update={

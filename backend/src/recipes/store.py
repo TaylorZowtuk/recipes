@@ -48,6 +48,12 @@ KITCHEN_KEY: Item = {"PK": {"S": "SETTINGS#kitchen"}, "SK": {"S": "SETTINGS"}}
 # The Store Categories a new stack starts with, in Grocery List order.
 STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy", "Frozen", "Bakery"]
 
+# A transaction holds at most 100 items. Store.enrich_recipe writes these three, and one more for
+# each Canonical Ingredient it creates and wording it learns.
+MAX_TRANSACTION_ITEMS = 100
+ENRICH_FIXED_ITEMS = ("the recipe", "its card", "META#collection")
+MAX_LEARNED = MAX_TRANSACTION_ITEMS - len(ENRICH_FIXED_ITEMS)
+
 # How many times a transaction or a read is tried before giving up, and the first backoff.
 ATTEMPTS = 4
 BACKOFF_SECONDS = 0.05
@@ -272,7 +278,7 @@ class Store:
         wordings: Iterable[Wording],
     ) -> Recipe:
         """`update_recipe`, creating the new Canonical Ingredients at version 1 and learning the
-        wordings in the same transaction.
+        wordings in the same transaction: ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
 
         Raises CanonicalExists or WordingConfirmed, and VersionConflict, writing nothing.
         """

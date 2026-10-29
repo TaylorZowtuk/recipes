@@ -304,10 +304,6 @@ class Wording(Model):
     schema_version: int
 
 
-# A transaction holds at most 100 items: the recipe, its card and META#collection, and these.
-MAX_LEARNED = 97
-
-
 class Enrichment(Model):
     """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
     Canonical Ingredients it creates and the wordings it learns.
@@ -321,14 +317,11 @@ class Enrichment(Model):
     wordings: list[Wording] = []
 
     @model_validator(mode="after")
-    def _fits_a_transaction(self) -> Enrichment:
+    def _each_once(self) -> Enrichment:
         ids = [canonical.id for canonical in self.canonical_ingredients]
         wordings = [wording.wording for wording in self.wordings]
         if len(set(ids)) < len(ids) or len(set(wordings)) < len(wordings):
             msg = "Each Canonical Ingredient and wording is in an enrichment once"
-            raise ValueError(msg)
-        if len(ids) + len(wordings) > MAX_LEARNED:
-            msg = f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
             raise ValueError(msg)
         return self
 

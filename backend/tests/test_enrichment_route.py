@@ -9,6 +9,7 @@ from conftest import EDITOR
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.models import MAX_LABEL, CanonicalIngredient, Wording
 from recipes.seed import RECIPES
+from recipes.store import MAX_LEARNED
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -455,4 +456,20 @@ def test_an_issue_on_a_fact_enrichment_doesnt_write_is_refused(
     response = enrich_matched(editor_client, recipe.id, issues=[{**issue(1), "fact_id": fact_id}])
 
     assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)
+
+
+def test_an_enrichment_learning_more_than_a_transaction_holds_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    wording = {"wording": "stewing beef", "canonical_id": BEEF_ID, "schema_version": 1}
+    news = [{**BEEF, "id": f"01K7Q00000000000000000{n:04d}"} for n in range(MAX_LEARNED)]
+
+    response = enrich_matched(
+        editor_client, recipe.id, canonical_ingredients=news, wordings=[wording]
+    )
+
+    assert response.status_code == 422
+    assert "at most" in response.json()["detail"]
     assert_nothing_written(editor_client, recipe)
