@@ -24,6 +24,7 @@ dev = [
     "moto[dynamodb,s3,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; s3: images; ssm: auth settings
     "pyright>=1.1.414",
     "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.10",
     "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.114",
     "types-requests>=2.33.0.20261006",
