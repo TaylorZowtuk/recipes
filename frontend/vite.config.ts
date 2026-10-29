@@ -16,7 +16,9 @@ export default defineConfig({
         name: "Plateful",
         short_name: "Plateful",
         display: "standalone",
-        background_color: "#F7F8F5",
+        // The dark --bg. An installed Android app shows this behind the system navigation bar in
+        // both schemes, and the manifest has no per-scheme colour, so it suits the dark scheme.
+        background_color: "#121715",
         theme_color: "#2E5E45",
         icons: [
           { src: "icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
