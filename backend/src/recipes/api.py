@@ -79,7 +79,7 @@ class Collection(BaseModel):
     collection_version: int
     cards: list[Card]
     canonical_ingredients: list[CanonicalIngredient]
-    wordings: list[Wording]  # the wording cache
+    wordings: list[Wording]  # the Wording Cache
     kitchen_settings: KitchenSettings
 
 

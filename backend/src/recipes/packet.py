@@ -3,7 +3,8 @@ of the model's answer against those offers before anything is written (enrichmen
 
 The model only chooses: a Canonical Ingredient among the candidates (or a new one, in a Store
 Category that exists), an FDC food among the candidates and one of its portions, and a quantity
-among the numbers written in the line. Every number written comes from the parser or the snapshot.
+among the numbers written in the line. Every number written comes from the parser or the FDC
+Snapshot.
 """
 
 import hashlib
@@ -160,7 +161,7 @@ class CanonicalCandidate(Strict):
     family: str
     store_category_id: str
     confirmed: bool  # an editor confirmed the Canonical Ingredient
-    from_wording: bool  # the wording cache maps this line's wording to it
+    from_wording: bool  # the Wording Cache maps this line's wording to it
 
 
 class FdcCandidate(Strict):
@@ -249,7 +250,7 @@ class Rejected(Exception):
 
 
 class Work:
-    """The Pending recipes, and the Canonical Ingredients, wording cache and Store Categories they
+    """The Pending recipes, and the Canonical Ingredients, Wording Cache and Store Categories they
     are matched against: the packet for a model, and the enrichment its answer gives each recipe.
     """
 

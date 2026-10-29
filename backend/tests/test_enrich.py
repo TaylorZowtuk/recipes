@@ -1,4 +1,4 @@
-"""The enrich CLI hands a model a work packet of every Pending recipe, then checks the model's
+"""The enrich CLI hands a model a Work Packet of every Pending recipe, then checks the model's
 answer against what the packet offered and writes the facts through the API.
 """
 

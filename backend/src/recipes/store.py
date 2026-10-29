@@ -1,5 +1,5 @@
 """The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Canonical
-Ingredients, the wording cache, Kitchen settings and meta items.
+Ingredients, the Wording Cache, Kitchen settings and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
 in the same transaction, and versioned items are written only if their version hasn't changed.
@@ -308,7 +308,7 @@ class Store:
         """
         return self._partition(Card, "CARD", page_size)
 
-    # Canonical Ingredients and the wording cache
+    # Canonical Ingredients and the Wording Cache
 
     def canonical_ingredients(self, page_size: int | None = None) -> list[CanonicalIngredient]:
         """Every Canonical Ingredient, in id order. `page_size` lets tests force several pages."""

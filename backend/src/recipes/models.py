@@ -214,7 +214,7 @@ Nutrient = Annotated[float, Field(allow_inf_nan=False)]
 
 
 class Per100g(Model):
-    """The FDC snapshot's nutrition for 100 g of the matched food, as FDC states it."""
+    """The FDC Snapshot's nutrition for 100 g of the matched food, as FDC states it."""
 
     kcal: Nutrient | None
     protein_g: Nutrient | None
@@ -224,7 +224,7 @@ class Per100g(Model):
 
 
 class ConversionFact(Fact):
-    """How the line converts to grams, copied from the FDC snapshot: a density for a volume, the
+    """How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
     grams in one count unit for a count, or the reason it doesn't convert.
     """
 
@@ -266,7 +266,7 @@ class EnrichmentIssue(Model):
 
 
 def normalize_wording(name: str) -> str:
-    """The wording cache's key for an ingredient's name: lowercase, with its whitespace collapsed
+    """The Wording Cache's key for an ingredient's name: lowercase, with its whitespace collapsed
     and the punctuation around it stripped. Plurals stay as written.
     """
     return " ".join(name.lower().split()).strip(string.punctuation + string.whitespace)
@@ -294,7 +294,7 @@ class CanonicalIngredient(Model):
 
 
 class Wording(Model):
-    """`WORDING` / `<wording>`: the wording cache's entry for one normalized wording. Enrichment
+    """`WORDING` / `<wording>`: the Wording Cache's entry for one normalized wording. Enrichment
     may replace it until an editor confirms it.
     """
 
