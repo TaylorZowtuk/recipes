@@ -7,7 +7,7 @@ import pytest
 from conftest import EDITOR
 
 from recipes.auth import SERVICE_TOKEN_HEADER
-from recipes.models import MAX_LABEL, CanonicalIngredient, Wording
+from recipes.models import MAX_LABEL, CanonicalIngredient, EnrichmentIssue, Wording
 from recipes.seed import RECIPES
 from recipes.store import MAX_LEARNED
 
@@ -321,9 +321,11 @@ def test_a_match_may_name_an_existing_canonical_ingredient(
 
 
 def test_the_card_counts_the_open_issues(editor_client: TestClient, api_store: Store) -> None:
-    recipe = add(api_store)
-
-    enrich_matched(editor_client, recipe.id, issues=[issue(1), issue(2, "resolved"), issue(3)])
+    issues = [
+        EnrichmentIssue.model_validate(issue(n, status))
+        for n, status in enumerate(["open", "resolved", "open"], 1)
+    ]
+    recipe = api_store.enrich_recipe(add(api_store).model_copy(update={"issues": issues}), [], [])
 
     card = next(card for card in bundle(editor_client)["cards"] if card["id"] == recipe.id)
     assert card["needs_review"] == {"open_issues": 2, "unconfirmed": 0}
@@ -340,7 +342,7 @@ def assert_nothing_written(editor_client: TestClient, recipe: Recipe) -> None:
     [
         {"canonical_ingredients": []},
         {"canonical_ingredients": [{**BEEF, "store_category_id": "no-such-category"}]},
-        {"wordings": [{"wording": "beef", "canonical_id": CHUCK_ID, "schema_version": 1}]},
+        {"wordings": [{"wording": "stewing beef", "canonical_id": CHUCK_ID, "schema_version": 1}]},
     ],
     ids=["unknown match", "unknown store category", "wording for an unknown canonical"],
 )
@@ -407,7 +409,7 @@ def test_a_canonical_ingredient_that_exists_is_not_created_again(
         editor_client,
         second.id,
         canonical_ingredients=[{**BEEF, "name": "beef"}],
-        wordings=[{"wording": "beef", "canonical_id": BEEF_ID, "schema_version": 1}],
+        wordings=[{"wording": "stewing beef", "canonical_id": BEEF_ID, "schema_version": 1}],
     )
 
     assert response.status_code == 409
@@ -482,6 +484,27 @@ def test_an_enrichment_with_more_than_200_issues_is_refused(
     issues = [{**issue(1), "id": f"01K7Q00000000000000000{n:04d}"} for n in range(201)]
 
     response = enrich_matched(editor_client, recipe.id, issues=issues)
+
+    assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"wordings": [{"wording": "salt", "canonical_id": BEEF_ID, "schema_version": 1}]},
+        {"wordings": [{"wording": "cubed", "canonical_id": BEEF_ID, "schema_version": 1}]},
+        {"issues": [issue(1, "resolved")]},
+        {"issues": [{**issue(1), "confirm_batch": "batch-1"}]},
+    ],
+    ids=["wording of no line", "wording of no line's name", "resolved issue", "confirmed issue"],
+)
+def test_a_wording_of_another_line_or_an_issue_already_settled_is_refused(
+    editor_client: TestClient, api_store: Store, fields: dict[str, Any]
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(editor_client, recipe.id, **fields)
 
     assert response.status_code == 422
     assert_nothing_written(editor_client, recipe)

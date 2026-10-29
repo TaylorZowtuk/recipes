@@ -44,6 +44,7 @@ from recipes.models import (
     WebUrl,
     Wording,
     new_ulid,
+    normalize_wording,
 )
 from recipes.store import (
     MAX_LEARNED,
@@ -336,9 +337,10 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
             "Ingredient's id is taken, or an editor confirmed a wording"
         },
         422: {
-            "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, a "
-            "fact names an unknown Canonical Ingredient or Store Category, or a new Canonical "
-            "Ingredient or wording is confirmed"
+            "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, an "
+            "issue isn't open, a wording isn't a parsed line's name, it learns more than one "
+            "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a "
+            "new Canonical Ingredient or wording is confirmed or at another schema version"
         },
     },
 )
@@ -346,6 +348,12 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     """Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
     in Awaiting Review for an editor to check it.
+
+    Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
+    one of their facts and arrives open with no confirm batch, every wording is the normalized
+    name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
+    names a Canonical Ingredient that exists or is new here, every new one's Store Category
+    exists, and every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
@@ -358,6 +366,16 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
+    # Only an editor's review settles an issue, never enrichment.
+    if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
+        raise HTTPException(422, "An Enrichment Issue arrives open, in no confirm batch")
+    names = {
+        normalize_wording(facts.parse.name)
+        for facts in body.facts.ingredients.values()
+        if facts.parse
+    }
+    if unknown := sorted({wording.wording for wording in body.wordings} - names):
+        raise HTTPException(422, f"No parsed line is named {', '.join(unknown)}")
     if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
         raise HTTPException(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
