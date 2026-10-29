@@ -141,7 +141,8 @@ export interface paths {
          *     one of their facts and arrives open with no confirm batch, every wording is the normalized
          *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
          *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
-         *     exists, and every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION.
+         *     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
+         *     the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -1469,7 +1470,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version */
+            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
