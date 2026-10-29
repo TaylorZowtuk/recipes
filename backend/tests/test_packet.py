@@ -376,6 +376,36 @@ def test_a_quantity_for_a_line_without_a_parse_is_rejected(monkeypatch: pytest.M
     ]
 
 
+def test_a_line_without_a_parse_learns_no_wording(monkeypatch: pytest.MonkeyPatch) -> None:
+    unparsed(monkeypatch, "1-2 tsp glimmer oil")
+
+    enrichment = work(wordings=[]).enrich(answer(line(portion_id=None)).recipes[0], "a-model")
+
+    match = enrichment.facts.ingredients["i2"].match
+    assert match is not None
+    assert match.canonical_id == GLIMMER_ID
+    assert enrichment.wordings == []
+
+
+def test_a_recipe_learning_more_than_one_write_holds_is_rejected() -> None:
+    names = [f"zorb{a}{b} quill eggs" for a in "abcdefg" for b in "abcdefg"]
+    many = recipe(*(f"2 {name}" for name in names))
+    work_ = work(many, wordings=[])
+    lines = [
+        line(
+            offered.line_id,
+            canonical={"new": {"name": name, "family": "egg", "store_category_id": "dairy"}},
+            fdc_id=offered.fdc_candidates[0].fdc_id,
+            portion_id=None,
+        )
+        for offered, name in zip(work_.packet().recipes[0].lines, names, strict=True)
+    ]
+
+    assert errors(work_, answer(*lines)) == [
+        "learns 98 Canonical Ingredients and wordings, more than the 97 one write holds"
+    ]
+
+
 def test_every_error_in_a_recipe_is_reported() -> None:
     assert errors(work(), answer(line(fdc_id=1), line("i1", portion_id=None))) == [
         "i2: FDC food 1 wasn't offered",

@@ -311,6 +311,41 @@ def test_a_rejected_recipe_is_not_written_and_the_others_are(
     assert stored(editor_client, good.id)["status"] == "awaiting_review"
 
 
+def test_a_recipe_learning_more_than_one_write_holds_is_rejected_and_the_next_written(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    names = [f"zorb{a}{b} quill eggs" for a in "abcdefg" for b in "abcdefg"]
+    lines = [IngredientLine(id=f"i{n}", text=f"2 {name}") for n, name in enumerate(names, 1)]
+    many = add(api_store, "Many Eggs", lines=lines)
+    after = add(api_store, "Garlic Tofu")
+    adapter = api(editor_client)
+    offered = work_packet(through(adapter), capsys)
+    answered = json.loads(answer_text(offered))
+    for answered_recipe, offered_recipe in zip(
+        answered["recipes"], offered["recipes"], strict=True
+    ):
+        if answered_recipe["recipe_id"] == many.id:
+            answered_recipe["lines"] = [
+                {
+                    "line_id": line["line_id"],
+                    "canonical": {
+                        "new": {"name": name, "family": "egg", "store_category_id": "dairy"}
+                    },
+                    "fdc_id": line["fdc_candidates"][0]["fdc_id"],
+                    "portion_id": None,
+                }
+                for line, name in zip(offered_recipe["lines"], names, strict=True)
+            ]
+
+    failed = apply(BASE_URL, through(adapter), SNAPSHOT, json.dumps(answered))
+
+    assert failed == 1
+    assert "Many Eggs → rejected, nothing written" in capsys.readouterr().out
+    assert not any(many.id in (r.url or "") for r in adapter.requests if r.method == "PUT")
+    assert stored(editor_client, many.id)["status"] == "pending"
+    assert stored(editor_client, after.id)["status"] == "awaiting_review"
+
+
 def test_a_recipe_the_answer_leaves_out_stays_pending(
     editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:

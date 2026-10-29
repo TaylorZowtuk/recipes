@@ -15,7 +15,7 @@ import sys
 import unicodedata
 from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
 
 from recipes import fdc
 from recipes.models import (
@@ -40,6 +40,7 @@ from recipes.models import (
     normalize_wording,
 )
 from recipes.parse import parse_line
+from recipes.store import MAX_LEARNED
 
 if TYPE_CHECKING:
     from recipes.models import IngredientLine
@@ -360,8 +361,14 @@ class Work:
         """The enrichment a model's answer gives one recipe: every line's parse, and a match and
         conversion for each answered line, with the Enrichment Issues, new Canonical Ingredients
         and wordings that come of it. Raises Rejected, with every error, when any line chose
-        something it wasn't offered.
+        something it wasn't offered, or the enrichment is more than one write holds.
         """
+        try:
+            return self._enrich(answered, model)
+        except ValidationError as error:
+            raise Rejected([str(error)]) from None
+
+    def _enrich(self, answered: AnsweredRecipe, model: str) -> Enrichment:
         offered = self._offered.get(answered.recipe_id)
         if offered is None:
             raise Rejected([f"{answered.recipe_id} isn't in the packet"])
@@ -378,6 +385,12 @@ class Work:
                 recipe.answer(line, answered_line)
         if recipe.errors:
             raise Rejected(recipe.errors)
+        if (learned := len(recipe.created) + len(recipe.learned)) > MAX_LEARNED:
+            error = (
+                f"learns {learned} Canonical Ingredients and wordings, more than the "
+                f"{MAX_LEARNED} one write holds"
+            )
+            raise Rejected([error])
         return Enrichment(
             enrichment_version=ENRICHMENT_VERSION,
             fdc_release=self.snapshot.release,
@@ -459,7 +472,9 @@ class _Answering:
                 per_100g=chosen.per_100g,
             ),
         )
-        self._learn(wording, canonical)
+        # A line without a parse has only its text, which is no wording to learn.
+        if parse:
+            self._learn(wording, canonical)
 
     def _parse(self, line_id: str) -> ParseFact | None:
         facts = self.ingredients.get(line_id)
