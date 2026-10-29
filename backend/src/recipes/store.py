@@ -321,7 +321,7 @@ class Store:
         return self._partition(CanonicalIngredient, "CANON", page_size)
 
     def wordings(self, page_size: int | None = None) -> list[Wording]:
-        """The wording cache, in wording order. `page_size` lets tests force several pages."""
+        """The Wording Cache, in wording order. `page_size` lets tests force several pages."""
         return self._partition(Wording, "WORDING", page_size)
 
     # Source guards and Queued Ingests
