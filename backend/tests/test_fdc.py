@@ -1,4 +1,4 @@
-"""The FDC snapshot: finding a line's candidate foods and converting through a food's portion."""
+"""The FDC Snapshot: finding a line's candidate foods and converting through a food's portion."""
 
 import csv
 import io
@@ -34,39 +34,39 @@ def test_a_snapshot_names_its_release(snapshot: fdc.Snapshot) -> None:
 
 def test_candidates_rank_the_closest_description_first(snapshot: fdc.Snapshot) -> None:
     # "Quill eggs, whole, raw" shares more of its words with the name than the longer SR one.
-    assert ids(snapshot.candidates("whole quill eggs")) == [1002, 2003, 2008]
+    assert ids(snapshot.candidates("whole quill eggs", 8)) == [1002, 2003, 2008]
 
 
 def test_a_description_that_starts_with_the_name_ranks_first(snapshot: fdc.Snapshot) -> None:
     # "Quill bread, egg" shares more of its words with "quill egg", but it's bread.
-    assert ids(snapshot.candidates("quill egg")) == [1002, 2003, 2008]
+    assert ids(snapshot.candidates("quill egg", 8)) == [1002, 2003, 2008]
 
 
 def test_candidates_put_foundation_before_sr_legacy_on_a_tie(snapshot: fdc.Snapshot) -> None:
-    assert ids(snapshot.candidates("snorp garlic")) == [3001, 2007]
+    assert ids(snapshot.candidates("snorp garlic", 8)) == [3001, 2007]
 
 
 def test_a_singular_name_matches_a_plural_description(snapshot: fdc.Snapshot) -> None:
-    assert ids(snapshot.candidates("zorbleberry")) == [1001, 2001]
+    assert ids(snapshot.candidates("zorbleberry", 8)) == [1001, 2001]
 
 
 def test_candidates_break_a_tie_by_fdc_id(snapshot: fdc.Snapshot) -> None:
-    assert ids(snapshot.candidates("plonk beans")) == [2005, 2006]
+    assert ids(snapshot.candidates("plonk beans", 8)) == [2005, 2006]
 
 
 def test_candidates_ignore_case_punctuation_and_plurals(snapshot: fdc.Snapshot) -> None:
-    assert ids(snapshot.candidates("Zorbleberries,  FROZEN!"))[0] == 2001
+    assert ids(snapshot.candidates("Zorbleberries,  FROZEN!", 8))[0] == 2001
 
 
 def test_candidates_stop_at_the_limit(snapshot: fdc.Snapshot) -> None:
     # "Zorbleberries, raw" shares half its words; three others share a third, Foundation first.
     assert ids(snapshot.candidates("raw", limit=2)) == [1001, 3001]
-    assert len(snapshot.candidates("raw")) == 5
+    assert len(snapshot.candidates("raw", 8)) == 5
 
 
 @pytest.mark.parametrize("name", ["", "unobtainium", "  ,  "])
 def test_a_name_sharing_no_word_has_no_candidates(snapshot: fdc.Snapshot, name: str) -> None:
-    assert snapshot.candidates(name) == []
+    assert snapshot.candidates(name, 8) == []
 
 
 def test_a_food_is_found_by_its_fdc_id(snapshot: fdc.Snapshot) -> None:

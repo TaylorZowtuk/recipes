@@ -48,7 +48,7 @@ SOURCES: dict[Dataset, Source] = {
 RELEASE = f"foundation-{FOUNDATION_DATE}+sr_legacy-2018-04"
 DEFAULT_PATH = Path(__file__).resolve().parents[2] / "fdc" / f"{RELEASE}.json.gz"
 
-# Energy is Atwater's general factors (2048) or specific ones (2047) where the food has no 1008.
+# Energy is Atwater's specific factors (2048) or general ones (2047) where the food has no 1008.
 KCAL = ("1008", "2048", "2047")
 UNDETERMINED = "undetermined"
 
@@ -138,10 +138,10 @@ class Snapshot(Frozen):
         ]
 
     def food(self, fdc_id: int) -> Food:
-        """The food with this FDC id. KeyError if the snapshot has none."""
+        """The food with this FDC id. KeyError if the FDC Snapshot has none."""
         return self._by_id[fdc_id]
 
-    def candidates(self, name: str, limit: int = 8) -> list[Food]:
+    def candidates(self, name: str, limit: int) -> list[Food]:
         """The foods whose descriptions share words with an ingredient's name, best first: those
         whose description starts with the name ("Egg, whole" for "egg", before "Bread, egg"), then
         by the share of their words in common, then Foundation before SR Legacy, then by FDC id.
@@ -304,7 +304,9 @@ def _download(source: Source, path: Path) -> Path:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m recipes.fdc", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build", help="download the pinned releases, write the snapshot")
+    build = commands.add_parser(
+        "build", help="download the pinned releases, write the FDC Snapshot"
+    )
     build.add_argument("--out", type=Path, default=DEFAULT_PATH.parent)
     args = parser.parse_args(argv)
     with tempfile.TemporaryDirectory() as tmp:
