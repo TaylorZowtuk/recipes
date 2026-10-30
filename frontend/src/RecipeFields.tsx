@@ -1,10 +1,11 @@
 import { type PointerEvent, useEffect, useRef } from "react";
-import { type DifficultyChoice, editBlock } from "./addRecipe";
+import type { DifficultyChoice } from "./addRecipe";
 import type { Difficulty, Image, Preview } from "./api/client";
 import { useSync } from "./collection";
 import { useOnline } from "./online";
 import { Plate } from "./Plate";
 import { cardImageUrl, type Focal, focalAt, focalStep, imageUrl } from "./photo";
+import { editBlock } from "./writeOutcome";
 
 // The fields an editor sets on a recipe, shared by Add a recipe's review and the recipe page's
 // Edit: Difficulty, Tags and the Preview Photo with its Focal Point.

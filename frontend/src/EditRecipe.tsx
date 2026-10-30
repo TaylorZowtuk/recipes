@@ -49,6 +49,12 @@ export function EditButton({ onEdit }: { onEdit: () => void }) {
   );
 }
 
+const EDIT_HEADING = "edit-recipe-heading";
+
+export function focusEditHeading() {
+  document.getElementById(EDIT_HEADING)?.focus({ preventScroll: true });
+}
+
 // Loads the Collection this device just changed, so the page shows the newer recipe at once.
 async function reloadCollection() {
   forgetCollection();
@@ -128,7 +134,15 @@ export function EditRecipe({
   };
 
   return (
-    <form className="review-form edit-form" noValidate onSubmit={save}>
+    <form
+      className="review-form edit-form"
+      aria-labelledby={EDIT_HEADING}
+      noValidate
+      onSubmit={save}
+    >
+      <h2 id={EDIT_HEADING} tabIndex={-1} className="visually-hidden">
+        Edit recipe
+      </h2>
       <fieldset disabled={!!blocked} className="review-fields">
         <PhotoPicker
           title={title}

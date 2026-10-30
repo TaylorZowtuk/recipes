@@ -3,11 +3,11 @@ import { Link, useNavigate, useParams } from "react-router";
 import type { Original, ParseFact, Quantity, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { DifficultyMeters } from "./DifficultyMeters";
-import { editing } from "./editRecipe";
+import { EditButton, EditRecipe, focusEditHeading } from "./EditRecipe";
+import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
-import { EditButton, EditRecipe } from "./RecipeEdit";
 import { byComponent } from "./recipeComponents";
 import { focusTitle, Screen } from "./Screen";
 import { EditorOnly } from "./session";
@@ -38,10 +38,16 @@ function RecipePage() {
   const { draft } = edit;
   const ready = card && recipe.state === "ready" ? recipe.value : undefined;
 
-  // Leaving Edit moves focus to the title, since the form that had it is gone.
+  // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
+  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title.
+  const notice = useRef<HTMLParagraphElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
-    if (wasEditing.current && !draft) focusTitle();
+    if (!wasEditing.current && draft) focusEditHeading();
+    if (wasEditing.current && !draft) {
+      if (notice.current) notice.current.focus({ preventScroll: true });
+      else focusTitle();
+    }
     wasEditing.current = !!draft;
   }, [draft]);
 
@@ -114,8 +120,8 @@ function RecipePage() {
         </p>
       )}
       {edit.notice && (
-        <p role="alert" className="screen-note">
-          {edit.notice}
+        <p ref={notice} role="alert" tabIndex={-1} className="screen-note">
+          {missing ? DELETED_ELSEWHERE : edit.notice}
         </p>
       )}
       {card && ready && draft && (
