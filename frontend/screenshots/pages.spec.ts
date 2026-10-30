@@ -62,14 +62,19 @@ const outDir = process.env.SCREENSHOT_DIR ?? "screenshots-out";
 // Set for the base branch's run, which may predate some of the pages.
 const mayBeMissing = !!process.env.SCREENSHOT_MAY_BE_MISSING;
 
-// A stand-in for Google's sign-in script, so the sign-in page looks the same on every run.
+// A stand-in for Google's sign-in script, so the sign-in page looks the same on every run. Like the
+// real one, it draws the button in an iframe whose document declares no colour scheme.
 const fakeGoogle = `window.google = { accounts: { id: {
   initialize() {},
-  renderButton(parent) {
-    const b = document.createElement("button");
-    b.textContent = "Sign in with Google";
-    b.style.cssText = "min-height:40px;padding:0 20px;border:1px solid #dadce0;border-radius:20px;background:#fff;color:#3c4043;font:500 14px system-ui";
-    parent.replaceChildren(b);
+  renderButton(parent, options) {
+    const dark = options.theme === "filled_black";
+    const f = document.createElement("iframe");
+    f.title = "Sign in with Google";
+    f.style.cssText = "width:220px;height:52px;border:0";
+    f.srcdoc = '<body style="margin:0;background:transparent"><button style="margin:6px;min-height:40px;padding:0 20px;border:1px solid '
+      + (dark ? '#131314;background:#131314;color:#e3e3e3' : '#dadce0;background:#fff;color:#3c4043')
+      + ';border-radius:20px;font:500 14px system-ui">Sign in with Google</button></body>';
+    parent.replaceChildren(f);
   },
 } } };`;
 

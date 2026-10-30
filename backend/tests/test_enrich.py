@@ -516,20 +516,20 @@ def redirect_to(location: str) -> Adapter:
 
 
 def test_a_redirect_on_the_same_host_is_followed_with_the_token() -> None:
-    adapter = redirect_to("/api/collection?v=3")
+    adapter = redirect_to("/api/v/collection/3")
 
     status, _ = through(adapter)("GET", "https://plateful.example/api/collection", None)
 
     assert status == 200
     assert [request.url for request in adapter.requests][-1] == (
-        "https://plateful.example/api/collection?v=3"
+        "https://plateful.example/api/v/collection/3"
     )
     assert adapter.requests[-1].headers[SERVICE_TOKEN_HEADER] == SERVICE_TOKEN
 
 
 @pytest.mark.parametrize(
     "location",
-    ["https://elsewhere.example/api/collection", "http://plateful.example/api/collection"],
+    ["https://elsewhere.example/api/v/collection/3", "http://plateful.example/api/v/collection/3"],
     ids=["another host", "plain http"],
 )
 def test_a_redirect_off_the_base_urls_scheme_and_host_is_not_followed(location: str) -> None:

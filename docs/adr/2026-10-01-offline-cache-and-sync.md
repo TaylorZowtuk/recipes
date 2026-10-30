@@ -1,5 +1,7 @@
 # Phones cache the collection behind a version counter, queue only conflict-free writes offline, and poll a tiny sync endpoint
 
+Superseded in part by [Versioned reads under `/api/v/`](2026-10-26-path-versioned-reads-cached-at-cloudfront.md): the phone fetches `/api/v/collection/<n>`, not `/api/collection?v=<n>`, and recipes by version under `/api/v/recipes/`, which is what CloudFront caches. Everything else here stands.
+
 The PWA keeps the whole collection on installed phones and finds out about changes by polling one small uncached endpoint, `GET /api/sync`. Offline, it queues only the writes that can't conflict (grocery ticks and Extras) and turns every other edit off. We chose polling because it fits the $0 stack: WebSockets would need API Gateway, whose free allowance has expired for this account, and Web Push needs an installed app, notification permission and a store of push subscriptions. We chose to queue only conflict-free writes because ticking groceries in a store with no signal is the one offline edit that matters, and a queue that can't conflict never needs a "your offline change was rejected" screen.
 
 ## Noticing changes

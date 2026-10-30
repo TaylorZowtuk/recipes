@@ -35,6 +35,25 @@ async function serveGoogle(page: Page, credential: string) {
   );
 }
 
+// Like Google's real script, draws its button in an iframe whose document declares no colour
+// scheme, over a transparent body, with a margin around the pill.
+const fakeGoogleInIframe = `
+  window.google = { accounts: { id: {
+    initialize() {},
+    renderButton(parent, options) {
+      const dark = options.theme === "filled_black";
+      const frame = document.createElement("iframe");
+      frame.title = "Sign in with Google";
+      frame.style.cssText = "width:240px;height:64px;border:0";
+      frame.srcdoc = '<body style="margin:0;background:transparent">'
+        + '<button style="margin:12px;height:40px;padding:0 20px;border:0;border-radius:20px;'
+        + (dark ? 'background:#131314;color:#e3e3e3' : 'background:#fff;color:#1f1f1f')
+        + '">Sign in with Google</button></body>';
+      parent.replaceChildren(frame);
+    },
+  } } };
+`;
+
 const accountButton = (page: Page) => page.getByRole("button", { name: "Account" });
 const menu = (page: Page) => page.getByRole("menu", { name: "Account" });
 const menuItems = (page: Page) => menu(page).getByRole("menuitem");
@@ -258,7 +277,10 @@ test("sign-in shows that Google's button and the sign-in are on their way", asyn
   });
 
   await page.goto("/sign-in");
-  await expect(page.getByText("Loading Google sign-in…")).toBeVisible();
+  const loading = page.getByText("Loading Google sign-in…");
+  await expect(loading).toBeVisible();
+  // Only Google's iframe is forced to the light scheme; the note keeps the page's.
+  await expect(loading).not.toHaveCSS("color-scheme", "light");
   releaseGoogle();
   await page.getByRole("button", { name: "Sign in with Google" }).click();
   await expect(page.getByText("Loading Google sign-in…")).toHaveCount(0);
@@ -345,4 +367,39 @@ test("Sign out stays in reach on a very short phone screen", async ({ page }, te
   await expect(menu(page)).toBeHidden();
   await openMenu(page);
   await expect(menuItems(page)).toHaveText(["Kitchen settings", "Sign in"]);
+});
+
+test("Google's button sits on the page's background, with no box around it", async ({ page }) => {
+  await page.route(GSI, (route) =>
+    route.fulfill({ contentType: "text/javascript", body: fakeGoogleInIframe }),
+  );
+  await page.goto("/sign-in");
+  const frame = page.locator(".google-button iframe");
+  await expect(
+    frame.contentFrame().getByRole("button", { name: "Sign in with Google" }),
+  ).toBeVisible();
+
+  // The iframe's corner, in the margin outside the pill, as drawn on screen.
+  const shot = (await frame.screenshot()).toString("base64");
+  const colours = await page.evaluate(async (shot) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${shot}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("no 2d context");
+    context.drawImage(image, 0, 0);
+    const corner = Array.from(context.getImageData(2, 2, 1, 1).data.slice(0, 3));
+    const bg = getComputedStyle(document.body).backgroundColor.match(/\d+/g)?.map(Number);
+    return { corner, bg };
+  }, shot);
+  expect(colours.bg).toHaveLength(3);
+  colours.corner.forEach((channel, i) => {
+    expect(
+      Math.abs(channel - (colours.bg?.[i] ?? -99)),
+      `corner ${colours.corner} vs page ${colours.bg}`,
+    ).toBeLessThanOrEqual(3);
+  });
 });
