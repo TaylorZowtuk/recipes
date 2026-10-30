@@ -7,6 +7,7 @@ let sync: Promise<Sync> | undefined;
 let collection: Promise<Collection> | undefined;
 let loadedCollection: Collection | undefined;
 const recipes = new Map<string, Recipe>();
+const recipeKey = (id: string, version: number) => `${id}@${version}`;
 
 export class NotFound extends Error {}
 
@@ -79,7 +80,7 @@ export function useSync(): Sync | null | undefined {
 
 // A recipe at its card's version and the schema version, its immutable URL.
 export async function loadRecipe(card: Card): Promise<Recipe> {
-  const key = `${card.id}@${card.recipe_version}`;
+  const key = recipeKey(card.id, card.recipe_version);
   const known = recipes.get(key);
   if (known) return known;
   const { schema_version } = await loadSync();
@@ -129,10 +130,30 @@ function useLoaded<T>(
   return cached === undefined ? { state: "loading" } : { state: "ready", value: cached };
 }
 
-export const useCollection = () => useLoaded("collection", loadCollection, loadedCollection);
+// The Collection. After this device changes it, a screen showing it switches to the new version
+// once that has loaded, keeping the old one on screen meanwhile, and still if the reload fails.
+export function useCollection(): Loaded<Collection> {
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => {
+    let current = true;
+    const reloaded = () => current && setReloads((n) => n + 1);
+    const reload = () => loadCollection().then(reloaded, () => {});
+    forgotten.add(reload);
+    return () => {
+      current = false;
+      forgotten.delete(reload);
+    };
+  }, []);
+  return useLoaded(`collection@${reloads}`, loadCollection, loadedCollection);
+}
+
+// Keeps a recipe the API just returned, so its page shows it without loading it again.
+export function rememberRecipe(recipe: Recipe) {
+  recipes.set(recipeKey(recipe.id, recipe.version), recipe);
+}
 
 // Waits while there is no card, so a screen can call it before the Collection has loaded.
 export function useRecipe(card: Card | undefined): Loaded<Recipe> {
-  const key = card ? `${card.id}@${card.recipe_version}` : "";
+  const key = card ? recipeKey(card.id, card.recipe_version) : "";
   return useLoaded(key, card && (() => loadRecipe(card)), recipes.get(key));
 }

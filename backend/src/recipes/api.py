@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -131,6 +131,10 @@ class PhotoUrl(BaseModel):
     url: WebUrl
 
 
+# A recipe's Tags, before `_tags` strips them, drops empty ones and spells each once.
+Tags = Annotated[list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)]
+
+
 class NewRecipe(BaseModel):
     """A recipe to add from a website: what ingest captured, plus the editor's own fields. Each
     of its images was stored by POST /api/images, and its preview shows one of them.
@@ -139,9 +143,7 @@ class NewRecipe(BaseModel):
     source: WebsiteSource
     original: Original
     difficulty: Difficulty | None = None
-    tags: Annotated[
-        list[Annotated[str, StringConstraints(max_length=100)]], Field(max_length=50)
-    ] = []
+    tags: Tags = []
     # A factory, not a default, so the schema leaves it optional for clients that send none.
     images: Annotated[list[Image], Field(max_length=MAX_IMAGES, default_factory=list)]
     preview: Preview | None = None
@@ -154,6 +156,45 @@ class NewRecipe(BaseModel):
             raise ValueError(msg)
         if self.preview and self.preview.image_id not in ids:
             msg = "The preview shows one of the recipe's images"
+            raise ValueError(msg)
+        return self
+
+
+class SetTags(BaseModel):
+    op: Literal["set_tags"]
+    tags: Tags
+
+
+class SetDifficulty(BaseModel):
+    op: Literal["set_difficulty"]
+    difficulty: Difficulty | None
+
+
+class SetPreview(BaseModel):
+    """Show one of the recipe's images as its Preview Photo, or none with null."""
+
+    op: Literal["set_preview"]
+    preview: Preview | None
+
+
+Operation = Annotated[SetTags | SetDifficulty | SetPreview, Field(discriminator="op")]
+
+
+# A version DynamoDB can compare: it rejects numbers of more than 38 digits.
+RecipeVersion = Annotated[int, Field(ge=1, le=2**53)]
+
+
+class RecipeEdit(BaseModel):
+    """An editor's batch of changes to the recipe at `version`, applied in one write."""
+
+    version: RecipeVersion
+    operations: Annotated[list[Operation], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _each_op_once(self) -> RecipeEdit:
+        ops = [operation.op for operation in self.operations]
+        if len(set(ops)) < len(ops):
+            msg = "Each operation is in an edit once"
             raise ValueError(msg)
         return self
 
@@ -384,7 +425,7 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
         source=body.source,
         dedupe_key=key,
         original=body.original,
-        tags=_tags(body.tags),
+        tags=_tags(body.tags, store),
         difficulty=body.difficulty,
         images=body.images,
         preview=body.preview,
@@ -457,6 +498,59 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
         raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
     except WordingConfirmed:
         raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+@router.patch(
+    "/recipes/{recipe_id}",
+    response_model=Recipe,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_RECIPE,
+        409: {"description": "The recipe changed since the editor read it"},
+        422: {"description": "Not a valid edit, or the preview isn't one of the recipe's images"},
+    },
+)
+def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: StoreDep) -> Recipe:
+    """Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
+    `body.version`, with its card, in one write.
+    """
+    recipe = _recipe(store, recipe_id)
+    changes: dict[str, object] = {"version": body.version}
+    for operation in body.operations:
+        match operation:
+            case SetTags():
+                changes["tags"] = _tags(operation.tags, store, editing=recipe.id)
+            case SetDifficulty():
+                changes["difficulty"] = operation.difficulty
+            case SetPreview():
+                preview = operation.preview
+                if preview and preview.image_id not in {image.id for image in recipe.images}:
+                    raise HTTPException(422, "The preview shows one of the recipe's images")
+                changes["preview"] = preview
+    return store.update_recipe(recipe.model_copy(update=changes))
+
+
+@router.delete(
+    "/recipes/{recipe_id}",
+    status_code=204,
+    response_class=Response,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_RECIPE,
+        409: {"description": "The recipe changed since the editor read it"},
+    },
+)
+def delete_recipe(
+    recipe_id: Annotated[Ulid, Path()], version: Annotated[RecipeVersion, Query()], store: StoreDep
+) -> Response:
+    """Delete the recipe at `version`, with its card and Source guard, so its Source can be
+    added again.
+    """
+    recipe = _recipe(store, recipe_id)
+    store.delete_recipe(recipe.model_copy(update={"version": version}))
+    return Response(status_code=204)
 
 
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
@@ -545,12 +639,19 @@ def _conflict(recipe_id: str | None, queued_ingest_id: str | None) -> JSONRespon
     return JSONResponse(duplicate.model_dump(mode="json"), status_code=409, headers=NO_STORE)
 
 
-def _tags(tags: list[str]) -> list[str]:
-    """Tags match case-insensitively, keeping the first spelling."""
+def _tags(tags: list[str], store: Store, editing: str | None = None) -> list[str]:
+    """Tags match case-insensitively across the Collection, keeping the spelling another
+    recipe's card already uses, or else the first given here.
+    """
+    spelled: dict[str, str] = {}
+    for card in store.cards():
+        if card.id != editing:
+            for tag in card.tags:
+                spelled.setdefault(tag.casefold(), tag)
     kept: dict[str, str] = {}
     for tag in (t.strip() for t in tags):
         if tag:
-            kept.setdefault(tag.casefold(), tag)
+            kept.setdefault(tag.casefold(), spelled.get(tag.casefold(), tag))
     return list(kept.values())
 
 

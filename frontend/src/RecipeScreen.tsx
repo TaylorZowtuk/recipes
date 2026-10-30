@@ -1,20 +1,32 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { Original, ParseFact, Quantity, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
+import { DifficultyMeters } from "./DifficultyMeters";
+import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
+import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
 import { byComponent } from "./recipeComponents";
-import { Screen } from "./Screen";
+import { focusTitle, Screen } from "./Screen";
+import { EditorOnly } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
 import { Tabs } from "./Tabs";
+import { TagList } from "./TagList";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
-// status note stays mounted through every state, so focus can rest on it after a retry.
+// status note stays mounted through every state, so focus can rest on it after a retry. The hero
+// shows the Difficulty and every Tag above the tabs, and to an editor an Edit button that swaps the
+// tabs for the Edit form. Keyed by the recipe, so a Draft never carries over to another one.
 export function RecipeScreen() {
+  const { id } = useParams();
+  return <RecipePage key={id} />;
+}
+
+function RecipePage() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
   const collection = useCollection();
@@ -22,6 +34,22 @@ export function RecipeScreen() {
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
   const recipe = useRecipe(card);
   const status = useRef<HTMLParagraphElement>(null);
+  const [edit, dispatch] = useReducer(editing, { draft: null });
+  const { draft } = edit;
+  const ready = card && recipe.state === "ready" ? recipe.value : undefined;
+
+  // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
+  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title.
+  const notice = useRef<HTMLParagraphElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (!wasEditing.current && draft) focusEditHeading();
+    if (wasEditing.current && !draft) {
+      if (notice.current) notice.current.focus({ preventScroll: true });
+      else focusTitle();
+    }
+    wasEditing.current = !!draft;
+  }, [draft]);
 
   useEffect(() => {
     if (card && shownSlug !== slug(card.title)) navigate(recipePath(card), { replace: true });
@@ -47,15 +75,34 @@ export function RecipeScreen() {
           ? {
               above: (
                 <>
-                  <Plate title={card.title} size="hero" preview={card.preview} />
+                  <Plate
+                    title={card.title}
+                    size="hero"
+                    preview={draft ? draft.preview : card.preview}
+                  />
                   {card.site_name && <p className="hero-site">{card.site_name}</p>}
                 </>
               ),
-              below: time && (
-                <p className="hero-time">
-                  <ClockIcon />
-                  {time}
-                </p>
+              below: (
+                <>
+                  {time && (
+                    <p className="hero-time">
+                      <ClockIcon />
+                      {time}
+                    </p>
+                  )}
+                  {!draft && (
+                    <>
+                      <DifficultyMeters difficulty={card.difficulty} />
+                      <TagList tags={card.tags} />
+                      {ready && (
+                        <EditorOnly>
+                          <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
+                        </EditorOnly>
+                      )}
+                    </>
+                  )}
+                </>
               ),
             }
           : {}
@@ -64,7 +111,7 @@ export function RecipeScreen() {
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}
-        {missing && "There’s no recipe at this address."}
+        {missing && !edit.notice && "There’s no recipe at this address."}
       </p>
       {failed && <LoadFailed what="The recipe" retry={failed.retry} status={status} />}
       {missing && (
@@ -72,7 +119,21 @@ export function RecipeScreen() {
           <Link to="/recipes">Browse the Collection</Link>
         </p>
       )}
-      {card && recipe.state === "ready" && (
+      {edit.notice && (
+        <p ref={notice} role="alert" tabIndex={-1} className="screen-note">
+          {missing ? DELETED_ELSEWHERE : edit.notice}
+        </p>
+      )}
+      {card && ready && draft && (
+        <RecipeEditor
+          recipe={ready}
+          title={card.title}
+          draft={draft}
+          problem={edit.problem}
+          dispatch={dispatch}
+        />
+      )}
+      {card && recipe.state === "ready" && !draft && (
         <Tabs
           label="Recipe"
           tabs={[

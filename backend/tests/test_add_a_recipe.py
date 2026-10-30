@@ -458,6 +458,36 @@ def test_saving_a_source_twice_is_a_duplicate(editor_client: TestClient, store: 
     assert [card.id for card in store.cards()] == [first["id"]]
 
 
+def test_a_deleted_recipes_source_can_be_added_again(
+    editor_client: TestClient, store: Store
+) -> None:
+    captured = ingest(editor_client).json()
+    first = save(editor_client, captured).json()
+    deleted = editor_client.delete(
+        f"/api/recipes/{first['id']}", params={"version": first["version"]}, headers=EDITOR
+    )
+    assert deleted.status_code == 204
+
+    response = save(editor_client, ingest(editor_client).json())
+
+    assert response.status_code == 201
+    assert [card.id for card in store.cards()] == [response.json()["id"]]
+    guard = store.source_guard(KEY)
+    assert guard is not None
+    assert guard.recipe_id == response.json()["id"]
+
+
+def test_saving_keeps_the_spelling_the_collection_already_uses_for_a_tag(
+    editor_client: TestClient, store: Store
+) -> None:
+    store.add_recipe(RECIPES[0].model_copy(update={"tags": ["Sunday", "roast"]}))
+
+    response = save(editor_client, ingest(editor_client).json(), tags=["SUNDAY", "Soup", "soup"])
+
+    assert response.status_code == 201
+    assert response.json()["tags"] == ["Sunday", "Soup"]
+
+
 def test_saving_a_queued_source_is_a_duplicate(editor_client: TestClient, web: FakeWeb) -> None:
     captured = ingest(editor_client).json()
     other = "https://plateful.test/blocked"
