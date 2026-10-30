@@ -136,8 +136,16 @@ export interface paths {
         get?: never;
         /**
          * Put Enrichment
-         * @description Store a Pending recipe's facts. A bulk import's recipe is then Ready, and any other waits
+         * @description Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
+         *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
          *     in Awaiting Review for an editor to check it.
+         *
+         *     Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
+         *     one of their facts and arrives open with no confirm batch, every wording is the normalized
+         *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
+         *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
+         *     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
+         *     the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -231,6 +239,62 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * CanonicalIngredient
+         * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
+         */
+        "CanonicalIngredient-Input": {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Family */
+            family: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Pantry Staple
+             * @default false
+             */
+            pantry_staple: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Store Category Id */
+            store_category_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * CanonicalIngredient
+         * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
+         */
+        "CanonicalIngredient-Output": {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Family */
+            family: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Pantry Staple
+             * @default false
+             */
+            pantry_staple: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Store Category Id */
+            store_category_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
          * Card
          * @description A recipe's small summary for the Collection grid, kept up to date on every recipe write.
          */
@@ -263,11 +327,105 @@ export interface components {
          * @description Everything a phone caches about the Collection, at one collection version.
          */
         Collection: {
+            /** Canonical Ingredients */
+            canonical_ingredients: components["schemas"]["CanonicalIngredient-Output"][];
             /** Cards */
             cards: components["schemas"]["Card"][];
             /** Collection Version */
             collection_version: number;
             kitchen_settings: components["schemas"]["KitchenSettings"];
+            /** Wordings */
+            wordings: components["schemas"]["Wording-Output"][];
+        };
+        /**
+         * ConversionFact
+         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
+         *     grams in one count unit for a count, or the reason it doesn't convert.
+         */
+        "ConversionFact-Input": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Count Unit */
+            count_unit: string | null;
+            /**
+             * Dataset
+             * @enum {string}
+             */
+            dataset: "foundation" | "sr_legacy";
+            /** Density G Per Ml */
+            density_g_per_ml: number | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Grams Per Count */
+            grams_per_count: number | null;
+            per_100g: components["schemas"]["Per100g"];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Refused */
+            refused: string | null;
+            /** Release */
+            release: string;
+        };
+        /**
+         * ConversionFact
+         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
+         *     grams in one count unit for a count, or the reason it doesn't convert.
+         */
+        "ConversionFact-Output": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Count Unit */
+            count_unit: string | null;
+            /**
+             * Dataset
+             * @enum {string}
+             */
+            dataset: "foundation" | "sr_legacy";
+            /** Density G Per Ml */
+            density_g_per_ml: number | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Grams Per Count */
+            grams_per_count: number | null;
+            per_100g: components["schemas"]["Per100g"];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Refused */
+            refused: string | null;
+            /** Release */
+            release: string;
         };
         /** Difficulty */
         Difficulty: {
@@ -293,12 +451,82 @@ export interface components {
         };
         /**
          * Enrichment
-         * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids.
+         * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
+         *     Canonical Ingredients it creates and the wordings it learns.
          */
         Enrichment: {
+            /**
+             * Canonical Ingredients
+             * @default []
+             */
+            canonical_ingredients: components["schemas"]["CanonicalIngredient-Input"][];
             /** Enrichment Version */
             enrichment_version: number;
             facts: components["schemas"]["RecipeFacts-Input"];
+            /** Fdc Release */
+            fdc_release?: string | null;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: components["schemas"]["EnrichmentIssue-Input"][];
+            /**
+             * Wordings
+             * @default []
+             */
+            wordings: components["schemas"]["Wording-Input"][];
+        };
+        /**
+         * EnrichmentIssue
+         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names.
+         */
+        "EnrichmentIssue-Input": {
+            /** After */
+            after?: string | null;
+            /** Before */
+            before?: string | null;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /** Fact Id */
+            fact_id: string;
+            /** Id */
+            id: string;
+            /** Model */
+            model?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Status
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "resolved";
+        };
+        /**
+         * EnrichmentIssue
+         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names.
+         */
+        "EnrichmentIssue-Output": {
+            /** After */
+            after: string | null;
+            /** Before */
+            before: string | null;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /** Fact Id */
+            fact_id: string;
+            /** Id */
+            id: string;
+            /** Model */
+            model: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Status
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "resolved";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -334,10 +562,14 @@ export interface components {
         };
         /** IngredientFacts */
         "IngredientFacts-Input": {
+            conversion?: components["schemas"]["ConversionFact-Input"] | null;
+            match?: components["schemas"]["MatchFact-Input"] | null;
             parse?: components["schemas"]["ParseFact-Input"] | null;
         };
         /** IngredientFacts */
         "IngredientFacts-Output": {
+            conversion: components["schemas"]["ConversionFact-Output"] | null;
+            match: components["schemas"]["MatchFact-Output"] | null;
             parse: components["schemas"]["ParseFact-Output"] | null;
         };
         /** IngredientLine */
@@ -366,6 +598,70 @@ export interface components {
             store_categories: components["schemas"]["StoreCategory"][];
             /** Version */
             version: number;
+        };
+        /**
+         * MatchFact
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose.
+         */
+        "MatchFact-Input": {
+            /** Canonical Id */
+            canonical_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Portion Id */
+            portion_id: number | null;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+        };
+        /**
+         * MatchFact
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose.
+         */
+        "MatchFact-Output": {
+            /** Canonical Id */
+            canonical_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Portion Id */
+            portion_id: number | null;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
         };
         /** NeedsReview */
         NeedsReview: {
@@ -522,6 +818,22 @@ export interface components {
             /** Unit Kind */
             unit_kind: ("mass" | "volume" | "count") | null;
         };
+        /**
+         * Per100g
+         * @description The FDC Snapshot's nutrition for 100 g of the matched food, as FDC states it.
+         */
+        Per100g: {
+            /** Carbs G */
+            carbs_g: number | null;
+            /** Fat G */
+            fat_g: number | null;
+            /** Kcal */
+            kcal: number | null;
+            /** Protein G */
+            protein_g: number | null;
+            /** Sodium Mg */
+            sodium_mg: number | null;
+        };
         /** PhotoUrl */
         PhotoUrl: {
             /** Url */
@@ -592,6 +904,8 @@ export interface components {
              *     }
              */
             facts: components["schemas"]["RecipeFacts-Output"];
+            /** Fdc Release */
+            fdc_release: string | null;
             /** Id */
             id: string;
             /**
@@ -601,6 +915,11 @@ export interface components {
             images: components["schemas"]["Image"][];
             /** Ingest Channel */
             ingest_channel: ("add_a_recipe" | "bulk_import") | null;
+            /**
+             * Issues
+             * @default []
+             */
+            issues: components["schemas"]["EnrichmentIssue-Output"][];
             original: components["schemas"]["Original-Output"];
             preview: components["schemas"]["Preview"] | null;
             /** Schema Version */
@@ -825,6 +1144,42 @@ export interface components {
             site_name: string;
             /** Url */
             url: string;
+        };
+        /**
+         * Wording
+         * @description `WORDING` / `<wording>`: the Wording Cache's entry for one normalized wording. Enrichment
+         *     may replace it until an editor confirms it.
+         */
+        "Wording-Input": {
+            /** Canonical Id */
+            canonical_id: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Wording */
+            wording: string;
+        };
+        /**
+         * Wording
+         * @description `WORDING` / `<wording>`: the Wording Cache's entry for one normalized wording. Enrichment
+         *     may replace it until an editor confirms it.
+         */
+        "Wording-Output": {
+            /** Canonical Id */
+            canonical_id: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Schema Version */
+            schema_version: number;
+            /** Wording */
+            wording: string;
         };
     };
     responses: never;
@@ -1116,14 +1471,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe isn't Pending, or changed meanwhile */
+            /** @description The recipe isn't Pending or changed meanwhile, a new Canonical Ingredient's id is taken, or an editor confirmed a wording */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description A fact is for a line the recipe doesn't have */
+            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

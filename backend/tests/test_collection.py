@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from recipes.models import SCHEMA_VERSION, CanonicalIngredient, Wording
 from recipes.seed import RECIPES
 
 if TYPE_CHECKING:
@@ -28,6 +29,26 @@ def test_the_current_version_serves_the_cards_and_kitchen_settings(
         "id": "household",
         "name": "Household",
     }
+
+
+def test_the_bundle_holds_the_canonical_ingredients_and_wording_cache(
+    client: TestClient, store: Store
+) -> None:
+    lentil = CanonicalIngredient(
+        id="01K7Q0000000000000000000C1",
+        name="red lentil",
+        family="lentil",
+        store_category_id="aisles",
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+    wording = Wording(wording="red lentils", canonical_id=lentil.id, schema_version=SCHEMA_VERSION)
+    store.enrich_recipe(store.add_recipe(RECIPES[0]), [lentil], [wording])
+
+    body = client.get("/api/collection", follow_redirects=True).json()
+
+    assert body["canonical_ingredients"] == [lentil.model_dump(mode="json")]
+    assert body["wordings"] == [wording.model_dump(mode="json")]
 
 
 def test_a_stale_version_redirects_to_the_current_one(client: TestClient, store: Store) -> None:

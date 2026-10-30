@@ -1,5 +1,5 @@
-"""The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Kitchen settings
-and meta items.
+"""The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Canonical
+Ingredients, the Wording Cache, Kitchen settings and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
 in the same transaction, and versioned items are written only if their version hasn't changed.
@@ -18,6 +18,7 @@ from botocore.exceptions import ClientError
 
 from recipes.models import (
     SCHEMA_VERSION,
+    CanonicalIngredient,
     Card,
     CollectionMeta,
     KitchenSettings,
@@ -26,6 +27,7 @@ from recipes.models import (
     SchemaMeta,
     SourceGuard,
     StoreCategory,
+    Wording,
     card_for,
 )
 
@@ -46,6 +48,12 @@ KITCHEN_KEY: Item = {"PK": {"S": "SETTINGS#kitchen"}, "SK": {"S": "SETTINGS"}}
 # The Store Categories a new stack starts with, in Grocery List order.
 STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy", "Frozen", "Bakery"]
 
+# A transaction holds at most 100 items. Store.enrich_recipe writes these three, and one more for
+# each Canonical Ingredient it creates and wording it learns.
+MAX_TRANSACTION_ITEMS = 100
+ENRICH_FIXED_ITEMS = ("the recipe", "its card", "META#collection")
+MAX_LEARNED = MAX_TRANSACTION_ITEMS - len(ENRICH_FIXED_ITEMS)
+
 # How many times a transaction or a read is tried before giving up, and the first backoff.
 ATTEMPTS = 4
 BACKOFF_SECONDS = 0.05
@@ -57,6 +65,14 @@ class VersionConflict(Exception):
 
 class DuplicateSource(Exception):
     """A recipe from this Source is in the Collection, or a Queued Ingest has reserved it."""
+
+
+class CanonicalExists(Exception):
+    """A Canonical Ingredient with this id is already in the table."""
+
+
+class WordingConfirmed(Exception):
+    """An editor confirmed this wording's Canonical Ingredient, so enrichment can't replace it."""
 
 
 class SchemaMismatch(RuntimeError):
@@ -82,6 +98,14 @@ def source_key(dedupe_key: str) -> Item:
 def queued_ingest_key(ingest_id: str) -> Item:
     # One partition, like the cards, so listing them is a query. ULIDs sort in queue order.
     return {"PK": {"S": "INGEST"}, "SK": {"S": ingest_id}}
+
+
+def canonical_key(canonical_id: str) -> Item:
+    return {"PK": {"S": "CANON"}, "SK": {"S": canonical_id}}
+
+
+def wording_key(wording: str) -> Item:
+    return {"PK": {"S": "WORDING"}, "SK": {"S": wording}}
 
 
 _serializer = TypeSerializer()
@@ -247,6 +271,37 @@ class Store:
             unchanged=("dedupe_key",),
         )
 
+    def enrich_recipe(
+        self,
+        recipe: Recipe,
+        canonical_ingredients: Iterable[CanonicalIngredient],
+        wordings: Iterable[Wording],
+    ) -> Recipe:
+        """`update_recipe`, creating the new Canonical Ingredients at version 1 and learning the
+        wordings in the same transaction: ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+
+        Raises CanonicalExists or WordingConfirmed, and VersionConflict, writing nothing.
+        """
+        created = [
+            self._create(canonical.model_copy(update={"version": 1}), canonical_key(canonical.id))
+            for canonical in canonical_ingredients
+        ]
+        learned = [self._learn_wording(wording) for wording in wordings]
+        try:
+            return self._save_versioned(
+                recipe,
+                recipe_key(recipe.id),
+                shared=True,
+                also=lambda saved: [self._put_card(saved), *created, *learned],
+                unchanged=("dedupe_key",),
+            )
+        except _Cancelled as cancelled:
+            if any(cancelled.failed(item) for item in created):
+                raise CanonicalExists from None
+            if any(cancelled.failed(item) for item in learned):
+                raise WordingConfirmed from None
+            raise
+
     def get_recipe(self, recipe_id: str) -> Recipe | None:
         # Consistent, like the card that names the version a phone asks for.
         item = self._get(recipe_key(recipe_id), consistent=True)
@@ -258,6 +313,16 @@ class Store:
         `page_size` lets tests force several pages.
         """
         return self._partition(Card, "CARD", page_size)
+
+    # Canonical Ingredients and the Wording Cache
+
+    def canonical_ingredients(self, page_size: int | None = None) -> list[CanonicalIngredient]:
+        """Every Canonical Ingredient, in id order. `page_size` lets tests force several pages."""
+        return self._partition(CanonicalIngredient, "CANON", page_size)
+
+    def wordings(self, page_size: int | None = None) -> list[Wording]:
+        """The Wording Cache, in wording order. `page_size` lets tests force several pages."""
+        return self._partition(Wording, "WORDING", page_size)
 
     # Source guards and Queued Ingests
 
@@ -386,6 +451,17 @@ class Store:
     def _guard_source(self, guard: SourceGuard, dedupe_key: str) -> TransactWriteItemTypeDef:
         """Claim the Source, so a second recipe or Queued Ingest from it is refused."""
         return self._create(guard, source_key(dedupe_key))
+
+    def _learn_wording(self, wording: Wording) -> TransactWriteItemTypeDef:
+        """Point the wording at its Canonical Ingredient, unless an editor confirmed it."""
+        return {
+            "Put": {
+                "TableName": self.table,
+                "Item": _to_item(wording, wording_key(wording.wording)),
+                "ConditionExpression": "attribute_not_exists(PK) OR confirmed = :false",
+                "ExpressionAttributeValues": {":false": {"BOOL": False}},
+            }
+        }
 
     def _put_card(self, recipe: Recipe) -> TransactWriteItemTypeDef:
         item = _to_item(card_for(recipe), card_key(recipe.id))

@@ -24,6 +24,7 @@ dev = [
     "moto[dynamodb,s3,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; s3: images; ssm: auth settings
     "pyright>=1.1.414",
     "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.10",
     "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.114",
     "types-requests>=2.33.0.20261006",
@@ -57,11 +58,12 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
-"src/recipes/enrich.py" = [
-    "BLE001", # the parser fails in many ways on a line it can't read, and any failure means no fact
-    "S105",   # names the service token's variable, which isn't the token
-]
+"src/recipes/enrich.py" = ["S105"] # names the service token's variable, which isn't the token
 "src/recipes/dev.py" = ["TC001"] # FastAPI reads a route's annotations at runtime
+"src/recipes/fdc.py" = ["PLR0911"] # convert returns each reason a portion converts nothing
+"src/recipes/packet.py" = [
+    "BLE001", # the parser fails in many ways on a line it can't read, and any failure means no fact
+]
 "src/recipes/images.py" = ["BLE001"] # Pillow fails in many ways on a file that isn't a photo
 "src/recipes/ingest.py" = [
     "BLE001",  # a site's scraper fails in its own ways, and any failure means no recipe

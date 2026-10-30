@@ -1,5 +1,7 @@
 # Enrichment is deterministic first, checked by an LLM that never writes numbers
 
+Partly superseded by [Wording Cache learns unconfirmed mappings](2026-10-28-wording-cache-learns-unconfirmed.md): the Wording Cache part.
+
 Enrichment runs after a recipe is saved, not during ingest. Deterministic code fills every field it can. An LLM then checks **every** field and fills in the ones that need judgment, but it may only **choose among options that code offers** or write text. Every density, gram weight and nutrient value comes from the bundled USDA FoodData Central (FDC) snapshot. We chose this over letting an LLM enrich freely and validating afterwards, because a model that invents a density or a calorie count produces errors that look plausible and that nobody would catch.
 
 ## Who fills what
