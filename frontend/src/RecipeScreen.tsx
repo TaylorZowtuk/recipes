@@ -3,11 +3,11 @@ import { Link, useNavigate, useParams } from "react-router";
 import type { Original, ParseFact, Quantity, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { DifficultyMeters } from "./DifficultyMeters";
-import { EditButton, EditRecipe, focusEditHeading } from "./EditRecipe";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
+import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
 import { byComponent } from "./recipeComponents";
 import { focusTitle, Screen } from "./Screen";
 import { EditorOnly } from "./session";
@@ -125,7 +125,7 @@ function RecipePage() {
         </p>
       )}
       {card && ready && draft && (
-        <EditRecipe
+        <RecipeEditor
           recipe={ready}
           title={card.title}
           draft={draft}

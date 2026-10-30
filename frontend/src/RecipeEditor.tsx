@@ -64,7 +64,7 @@ async function reloadCollection() {
 // Edit: the draft's Difficulty, Tags and Preview Photo, saved together in one PATCH at the
 // recipe's version. Delete removes the recipe after a confirm. A conflict on either reloads the
 // Collection and leaves Edit, showing the newer recipe.
-export function EditRecipe({
+export function RecipeEditor({
   recipe,
   title,
   draft,
