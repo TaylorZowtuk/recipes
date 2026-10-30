@@ -254,6 +254,8 @@ test("a save after another device deleted the recipe says it's gone", async ({
   await expect(page.getByRole("alert")).toHaveText("This recipe was deleted on another device.");
   await expect(page.getByRole("alert")).toBeFocused();
   await expect(page.getByRole("heading", { level: 1, name: "Recipe not found" })).toBeVisible();
+  // The notice says why, so the not-found page's own note doesn't repeat it.
+  await expect(page.getByText("There’s no recipe at this address.")).toHaveCount(0);
   await expect(tagsField(page)).toHaveCount(0);
 });
 

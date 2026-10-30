@@ -111,7 +111,7 @@ function RecipePage() {
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}
-        {missing && "There’s no recipe at this address."}
+        {missing && !edit.notice && "There’s no recipe at this address."}
       </p>
       {failed && <LoadFailed what="The recipe" retry={failed.retry} status={status} />}
       {missing && (
