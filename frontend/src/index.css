@@ -688,6 +688,12 @@ h1:focus {
   max-width: 480px;
 }
 
+/* The recipe page shows a long Tag whole, wrapped; cards clip it. */
+.hero .tag {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .hero {
   display: flex;
   flex-direction: column;
