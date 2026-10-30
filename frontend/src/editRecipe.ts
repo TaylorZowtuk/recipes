@@ -11,6 +11,10 @@ export const CHANGED_ELSEWHERE =
   "This recipe changed on another device. Showing the newer version.";
 // The conflict's notice once the reloaded Collection no longer has the recipe.
 export const DELETED_ELSEWHERE = "This recipe was deleted on another device.";
+// When the Collection reload after a write fails, the page still shows the old recipe.
+export const SAVED_NOT_REFRESHED = "Saved, but couldn’t refresh. Reload to see the latest.";
+export const CHANGED_NOT_REFRESHED =
+  "This recipe changed on another device, but couldn’t refresh. Reload to see the newer version.";
 const NOT_AN_EDITOR = "Only the household’s editors can edit recipes. Sign in again.";
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 
@@ -79,6 +83,8 @@ export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
 
 // Edit on the recipe page: a draft while editing, null while read-only. A conflict discards the
 // draft, since the newer recipe shows instead and nothing is merged; any other failure keeps it.
+// `refreshed` says whether the Collection reloaded after the write, so the notice never claims
+// the page shows what it doesn't.
 type EditState = { draft: Draft | null; problem?: string; notice?: string };
 
 export type EditAction =
@@ -86,7 +92,7 @@ export type EditAction =
   | { type: "change"; change: Partial<Draft> }
   | { type: "cancel" }
   | { type: "incomplete" }
-  | { type: "settled"; outcome: EditOutcome | DeleteOutcome };
+  | { type: "settled"; outcome: EditOutcome | DeleteOutcome; refreshed: boolean };
 
 export function editing(state: EditState, action: EditAction): EditState {
   switch (action.type) {
@@ -101,10 +107,14 @@ export function editing(state: EditState, action: EditAction): EditState {
     case "settled":
       switch (action.outcome.kind) {
         case "saved":
+          return action.refreshed ? { draft: null } : { draft: null, notice: SAVED_NOT_REFRESHED };
         case "deleted":
           return { draft: null };
         case "conflict":
-          return { draft: null, notice: CHANGED_ELSEWHERE };
+          return {
+            draft: null,
+            notice: action.refreshed ? CHANGED_ELSEWHERE : CHANGED_NOT_REFRESHED,
+          };
         case "not-an-editor":
           return { ...state, problem: NOT_AN_EDITOR };
         default:

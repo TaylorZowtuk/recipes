@@ -56,9 +56,13 @@ export function focusEditHeading() {
 }
 
 // Loads the Collection this device just changed, so the page shows the newer recipe at once.
-async function reloadCollection() {
+// Says whether it loaded; if not, the page still shows the old one.
+async function reloadCollection(): Promise<boolean> {
   forgetCollection();
-  await loadCollection().catch(() => {});
+  return loadCollection().then(
+    () => true,
+    () => false,
+  );
 }
 
 // Edit: the draft's Difficulty, Tags and Preview Photo, saved together in one PATCH at the
@@ -86,10 +90,11 @@ export function RecipeEditor({
 
   const settle = async (outcome: EditOutcome | DeleteOutcome) => {
     if (outcome.kind === "saved") rememberRecipe(outcome.recipe);
-    if (outcome.kind === "saved" || outcome.kind === "conflict") await reloadCollection();
+    const refreshed =
+      outcome.kind === "saved" || outcome.kind === "conflict" ? await reloadCollection() : true;
     if (!mounted.current) return;
     setBusy(undefined);
-    dispatch({ type: "settled", outcome });
+    dispatch({ type: "settled", outcome, refreshed });
   };
 
   const save = async (event: FormEvent) => {

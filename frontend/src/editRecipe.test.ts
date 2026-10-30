@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Recipe } from "./api/client";
 import {
   CHANGED_ELSEWHERE,
+  CHANGED_NOT_REFRESHED,
   changeCount,
   type Draft,
   deleteOutcome,
@@ -10,6 +11,7 @@ import {
   editing,
   editOutcome,
   RATE_ALL,
+  SAVED_NOT_REFRESHED,
   saveLabel,
 } from "./editRecipe";
 
@@ -173,27 +175,55 @@ describe("editing", () => {
   });
 
   it("leaves Edit once saved", () => {
-    expect(editing(open, { type: "settled", outcome: { kind: "saved", recipe: r } })).toEqual({
-      draft: null,
-    });
+    expect(
+      editing(open, {
+        type: "settled",
+        outcome: { kind: "saved", recipe: r },
+        refreshed: true,
+      }),
+    ).toEqual({ draft: null });
+  });
+
+  it("leaves Edit once saved but says so when the Collection couldn't refresh", () => {
+    expect(
+      editing(open, {
+        type: "settled",
+        outcome: { kind: "saved", recipe: r },
+        refreshed: false,
+      }),
+    ).toEqual({ draft: null, notice: SAVED_NOT_REFRESHED });
   });
 
   it("discards the draft on a conflict and says the newer version is showing", () => {
     const changed = editing(open, { type: "change", change: { tags: "soup" } });
-    expect(editing(changed, { type: "settled", outcome: { kind: "conflict" } })).toEqual({
-      draft: null,
-      notice: CHANGED_ELSEWHERE,
-    });
+    expect(
+      editing(changed, { type: "settled", outcome: { kind: "conflict" }, refreshed: true }),
+    ).toEqual({ draft: null, notice: CHANGED_ELSEWHERE });
+  });
+
+  it("doesn't claim the newer version shows when the Collection couldn't refresh", () => {
+    const changed = editing(open, { type: "change", change: { tags: "soup" } });
+    expect(
+      editing(changed, { type: "settled", outcome: { kind: "conflict" }, refreshed: false }),
+    ).toEqual({ draft: null, notice: CHANGED_NOT_REFRESHED });
   });
 
   it("keeps the draft when the save failed, to try again", () => {
-    const failed = editing(open, { type: "settled", outcome: { kind: "failed" } });
+    const failed = editing(open, {
+      type: "settled",
+      outcome: { kind: "failed" },
+      refreshed: true,
+    });
     expect(failed.draft).toEqual(open.draft);
     expect(failed.problem).toBe("Couldn’t reach Plateful. Try again.");
   });
 
   it("clears an old notice when Edit opens again", () => {
-    const conflicted = editing(open, { type: "settled", outcome: { kind: "conflict" } });
+    const conflicted = editing(open, {
+      type: "settled",
+      outcome: { kind: "conflict" },
+      refreshed: true,
+    });
     expect(editing(conflicted, { type: "open", recipe: r })).toEqual({ draft: draftOf(r) });
   });
 });

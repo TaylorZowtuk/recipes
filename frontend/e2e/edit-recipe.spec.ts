@@ -132,7 +132,7 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   await expect(tags(card).getByRole("listitem")).toHaveText(["weeknight", "rice"]);
 });
 
-test("a save whose Collection reload fails keeps the recipe on screen", async ({
+test("a save whose Collection reload fails keeps the recipe on screen and says to reload", async ({
   page,
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-reload-fails");
@@ -141,9 +141,12 @@ test("a save whose Collection reload fails keeps the recipe on screen", async ({
   await page.route("**/api/v/collection/**", (route) => route.abort());
   await page.getByRole("button", { name: "Save 1 change" }).click();
 
+  await expect(page.getByRole("alert")).toHaveText(
+    "Saved, but couldn’t refresh. Reload to see the latest.",
+  );
+  await expect(page.getByRole("alert")).toBeFocused();
   await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: recipe.original.title })).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("Cancel discards the draft", async ({ page }, testInfo) => {
@@ -191,6 +194,27 @@ test("a save that lost a race shows the newer recipe and says so", async ({ page
   await expect(page.getByRole("alert")).toBeFocused();
   await expect(tagsField(page)).toHaveCount(0);
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["from elsewhere"]);
+});
+
+test("a save that lost a race, then couldn't reload, says to reload", async ({
+  page,
+}, testInfo) => {
+  const recipe = await editorOpens(page, testInfo, "edit-conflict-reload-fails");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await tagsField(page).fill("soup");
+
+  const elsewhere = await page.request.patch(`/api/recipes/${recipe.id}`, {
+    data: { version: recipe.version, operations: [{ op: "set_tags", tags: ["from elsewhere"] }] },
+  });
+  expect(elsewhere.status(), "patch elsewhere").toBe(200);
+  await page.route("**/api/v/collection/**", (route) => route.abort());
+
+  await page.getByRole("button", { name: "Save 1 change" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "This recipe changed on another device, but couldn’t refresh. Reload to see the newer version.",
+  );
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(tagsField(page)).toHaveCount(0);
 });
 
 test("a delete that lost a race shows the newer recipe and says so", async ({ page }, testInfo) => {
