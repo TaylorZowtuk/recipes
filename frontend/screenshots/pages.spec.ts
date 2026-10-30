@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 // Add a page here when a UI change needs before/after screenshots of it. `loaded` is text that
 // shows once a page's data has arrived, for pages that render before it does. `editor` signs in
-// first (with the local API's fake sign-in), and `menu` opens the account menu. `ingest` fetches
+// first (with the local API's fake sign-in), `menu` opens the account menu and `tab` opens that tab. `ingest` fetches
 // that path on the local API's fake web in Add a recipe, made unique to the project.
 type Shot = {
   name: string;
@@ -13,6 +13,7 @@ type Shot = {
   editor?: boolean;
   menu?: boolean;
   ingest?: string;
+  tab?: string;
 };
 const pages: Shot[] = [
   {
@@ -53,6 +54,13 @@ const pages: Shot[] = [
     ready: "Sesame Noodles with Crispy Tofu",
     loaded: "For the sauce",
   },
+  {
+    name: "recipe-steps",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    tab: "Steps",
+  },
 ];
 
 // In Playwright's WebKit, page.route stops seeing requests once the app registers a service worker.
@@ -78,7 +86,7 @@ const fakeGoogle = `window.google = { accounts: { id: {
   },
 } } };`;
 
-for (const { name, path: url, ready, loaded, editor, menu, ingest } of pages) {
+for (const { name, path: url, ready, loaded, editor, menu, ingest, tab } of pages) {
   test(name, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -124,6 +132,11 @@ for (const { name, path: url, ready, loaded, editor, menu, ingest } of pages) {
       // BASE may show the page without this data yet, so it gets a short wait and no failure.
       if (mayBeMissing) await content.waitFor({ timeout: 3000 }).catch(() => {});
       else await expect(content).toBeVisible();
+    }
+    if (tab) {
+      await page.getByRole("tab", { name: tab }).click();
+      await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     }
     if (menu) {
       const account = page.getByRole("button", { name: "Account" });
