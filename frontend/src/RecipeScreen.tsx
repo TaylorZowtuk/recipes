@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { Original, ParseFact, Quantity, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
+import { DifficultyMeters } from "./DifficultyMeters";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
@@ -10,10 +11,12 @@ import { Screen } from "./Screen";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
 import { Tabs } from "./Tabs";
+import { TagList } from "./TagList";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
-// status note stays mounted through every state, so focus can rest on it after a retry.
+// status note stays mounted through every state, so focus can rest on it after a retry. The hero
+// shows the Difficulty and every Tag, read-only, above the tabs.
 export function RecipeScreen() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
@@ -51,11 +54,17 @@ export function RecipeScreen() {
                   {card.site_name && <p className="hero-site">{card.site_name}</p>}
                 </>
               ),
-              below: time && (
-                <p className="hero-time">
-                  <ClockIcon />
-                  {time}
-                </p>
+              below: (
+                <>
+                  {time && (
+                    <p className="hero-time">
+                      <ClockIcon />
+                      {time}
+                    </p>
+                  )}
+                  <DifficultyMeters difficulty={card.difficulty} />
+                  <TagList tags={card.tags} />
+                </>
               ),
             }
           : {}
