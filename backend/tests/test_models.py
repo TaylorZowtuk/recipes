@@ -4,14 +4,16 @@ from pydantic import ValidationError
 from recipes.models import (
     MAX_ORIGINAL_BYTES,
     Original,
+    Recipe,
     SourceGuard,
     SpreadsheetSource,
     Step,
     WebsiteSource,
     new_ulid,
     normalize_wording,
+    written_as,
 )
-from recipes.seed import CAPTURED_AT
+from recipes.seed import CAPTURED_AT, RECIPES
 
 
 @pytest.mark.parametrize("url", ["javascript:alert(1)", "data:text/html,hi", "example.com/x"])
@@ -71,3 +73,19 @@ def test_an_original_fits_a_dynamodb_item_at_its_size_limit() -> None:
 )
 def test_a_wording_is_normalized_without_singularizing(name: str, wording: str) -> None:
     assert normalize_wording(name) == wording
+
+
+@pytest.mark.parametrize(
+    "recipe", [r for r in RECIPES if r.facts.steps], ids=lambda r: r.original.title
+)
+def test_the_seeds_step_segments_are_their_steps_text(recipe: Recipe) -> None:
+    texts = {step.id: step.text for step in recipe.original.steps}
+    lines = {line.id for line in recipe.original.ingredients}
+    portions: dict[str, float] = {}
+    for step_id, facts in recipe.facts.steps.items():
+        if facts.segments:
+            assert "".join(written_as(s) for s in facts.segments.segments) == texts[step_id]
+        for use in facts.uses.uses if facts.uses else []:
+            assert use.ref in lines
+            portions[use.ref] = portions.get(use.ref, 0) + use.portion
+    assert all(total <= 1 for total in portions.values())
