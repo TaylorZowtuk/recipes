@@ -132,6 +132,20 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   await expect(tags(card).getByRole("listitem")).toHaveText(["weeknight", "rice"]);
 });
 
+test("a save whose Collection reload fails keeps the recipe on screen", async ({
+  page,
+}, testInfo) => {
+  const recipe = await editorOpens(page, testInfo, "edit-reload-fails");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await tagsField(page).fill("weeknight, rice");
+  await page.route("**/api/v/collection/**", (route) => route.abort());
+  await page.getByRole("button", { name: "Save 1 change" }).click();
+
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: recipe.original.title })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
 test("Cancel discards the draft", async ({ page }, testInfo) => {
   await editorOpens(page, testInfo, "edit-cancels");
   await page.getByRole("button", { name: "Edit" }).click();

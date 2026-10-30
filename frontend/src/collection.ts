@@ -130,13 +130,13 @@ function useLoaded<T>(
 }
 
 // The Collection. After this device changes it, a screen showing it switches to the new version
-// once that has loaded, keeping the old one on screen meanwhile.
+// once that has loaded, keeping the old one on screen meanwhile, and still if the reload fails.
 export function useCollection(): Loaded<Collection> {
   const [reloads, setReloads] = useState(0);
   useEffect(() => {
     let current = true;
     const reloaded = () => current && setReloads((n) => n + 1);
-    const reload = () => loadCollection().then(reloaded, reloaded);
+    const reload = () => loadCollection().then(reloaded, () => {});
     forgotten.add(reload);
     return () => {
       current = false;
