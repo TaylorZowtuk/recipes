@@ -315,24 +315,26 @@ class Store:
                 "ExpressionAttributeValues": {":expected": {"N": str(recipe.version)}},
             }
         }
+        guard: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": source_key(recipe.dedupe_key),
+                "ConditionExpression": "recipe_id = :id",
+                "ExpressionAttributeValues": {":id": {"S": recipe.id}},
+            }
+        }
         try:
             self._transact(
                 [
                     deleted,
                     {"Delete": {"TableName": self.table, "Key": card_key(recipe.id)}},
-                    {
-                        "Delete": {
-                            "TableName": self.table,
-                            "Key": source_key(recipe.dedupe_key),
-                            "ConditionExpression": "recipe_id = :id",
-                            "ExpressionAttributeValues": {":id": {"S": recipe.id}},
-                        }
-                    },
+                    guard,
                     self._bump_collection(),
                 ]
             )
         except _Cancelled as cancelled:
-            if cancelled.failed(deleted):
+            # A Source guard that is gone or names another recipe leaves the delete unsafe too.
+            if cancelled.failed(deleted) or cancelled.failed(guard):
                 raise VersionConflict(recipe.id) from None
             raise
 

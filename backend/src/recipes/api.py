@@ -180,10 +180,14 @@ class SetPreview(BaseModel):
 Operation = Annotated[SetTags | SetDifficulty | SetPreview, Field(discriminator="op")]
 
 
+# A version DynamoDB can compare: it rejects numbers of more than 38 digits.
+RecipeVersion = Annotated[int, Field(ge=1, le=2**53)]
+
+
 class RecipeEdit(BaseModel):
     """An editor's batch of changes to the recipe at `version`, applied in one write."""
 
-    version: int
+    version: RecipeVersion
     operations: Annotated[list[Operation], Field(min_length=1)]
 
     @model_validator(mode="after")
@@ -539,7 +543,7 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
     },
 )
 def delete_recipe(
-    recipe_id: Annotated[Ulid, Path()], version: Annotated[int, Query()], store: StoreDep
+    recipe_id: Annotated[Ulid, Path()], version: Annotated[RecipeVersion, Query()], store: StoreDep
 ) -> Response:
     """Delete the recipe at `version`, with its card and Source guard, so its Source can be
     added again.

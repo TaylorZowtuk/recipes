@@ -8,6 +8,7 @@ from conftest import EDITOR
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.models import Image, Preview, card_for
 from recipes.seed import RECIPES
+from recipes.store import source_key
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -48,6 +49,10 @@ def delete(
         params={"version": recipe.version if version is None else version},
         headers=headers,
     )
+
+
+def guard_item(store: Store, key: dict[str, Any]) -> object:
+    return store.client.get_item(TableName=store.table, Key=key, ConsistentRead=True).get("Item")
 
 
 def set_tags(*tags: str) -> dict[str, Any]:
@@ -244,6 +249,46 @@ def test_a_stale_delete_returns_409_and_removes_nothing(
     assert store.cards() == [card_for(current)]
     assert store.source_guard(added.dedupe_key) is not None
     assert store.collection_version() == before
+
+
+@pytest.mark.parametrize("guard", ["names another recipe", "is missing"])
+def test_a_delete_whose_source_guard_is_not_the_recipes_returns_409_and_removes_nothing(
+    editor_client: TestClient, store: Store, guard: str
+) -> None:
+    added = add(store)
+    key = source_key(added.dedupe_key)
+    if guard == "is missing":
+        store.client.delete_item(TableName=store.table, Key=key)
+    else:
+        store.client.put_item(
+            TableName=store.table, Item={**key, "recipe_id": {"S": "01K7YYYYYYYYYYYYYYYYYYYYYY"}}
+        )
+    guard_before = guard_item(store, key)
+    before = store.collection_version()
+
+    response = delete(editor_client, added)
+
+    assert response.status_code == 409
+    assert store.get_recipe(added.id) == added
+    assert store.cards() == [card_for(added)]
+    assert guard_item(store, key) == guard_before
+    assert store.collection_version() == before
+
+
+@pytest.mark.parametrize("method", ["patch", "delete"])
+def test_a_version_too_large_for_the_table_is_422(
+    editor_client: TestClient, store: Store, method: str
+) -> None:
+    added = add(store)
+    version = 10**40
+
+    if method == "patch":
+        response = edit(editor_client, added, set_tags("x"), version=version)
+    else:
+        response = delete(editor_client, added, version=version)
+
+    assert response.status_code == 422
+    assert store.get_recipe(added.id) == added
 
 
 def test_deleting_an_unknown_recipe_is_404(editor_client: TestClient, store: Store) -> None:
