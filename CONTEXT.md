@@ -149,6 +149,10 @@ _Avoid_: Duration estimate
 A label an editor makes up and attaches to recipes so they can be filtered by it.
 _Avoid_: Category (that word belongs to store categories), label
 
+**Draft**:
+An editor's unsaved changes to a saved recipe in Edit, such as its Difficulty, Tags and Preview Photo. It is held only on the device until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe.
+_Avoid_: Pending changes (*Pending* is an Enrichment Status), unsaved edit
+
 **Favorite Site**:
 A recipe website the household trusts and returns to when looking for new recipes.
 _Avoid_: Bookmark, source (a source is where particular recipes came from)

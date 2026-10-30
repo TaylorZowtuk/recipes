@@ -10,7 +10,7 @@ import type {
 
 // Why the API refused: a duplicate names the recipe or Queued Ingest the Source already is, and a
 // conflict is a race worth retrying.
-type Refusal =
+export type Refusal =
   | { kind: "duplicate"; duplicate: Duplicate }
   | { kind: "conflict" | "not-an-editor" | "failed" };
 
@@ -22,11 +22,11 @@ export type IngestOutcome =
 
 export type SaveOutcome = { kind: "saved" } | Refusal;
 
-type Answer<T> = { data?: T; error?: unknown; response: Response };
+export type Answer<T> = { data?: T; error?: unknown; response: Response };
 
 // A 409 that names neither a recipe nor a Queued Ingest is a conflict. A 403 is not-an-editor only
 // when the body is the API's JSON: the WAF's rate-limit block is a 403 too.
-function refusal({ error, response }: Answer<unknown>): Refusal {
+export function refusal({ error, response }: Answer<unknown>): Refusal {
   const body = typeof error === "object" && error !== null ? error : undefined;
   if (response.status === 409 && body) {
     const duplicate = body as Duplicate;

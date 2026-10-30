@@ -129,7 +129,27 @@ function useLoaded<T>(
   return cached === undefined ? { state: "loading" } : { state: "ready", value: cached };
 }
 
-export const useCollection = () => useLoaded("collection", loadCollection, loadedCollection);
+// The Collection. After this device changes it, a screen showing it switches to the new version
+// once that has loaded, keeping the old one on screen meanwhile.
+export function useCollection(): Loaded<Collection> {
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => {
+    let current = true;
+    const reloaded = () => current && setReloads((n) => n + 1);
+    const reload = () => loadCollection().then(reloaded, reloaded);
+    forgotten.add(reload);
+    return () => {
+      current = false;
+      forgotten.delete(reload);
+    };
+  }, []);
+  return useLoaded(`collection@${reloads}`, loadCollection, loadedCollection);
+}
+
+// Keeps a recipe the API just returned, so its page shows it without loading it again.
+export function rememberRecipe(recipe: Recipe) {
+  recipes.set(`${recipe.id}@${recipe.version}`, recipe);
+}
 
 // Waits while there is no card, so a screen can call it before the Collection has loaded.
 export function useRecipe(card: Card | undefined): Loaded<Recipe> {

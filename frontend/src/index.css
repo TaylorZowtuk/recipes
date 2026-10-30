@@ -952,7 +952,7 @@ h1:focus {
 }
 
 .queued h2,
-.difficulty > legend,
+.difficulty-field > legend,
 .photo-picker > legend {
   margin: calc(var(--space) * 6) 0 calc(var(--space) * 2);
   font-family: var(--font-display);
@@ -1025,7 +1025,7 @@ h1:focus {
   margin: 0 auto;
 }
 
-.review-form .difficulty {
+.review-form .difficulty-field {
   margin-bottom: calc(var(--space) * 4);
 }
 
@@ -1339,4 +1339,32 @@ h1:focus {
   .sync-status {
     padding: 0 calc(var(--space) * 8 + env(safe-area-inset-right)) 0 calc(var(--space) * 8);
   }
+}
+
+/* The recipe page's Edit: the button under the hero's Tags, and the form in place of the tabs,
+   with Delete set apart below the Save and Cancel row. */
+.edit-open {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: calc(var(--space) * 4);
+}
+
+.edit-form {
+  padding-bottom: calc(var(--space) * 6);
+}
+
+.edit-delete {
+  margin-top: calc(var(--space) * 6);
+  padding-top: calc(var(--space) * 2);
+  border-top: 1px solid var(--divider);
+}
+
+.text-button-danger {
+  color: var(--emphasis-text);
+}
+
+.text-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
