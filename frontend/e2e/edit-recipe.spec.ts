@@ -100,6 +100,8 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-saves");
   await page.getByRole("button", { name: "Edit" }).click();
+  // The Edit button that had focus is gone, so focus moves to the form's heading.
+  await expect(page.getByRole("heading", { name: "Edit recipe" })).toBeFocused();
   const save = page.getByRole("button", { name: /^Save \d+ changes?$/ });
   await expect(save).toHaveText("Save 0 changes");
   await expect(save).toBeDisabled();
@@ -172,8 +174,49 @@ test("a save that lost a race shows the newer recipe and says so", async ({ page
   await expect(page.getByRole("alert")).toHaveText(
     "This recipe changed on another device. Showing the newer version.",
   );
+  await expect(page.getByRole("alert")).toBeFocused();
   await expect(tagsField(page)).toHaveCount(0);
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["from elsewhere"]);
+});
+
+test("a delete that lost a race shows the newer recipe and says so", async ({ page }, testInfo) => {
+  const recipe = await editorOpens(page, testInfo, "edit-delete-conflicts");
+  await page.getByRole("button", { name: "Edit" }).click();
+
+  // Another device saves first.
+  const elsewhere = await page.request.patch(`/api/recipes/${recipe.id}`, {
+    data: { version: recipe.version, operations: [{ op: "set_tags", tags: ["from elsewhere"] }] },
+  });
+  expect(elsewhere.status(), "patch elsewhere").toBe(200);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete recipe" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "This recipe changed on another device. Showing the newer version.",
+  );
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(tagsField(page)).toHaveCount(0);
+  await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["from elsewhere"]);
+  await expect(page).toHaveURL(new RegExp(`/recipes/${recipe.id}/`));
+});
+
+test("a save after another device deleted the recipe says it's gone", async ({
+  page,
+}, testInfo) => {
+  const recipe = await editorOpens(page, testInfo, "edit-deleted-elsewhere");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await tagsField(page).fill("soup");
+
+  const elsewhere = await page.request.delete(`/api/recipes/${recipe.id}`, {
+    params: { version: recipe.version },
+  });
+  expect(elsewhere.status(), "delete elsewhere").toBe(204);
+
+  await page.getByRole("button", { name: "Save 1 change" }).click();
+  await expect(page.getByRole("alert")).toHaveText("This recipe was deleted on another device.");
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(page.getByRole("heading", { level: 1, name: "Recipe not found" })).toBeVisible();
+  await expect(tagsField(page)).toHaveCount(0);
 });
 
 test("an editor deletes a recipe and it leaves the Collection", async ({ page }, testInfo) => {
