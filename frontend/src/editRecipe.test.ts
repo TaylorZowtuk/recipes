@@ -122,6 +122,21 @@ describe("editOutcome and deleteOutcome", () => {
     });
   });
 
+  it("are a conflict on a 404, when another device deleted the recipe", () => {
+    const gone = { detail: "No such recipe" };
+    expect(editOutcome({ error: gone, response: response(404) })).toEqual({ kind: "conflict" });
+    expect(deleteOutcome({ error: gone, response: response(404) })).toEqual({
+      kind: "conflict",
+    });
+  });
+
+  it("are a failure on a 404 that isn't the API's JSON", () => {
+    expect(editOutcome({ error: "Not Found", response: response(404) })).toEqual({
+      kind: "failed",
+    });
+    expect(deleteOutcome({ response: response(404) })).toEqual({ kind: "failed" });
+  });
+
   it("tell a signed-out editor from a failure", () => {
     const forbidden = { detail: "Editors only" };
     expect(editOutcome({ error: forbidden, response: response(403) })).toEqual({

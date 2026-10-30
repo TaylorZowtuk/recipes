@@ -1,12 +1,6 @@
-import {
-  type Answer,
-  chosenDifficulty,
-  type DifficultyChoice,
-  parseTags,
-  type Refusal,
-  refusal,
-} from "./addRecipe";
+import { chosenDifficulty, type DifficultyChoice, parseTags } from "./addRecipe";
 import type { Difficulty, Preview, Recipe, RecipeOperation } from "./api/client";
+import { type Answer, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
 // An editor's Draft: the recipe's Difficulty, Tags and Preview Photo as Edit shows them. It lives
 // only in the recipe page's state, so Cancel or leaving the page discards it.
@@ -15,6 +9,8 @@ export type Draft = { difficulty: DifficultyChoice; tags: string; preview: Previ
 export const RATE_ALL = "Rate all of Prep, Cook and Cleanup, or clear them.";
 export const CHANGED_ELSEWHERE =
   "This recipe changed on another device. Showing the newer version.";
+// The conflict's notice once the reloaded Collection no longer has the recipe.
+export const DELETED_ELSEWHERE = "This recipe was deleted on another device.";
 const NOT_AN_EDITOR = "Only the household’s editors can edit recipes. Sign in again.";
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 
@@ -65,18 +61,20 @@ export function draftOperations(recipe: Recipe, draft: Draft): RecipeOperation[]
 
 export const saveLabel = (count: number) => `Save ${count} ${count === 1 ? "change" : "changes"}`;
 
-export type EditOutcome = { kind: "saved"; recipe: Recipe } | Refusal;
-export type DeleteOutcome = { kind: "deleted" } | Refusal;
+export type EditOutcome = { kind: "saved"; recipe: Recipe } | WriteRefusal;
+export type DeleteOutcome = { kind: "deleted" } | WriteRefusal;
 
-// What `PATCH /api/recipes/{id}` answered: the saved recipe (200), or why not. A 409 is a stale
-// version: the recipe changed elsewhere.
+// What `PATCH /api/recipes/{id}` answered: the saved recipe (200), or why not. A 409 (a stale
+// version) or a 404 (deleted) means the recipe changed elsewhere.
 export function editOutcome(answer: Answer<Recipe>): EditOutcome {
   const { data, response } = answer;
-  return response.status === 200 && data ? { kind: "saved", recipe: data } : refusal(answer);
+  return response.status === 200 && data
+    ? { kind: "saved", recipe: data }
+    : versionedRefusal(answer);
 }
 
 export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
-  return answer.response.status === 204 ? { kind: "deleted" } : refusal(answer);
+  return answer.response.status === 204 ? { kind: "deleted" } : versionedRefusal(answer);
 }
 
 // Edit on the recipe page: a draft while editing, null while read-only. A conflict discards the
