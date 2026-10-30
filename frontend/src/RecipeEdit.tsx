@@ -133,6 +133,7 @@ export function EditRecipe({
         <PhotoPicker
           title={title}
           images={recipe.images}
+          emptyText="This recipe has no photos."
           preview={draft.preview}
           onPick={(preview) => change({ preview })}
         />

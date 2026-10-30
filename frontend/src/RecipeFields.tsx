@@ -99,12 +99,14 @@ export function PhotoPicker({
   title,
   images,
   storing = 0,
+  emptyText = "No photos were found.",
   preview,
   onPick,
 }: {
   title: string;
   images: Image[];
   storing?: number;
+  emptyText?: string;
   preview: Preview | null | undefined;
   onPick: (preview: Preview | null) => void;
 }) {
@@ -116,7 +118,7 @@ export function PhotoPicker({
         {storing > 0
           ? "Getting the photos…"
           : images.length === 0
-            ? "No photos were found."
+            ? emptyText
             : images.length === 1
               ? "1 photo"
               : `${images.length} photos`}

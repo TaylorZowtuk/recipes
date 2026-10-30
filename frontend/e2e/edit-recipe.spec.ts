@@ -1,4 +1,11 @@
-import { type APIRequestContext, expect, type Page, type TestInfo, test } from "@playwright/test";
+import {
+  type APIRequestContext,
+  expect,
+  type Locator,
+  type Page,
+  type TestInfo,
+  test,
+} from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
@@ -30,6 +37,31 @@ async function addRecipe(api: APIRequestContext, url: string): Promise<Saved> {
       original,
       difficulty: { prep: 1, cook: 1, cleanup: 1 },
       tags: ["weeknight"],
+    },
+  });
+  expect(saved.status(), "save").toBe(201);
+  return saved.json();
+}
+
+// Adds a recipe with the page's first two photos stored, the first its Preview Photo.
+async function addRecipeWithPhotos(api: APIRequestContext, url: string): Promise<Saved> {
+  const ingested = await api.post("/api/ingest", { data: { url } });
+  expect(ingested.status(), "ingest").toBe(200);
+  const { source, original, candidate_photos } = await ingested.json();
+  const images = [];
+  for (const photo of (candidate_photos as string[]).slice(0, 2)) {
+    const stored = await api.post("/api/images", { data: { url: photo } });
+    expect(stored.status(), "store photo").toBe(200);
+    images.push(await stored.json());
+  }
+  expect(images, "two stored photos").toHaveLength(2);
+  const saved = await api.post("/api/recipes", {
+    data: {
+      source,
+      original,
+      tags: [],
+      images,
+      preview: { image_id: images[0].id, focal_x: 0.5, focal_y: 0.5 },
     },
   });
   expect(saved.status(), "save").toBe(201);
@@ -184,4 +216,51 @@ test("a visitor sees Difficulty and Tags with no Edit", async ({ page, request }
   await expect(difficulty(hero(page))).toHaveAttribute("aria-label", ONE_ONE_ONE);
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["weeknight"]);
   await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+});
+
+test("an editor changes the Preview Photo and Focal Point, and the header and card show them", async ({
+  page,
+}, testInfo) => {
+  await signIn(page.request);
+  const recipe = await addRecipeWithPhotos(page.request, pageUrl("edit-photo", testInfo));
+  await openRecipe(page, recipe);
+  const plateImage = (scope: Locator) => scope.locator(".plate img");
+  const objectPositionOf = (image: Locator) =>
+    image.evaluate((img) => (img as HTMLImageElement).style.objectPosition);
+  const header = plateImage(hero(page));
+  await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
+  const before = await header.getAttribute("src");
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  const picker = page.getByRole("group", { name: "Photo" });
+  await expect(picker.getByRole("radio", { name: "Photo 1" })).toBeChecked();
+  const save = page.getByRole("button", { name: /^Save \d+ changes?$/ });
+  await expect(save).toHaveText("Save 0 changes");
+  // Clicks the label: the radio itself is visually hidden behind its swatch.
+  await picker
+    .locator("label", { has: page.getByRole("radio", { name: "Photo 2", exact: true }) })
+    .click();
+  await expect(save).toHaveText("Save 1 change");
+  const focal = page.getByRole("slider", { name: "Focal Point" });
+  await focal.focus();
+  await focal.press("ArrowLeft");
+  await focal.press("ArrowUp");
+  await expect(save).toHaveText("Save 1 change");
+  await save.click();
+
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(header).not.toHaveAttribute("src", before ?? "");
+  await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
+  const position = await objectPositionOf(header);
+  expect(position).not.toBe("50% 50%");
+
+  await page.getByRole("button", { name: "Back" }).click();
+  const card = page
+    .getByRole("list", { name: "Recipes" })
+    .getByRole("link")
+    .filter({ hasText: recipe.original.title });
+  const cardImage = plateImage(card);
+  await expect(cardImage).toHaveAttribute("src", /^\/images\/[0-9a-f]+-card\.webp$/);
+  expect(await cardImage.getAttribute("src")).not.toBe(before?.replace(".webp", "-card.webp"));
+  expect(await objectPositionOf(cardImage)).toBe(position);
 });
