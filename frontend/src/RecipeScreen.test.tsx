@@ -98,6 +98,7 @@ describe("Ingredients", () => {
               preparation: "minced",
             }),
           },
+          steps: {},
         }}
       />,
     );
@@ -128,6 +129,7 @@ describe("Ingredients", () => {
               comment: "or to taste",
             }),
           },
+          steps: {},
         }}
       />,
     );
@@ -157,6 +159,7 @@ describe("Ingredients", () => {
             i3: parse({ quantity: { low: 2, high: 2 }, name: "eggs" }),
             i4: parse({ name: "salt" }),
           },
+          steps: {},
         }}
       />,
     );
@@ -184,7 +187,7 @@ describe("Ingredients", () => {
           ["i1", "3 tbsp tahini", "For the sauce"],
           ["i2", "400 g firm tofu", "For the tofu"],
         )}
-        facts={{ ingredients: { i2: { parse: null, match: null, conversion: null } } }}
+        facts={{ ingredients: { i2: { parse: null, match: null, conversion: null } }, steps: {} }}
       />,
     );
     expect([...markup.matchAll(/<h2>(.*?)<\/h2>/g)].map(([, h]) => h)).toEqual([
