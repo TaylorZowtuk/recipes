@@ -81,7 +81,7 @@ export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
 
 // Edit on the recipe page: a draft while editing, null while read-only. A conflict discards the
 // draft, since the newer recipe shows instead and nothing is merged; any other failure keeps it.
-export type EditState = { draft: Draft | null; problem?: string; notice?: string };
+type EditState = { draft: Draft | null; problem?: string; notice?: string };
 
 export type EditAction =
   | { type: "open"; recipe: Recipe }

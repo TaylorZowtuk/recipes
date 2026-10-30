@@ -7,7 +7,7 @@ import { editing } from "./editRecipe";
 import { ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
-import { EditButton, EditRecipe } from "./RecipeEdit";
+import { EditButton, EditRecipe } from "./EditRecipe";
 import { byComponent } from "./recipeComponents";
 import { focusTitle, Screen } from "./Screen";
 import { EditorOnly } from "./session";
