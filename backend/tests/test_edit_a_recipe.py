@@ -275,12 +275,13 @@ def test_a_delete_whose_source_guard_is_not_the_recipes_returns_409_and_removes_
     assert store.collection_version() == before
 
 
+# 10**40 is too large for the table to compare; no recipe has a version below 1.
+@pytest.mark.parametrize("version", [10**40, 0, -1])
 @pytest.mark.parametrize("method", ["patch", "delete"])
-def test_a_version_too_large_for_the_table_is_422(
-    editor_client: TestClient, store: Store, method: str
+def test_a_version_out_of_range_is_422(
+    editor_client: TestClient, store: Store, method: str, version: int
 ) -> None:
     added = add(store)
-    version = 10**40
 
     if method == "patch":
         response = edit(editor_client, added, set_tags("x"), version=version)
