@@ -127,8 +127,16 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   panel = page.getByRole("tabpanel", { name: "Steps" });
   await expect(panel.getByRole("heading", { level: 2 })).toHaveCount(3);
   await expect(panel.getByRole("listitem")).toHaveCount(5);
-  await expect(panel.getByRole("listitem").nth(1)).toHaveText("Toss the tofu in cornstarch.");
   await expect(panel.getByRole("list").nth(1)).toHaveAttribute("start", "2");
+  // A step that names an ingredient line shows the amount it uses: half the green onions here,
+  // and the rest in the next step. One with no segments shows its text as captured.
+  const steps = panel.getByRole("listitem");
+  await expect(steps.nth(0)).toHaveText("Whisk the sauce ingredients with 2 tbsp warm water.");
+  await expect(steps.nth(0).locator(".step-amount")).toHaveCount(0);
+  await expect(steps.nth(1)).toHaveText("Toss 400 g firm tofu in 2 tbsp cornstarch.");
+  await expect(steps.nth(3).locator(".step-amount")).toHaveText(["250 g", "½–1"]);
+  await expect(steps.nth(4).locator(".step-amount")).toHaveText(["½–1"]);
+  await expect(steps.nth(4)).toContainText("top with the tofu and ½–1 green onions.");
 
   // About: the Stated Times and yield as written, and the Source in a new tab.
   await tabs.getByRole("tab", { name: "About" }).click();

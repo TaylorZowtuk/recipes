@@ -28,6 +28,7 @@ from recipes.ingest import (
 )
 from recipes.models import (
     MAX_RECIPE_BYTES,
+    PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
     Card,
@@ -35,18 +36,21 @@ from recipes.models import (
     Enrichment,
     Image,
     IngredientFacts,
+    IngredientSegment,
     KitchenSettings,
     Original,
     Preview,
     QueuedIngest,
     QueuedIngestState,
     Recipe,
+    StepFacts,
     Ulid,
     WebsiteSource,
     WebUrl,
     Wording,
     new_ulid,
     normalize_wording,
+    written_as,
 )
 from recipes.store import (
     MAX_LEARNED,
@@ -409,11 +413,13 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
             "Ingredient's id is taken, or an editor confirmed a wording"
         },
         422: {
-            "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, an "
-            "issue isn't open, a wording isn't a parsed line's name, it learns more than one "
-            "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a "
-            "new Canonical Ingredient or wording is confirmed or at another schema version, or "
-            "the enriched recipe is too big to store"
+            "description": "A fact or Enrichment Issue is for a line or step the recipe doesn't "
+            "have, a step's segments aren't its text, its segments or uses name a line the recipe "
+            "doesn't have, a line's portions add up to more than 1, an issue isn't open, a "
+            "wording isn't a parsed line's name, it learns more than one write holds, a fact "
+            "names an unknown Canonical Ingredient or Store Category, or a new Canonical "
+            "Ingredient or wording is confirmed or at another schema version, or the enriched "
+            "recipe is too big to store"
         },
     },
 )
@@ -422,8 +428,10 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
     in Awaiting Review for an editor to check it.
 
-    Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
-    one of their facts and arrives open with no confirm batch, every wording is the normalized
+    Refused unless every fact is for one of the recipe's lines or steps, every step's segments
+    are its text exactly and name only its lines, as do its uses, each line's portions across the
+    steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
+    with no confirm batch, every wording is the normalized
     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
     names a Canonical Ingredient that exists or is new here, every new one's Store Category
     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
@@ -435,6 +443,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     if recipe.status != "pending":
         raise HTTPException(409, "Only a Pending recipe can be enriched")
     _check_lines(body, recipe)
+    _check_steps(body, recipe)
     if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
         raise HTTPException(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
@@ -466,7 +475,10 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
-    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
+    steps = {step.id for step in recipe.original.steps}
+    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields} | {
+        f"{step}.{fact}" for step in steps for fact in StepFacts.model_fields
+    }
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment.
@@ -479,6 +491,31 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     }
     if unknown := sorted({wording.wording for wording in body.wordings} - names):
         raise HTTPException(422, f"No parsed line is named {', '.join(unknown)}")
+
+
+def _check_steps(body: Enrichment, recipe: Recipe) -> None:
+    """Refuse a fact for a step the recipe doesn't have, segments that aren't the step's text,
+    segments or uses naming a line the recipe doesn't have, and a line used more than once over.
+    """
+    texts = {step.id: step.text for step in recipe.original.steps}
+    if unknown := sorted(body.facts.steps.keys() - texts.keys()):
+        raise HTTPException(422, f"The recipe has no step {', '.join(unknown)}")
+    lines = {line.id for line in recipe.original.ingredients}
+    refs: set[str] = set()
+    portions: dict[str, float] = {}
+    for step_id, facts in body.facts.steps.items():
+        if facts.segments:
+            segments = facts.segments.segments
+            if "".join(written_as(segment) for segment in segments) != texts[step_id]:
+                raise HTTPException(422, f"Step {step_id}'s segments aren't its text")
+            refs |= {s.ref for s in segments if isinstance(s, IngredientSegment)}
+        for use in facts.uses.uses if facts.uses else []:
+            refs.add(use.ref)
+            portions[use.ref] = portions.get(use.ref, 0) + use.portion
+    if unknown := sorted(refs - lines):
+        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    if over := sorted(ref for ref, total in portions.items() if total > 1 + PORTION_TOLERANCE):
+        raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
 
 
 def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:

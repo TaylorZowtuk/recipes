@@ -454,7 +454,9 @@ def test_enrichment_cant_confirm_what_it_learns(
 
 
 @pytest.mark.parametrize(
-    "fact_id", ["i10.match", "i1.segments", "i1"], ids=["no such line", "no such fact", "no fact"]
+    "fact_id",
+    ["i10.match", "i1.segments", "i1", "s9.segments", "s1.parse"],
+    ids=["no such line", "no such fact", "no fact", "no such step", "no such step fact"],
 )
 def test_an_issue_on_a_fact_enrichment_doesnt_write_is_refused(
     editor_client: TestClient, api_store: Store, fact_id: str
@@ -530,3 +532,117 @@ def test_a_wording_of_another_line_or_an_issue_already_settled_is_refused(
 
     assert response.status_code == 422
     assert_nothing_written(editor_client, recipe)
+
+
+STEPPED = {
+    "ingredients": FACTS["ingredients"],
+    "steps": {
+        "s1": {
+            "segments": {
+                **LLM,
+                "segments": [
+                    {"t": "text", "v": "Toss the "},
+                    {"t": "ingredient", "ref": "i1", "written": "beef"},
+                    {"t": "text", "v": " in flour and brown it in the oil in batches."},
+                ],
+            },
+            "uses": {**LLM, "estimated": True, "uses": [{"ref": "i1", "portion": 0.5}]},
+        },
+        "s3": {
+            "segments": {
+                **LLM,
+                "segments": [
+                    {"t": "text", "v": "Add the stock and barley, cover and simmer "},
+                    {"t": "duration", "low_s": 5400, "high_s": 5400, "written": "1 1/2 hours"},
+                    {"t": "text", "v": "."},
+                ],
+            },
+            "uses": {**LLM, "estimated": True, "uses": [{"ref": "i1", "portion": 0.5}]},
+        },
+    },
+}
+
+
+def stepped(**changes: Any) -> dict[str, Any]:
+    """The step facts, with s1's segments or uses changed."""
+    s1 = STEPPED["steps"]["s1"]
+    return {
+        **STEPPED,
+        "steps": {
+            **STEPPED["steps"],
+            "s1": {
+                "segments": {**s1["segments"], **changes.get("segments", {})},
+                "uses": {**s1["uses"], **changes.get("uses", {})},
+            },
+        },
+    }
+
+
+def test_step_facts_are_stored_with_the_recipe(editor_client: TestClient, api_store: Store) -> None:
+    recipe = add(api_store)
+
+    response = enrich(editor_client, recipe.id, STEPPED)
+
+    assert response.status_code == 200
+    stored = fetch(editor_client, recipe.id)
+    assert stored["original"]["steps"] == recipe.original.model_dump(mode="json")["steps"]
+    simmer = stored["facts"]["steps"]["s3"]
+    assert simmer["segments"]["segments"][1] == {
+        "t": "duration",
+        "low_s": 5400,
+        "high_s": 5400,
+        "written": "1 1/2 hours",
+    }
+    assert simmer["uses"]["uses"] == [{"ref": "i1", "portion": 0.5}]
+    assert sorted(stored["facts"]["steps"]) == ["s1", "s3"]
+
+
+@pytest.mark.parametrize(
+    "facts",
+    [
+        {**STEPPED, "steps": {"s9": STEPPED["steps"]["s1"]}},
+        stepped(uses={"uses": [{"ref": "i99", "portion": 0.5}]}),
+        stepped(
+            segments={
+                "segments": [
+                    {"t": "text", "v": "Toss the "},
+                    {"t": "ingredient", "ref": "i99", "written": "beef"},
+                    {"t": "text", "v": " in flour and brown it in the oil in batches."},
+                ]
+            }
+        ),
+        stepped(segments={"segments": [{"t": "text", "v": "Toss the beef in flour."}]}),
+        stepped(uses={"uses": [{"ref": "i1", "portion": 0.75}]}),
+        stepped(uses={"uses": [{"ref": "i1", "portion": 1.5}]}),
+        stepped(uses={"uses": [{"ref": "i1", "portion": 0}]}),
+    ],
+    ids=[
+        "no such step",
+        "uses no such line",
+        "segment of no such line",
+        "segments that aren't the text",
+        "portions over 1 across steps",
+        "portion over 1",
+        "zero portion",
+    ],
+)
+def test_step_facts_that_dont_fit_the_recipe_are_refused(
+    editor_client: TestClient, api_store: Store, facts: dict[str, Any]
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich(editor_client, recipe.id, facts)
+
+    assert response.status_code == 422
+    assert fetch(editor_client, recipe.id)["status"] == "pending"
+
+
+@pytest.mark.parametrize("fact_id", ["s1.segments", "s4.uses"])
+def test_an_issue_on_a_steps_fact_is_accepted(
+    editor_client: TestClient, api_store: Store, fact_id: str
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(editor_client, recipe.id, issues=[{**issue(1), "fact_id": fact_id}])
+
+    assert response.status_code == 200
