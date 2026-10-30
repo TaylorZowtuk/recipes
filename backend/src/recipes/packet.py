@@ -86,7 +86,10 @@ INSTRUCTIONS = (
     "can't match. "
     "For each step, keep by id each of its offers (a duration or temperature found in its text) "
     "that the step means as one. Give each place the step names an ingredient line as an "
-    "ingredient: the line's ref, the words exactly as written in the text, and the portion of "
+    "ingredient: the line's ref, the whole phrase in the text that names it, copied exactly, "
+    'with its amount, article and portion words ("1 tsp salt", "the tofu", "half the '
+    'garlic", "the rest of the onions"), because the app replaces that phrase with the computed '
+    "amount and the ingredient's name, and the portion of "
     "the line the step uses, more than 0 and at most 1. Code gives default_uses as a start: each "
     "line all used (portion 1.0) in the first step that mentions its name. Change them where a "
     "recipe uses a line over several steps, such as half the salt in one step and the rest in "

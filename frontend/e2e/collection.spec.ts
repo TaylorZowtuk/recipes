@@ -133,10 +133,10 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   const steps = panel.getByRole("listitem");
   await expect(steps.nth(0)).toHaveText("Whisk the sauce ingredients with 2 tbsp warm water.");
   await expect(steps.nth(0).locator(".step-amount")).toHaveCount(0);
-  await expect(steps.nth(1)).toHaveText("Toss the 400 g firm tofu in 2 tbsp cornstarch.");
+  await expect(steps.nth(1)).toHaveText("Toss 400 g firm tofu in 2 tbsp cornstarch.");
   await expect(steps.nth(3).locator(".step-amount")).toHaveText(["250 g", "½–1"]);
   await expect(steps.nth(4).locator(".step-amount")).toHaveText(["½–1"]);
-  await expect(steps.nth(4)).toContainText("the rest of the ½–1 green onions.");
+  await expect(steps.nth(4)).toContainText("top with the tofu and ½–1 green onions.");
 
   // About: the Stated Times and yield as written, and the Source in a new tab.
   await tabs.getByRole("tab", { name: "About" }).click();
