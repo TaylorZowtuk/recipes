@@ -2,12 +2,14 @@ import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { Card } from "./api/client";
 import { useCollection } from "./collection";
+import { DifficultyMeters } from "./DifficultyMeters";
 import { SearchIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
 import { Screen } from "./Screen";
 import { recipePath } from "./slug";
 import { formatStatedTime } from "./statedTime";
+import { TagList } from "./TagList";
 import { byTitle, titleMatches } from "./titleSearch";
 
 // The Recipes tab: every card in the Collection, by title, narrowed by a title search.
@@ -60,7 +62,8 @@ function resultCount(total: number, shown: number, query: string): string {
   return shown === 1 ? "1 recipe" : `${shown} recipes`;
 }
 
-function RecipeCard({ card }: { card: Card }) {
+// A card in the grid. It shows up to four Tags, so cards stay close to one height.
+export function RecipeCard({ card }: { card: Card }) {
   const time = formatStatedTime(card.stated_seconds);
   return (
     <Link to={recipePath(card)} className="card">
@@ -68,6 +71,8 @@ function RecipeCard({ card }: { card: Card }) {
       <span className="card-title">{card.title}</span>
       {card.site_name && <span className="card-meta">{card.site_name}</span>}
       {time && <span className="card-meta">{time}</span>}
+      <DifficultyMeters difficulty={card.difficulty} />
+      <TagList tags={card.tags} limit={4} />
       {card.status === "pending" && <span className="badge">Enrichment pending</span>}
     </Link>
   );
