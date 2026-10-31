@@ -678,7 +678,7 @@ def test_an_answered_step_gets_segments_and_uses_built_from_its_text() -> None:
     assert oil.segments is not None
     assert [s.model_dump(exclude_defaults=False) for s in oil.segments.segments] == [
         {"t": "text", "v": "Heat the "},
-        {"t": "ingredient", "ref": "i2", "written": "glimmer oil"},
+        {"t": "ingredient", "ref": "i2", "written": "glimmer oil", "portion": 1.0},
         {"t": "text", "v": " to "},
         {"t": "temperature", "c": 177, "written": "350\u00b0F"},
         {"t": "text", "v": "."},
@@ -710,19 +710,19 @@ def test_an_ingredient_split_across_steps_uses_a_portion_in_each() -> None:
                     "s2",
                     span("i1", "quill eggs"),
                     span("i3", "snorp garlic"),
-                    span("i4", "salt", 0.5),
+                    span("i4", "salt", 0.25),
                     keep=["o1"],
                 ),
-                step("s3", span("i4", "salt", 0.25), span("i4", "salt", 0.25), keep=["o1"]),
+                step("s3", span("i4", "salt", 0.5), span("i4", "salt", 0.25), keep=["o1"]),
             ]
         ),
     )
 
     fry, rest = enrichment.facts.steps["s2"], enrichment.facts.steps["s3"]
     assert fry.uses is not None
-    assert [(u.ref, u.portion) for u in fry.uses.uses] == [("i1", 1), ("i3", 1), ("i4", 0.5)]
+    assert [(u.ref, u.portion) for u in fry.uses.uses] == [("i1", 1), ("i3", 1), ("i4", 0.25)]
     assert rest.uses is not None
-    assert [(u.ref, u.portion) for u in rest.uses.uses] == [("i4", 0.5)]
+    assert [(u.ref, u.portion) for u in rest.uses.uses] == [("i4", 0.75)]
     assert rest.segments is not None
     segments = rest.segments.segments
     assert "".join(s.v if s.t == "text" else s.written for s in segments) == STEPS[2]
@@ -740,6 +740,8 @@ def test_an_ingredient_split_across_steps_uses_a_portion_in_each() -> None:
         ". Season with the rest of the ",
         ", ",
     ]
+    # Each mention keeps its own portion, and the step's use is their sum.
+    assert [s.portion for s in segments if s.t == "ingredient"] == [0.5, 0.25]
 
 
 @pytest.mark.parametrize(

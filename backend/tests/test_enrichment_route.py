@@ -542,7 +542,7 @@ STEPPED = {
                 **LLM,
                 "segments": [
                     {"t": "text", "v": "Toss the "},
-                    {"t": "ingredient", "ref": "i1", "written": "beef"},
+                    {"t": "ingredient", "ref": "i1", "written": "beef", "portion": 0.5},
                     {"t": "text", "v": " in flour and brown it in the oil in batches."},
                 ],
             },
@@ -606,7 +606,7 @@ def test_step_facts_are_stored_with_the_recipe(editor_client: TestClient, api_st
             segments={
                 "segments": [
                     {"t": "text", "v": "Toss the "},
-                    {"t": "ingredient", "ref": "i99", "written": "beef"},
+                    {"t": "ingredient", "ref": "i99", "written": "beef", "portion": 0.5},
                     {"t": "text", "v": " in flour and brown it in the oil in batches."},
                 ]
             }

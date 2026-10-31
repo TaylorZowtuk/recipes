@@ -251,12 +251,19 @@ class TextSegment(Model):
     v: Line
 
 
+# How much of an ingredient line a step uses: more than none, and at most all of it.
+Portion = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+# How far past 1 a line's portions may add up to, for floating point: nine ninths.
+PORTION_TOLERANCE = 1e-9
+
+
 class IngredientSegment(Model):
-    """Where a step names an ingredient line, which renders its amount scaled."""
+    """Where a step names an ingredient line, which renders its amount × portion, scaled."""
 
     t: Literal["ingredient"] = "ingredient"
     ref: Label  # the ingredient line's id
     written: Line
+    portion: Portion  # of the line, used where the step names it here
 
 
 Seconds = Annotated[int, Field(ge=0)]
@@ -301,12 +308,6 @@ class SegmentsFact(Fact):
     """A step's text split into typed pieces, in order, which together are its text exactly."""
 
     segments: Annotated[list[Segment], Field(max_length=MAX_LINES)]
-
-
-# How much of an ingredient line a step uses: more than none, and at most all of it.
-Portion = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
-# How far past 1 a line's portions across the steps may add up to, for floating point: 3 thirds.
-PORTION_TOLERANCE = 1e-9
 
 
 class StepUse(Model):

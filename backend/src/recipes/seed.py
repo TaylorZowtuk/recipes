@@ -96,8 +96,8 @@ def _parse(
     )
 
 
-def _ingredient(ref: str, written: str) -> IngredientSegment:
-    return IngredientSegment(ref=ref, written=written)
+def _ingredient(ref: str, written: str, portion: float = 1.0) -> IngredientSegment:
+    return IngredientSegment(ref=ref, written=written, portion=portion)
 
 
 def _duration(low_s: int, high_s: int, written: str) -> DurationSegment:
@@ -280,13 +280,13 @@ RECIPES = [
                     "Cook ",
                     _ingredient("i8", "the noodles"),
                     ", rinse under cold water, drain well and toss with ",
-                    _ingredient("i9", "half the green onions"),
+                    _ingredient("i9", "half the green onions", 0.5),
                     ".",
                     uses={"i8": 1.0, "i9": 0.5},
                 ),
                 "s5": _step_facts(
                     "Toss with the sauce and top with the tofu and ",
-                    _ingredient("i9", "the rest of the green onions"),
+                    _ingredient("i9", "the rest of the green onions", 0.5),
                     ".",
                     uses={"i9": 0.5},
                 ),

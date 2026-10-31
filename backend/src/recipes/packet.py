@@ -90,7 +90,7 @@ INSTRUCTIONS = (
     'with its amount, article and portion words ("1 tsp salt", "the tofu", "half the '
     'garlic", "the rest of the onions"), because the app replaces that phrase with the computed '
     "amount and the ingredient's name, and the portion of "
-    "the line the step uses, more than 0 and at most 1. Code gives default_uses as a start: each "
+    "the line that phrase uses, more than 0 and at most 1. Code gives default_uses as a start: each "
     "line all used (portion 1.0) in the first step that mentions its name. Change them where a "
     "recipe uses a line over several steps, such as half the salt in one step and the rest in "
     "another: a line's portions add up to at most 1 across all the steps. Leave out a step you "
@@ -698,8 +698,9 @@ class _Answering:
         ]
 
     def _answer_step(self, step: PacketStep, answered: AnsweredStep) -> None:
-        """The step's segments, built by placing its kept offers and its ingredients where they
-        are written, with text between, and its uses, each line's portions summed.
+        """The step's segments, built by placing its kept offers and its ingredients, each with
+        its portion, where they are written, with text between, and its uses, each line's portions
+        summed.
         """
         offers = {f"o{n}": found for n, found in enumerate(find_offers(step.text), 1)}
         errors: list[str] = []
@@ -725,7 +726,12 @@ class _Answering:
                 errors.append(start)
                 continue
             placed.append(
-                (start, IngredientSegment(ref=ingredient.ref, written=ingredient.written))
+                (
+                    start,
+                    IngredientSegment(
+                        ref=ingredient.ref, written=ingredient.written, portion=ingredient.portion
+                    ),
+                )
             )
             uses[ingredient.ref] = uses.get(ingredient.ref, 0) + ingredient.portion
         if errors:
