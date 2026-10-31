@@ -318,8 +318,8 @@ class StepUse(Model):
 
 class UsesFact(Fact):
     """The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
-    an ingredient's portions add up to at most 1. In a step with segments, each line's portion is
-    its ingredient segments' portions summed.
+    an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+    is its ingredient segments' Step Portions summed.
     """
 
     uses: Annotated[list[StepUse], Field(max_length=MAX_LINES)]
