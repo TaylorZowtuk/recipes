@@ -21,12 +21,12 @@ from recipes.models import (
     WebsiteSource,
     Wording,
 )
+from recipes.offers import find_offers
 from recipes.packet import (
     Answer,
     AnsweredRecipe,
     Rejected,
     Work,
-    find_offers,
     readable_quantities,
 )
 from recipes.parse import parse_line
