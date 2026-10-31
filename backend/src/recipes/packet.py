@@ -5,7 +5,8 @@ The model only chooses: a Canonical Ingredient among the candidates (or a new on
 Category that exists), an FDC food among the candidates and one of its portions, a quantity
 among the numbers written in the line, which of the durations and temperatures found in a step
 are ones, and where a step names an ingredient line. Every number written comes from the parser,
-the FDC Snapshot or the step's text, except how much of a line each step uses: its portion.
+the FDC Snapshot or the step's text, except how much of a line each mention in a step uses: its
+Step Portion.
 """
 
 import hashlib

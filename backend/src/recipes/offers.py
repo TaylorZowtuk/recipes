@@ -1,5 +1,7 @@
 """The numbers written in recipe text, and the durations and temperatures code finds in a step's
-text: what the Work Packet offers a model, and all a step's segments may say there.
+text: what the Work Packet offers a model, and the only durations and temperatures a step's
+segments may hold. It is kept apart from packet.py so the API can check a step's segments without
+importing the parser.
 """
 
 import math
@@ -32,7 +34,7 @@ SECONDS_IN = {"h": 3600, "m": 60, "s": 1}
 # "2c sugar" and "2 C" are cups.
 TEMPERATURE = re.compile(
     r"(?<![\w.])(?P<degrees>\d+)"
-    r"(?:(?:\s*[°º]\s*|\s+degrees?\s+)(?P<scale>(?i:[FC]))(?i:ahrenheit|elsius)?|(?P<bare>[FC]))\b",
+    r"(?:(?:\s*[°º]\s*|\s+(?i:degrees?)\s+)(?P<scale>(?i:[FC]))(?i:ahrenheit|elsius)?|(?P<bare>[FC]))\b",
 )
 
 

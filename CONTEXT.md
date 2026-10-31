@@ -112,7 +112,7 @@ Something enrichment corrected or was unsure about, and which an editor should c
 _Avoid_: Warning, error
 
 **Work Packet**:
-The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it as offers, and default uses. The answer keeps the offers that are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written.
+The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it, each with an id, and default uses. The answer keeps those that really are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written.
 _Avoid_: Prompt, batch
 
 **Step Portion**:

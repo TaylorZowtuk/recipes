@@ -36,7 +36,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 
 ## Layout
 
-- `backend/`: one uv project, one `recipes` package. The API, ingest and the `enrich` CLI are modules in it, with `packet.py` (the Work Packet and the checks on a model's answer) and `fdc.py` (the FDC Snapshot; `python -m recipes.fdc build` rebuilds it). `backend/fdc/` holds the committed FDC Snapshot, which the Lambda zip leaves out. See [`backend/AGENTS.md`](backend/AGENTS.md).
+- `backend/`: one uv project, one `recipes` package. The API, ingest and the `enrich` CLI are modules in it, with `packet.py` (the Work Packet and the checks on a model's answer), `offers.py` (the durations and temperatures found in a step's text, which the API checks segments against) and `fdc.py` (the FDC Snapshot; `python -m recipes.fdc build` rebuilds it). `backend/fdc/` holds the committed FDC Snapshot, which the Lambda zip leaves out. See [`backend/AGENTS.md`](backend/AGENTS.md).
 - `frontend/`: one pnpm package, the PWA. Playwright tests are in `e2e/`, the generated API client in `src/api/`. See [`frontend/AGENTS.md`](frontend/AGENTS.md).
 - `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup and `tests/` (`terraform test` on mock providers). See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.

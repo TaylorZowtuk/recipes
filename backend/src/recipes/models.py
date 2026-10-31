@@ -251,7 +251,8 @@ class TextSegment(Model):
     v: Line
 
 
-# How much of an ingredient line a step uses: more than none, and at most all of it.
+# How much of an ingredient line one mention or one step uses: more than none, and at most all of
+# it.
 Portion = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
 # How far past 1 a line's portions may add up to, for floating point: nine ninths.
 PORTION_TOLERANCE = 1e-9
@@ -317,7 +318,8 @@ class StepUse(Model):
 
 class UsesFact(Fact):
     """The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
-    an ingredient's portions add up to at most 1.
+    an ingredient's portions add up to at most 1. In a step with segments, each line's portion is
+    its ingredient segments' portions summed.
     """
 
     uses: Annotated[list[StepUse], Field(max_length=MAX_LINES)]
