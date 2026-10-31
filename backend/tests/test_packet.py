@@ -769,6 +769,10 @@ def test_an_ingredient_split_across_steps_uses_a_portion_in_each() -> None:
             "s1: i2's portion 1.5 isn't more than 0 and at most 1",
         ),
         (
+            [step("s3", span("i4", "salt", 0.75), span("i4", "salt", 0.75))],
+            "s3: i4's portions add up to 1.5, more than all of it",
+        ),
+        (
             [step("s2", span("i4", "salt", 0.75)), step("s3", span("i4", "salt", 0.5))],
             "i4: its portions add up to 1.25, more than all of it",
         ),
@@ -783,6 +787,7 @@ def test_an_ingredient_split_across_steps_uses_a_portion_in_each() -> None:
         "spans overlapping",
         "zero portion",
         "portion over 1",
+        "portions over 1 in one step",
         "portions over 1 across steps",
     ],
 )
@@ -793,12 +798,36 @@ def test_a_step_answer_outside_the_offers_is_rejected(
 
 
 def test_portions_adding_up_to_all_of_an_ingredient_are_allowed() -> None:
-    thirds = [step("s2", span("i4", "salt", 1 / 3)), step("s3", *[span("i4", "salt", 1 / 3)] * 2)]
+    # Nine ninths add up to a little more than 1 in floating point.
+    salted = work(recipe(steps=("Season with salt.",) * 9))
+    ninths = [step(f"s{n}", span("i4", "salt", 1 / 9)) for n in range(1, 10)]
 
-    enrichment = enrich(stepped(), answer(steps=thirds))
+    enrichment = enrich(salted, answer(steps=ninths))
 
-    assert sorted(enrichment.facts.steps) == ["s2", "s3"]
+    assert len(enrichment.facts.steps) == 9
+
+
+def test_a_steps_portions_adding_up_to_all_of_an_ingredient_use_all_of_it() -> None:
+    salted = work(recipe(steps=("Season with salt" + ", salt" * 8 + ".",)))
+
+    enrichment = enrich(salted, answer(steps=[step("s1", *[span("i4", "salt", 1 / 9)] * 9)]))
+
+    season = enrichment.facts.steps["s1"]
+    assert season.uses is not None
+    assert [(u.ref, u.portion) for u in season.uses.uses] == [("i4", 1.0)]
+    assert season.segments is not None
+    assert [s.portion for s in season.segments.segments if s.t == "ingredient"] == [1 / 9] * 9
+
+
+def test_an_offer_kept_twice_is_one_segment() -> None:
+    enrichment = enrich(stepped(), answer(steps=[step("s1", keep=["o1", "o1"])]))
+
+    oil = enrichment.facts.steps["s1"]
+    assert oil.segments is not None
+    assert [s.t for s in oil.segments.segments] == ["text", "temperature", "text"]
 
 
 def test_the_instructions_state_the_default_uses_rule() -> None:
-    assert "first step that mentions" in work().packet().instructions
+    instructions = work().packet().instructions
+    assert "first step that mentions" in instructions
+    assert "not applied for you: list every ingredient each step names" in instructions

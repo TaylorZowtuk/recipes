@@ -89,12 +89,12 @@ INSTRUCTIONS = (
     "ingredient: the line's ref, the whole phrase in the text that names it, copied exactly, "
     'with its amount, article and portion words ("1 tsp salt", "the tofu", "half the '
     'garlic", "the rest of the onions"), because the app replaces that phrase with the computed '
-    "amount and the ingredient's name, and the portion of "
-    "the line that phrase uses, more than 0 and at most 1. Code gives default_uses as a start: each "
-    "line all used (portion 1.0) in the first step that mentions its name. Change them where a "
-    "recipe uses a line over several steps, such as half the salt in one step and the rest in "
-    "another: a line's portions add up to at most 1 across all the steps. Leave out a step you "
-    "can't read."
+    "amount and the ingredient's name, and the portion of the line that phrase uses, more than 0 "
+    "and at most 1. Code gives default_uses as a start: each line all used (portion 1.0) in the "
+    "first step that mentions its name. These are suggestions, not applied for you: list every "
+    "ingredient each step names, including those in default_uses. Change them where a recipe "
+    "uses a line over several steps, such as half the salt in one step and the rest in another: "
+    "a line's portions add up to at most 1 across all the steps. Leave out a step you can't read."
 )
 
 VULGAR = "¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞"
@@ -734,6 +734,11 @@ class _Answering:
                 )
             )
             uses[ingredient.ref] = uses.get(ingredient.ref, 0) + ingredient.portion
+        errors += [
+            f"{ref}'s portions add up to {total:g}, more than all of it"
+            for ref, total in uses.items()
+            if total > 1 + PORTION_TOLERANCE
+        ]
         if errors:
             self.errors += [f"{step.step_id}: {error}" for error in errors]
             return
@@ -750,7 +755,8 @@ class _Answering:
                 provenance="llm",
                 confidence=STEP_CONFIDENCE,
                 estimated=True,
-                uses=[StepUse(ref=ref, portion=portion) for ref, portion in uses.items()],
+                # A sum past 1 by no more than the tolerance is all of the line.
+                uses=[StepUse(ref=ref, portion=min(portion, 1)) for ref, portion in uses.items()],
             ),
         )
 
