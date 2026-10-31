@@ -258,7 +258,7 @@ PORTION_TOLERANCE = 1e-9
 
 
 class IngredientSegment(Model):
-    """Where a step names an ingredient line, which renders its amount × portion, scaled."""
+    """Where a step names an ingredient line, which renders its amount times its portion, scaled."""
 
     t: Literal["ingredient"] = "ingredient"
     ref: Label  # the ingredient line's id
