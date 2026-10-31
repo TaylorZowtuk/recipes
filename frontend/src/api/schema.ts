@@ -143,8 +143,8 @@ export interface paths {
          *     Refused unless every fact is for one of the recipe's lines or steps, every step's segments
          *     are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
          *     duration or temperature segment is one code finds in its step's text, a step with segments has
-         *     uses that are exactly its segments' portions summed per line, each line's portions across the
-         *     steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
+         *     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
+         *     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
          *     with no confirm batch, every wording is the normalized
          *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
          *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
@@ -1310,8 +1310,8 @@ export interface components {
         /**
          * UsesFact
          * @description The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
-         *     an ingredient's portions add up to at most 1. In a step with segments, each line's portion is
-         *     its ingredient segments' portions summed.
+         *     an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+         *     is its ingredient segments' Step Portions summed.
          */
         "UsesFact-Input": {
             /** Confidence */
@@ -1340,8 +1340,8 @@ export interface components {
         /**
          * UsesFact
          * @description The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
-         *     an ingredient's portions add up to at most 1. In a step with segments, each line's portion is
-         *     its ingredient segments' portions summed.
+         *     an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+         *     is its ingredient segments' Step Portions summed.
          */
         "UsesFact-Output": {
             /** Confidence */
