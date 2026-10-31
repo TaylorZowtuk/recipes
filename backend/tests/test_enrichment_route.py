@@ -12,6 +12,7 @@ from recipes.models import (
     MAX_RECIPE_BYTES,
     CanonicalIngredient,
     EnrichmentIssue,
+    Step,
     Wording,
 )
 from recipes.seed import RECIPES
@@ -534,48 +535,61 @@ def test_a_wording_of_another_line_or_an_issue_already_settled_is_refused(
     assert_nothing_written(editor_client, recipe)
 
 
+def beef(portion: float, ref: str = "i1") -> list[dict[str, Any]]:
+    """s1's segments, naming the beef as the line `ref` with `portion`."""
+    return [
+        {"t": "text", "v": "Toss the "},
+        {"t": "ingredient", "ref": ref, "written": "beef", "portion": portion},
+        {"t": "text", "v": " in flour and brown it in the oil in batches."},
+    ]
+
+
+def simmer(*timer: dict[str, Any]) -> list[dict[str, Any]]:
+    """s3's segments, with `timer` in place of "1 1/2 hours" and the text before it."""
+    return [*timer, {"t": "text", "v": "."}]
+
+
+SIMMER_TIMER = (
+    {"t": "text", "v": "Add the stock and barley, cover and simmer "},
+    {"t": "duration", "low_s": 5400, "high_s": 5400, "written": "1 1/2 hours"},
+)
 STEPPED = {
     "ingredients": FACTS["ingredients"],
     "steps": {
         "s1": {
-            "segments": {
-                **LLM,
-                "segments": [
-                    {"t": "text", "v": "Toss the "},
-                    {"t": "ingredient", "ref": "i1", "written": "beef", "portion": 0.5},
-                    {"t": "text", "v": " in flour and brown it in the oil in batches."},
-                ],
-            },
+            "segments": {**LLM, "segments": beef(0.5)},
             "uses": {**LLM, "estimated": True, "uses": [{"ref": "i1", "portion": 0.5}]},
         },
-        "s3": {
-            "segments": {
-                **LLM,
-                "segments": [
-                    {"t": "text", "v": "Add the stock and barley, cover and simmer "},
-                    {"t": "duration", "low_s": 5400, "high_s": 5400, "written": "1 1/2 hours"},
-                    {"t": "text", "v": "."},
-                ],
-            },
-            "uses": {**LLM, "estimated": True, "uses": [{"ref": "i1", "portion": 0.5}]},
-        },
+        # A step may use a line without naming it.
+        "s2": {"uses": {**LLM, "estimated": True, "uses": [{"ref": "i1", "portion": 0.5}]}},
+        "s3": {"segments": {**LLM, "segments": simmer(*SIMMER_TIMER)}},
     },
 }
 
 
-def stepped(**changes: Any) -> dict[str, Any]:
-    """The step facts, with s1's segments or uses changed."""
-    s1 = STEPPED["steps"]["s1"]
+def stepped(
+    segments: list[dict[str, Any]] | None = None,
+    uses: list[dict[str, Any]] | None = None,
+    s3: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The step facts, with s1's segments or uses, or s3's segments, changed."""
+    steps = STEPPED["steps"]
+    s1 = steps["s1"]
     return {
         **STEPPED,
         "steps": {
-            **STEPPED["steps"],
+            **steps,
             "s1": {
-                "segments": {**s1["segments"], **changes.get("segments", {})},
-                "uses": {**s1["uses"], **changes.get("uses", {})},
+                "segments": {**s1["segments"], "segments": segments or s1["segments"]["segments"]},
+                "uses": {**s1["uses"], "uses": s1["uses"]["uses"] if uses is None else uses},
             },
+            "s3": {"segments": {**steps["s3"]["segments"], "segments": s3}} if s3 else steps["s3"],
         },
     }
+
+
+def use(ref: str, portion: float) -> dict[str, Any]:
+    return {"ref": ref, "portion": portion}
 
 
 def test_step_facts_are_stored_with_the_recipe(editor_client: TestClient, api_store: Store) -> None:
@@ -586,35 +600,94 @@ def test_step_facts_are_stored_with_the_recipe(editor_client: TestClient, api_st
     assert response.status_code == 200
     stored = fetch(editor_client, recipe.id)
     assert stored["original"]["steps"] == recipe.original.model_dump(mode="json")["steps"]
-    simmer = stored["facts"]["steps"]["s3"]
-    assert simmer["segments"]["segments"][1] == {
+    toss = stored["facts"]["steps"]["s1"]
+    assert toss["segments"]["segments"][1] == {
+        "t": "ingredient",
+        "ref": "i1",
+        "written": "beef",
+        "portion": 0.5,
+    }
+    assert stored["facts"]["steps"]["s3"]["segments"]["segments"][1] == {
         "t": "duration",
         "low_s": 5400,
         "high_s": 5400,
         "written": "1 1/2 hours",
     }
-    assert simmer["uses"]["uses"] == [{"ref": "i1", "portion": 0.5}]
-    assert sorted(stored["facts"]["steps"]) == ["s1", "s3"]
+    assert stored["facts"]["steps"]["s2"]["segments"] is None
+    assert stored["facts"]["steps"]["s2"]["uses"]["uses"] == [{"ref": "i1", "portion": 0.5}]
+    assert sorted(stored["facts"]["steps"]) == ["s1", "s2", "s3"]
+
+
+def test_a_lines_portions_adding_up_to_all_of_it_are_accepted(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # Nine ninths add up to a little more than 1 in floating point.
+    steps = [Step(id=f"s{n}", text="Season the beef.") for n in range(1, 10)]
+    recipe = add(api_store, original=PENDING.original.model_copy(update={"steps": steps}))
+    season = {
+        "segments": {
+            **LLM,
+            "segments": [
+                {"t": "text", "v": "Season the "},
+                {"t": "ingredient", "ref": "i1", "written": "beef", "portion": 1 / 9},
+                {"t": "text", "v": "."},
+            ],
+        },
+        "uses": {**LLM, "estimated": True, "uses": [use("i1", 1 / 9)]},
+    }
+    facts = {**STEPPED, "steps": {step.id: season for step in steps}}
+
+    response = enrich(editor_client, recipe.id, facts)
+
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize(
-    "facts",
+    ("facts", "detail"),
     [
-        {**STEPPED, "steps": {"s9": STEPPED["steps"]["s1"]}},
-        stepped(uses={"uses": [{"ref": "i99", "portion": 0.5}]}),
-        stepped(
-            segments={
-                "segments": [
-                    {"t": "text", "v": "Toss the "},
-                    {"t": "ingredient", "ref": "i99", "written": "beef", "portion": 0.5},
-                    {"t": "text", "v": " in flour and brown it in the oil in batches."},
-                ]
-            }
+        ({**STEPPED, "steps": {"s9": STEPPED["steps"]["s1"]}}, "no step s9"),
+        (stepped(uses=[use("i99", 0.5)]), "no line i99"),
+        (stepped(beef(0.5, "i99")), "no line i99"),
+        (
+            stepped([{"t": "text", "v": "Toss the beef in flour."}], []),
+            "Step s1's segments aren't its text",
         ),
-        stepped(segments={"segments": [{"t": "text", "v": "Toss the beef in flour."}]}),
-        stepped(uses={"uses": [{"ref": "i1", "portion": 0.75}]}),
-        stepped(uses={"uses": [{"ref": "i1", "portion": 1.5}]}),
-        stepped(uses={"uses": [{"ref": "i1", "portion": 0}]}),
+        (stepped(beef(0.75), [use("i1", 0.75)]), "The steps use more than all of i1"),
+        (stepped(uses=[use("i1", 1.5)]), "less than or equal to 1"),
+        (stepped(uses=[use("i1", 0)]), "greater than 0"),
+        (stepped(beef(1.5), [use("i1", 1.5)]), "less than or equal to 1"),
+        (stepped(uses=[use("i1", 0.25), use("i1", 0.25)]), "Step s1 uses i1 twice"),
+        (stepped(uses=[]), "Step s1's uses aren't its ingredient segments' portions"),
+        (
+            stepped(uses=[use("i1", 0.25)]),
+            "Step s1's uses aren't its ingredient segments' portions",
+        ),
+        (
+            stepped(uses=[use("i1", 0.5), use("i9", 0.5)]),
+            "Step s1's uses aren't its ingredient segments' portions",
+        ),
+        (
+            stepped(s3=simmer({**SIMMER_TIMER[0]}, {**SIMMER_TIMER[1], "low_s": 5, "high_s": 5})),
+            "Step s3's 1 1/2 hours isn't what code finds there",
+        ),
+        (
+            stepped(
+                s3=simmer(
+                    {"t": "text", "v": "Add the stock and barley, cover and simmer 1 "},
+                    {"t": "duration", "low_s": 1800, "high_s": 1800, "written": "1/2 hours"},
+                )
+            ),
+            "Step s3's 1/2 hours isn't what code finds there",
+        ),
+        (
+            stepped(
+                s3=simmer(
+                    {**SIMMER_TIMER[0]},
+                    {"t": "temperature", "c": 90, "written": "1 1/2 hours"},
+                )
+            ),
+            "Step s3's 1 1/2 hours isn't what code finds there",
+        ),
     ],
     ids=[
         "no such step",
@@ -624,16 +697,25 @@ def test_step_facts_are_stored_with_the_recipe(editor_client: TestClient, api_st
         "portions over 1 across steps",
         "portion over 1",
         "zero portion",
+        "segment portion over 1",
+        "a line used twice in a step",
+        "segment with no use",
+        "use that isn't its segments' portion",
+        "use with no segment",
+        "duration with another number",
+        "duration code finds elsewhere",
+        "temperature code doesn't find",
     ],
 )
 def test_step_facts_that_dont_fit_the_recipe_are_refused(
-    editor_client: TestClient, api_store: Store, facts: dict[str, Any]
+    editor_client: TestClient, api_store: Store, facts: dict[str, Any], detail: str
 ) -> None:
     recipe = add(api_store)
 
     response = enrich(editor_client, recipe.id, facts)
 
     assert response.status_code == 422
+    assert detail in str(response.json()["detail"])
     assert fetch(editor_client, recipe.id)["status"] == "pending"
 
 

@@ -33,6 +33,7 @@ from recipes.models import (
     CanonicalIngredient,
     Card,
     Difficulty,
+    DurationSegment,
     Enrichment,
     Image,
     IngredientFacts,
@@ -44,6 +45,7 @@ from recipes.models import (
     QueuedIngestState,
     Recipe,
     StepFacts,
+    TemperatureSegment,
     Ulid,
     WebsiteSource,
     WebUrl,
@@ -52,6 +54,7 @@ from recipes.models import (
     normalize_wording,
     written_as,
 )
+from recipes.offers import find_offers
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -469,8 +472,8 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
 
 
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
-    """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no fact or not
-    open, and a wording that isn't a parsed line's name.
+    """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no line or step
+    fact or not open, and a wording that isn't a parsed line's name.
     """
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
@@ -494,28 +497,60 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
 
 
 def _check_steps(body: Enrichment, recipe: Recipe) -> None:
-    """Refuse a fact for a step the recipe doesn't have, segments that aren't the step's text,
-    segments or uses naming a line the recipe doesn't have, and a line used more than once over.
+    """Refuse a fact for a step the recipe doesn't have, a step's facts `_check_step` refuses, and
+    a line used more than once over across the steps.
     """
     texts = {step.id: step.text for step in recipe.original.steps}
     if unknown := sorted(body.facts.steps.keys() - texts.keys()):
         raise HTTPException(422, f"The recipe has no step {', '.join(unknown)}")
     lines = {line.id for line in recipe.original.ingredients}
-    refs: set[str] = set()
     portions: dict[str, float] = {}
     for step_id, facts in body.facts.steps.items():
-        if facts.segments:
-            segments = facts.segments.segments
-            if "".join(written_as(segment) for segment in segments) != texts[step_id]:
-                raise HTTPException(422, f"Step {step_id}'s segments aren't its text")
-            refs |= {s.ref for s in segments if isinstance(s, IngredientSegment)}
+        _check_step(step_id, texts[step_id], facts, lines)
         for use in facts.uses.uses if facts.uses else []:
-            refs.add(use.ref)
             portions[use.ref] = portions.get(use.ref, 0) + use.portion
-    if unknown := sorted(refs - lines):
-        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
     if over := sorted(ref for ref, total in portions.items() if total > 1 + PORTION_TOLERANCE):
         raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
+
+
+def _check_step(step_id: str, text: str, facts: StepFacts, lines: set[str]) -> None:
+    """Refuse segments or uses naming a line the recipe doesn't have, a line used twice, segments
+    that aren't the step's text, a duration or temperature that isn't what code finds where it's
+    written, and, in a step with segments, uses that aren't its ingredient segments' portions
+    summed per line.
+    """
+    uses = facts.uses.uses if facts.uses else []
+    segments = facts.segments.segments if facts.segments else []
+    named = {s.ref for s in segments if isinstance(s, IngredientSegment)}
+    if unknown := sorted(({use.ref for use in uses} | named) - lines):
+        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    refs = [use.ref for use in uses]
+    if twice := sorted({ref for ref in refs if refs.count(ref) > 1}):
+        raise HTTPException(422, f"Step {step_id} uses {', '.join(twice)} twice")
+    used = {use.ref: use.portion for use in uses}
+    if facts.segments is None:
+        return
+    if "".join(written_as(segment) for segment in segments) != text:
+        raise HTTPException(422, f"Step {step_id}'s segments aren't its text")
+    found = {(start, segment.written): segment for start, segment in find_offers(text)}
+    summed: dict[str, float] = {}
+    at = 0
+    for segment in segments:
+        if isinstance(segment, DurationSegment | TemperatureSegment) and (
+            found.get((at, segment.written)) != segment
+        ):
+            raise HTTPException(
+                422, f"Step {step_id}'s {segment.written} isn't what code finds there"
+            )
+        if isinstance(segment, IngredientSegment):
+            summed[segment.ref] = summed.get(segment.ref, 0) + segment.portion
+        at += len(written_as(segment))
+    if used.keys() != summed.keys() or any(
+        abs(portion - summed[ref]) > PORTION_TOLERANCE for ref, portion in used.items()
+    ):
+        raise HTTPException(
+            422, f"Step {step_id}'s uses aren't its ingredient segments' portions summed"
+        )
 
 
 def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
