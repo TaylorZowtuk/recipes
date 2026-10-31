@@ -628,7 +628,7 @@ export interface components {
         };
         /**
          * IngredientSegment
-         * @description Where a step names an ingredient line, which renders its amount × portion, scaled.
+         * @description Where a step names an ingredient line, which renders its amount times its portion, scaled.
          */
         "IngredientSegment-Input": {
             /** Portion */
@@ -645,7 +645,7 @@ export interface components {
         };
         /**
          * IngredientSegment
-         * @description Where a step names an ingredient line, which renders its amount × portion, scaled.
+         * @description Where a step names an ingredient line, which renders its amount times its portion, scaled.
          */
         "IngredientSegment-Output": {
             /** Portion */
