@@ -302,6 +302,42 @@ class Store:
                 raise WordingConfirmed from None
             raise
 
+    def delete_recipe(self, recipe: Recipe) -> None:
+        """Delete the recipe, its card and its Source guard if the stored recipe is still at
+        `recipe.version`, so its Source can be added again. Raises VersionConflict otherwise.
+        """
+        deleted: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": recipe_key(recipe.id),
+                "ConditionExpression": "#version = :expected",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ExpressionAttributeValues": {":expected": {"N": str(recipe.version)}},
+            }
+        }
+        guard: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": source_key(recipe.dedupe_key),
+                "ConditionExpression": "recipe_id = :id",
+                "ExpressionAttributeValues": {":id": {"S": recipe.id}},
+            }
+        }
+        try:
+            self._transact(
+                [
+                    deleted,
+                    {"Delete": {"TableName": self.table, "Key": card_key(recipe.id)}},
+                    guard,
+                    self._bump_collection(),
+                ]
+            )
+        except _Cancelled as cancelled:
+            # A Source guard that is gone or names another recipe leaves the delete unsafe too.
+            if cancelled.failed(deleted) or cancelled.failed(guard):
+                raise VersionConflict(recipe.id) from None
+            raise
+
     def get_recipe(self, recipe_id: str) -> Recipe | None:
         # Consistent, like the card that names the version a phone asks for.
         item = self._get(recipe_key(recipe_id), consistent=True)

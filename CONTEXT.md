@@ -150,8 +150,12 @@ The prep, cook or total time a source gives for a recipe, kept as written. It is
 _Avoid_: Duration estimate
 
 **Tag**:
-A label an editor makes up and attaches to recipes so they can be filtered by it.
+A label an editor makes up and attaches to recipes so they can be filtered by it. Tags match case-insensitively across the Collection and keep the spelling first used, so "WEEKNIGHT" on a new recipe becomes the Collection's "weeknight".
 _Avoid_: Category (that word belongs to store categories), label
+
+**Draft**:
+An editor's unsaved changes while editing a saved recipe, such as its Difficulty, Tags and Preview Photo. It is held only in the recipe page, never stored or sent until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe.
+_Avoid_: Pending changes (*Pending* is an Enrichment Status), unsaved edit
 
 **Favorite Site**:
 A recipe website the household trusts and returns to when looking for new recipes.

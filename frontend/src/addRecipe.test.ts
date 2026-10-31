@@ -3,7 +3,6 @@ import {
   type Candidate,
   chosenDifficulty,
   defaultPreview,
-  editBlock,
   ingestOutcome,
   parseTags,
   previewPhoto,
@@ -12,7 +11,7 @@ import {
   storeCandidates,
   storedImages,
 } from "./addRecipe";
-import type { Duplicate, Image, Ingested, QueuedIngest, Sync } from "./api/client";
+import type { Duplicate, Image, Ingested, QueuedIngest } from "./api/client";
 
 const ingested = { source: { url: "https://plateful.test/a" } } as Ingested;
 const queuedIngest = { id: "01Q", state: "waiting" } as QueuedIngest;
@@ -93,24 +92,6 @@ describe("saveOutcome", () => {
       kind: "failed",
     });
     expect(saveOutcome({ response: response(422) })).toEqual({ kind: "failed" });
-  });
-});
-
-describe("editBlock", () => {
-  const open: Sync = { collection_version: 3, schema_version: 1, read_only: null, weeks: null };
-
-  it("is nothing online with the API open, or while sync is still loading", () => {
-    expect(editBlock(true, open)).toBeNull();
-    expect(editBlock(true, undefined)).toBeNull();
-  });
-
-  it("is offline without a network, whatever sync said", () => {
-    expect(editBlock(false, open)).toBe("offline");
-    expect(editBlock(false, { ...open, read_only: "updating" })).toBe("offline");
-  });
-
-  it("is paused while the API is read-only", () => {
-    expect(editBlock(true, { ...open, read_only: "updating" })).toBe("paused");
   });
 });
 

@@ -120,10 +120,20 @@ export interface paths {
         get: operations["get_current_recipe_api_recipes__recipe_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Recipe
+         * @description Delete the recipe at `version`, with its card and Source guard, so its Source can be
+         *     added again.
+         */
+        delete: operations["delete_recipe_api_recipes__recipe_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Recipe
+         * @description Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
+         *     `body.version`, with its card, in one write.
+         */
+        patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
     };
     "/api/recipes/{recipe_id}/enrichment": {
@@ -1013,6 +1023,16 @@ export interface components {
             version: number;
         };
         /**
+         * RecipeEdit
+         * @description An editor's batch of changes to the recipe at `version`, applied in one write.
+         */
+        RecipeEdit: {
+            /** Operations */
+            operations: (components["schemas"]["SetTags"] | components["schemas"]["SetDifficulty"] | components["schemas"]["SetPreview"])[];
+            /** Version */
+            version: number;
+        };
+        /**
          * RecipeFacts
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
          *     `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
@@ -1139,6 +1159,37 @@ export interface components {
             email: string | null;
             /** Google Client Id */
             google_client_id: string | null;
+        };
+        /** SetDifficulty */
+        SetDifficulty: {
+            difficulty: components["schemas"]["Difficulty"] | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_difficulty";
+        };
+        /**
+         * SetPreview
+         * @description Show one of the recipe's images as its Preview Photo, or none with null.
+         */
+        SetPreview: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_preview";
+            preview: components["schemas"]["Preview"] | null;
+        };
+        /** SetTags */
+        SetTags: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_tags";
+            /** Tags */
+            tags: string[];
         };
         /**
          * SignIn
@@ -1700,6 +1751,112 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    delete_recipe_api_recipes__recipe_id__delete: {
+        parameters: {
+            query: {
+                version: number;
+            };
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe changed since the editor read it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_recipe_api_recipes__recipe_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe changed since the editor read it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a valid edit, or the preview isn't one of the recipe's images */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

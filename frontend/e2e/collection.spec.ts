@@ -37,7 +37,8 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   const total = await shownCount(page);
   const titles = await cardTitles(page).allTextContents();
   expect(titles).toEqual([...titles].sort((a, b) => a.localeCompare(b)));
-  const items = grid(page).getByRole("listitem");
+  // The grid's own items, not the Tags listed inside a card.
+  const items = grid(page).locator(":scope > li");
   const [a, b] = [await items.nth(0).boundingBox(), await items.nth(1).boundingBox()];
   expect(a?.y).toBe(b?.y);
 
