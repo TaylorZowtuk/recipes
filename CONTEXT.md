@@ -112,8 +112,12 @@ Something enrichment corrected or was unsure about, and which an editor should c
 _Avoid_: Warning, error
 
 **Work Packet**:
-The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written.
+The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it as offers, and default uses. The answer keeps the offers that are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written.
 _Avoid_: Prompt, batch
+
+**Step Portion**:
+The share of an ingredient line that one mention of it in a step uses, e.g. 0.5 for "half the garlic". The step shows the line's amount times it. Across all of a recipe's steps, a line's step portions add up to at most 1. It has nothing to do with an FDC food's portion, a household measure with its gram weight.
+_Avoid_: Portion (alone), share, fraction
 
 **FDC Snapshot**:
 The pinned copy of USDA FoodData Central's Foundation Foods and SR Legacy kept in the repo, which every density, gram weight and nutrient value comes from. Its release is recorded on each recipe enriched with it.
