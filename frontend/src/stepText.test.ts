@@ -135,12 +135,8 @@ describe("stepText", () => {
 
   it("keeps the words as written when the line has no amount or no parse", () => {
     const salt = parse({ name: "salt" });
-    expect(stepText(step, facts({ i1: salt }, halfTheGarlic(1)), 1)[1]).toBe(
-      "half the garlic",
-    );
-    expect(stepText(step, facts({ i1: null }, halfTheGarlic(1)), 1)[1]).toBe(
-      "half the garlic",
-    );
+    expect(stepText(step, facts({ i1: salt }, halfTheGarlic(1)), 1)[1]).toBe("half the garlic");
+    expect(stepText(step, facts({ i1: null }, halfTheGarlic(1)), 1)[1]).toBe("half the garlic");
     expect(stepText(step, facts({}, halfTheGarlic(1)), 1)[1]).toBe("half the garlic");
   });
 
