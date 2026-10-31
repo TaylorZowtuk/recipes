@@ -200,7 +200,7 @@ describe("Steps", () => {
                 ...unconfirmed,
                 segments: [
                   { t: "text", v: "Add " },
-                  { t: "ingredient", ref: "i1", written: "half the garlic" },
+                  { t: "ingredient", ref: "i1", written: "half the garlic", portion: 0.5 },
                   { t: "text", v: "." },
                 ],
               },

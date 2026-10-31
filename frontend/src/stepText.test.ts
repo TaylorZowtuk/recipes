@@ -63,15 +63,15 @@ function facts(ingredients: Record<string, ParseFact | null>, s1?: StepFacts): R
   };
 }
 
-const halfTheGarlic = (uses: Record<string, number>) =>
+const halfTheGarlic = (portion: number) =>
   stepFacts(
-    ["Add ", { t: "ingredient", ref: "i1", written: "half the garlic" }, " and simmer."],
-    uses,
+    ["Add ", { t: "ingredient", ref: "i1", written: "half the garlic", portion }, " and simmer."],
+    { i1: portion },
   );
 
 describe("stepText", () => {
   it("shows the step's portion of the line's amount in place of the words", () => {
-    expect(stepText(step, facts({ i1: garlic }, halfTheGarlic({ i1: 0.5 })), 1)).toEqual([
+    expect(stepText(step, facts({ i1: garlic }, halfTheGarlic(0.5)), 1)).toEqual([
       "Add ",
       { amount: "2 cloves", name: "garlic" },
       " and simmer.",
@@ -79,7 +79,7 @@ describe("stepText", () => {
   });
 
   it("scales the portion", () => {
-    expect(stepText(step, facts({ i1: garlic }, halfTheGarlic({ i1: 0.5 })), 3)).toEqual([
+    expect(stepText(step, facts({ i1: garlic }, halfTheGarlic(0.5)), 3)).toEqual([
       "Add ",
       { amount: "6 cloves", name: "garlic" },
       " and simmer.",
@@ -88,12 +88,12 @@ describe("stepText", () => {
 
   it("scales both ends of a range, in kitchen fractions", () => {
     const onions = parse({ quantity: { low: 1, high: 2 }, name: "green onions" });
-    expect(stepText(step, facts({ i1: onions }, halfTheGarlic({ i1: 0.5 })), 1)[1]).toEqual({
+    expect(stepText(step, facts({ i1: onions }, halfTheGarlic(0.5)), 1)[1]).toEqual({
       amount: "½–1",
       name: "green onions",
     });
     const vinegar = parse({ quantity: { low: 1.5, high: 1.5 }, unit: "tbsp", name: "vinegar" });
-    expect(stepText(step, facts({ i1: vinegar }, halfTheGarlic({ i1: 0.5 })), 1)[1]).toEqual({
+    expect(stepText(step, facts({ i1: vinegar }, halfTheGarlic(0.5)), 1)[1]).toEqual({
       amount: "¾ tbsp",
       name: "vinegar",
     });
@@ -106,28 +106,42 @@ describe("stepText", () => {
       name: "extra-firm tofu",
       short_name: "tofu",
     });
-    expect(stepText(step, facts({ i1: tofu }, halfTheGarlic({ i1: 1 })), 1)[1]).toEqual({
+    expect(stepText(step, facts({ i1: tofu }, halfTheGarlic(1)), 1)[1]).toEqual({
       amount: "400 g",
       name: "tofu",
     });
   });
 
-  it("takes all of a line the step names but has no use for", () => {
-    expect(stepText(step, facts({ i1: garlic }, halfTheGarlic({})), 1)[1]).toEqual({
-      amount: "4 cloves",
-      name: "garlic",
-    });
+  it("shows each mention's own portion of a line the step names twice", () => {
+    const butter = parse({ quantity: { low: 4, high: 4 }, unit: "tbsp", name: "butter" });
+    const melt = stepFacts(
+      [
+        "Melt ",
+        { t: "ingredient", ref: "i1", written: "half the butter", portion: 0.5 },
+        ", add the onions, then stir in ",
+        { t: "ingredient", ref: "i1", written: "the rest of the butter", portion: 0.5 },
+        ".",
+      ],
+      { i1: 1 },
+    );
+    expect(stepText(step, facts({ i1: butter }, melt), 1)).toEqual([
+      "Melt ",
+      { amount: "2 tbsp", name: "butter" },
+      ", add the onions, then stir in ",
+      { amount: "2 tbsp", name: "butter" },
+      ".",
+    ]);
   });
 
   it("keeps the words as written when the line has no amount or no parse", () => {
     const salt = parse({ name: "salt" });
-    expect(stepText(step, facts({ i1: salt }, halfTheGarlic({ i1: 1 })), 1)[1]).toBe(
+    expect(stepText(step, facts({ i1: salt }, halfTheGarlic(1)), 1)[1]).toBe(
       "half the garlic",
     );
-    expect(stepText(step, facts({ i1: null }, halfTheGarlic({ i1: 1 })), 1)[1]).toBe(
+    expect(stepText(step, facts({ i1: null }, halfTheGarlic(1)), 1)[1]).toBe(
       "half the garlic",
     );
-    expect(stepText(step, facts({}, halfTheGarlic({ i1: 1 })), 1)[1]).toBe("half the garlic");
+    expect(stepText(step, facts({}, halfTheGarlic(1)), 1)[1]).toBe("half the garlic");
   });
 
   it("keeps durations and temperatures as written", () => {
