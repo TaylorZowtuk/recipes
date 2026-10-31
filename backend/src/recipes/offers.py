@@ -16,20 +16,23 @@ NUMBER = re.compile(
     |(?P<decimal>\d*\.\d+|\d+)                            # 2, 2.5, .5""",
     re.VERBOSE,
 )
-# A number written in a step: 1 1/2, 1/2, 1½, 2.5 or 2. NUMBER reads its value.
-STEP_NUMBER = rf"\d+\s+\d+/\d+|\d+/\d+|(?:\d+\s*)?[{VULGAR}]|\d+(?:\.\d+)?"
-# A time in a step: "8-10 minutes", "8 to 10 minutes", "1½ hours", "45 min", "30 secs".
+# A number written in a step: 1-1/2, 1 1/2, 1/2, 1½, 2.5 or 2. NUMBER reads its value. The
+# hyphenated mixed number comes first, so "1-1/2" isn't read as a range from 1 to 1/2.
+STEP_NUMBER = rf"\d+-\d+/\d+|\d+\s+\d+/\d+|\d+/\d+|(?:\d+\s*)?[{VULGAR}]|\d+(?:\.\d+)?"
+# A time in a step: "8-10 minutes", "8 to 10 minutes", "1½ hours", "45 min", "30 secs", and as
+# an adjective, "a 15-minute rest".
 DURATION = re.compile(
-    rf"(?<![\w.])(?P<low>{STEP_NUMBER})(?:\s*(?:-|\u2013|to)\s*(?P<high>{STEP_NUMBER}))?\s*"
+    rf"(?<![\w.])(?P<low>{STEP_NUMBER})(?:\s*(?:-|\u2013|to)\s*(?P<high>{STEP_NUMBER}))?(?:-|\s*)"
     r"(?P<unit>hours?|hrs?|minutes?|mins?|seconds?|secs?)\b",
     re.IGNORECASE,
 )
 SECONDS_IN = {"h": 3600, "m": 60, "s": 1}
-# A temperature in a step: "350°F", "180 °C", "180C", "425 degrees F". "2 C" may be cups, so a
-# scale with neither a degree sign nor "degrees" is written right after its number.
+# A temperature in a step: "350°F", "180 °C", "180C", "180c", "425 degrees F". "2 C" may be cups,
+# so a scale with neither a degree sign nor "degrees" is written right after its number.
 TEMPERATURE = re.compile(
-    r"(?<![\w.])(?P<degrees>\d+)(?:\s*[°º]\s*|\s+(?i:degrees?)\s+|)(?P<scale>[FC])"
-    r"(?:ahrenheit|elsius)?\b"
+    r"(?<![\w.])(?P<degrees>\d+)(?:\s*[°º]\s*|\s+degrees?\s+|)(?P<scale>[FC])"
+    r"(?:ahrenheit|elsius)?\b",
+    re.IGNORECASE,
 )
 
 
@@ -76,7 +79,7 @@ def find_offers(text: str) -> list[Found]:
         )
     for match in TEMPERATURE.finditer(text):
         degrees = int(match["degrees"])
-        celsius = (degrees - 32) * 5 / 9 if match["scale"] == "F" else degrees
+        celsius = (degrees - 32) * 5 / 9 if match["scale"] in "Ff" else degrees
         found.append(
             (match.start(), TemperatureSegment(c=math.floor(celsius + 0.5), written=match[0]))
         )
