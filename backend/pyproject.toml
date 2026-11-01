@@ -4,29 +4,29 @@ version = "0.1.0"
 description = "Plateful's API, ingest and enrich CLI."
 requires-python = ">=3.14"
 dependencies = [
-    "boto3>=1.43.107",
+    "boto3>=1.43.121",
     "cachecontrol>=0.14.4", # keeps Google's signing certs for as long as their Cache-Control says
-    "fastapi>=0.142.2",
+    "fastapi>=0.162.0",
     "google-auth[requests]>=2.62.0", # verifies Sign in with Google ID tokens
-    "pillow>=12.2,<13", # decodes recipe photos and stores them as WebP
+    "pillow>=13.0.0,<14", # decodes recipe photos and stores them as WebP
     "protego>=0.7.0", # reads robots.txt before a website is fetched
     "recipe-scrapers>=15.13.0", # captures the Original from a website's schema.org data
     "uvicorn>=0.54.0", # run.sh serves the app with it behind the Lambda Web Adapter
 ]
 
 [build-system]
-requires = ["uv_build>=0.12.22,<0.13.0"]
+requires = ["uv_build>=0.13.6,<0.14.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1",
-    "moto[dynamodb,s3,server,ssm]>=5.2.3", # server: test_lambda_package gives run.sh a DynamoDB; s3: images; ssm: auth settings
+    "httpx2>=2.16.0",
+    "moto[dynamodb,s3,server,ssm]>=5.2.5", # server: test_lambda_package gives run.sh a DynamoDB; s3: images; ssm: auth settings
     "pyright>=1.1.414",
-    "pytest>=9.1.1",
+    "pytest>=9.2.0",
     "pytest-xdist>=3.8.0",
-    "ruff>=0.16.10",
-    "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.114",
+    "ruff>=0.17.3",
+    "types-boto3-lite[dynamodb,lambda,s3,ssm]>=1.43.121",
     "types-requests>=2.33.0.20261006",
 ]
 # The enrich CLI's parser, kept out of the Lambda zip for now. Whether the API parses lines when
