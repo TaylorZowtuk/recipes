@@ -1,5 +1,7 @@
 import type { Difficulty } from "./api/client";
-import { totalDifficulty } from "./cardFilters";
+
+export const totalDifficulty = (difficulty: Difficulty) =>
+  difficulty.prep + difficulty.cook + difficulty.cleanup;
 
 const METERS = [
   ["Prep", "prep"],

@@ -1,4 +1,6 @@
-import type { Card, Difficulty } from "./api/client";
+import type { Card } from "./api/client";
+import { totalDifficulty } from "./DifficultyMeters";
+import { alphabetical } from "./titleSearch";
 
 // What the Recipes tab narrows the Collection by. Each chosen Tag must match; null means "Any".
 export type CardFilters = {
@@ -14,9 +16,6 @@ export const noFilters: CardFilters = {
   easyCleanup: false,
   maxStatedSeconds: null,
 };
-
-export const totalDifficulty = (difficulty: Difficulty) =>
-  difficulty.prep + difficulty.cook + difficulty.cleanup;
 
 const tagKey = (tag: string) => tag.toLowerCase();
 
@@ -64,12 +63,10 @@ export function activeFilterCount(filters: CardFilters): number {
   );
 }
 
-const collator = new Intl.Collator("en", { sensitivity: "base" });
-
 // The Collection's Tags, each once whatever its case (the first spelling seen), alphabetically.
 export function collectionTags(cards: readonly Card[]): string[] {
   const tags = new Map<string, string>();
   for (const card of cards)
     for (const tag of card.tags) if (!tags.has(tagKey(tag))) tags.set(tagKey(tag), tag);
-  return [...tags.values()].sort(collator.compare);
+  return [...tags.values()].sort(alphabetical);
 }

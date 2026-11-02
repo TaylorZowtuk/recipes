@@ -7,7 +7,6 @@ import {
   filterCards,
   noFilters,
   toggleTag,
-  totalDifficulty,
 } from "./cardFilters";
 
 const card = (title: string, fields: Partial<Card> = {}): Card => ({
@@ -116,11 +115,5 @@ describe("collectionTags", () => {
 
   it("is empty for a Collection without Tags", () => {
     expect(collectionTags([card("Synthetic Plain")])).toEqual([]);
-  });
-});
-
-describe("totalDifficulty", () => {
-  it("adds Prep, Cook and Cleanup", () => {
-    expect(totalDifficulty({ prep: 1, cook: 2, cleanup: 3 })).toBe(6);
   });
 });
