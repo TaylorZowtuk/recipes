@@ -19,3 +19,20 @@ export function TagList({ tags, limit = Infinity }: { tags: string[]; limit?: nu
     </ul>
   );
 }
+
+// One Tag as a toggle button, pressed while it's one of the chosen Tags.
+export function TagChip({
+  tag,
+  pressed,
+  onToggle,
+}: {
+  tag: string;
+  pressed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button type="button" className="chip" aria-pressed={pressed} onClick={onToggle}>
+      {tag}
+    </button>
+  );
+}

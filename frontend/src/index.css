@@ -24,6 +24,7 @@
   --cooking-text: #141b18;
   --cooking-progress: #2e5e45;
   --plate-shadow: rgba(30, 60, 45, 0.22);
+  --scrim: rgba(10, 20, 15, 0.45);
 
   --font-display: "Baloo 2", system-ui, sans-serif;
   --font-body: "Nunito Sans", system-ui, sans-serif;
@@ -79,6 +80,7 @@
     --cooking-text: #eef1ee;
     --cooking-progress: #8cc5a2;
     --plate-shadow: rgba(0, 0, 0, 0.5);
+    --scrim: rgba(0, 0, 0, 0.6);
   }
 }
 
@@ -1378,4 +1380,238 @@ h1:focus {
 .text-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* The search with the Filters button beside it. */
+.search-row {
+  display: flex;
+  gap: calc(var(--space) * 2);
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.search-row .search {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.search-row > .button {
+  flex: none;
+  padding: 0 calc(var(--space) * 4);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* Tag chips: toggle buttons, filled in Accent with a tick while chosen. */
+.chips {
+  display: flex;
+  gap: calc(var(--space) * 2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The Recipes tab's row scrolls sideways rather than wrapping. */
+.chips-row {
+  margin-bottom: calc(var(--space) * 3);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.chips-row::-webkit-scrollbar {
+  display: none;
+}
+
+.chips-wrap {
+  flex-wrap: wrap;
+}
+
+/* A pill toggle: a Tag chip, or one of the sheet's choices. Accent fills it while it's chosen. */
+.chip,
+.choice-text {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  padding: 0 calc(var(--space) * 4);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color var(--motion),
+    background-color var(--motion);
+}
+
+.chip[aria-pressed="true"],
+.choice input:checked + .choice-text {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  border: none;
+  white-space: nowrap;
+}
+
+.chip[aria-pressed="true"]::before {
+  content: "✓" / "";
+}
+
+.chips-row .chip:focus-visible {
+  outline-offset: -3px;
+}
+
+/* The Filters sheet: a sheet up from the bottom on phones, a centred card on desktop. */
+.sheet {
+  inset: auto 0 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 85dvh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: none;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--surface);
+  box-shadow: var(--elevation-float);
+  color: var(--text);
+}
+
+.sheet[open] {
+  animation: sheet-in var(--motion) ease-out;
+}
+
+.sheet::backdrop {
+  background: var(--scrim);
+}
+
+/* The sheet's padding, here rather than on the dialog, so a tap in it isn't taken for the backdrop. */
+.sheet-body {
+  padding: calc(var(--space) * 5) calc(var(--gutter) + env(safe-area-inset-right)) 0
+    calc(var(--gutter) + env(safe-area-inset-left));
+}
+
+@keyframes sheet-in {
+  from {
+    translate: 0 100%;
+  }
+}
+
+.sheet-title {
+  margin: 0 0 calc(var(--space) * 2);
+  font-family: var(--font-display);
+  font-size: var(--text-screen-title);
+  font-weight: 700;
+}
+
+.sheet-title:focus {
+  outline: none;
+}
+
+.sheet-section {
+  min-width: 0;
+  margin: 0;
+  padding: calc(var(--space) * 3) 0;
+  border: none;
+}
+
+.sheet-section h3,
+.sheet-section legend {
+  margin: 0 0 calc(var(--space) * 2);
+  padding: 0;
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--space) * 2);
+}
+
+.choice {
+  position: relative;
+  display: block;
+}
+
+.choice-text {
+  display: grid;
+  place-items: center;
+}
+
+.choice input:focus-visible + .choice-text {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  min-height: var(--tap);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.check input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.sheet .field-hint {
+  margin: 0;
+}
+
+/* Clear and Done stay in view at the sheet's foot while its content scrolls. */
+.sheet-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: calc(var(--space) * 3);
+  margin-top: calc(var(--space) * 3);
+  padding: calc(var(--space) * 3) 0 calc(var(--space) * 5 + env(safe-area-inset-bottom));
+  background: var(--surface);
+}
+
+.sheet-actions .button {
+  flex: 1;
+}
+
+@media (min-width: 768px) {
+  .search-row {
+    max-width: 600px;
+  }
+
+  .search-row .search {
+    max-width: none;
+  }
+
+  .sheet {
+    inset: 0;
+    width: min(480px, calc(100vw - var(--space) * 16));
+    margin: auto;
+    border-radius: var(--radius-card);
+  }
+
+  .sheet-body {
+    padding: calc(var(--space) * 6) calc(var(--space) * 6) 0;
+  }
+
+  .sheet-actions {
+    padding-bottom: calc(var(--space) * 6);
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      translate: 0 12px;
+    }
+  }
 }

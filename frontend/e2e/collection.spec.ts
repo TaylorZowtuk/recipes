@@ -24,6 +24,13 @@ async function shownCount(page: Page) {
 // The Shell's sync status is the other status on every screen.
 const resultCount = (page: Page) => page.getByRole("status").and(page.locator(".result-count"));
 
+// The sheet slides in; measuring or clicking by coordinates mid-slide gives fractional boxes.
+async function settled(sheet: Locator) {
+  await sheet.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+  );
+}
+
 async function expectTapTarget(target: Locator) {
   const box = await target.boundingBox();
   expect(box?.width).toBeGreaterThanOrEqual(50);
@@ -157,6 +164,144 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/recipes$/);
   await expect(seededCards(page)).toHaveCount(seededCount);
+});
+
+test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", async ({
+  page,
+}) => {
+  await page.goto("/recipes");
+  await shownCount(page);
+  const seededTitles = () => seededCards(page).locator(".card-title");
+
+  // A row of the Collection's Tags, one tap each, that scrolls sideways rather than wrapping.
+  const chips = page.getByRole("list", { name: "Filter by Tag" });
+  const weeknight = chips.getByRole("button", { name: "weeknight", exact: true });
+  await expect(weeknight).toHaveAttribute("aria-pressed", "false");
+  await expectTapTarget(weeknight);
+  const row = await chips.evaluate((list) => ({
+    style: getComputedStyle(list).overflowX,
+    tops: new Set([...list.children].map((chip) => chip.getBoundingClientRect().top)).size,
+  }));
+  expect(row.style).toBe("auto");
+  expect(row.tops).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => document.documentElement.clientWidth),
+  );
+
+  await weeknight.click();
+  await expect(weeknight).toHaveAttribute("aria-pressed", "true");
+  await expect(seededTitles()).toHaveText([recipeTitle, "Tomato Lentil Soup"]);
+  const filters = page.getByRole("button", { name: /^Filters/ });
+  await expect(filters).toHaveText("Filters · 1");
+  await expectTapTarget(filters);
+
+  // The sheet shares the chosen Tags, and a second one must also match.
+  await filters.click();
+  const sheet = page.getByRole("dialog", { name: "Filters" });
+  await expect(sheet).toBeVisible();
+  await settled(sheet);
+  await expect(sheet.getByRole("heading", { name: "Filters" })).toBeFocused();
+  await expect(sheet.getByRole("button", { name: "weeknight", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const vegetarian = sheet.getByRole("button", { name: "vegetarian", exact: true });
+  await expectTapTarget(vegetarian);
+  await vegetarian.click();
+  await expect(seededTitles()).toHaveText([recipeTitle]);
+  await expect(filters).toHaveText("Filters · 2");
+
+  // The sheet covers the status line, so its Done button carries the live count.
+  const done = sheet.getByRole("button", { name: /^(Show \d+ recipes?|No recipes match)$/ });
+  await expect(done).toHaveText("Show 1 recipe");
+  await expect(sheet.getByRole("status")).toHaveText("1 recipe matches");
+
+  // Clear empties every filter, the chip row's too.
+  await sheet.getByRole("button", { name: "Clear" }).click();
+  await expect(seededCards(page)).toHaveCount(seededCount);
+  await expect(filters).toHaveText("Filters");
+  await expect(weeknight).toHaveAttribute("aria-pressed", "false");
+
+  // A maximum Total Difficulty, then easy cleanup, each drop the cards without a Difficulty.
+  const difficulty = sheet.getByRole("group", { name: "Total Difficulty at most" });
+  await expect(difficulty.getByRole("radio", { name: "Any" })).toBeChecked();
+  await expectTapTarget(difficulty.locator("label").filter({ hasText: "4" }));
+  await difficulty.getByText("4", { exact: true }).click();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await difficulty.getByText("Any", { exact: true }).click();
+  await expect(seededCards(page)).toHaveCount(seededCount);
+
+  const cleanup = sheet.getByRole("checkbox", { name: "Easy cleanup" });
+  const cleanupLabel = sheet.locator("label", { hasText: "Easy cleanup" });
+  await expectTapTarget(cleanupLabel);
+  await cleanupLabel.click();
+  await expect(cleanup).toBeChecked();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await cleanupLabel.click();
+
+  // A maximum Stated Time drops the cards without one.
+  const time = sheet.getByRole("group", { name: "Stated Time at most" });
+  await time.getByText("30 min", { exact: true }).click();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
+  await expect(filters).toHaveText("Filters · 1");
+  await expect(done).toHaveText(/^Show \d+ recipes$/);
+
+  // Done closes the sheet and returns focus to the Filters button; the filters stay.
+  await expectTapTarget(done);
+  await expectTapTarget(sheet.getByRole("button", { name: "Clear" }));
+  await done.click();
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
+
+  // A tap in the sheet's own margin, beside a pill, leaves it open; Escape closes it.
+  await filters.click();
+  await expect(sheet).toBeVisible();
+  await settled(sheet);
+  const box = await sheet.boundingBox();
+  const any = difficulty.getByText("Any", { exact: true });
+  await any.scrollIntoViewIfNeeded();
+  const pill = await any.boundingBox();
+  if (!box || !pill) throw new Error("The sheet isn't laid out");
+  await page.mouse.click(box.x + 4, pill.y + pill.height / 2);
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
+
+  // Pressing a chip and releasing on the backdrop leaves the sheet open and the chip unchanged.
+  await filters.click();
+  await expect(sheet).toBeVisible();
+  await settled(sheet);
+  const dragChip = sheet.getByRole("button", { name: "weeknight", exact: true });
+  const pressedBefore = await dragChip.getAttribute("aria-pressed");
+  const chipBox = await dragChip.boundingBox();
+  if (!chipBox) throw new Error("The chip isn't laid out");
+  await page.mouse.move(chipBox.x + chipBox.width / 2, chipBox.y + chipBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(4, 4);
+  await page.mouse.up();
+  await expect(sheet).toBeVisible();
+  await expect(dragChip).toHaveAttribute("aria-pressed", pressedBefore ?? "false");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+
+  // A tap on the backdrop, outside the sheet, closes it.
+  await filters.click();
+  await page.mouse.click(4, 4);
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
+
+  // Nothing matching says so, with the search too.
+  await weeknight.click();
+  await chips.getByRole("button", { name: "breakfast", exact: true }).click();
+  await filters.click();
+  await expect(done).toHaveText("No recipes match");
+  await done.click();
+  await expect(sheet).toBeHidden();
+  await expect(resultCount(page)).toHaveText("No recipes match these filters.");
+  await page.getByRole("searchbox", { name: "Search recipe titles" }).fill("oats");
+  await expect(resultCount(page)).toHaveText("No recipes match “oats” and these filters.");
 });
 
 test("a stale or missing slug still opens the recipe and corrects itself", async ({ page }) => {

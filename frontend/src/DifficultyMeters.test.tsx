@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { DifficultyMeters } from "./DifficultyMeters";
+import { DifficultyMeters, totalDifficulty } from "./DifficultyMeters";
 
 // Each meter's label and how many of its three pips are filled, then the Total.
 function meters(markup: string) {
@@ -31,5 +31,11 @@ describe("DifficultyMeters", () => {
 
   it("renders nothing for a recipe without a Difficulty", () => {
     expect(renderToStaticMarkup(<DifficultyMeters difficulty={null} />)).toBe("");
+  });
+});
+
+describe("totalDifficulty", () => {
+  it("adds Prep, Cook and Cleanup", () => {
+    expect(totalDifficulty({ prep: 1, cook: 2, cleanup: 3 })).toBe(6);
   });
 });
