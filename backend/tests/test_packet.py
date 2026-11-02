@@ -16,6 +16,8 @@ from recipes.models import (
     IngredientLine,
     Original,
     Recipe,
+    StatedTime,
+    StatedTimes,
     Step,
     StoreCategory,
     WebsiteSource,
@@ -26,6 +28,7 @@ from recipes.packet import (
     Answer,
     AnsweredRecipe,
     Rejected,
+    Substitutes,
     Work,
     readable_quantities,
 )
@@ -47,7 +50,13 @@ GLIMMER = CanonicalIngredient(
 LINES = ["2 quill eggs", "1-2 tsp glimmer oil", "3 cloves snorp garlic, minced", "salt, to taste"]
 
 
-def recipe(*lines: str, recipe_id: str = RECIPE_ID, steps: tuple[str, ...] = ()) -> Recipe:
+def recipe(
+    *lines: str,
+    recipe_id: str = RECIPE_ID,
+    steps: tuple[str, ...] = (),
+    description: str | None = None,
+    stated_times: StatedTimes | None = None,
+) -> Recipe:
     return Recipe(
         id=recipe_id,
         schema_version=SCHEMA_VERSION,
@@ -60,11 +69,13 @@ def recipe(*lines: str, recipe_id: str = RECIPE_ID, steps: tuple[str, ...] = ())
         dedupe_key=f"https://example.com/{recipe_id}",
         original=Original(
             title="Quill Egg Fry",
+            description=description,
             extractor="json-ld",
             ingredients=[
                 IngredientLine(id=f"i{n}", text=text) for n, text in enumerate(lines or LINES, 1)
             ],
             steps=[Step(id=f"s{n}", text=text) for n, text in enumerate(steps, 1)],
+            stated_times=stated_times or StatedTimes(),
         ),
         status="pending",
     )
@@ -84,6 +95,7 @@ def work(
     *recipes: Recipe,
     canonicals: list[CanonicalIngredient] | None = None,
     wordings: list[Wording] | None = None,
+    substitutes: Substitutes | None = None,
 ) -> Work:
     return Work(
         recipes=list(recipes) or [recipe()],
@@ -91,6 +103,7 @@ def work(
         wordings=[wording("glimmer oil")] if wordings is None else wordings,
         store_categories=CATEGORIES,
         snapshot=SNAPSHOT,
+        substitutes=substitutes,
     )
 
 
@@ -110,6 +123,7 @@ def answer(
     recipe_id: str = RECIPE_ID,
     offer_id: str = "",
     steps: list[dict[str, Any]] | None = None,
+    difficulty: dict[str, int] | None = None,
 ) -> Answer:
     answered: dict[str, Any] = {
         "recipe_id": recipe_id,
@@ -118,6 +132,8 @@ def answer(
     }
     if steps is not None:
         answered["steps"] = steps
+    if difficulty is not None:
+        answered["difficulty"] = difficulty
     return Answer.model_validate({"model": "a-model", "recipes": [answered]})
 
 
@@ -856,3 +872,325 @@ def test_the_instructions_state_the_default_uses_rule() -> None:
     instructions = work().packet().instructions
     assert "first step that mentions" in instructions
     assert "not applied for you: list every ingredient each step names" in instructions
+
+
+ZORBLE = canonical(30, "zorbleberry")
+DESCRIPTION = "Crisp quill eggs. Zorbleberry oil works in place of the glimmer oil."
+FRY = ("Fry the quill eggs in the glimmer oil; snorp garlic oil works too.",)
+
+
+def described() -> Recipe:
+    return recipe(steps=FRY, description=DESCRIPTION)
+
+
+def substitutes(
+    *quotes: tuple[str, str], line_id: str = "i2", recipe_id: str = RECIPE_ID
+) -> Substitutes:
+    """A substitutes file quoting, for one line, each (wording, quoted_from)."""
+    quoted = [{"wording": wording, "quoted_from": source} for wording, source in quotes]
+    lines = [{"line_id": line_id, "substitutes": quoted}]
+    return Substitutes.model_validate({"recipes": [{"recipe_id": recipe_id, "lines": lines}]})
+
+
+ZORBLEBERRY_OIL = substitutes(("zorbleberry oil", "description"))
+
+
+def offering(quoted: Substitutes = ZORBLEBERRY_OIL, wordings: list[Wording] | None = None) -> Work:
+    return work(described(), canonicals=[GLIMMER, ZORBLE], wordings=wordings, substitutes=quoted)
+
+
+def substitution(**fields: Any) -> dict[str, Any]:
+    """A substitution within zorbleberry oil's offer."""
+    return {
+        "wording": "zorbleberry oil",
+        "canonical_id": ZORBLE.id,
+        "fdc_id": 1001,
+        "portion_id": 501,
+        "ratio": 2,
+        "note": "use twice as much",
+        **fields,
+    }
+
+
+def test_the_substitutes_packet_gives_each_recipe_its_lines_steps_and_description() -> None:
+    packet = work(described()).substitutes_packet()
+
+    (offered,) = packet.recipes
+    assert (offered.recipe_id, offered.title, offered.description) == (
+        RECIPE_ID,
+        "Quill Egg Fry",
+        DESCRIPTION,
+    )
+    assert [(ln.line_id, ln.text) for ln in offered.lines] == [
+        (f"i{n}", text) for n, text in enumerate(LINES, 1)
+    ]
+    assert [(s.step_id, s.text) for s in offered.steps] == [("s1", FRY[0])]
+    assert "substitute the recipe itself states" in packet.instructions
+    assert "Never suggest a substitute the recipe doesn't state" in packet.instructions
+
+
+def test_each_quoted_substitute_is_offered_candidates_from_its_wording() -> None:
+    quoted = substitutes(("Zorbleberry oil", "description"), ("snorp garlic oil", "s1"))
+
+    (offered,) = offering(quoted).packet().recipes
+
+    eggs, oil, *_ = offered.lines
+    assert eggs.substitute_offers == []
+    zorbleberry, garlic = oil.substitute_offers
+    assert (zorbleberry.wording, garlic.wording) == ("Zorbleberry oil", "snorp garlic oil")
+    # The line's own cached canonical, glimmer oil, is left out: a substitute isn't the line.
+    assert [c.id for c in zorbleberry.canonical_candidates] == [ZORBLE.id]
+    assert [f.fdc_id for f in zorbleberry.fdc_candidates] == [1001, 2004, 2001]
+    assert [f.fdc_id for f in garlic.fdc_candidates][:2] == [3001, 2007]
+
+
+def test_without_substitutes_no_line_is_offered_any() -> None:
+    (offered,) = work(described()).packet().recipes
+
+    assert all(ln.substitute_offers == [] for ln in offered.lines)
+
+
+def test_the_substitute_offers_are_part_of_the_offer_id() -> None:
+    without = offer_id(work(described(), canonicals=[GLIMMER, ZORBLE]))
+
+    assert offer_id(offering()) != without
+    assert offer_id(offering(substitutes(("snorp garlic oil", "s1")))) != offer_id(offering())
+
+
+@pytest.mark.parametrize(
+    ("quoted", "error"),
+    [
+        (
+            substitutes(("plonk beans", "description")),
+            f'{RECIPE_ID} i2: "plonk beans" isn\'t in description',
+        ),
+        (
+            substitutes(("zorbleberry oil", "s1")),
+            f'{RECIPE_ID} i2: "zorbleberry oil" isn\'t in s1',
+        ),
+        (
+            substitutes(("snorp garlic", "i3"), line_id="i9"),
+            f"{RECIPE_ID}: no line i9",
+        ),
+        (
+            substitutes(("snorp garlic oil", "s9")),
+            f"{RECIPE_ID} i2: no line, step or description s9",
+        ),
+        (
+            substitutes(("zorbleberry oil", "description"), ("Zorbleberry Oil", "description")),
+            f'{RECIPE_ID} i2: "Zorbleberry Oil" is quoted twice',
+        ),
+        (
+            substitutes(("zorbleberry oil", "description"), recipe_id="01K7Q0000000000000000000R9"),
+            "01K7Q0000000000000000000R9 isn't a Pending recipe",
+        ),
+    ],
+    ids=[
+        "not in the description",
+        "not in the step",
+        "unknown line",
+        "unknown step",
+        "duplicate",
+        "unknown recipe",
+    ],
+)
+def test_a_substitutes_file_quoting_what_the_recipe_doesnt_say_is_rejected(
+    quoted: Substitutes, error: str
+) -> None:
+    with pytest.raises(Rejected) as rejected:
+        offering(quoted)
+
+    assert rejected.value.errors == [error]
+
+
+def test_a_quote_from_a_recipe_without_a_description_is_rejected() -> None:
+    with pytest.raises(Rejected) as rejected:
+        work(recipe(steps=FRY), substitutes=ZORBLEBERRY_OIL)
+
+    assert rejected.value.errors == [f"{RECIPE_ID} i2: no line, step or description description"]
+
+
+def test_a_quote_may_come_from_another_line_ignoring_case() -> None:
+    (offered,) = offering(substitutes(("SNORP GARLIC", "i3"))).packet().recipes
+
+    assert [o.wording for o in offered.lines[1].substitute_offers] == ["SNORP GARLIC"]
+
+
+def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_with_fdc_numbers() -> None:
+    enrichment = enrich(offering(), answer(line(substitutions=[substitution()])))
+
+    oil = enrichment.facts.ingredients["i2"]
+    fact = oil.substitutions
+    assert fact is not None
+    assert (fact.provenance, fact.estimated, fact.confirmed) == ("llm", True, False)
+    assert oil.match is not None
+    assert oil.conversion is not None
+    assert fact.confidence == oil.conversion.confidence
+    (item,) = fact.items
+    assert (item.wording, item.canonical_id, item.ratio, item.note) == (
+        "zorbleberry oil",
+        ZORBLE.id,
+        2,
+        "use twice as much",
+    )
+    assert (item.fdc_id, item.portion_id) == (1001, 501)
+    food = SNAPSHOT.food(1001)
+    assert item.fdc.model_dump() == {
+        "dataset": food.dataset,
+        "release": SNAPSHOT.release,
+        **fdc.convert(food, 501).model_dump(),
+        "per_100g": food.per_100g.model_dump(),
+    }
+
+
+def test_an_offered_substitute_the_answer_leaves_out_is_not_written() -> None:
+    enrichment = enrich(offering(), answer(line()))
+
+    assert enrichment.facts.ingredients["i2"].substitutions is None
+
+
+@pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        (
+            {"canonical_id": "01K7Q0000000000000000000ZZ"},
+            (
+                "i2: substitute zorbleberry oil: Canonical Ingredient 01K7Q0000000000000000000ZZ "
+                "wasn't offered"
+            ),
+        ),
+        ({"wording": "plonk beans"}, "i2: substitute plonk beans wasn't offered"),
+        ({"fdc_id": 1002}, "i2: substitute zorbleberry oil: FDC food 1002 wasn't offered"),
+        (
+            {"portion_id": 606},
+            "i2: substitute zorbleberry oil: portion 606 isn't one of FDC food 1001's",
+        ),
+    ],
+    ids=["unoffered canonical", "unoffered wording", "unoffered fdc_id", "unoffered portion"],
+)
+def test_a_substitution_outside_its_offer_is_rejected(fields: dict[str, Any], error: str) -> None:
+    answered = answer(line(substitutions=[substitution(**fields)]))
+
+    assert errors(offering(), answered) == [error]
+
+
+def test_a_substitute_answered_twice_is_rejected() -> None:
+    answered = answer(line(substitutions=[substitution(), substitution()]))
+
+    assert errors(offering(), answered) == ["i2: substitute zorbleberry oil answered twice"]
+
+
+def test_a_substitute_that_is_the_lines_own_match_is_rejected() -> None:
+    # Without a cached wording, glimmer oil is a candidate for the line and its substitute.
+    own = substitution(canonical_id=GLIMMER_ID, fdc_id=2004, portion_id=606)
+
+    assert errors(offering(wordings=[]), answer(line(substitutions=[own]))) == [
+        f"i2: substitute zorbleberry oil: Canonical Ingredient {GLIMMER_ID} is the line's own match"
+    ]
+
+
+@pytest.mark.parametrize("ratio", [0, 10.5])
+def test_a_substitution_ratio_out_of_range_is_refused(ratio: float) -> None:
+    with pytest.raises(ValueError, match="ratio"):
+        answer(line(substitutions=[substitution(ratio=ratio)]))
+
+
+def test_the_packet_offers_each_recipes_stated_times() -> None:
+    times = StatedTimes(prep=StatedTime(text="10 mins", seconds=600))
+
+    (offered,) = work(recipe(stated_times=times)).packet().recipes
+
+    assert offered.stated_times == times
+
+
+def test_a_suggested_difficulty_is_written_estimated_and_unconfirmed() -> None:
+    enrichment = enrich(work(), answer(difficulty={"prep": 1, "cook": 2, "cleanup": 3}))
+
+    difficulty = enrichment.facts.difficulty
+    assert difficulty is not None
+    assert (difficulty.prep, difficulty.cook, difficulty.cleanup) == (1, 2, 3)
+    assert (difficulty.provenance, difficulty.estimated, difficulty.confirmed) == (
+        "llm",
+        True,
+        False,
+    )
+
+
+def test_no_difficulty_in_the_answer_writes_none() -> None:
+    assert enrich(work(), answer()).facts.difficulty is None
+
+
+@pytest.mark.parametrize("rating", [0, 4])
+def test_a_difficulty_out_of_range_is_refused(rating: int) -> None:
+    with pytest.raises(ValueError, match="cook"):
+        answer(difficulty={"prep": 1, "cook": rating, "cleanup": 1})
+
+
+def test_the_instructions_state_the_difficulty_scale() -> None:
+    assert (
+        "prep, cook and cleanup, each 1 (easy) to 3 (hard); its Total Difficulty is their sum"
+    ) in work().packet().instructions
+
+
+def test_the_packet_offers_the_parsers_optional() -> None:
+    (offered,) = work(recipe("1 tsp glimmer oil, for garnish")).packet().recipes
+
+    parse = offered.lines[0].parse
+    assert parse is not None
+    assert parse.optional
+
+
+def missed_optional(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The parser misses that a line is optional, as it can on an odd line."""
+
+    def parse(text: str) -> Any:
+        return parse_line(text).model_copy(update={"optional": False})
+
+    monkeypatch.setattr("recipes.packet.parse_line", parse)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1-2 tsp glimmer oil, optional",
+        "1-2 tsp glimmer oil, for garnish",
+        "1-2 tsp glimmer oil, to serve",
+    ],
+)
+def test_the_answer_corrects_a_missed_optional_and_raises_an_issue(
+    monkeypatch: pytest.MonkeyPatch, text: str
+) -> None:
+    missed_optional(monkeypatch)
+    corrected = line("i1", optional=True, corrections_reason="the line says so")
+
+    enrichment = enrich(work(recipe(text)), answer(corrected))
+
+    parse = enrichment.facts.ingredients["i1"].parse
+    assert parse is not None
+    assert (parse.optional, parse.provenance) == (True, "llm")
+    (issue,) = enrichment.issues
+    assert (issue.fact_id, issue.before, issue.after) == ("i1.parse", "not optional", "optional")
+    assert issue.reason == "the line says so"
+
+
+def test_an_optional_correction_says_why(monkeypatch: pytest.MonkeyPatch) -> None:
+    missed_optional(monkeypatch)
+
+    serve = work(recipe("1-2 tsp glimmer oil, to serve"))
+
+    assert errors(serve, answer(line("i1", optional=True))) == [
+        "i1: say why optional changed in corrections_reason"
+    ]
+
+
+def test_the_same_optional_as_the_parse_changes_nothing() -> None:
+    enrichment = enrich(work(), answer(line(optional=False)))
+
+    parse = enrichment.facts.ingredients["i2"].parse
+    assert parse is not None
+    assert parse.provenance == "parser"
+    assert enrichment.issues == []
+
+
+def test_the_instructions_say_what_optional_covers() -> None:
+    assert '"optional", "for garnish" or "to serve"' in work().packet().instructions
