@@ -95,7 +95,10 @@ function RecipePage() {
                   )}
                   {!draft && (
                     <>
-                      <DifficultyMeters difficulty={card.difficulty} />
+                      <DifficultyMeters
+                        difficulty={card.difficulty}
+                        suggested={card.difficulty_suggested}
+                      />
                       <TagList tags={card.tags} />
                       {ready && (
                         <EditorOnly>

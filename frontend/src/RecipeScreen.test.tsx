@@ -1,7 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import type { Original, ParseFact } from "./api/client";
-import { Ingredients, Steps } from "./RecipeScreen";
+import { MemoryRouter, Route, Routes } from "react-router";
+import { describe, expect, it, vi } from "vitest";
+import type { Card, Original, ParseFact } from "./api/client";
+import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
+
+// The Collection the recipe page reads its card from, with the recipe itself still loading.
+const shown: { cards: Card[] } = { cards: [] };
+vi.mock("./collection", () => ({
+  useCollection: () => ({ state: "ready", value: shown }),
+  useRecipe: () => ({ state: "loading" }),
+}));
+// The account menu reads the browser's session, which a server render has none of.
+vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",
@@ -171,6 +181,59 @@ describe("Ingredients", () => {
     expect(lines(markup)).toEqual([["3 tbsp tahini"], ["400 g firm tofu"]]);
   });
 
+  it("never shows a line's unconfirmed substitutions", () => {
+    const markup = renderToStaticMarkup(
+      <Ingredients
+        original={original(["i1", "2 tbsp butter or margarine", null])}
+        facts={{
+          ingredients: {
+            i1: {
+              ...parse({ quantity: { low: 2, high: 2 }, unit: "tbsp", name: "butter" }),
+              substitutions: {
+                provenance: "llm",
+                confidence: 0.7,
+                estimated: true,
+                confirmed: false,
+                confirmed_by: null,
+                confirmed_at: null,
+                confirm_batch: null,
+                items: [
+                  {
+                    wording: "margarine",
+                    canonical_id: "01K7TEST0000000000000000C1",
+                    ratio: 1,
+                    note: "use the same amount",
+                    fdc_id: 1,
+                    portion_id: null,
+                    fdc: {
+                      dataset: "foundation",
+                      release: "2025-04",
+                      per_100g: {
+                        kcal: 700,
+                        protein_g: 1,
+                        fat_g: 80,
+                        carbs_g: 1,
+                        sodium_mg: 700,
+                      },
+                      density_g_per_ml: 0.96,
+                      count_unit: null,
+                      grams_per_count: null,
+                      refused: null,
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          steps: {},
+          difficulty: null,
+        }}
+      />,
+    );
+    expect(markup.replace(/<[^>]+>/g, "")).toBe("butter 2 tbsp");
+    expect(markup).not.toMatch(/margarine|same amount|swap/i);
+  });
+
   it("shows every line as raw text when there are no facts at all", () => {
     const markup = renderToStaticMarkup(
       <Ingredients original={original(["i1", "3 tbsp tahini", null])} />,
@@ -229,5 +292,48 @@ describe("Steps", () => {
     expect(
       [...markup.matchAll(/<li>(.*?)<\/li>/g)].map(([, li = ""]) => li.replace(/<[^>]+>/g, "")),
     ).toEqual(["Add 2 cloves garlic.", "Add the rest of the garlic."]);
+  });
+});
+
+describe("RecipeScreen", () => {
+  const card: Card = {
+    id: "01K7TEST000000000000000001",
+    title: "Synthetic Test Noodles",
+    site_name: "example.com",
+    stated_seconds: null,
+    status: "awaiting_review",
+    preview: null,
+    difficulty: { prep: 2, cook: 1, cleanup: 1 },
+    difficulty_suggested: true,
+    tags: [],
+    needs_review: { open_issues: 0, unconfirmed: 0 },
+    recipe_version: 1,
+    schema_version: 1,
+  };
+  const render = (c: Card) => {
+    shown.cards = [c];
+    return renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/recipes/${c.id}/synthetic-test-noodles`]}>
+        <Routes>
+          <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  };
+
+  it("labels the hero's Suggested Difficulty as a suggestion", () => {
+    const markup = render(card);
+    expect(markup).toContain(
+      'aria-label="Suggested difficulty: Prep 2 of 3, Cook 1 of 3, Cleanup 1 of 3, total 4 of 9"',
+    );
+    expect(markup).toContain(">Suggested</span>");
+  });
+
+  it("shows an editor's Difficulty in the hero with no suggestion label", () => {
+    const markup = render({ ...card, difficulty_suggested: false });
+    expect(markup).toContain(
+      'aria-label="Difficulty: Prep 2 of 3, Cook 1 of 3, Cleanup 1 of 3, total 4 of 9"',
+    );
+    expect(markup).not.toContain("uggested");
   });
 });
