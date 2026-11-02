@@ -14,9 +14,12 @@ const original = (...lines: [string, string, string | null][]): Original => ({
   stated_times: { prep: null, cook: null, total: null },
 });
 
-const parse = (fact: Partial<ParseFact>): { parse: ParseFact; match: null; conversion: null } => ({
+const parse = (
+  fact: Partial<ParseFact>,
+): { parse: ParseFact; match: null; conversion: null; substitutions: null } => ({
   match: null,
   conversion: null,
+  substitutions: null,
   parse: {
     quantity: null,
     unit: null,
@@ -63,6 +66,7 @@ describe("Ingredients", () => {
             }),
           },
           steps: {},
+          difficulty: null,
         }}
       />,
     );
@@ -94,6 +98,7 @@ describe("Ingredients", () => {
             }),
           },
           steps: {},
+          difficulty: null,
         }}
       />,
     );
@@ -124,6 +129,7 @@ describe("Ingredients", () => {
             i4: parse({ name: "salt" }),
           },
           steps: {},
+          difficulty: null,
         }}
       />,
     );
@@ -151,7 +157,11 @@ describe("Ingredients", () => {
           ["i1", "3 tbsp tahini", "For the sauce"],
           ["i2", "400 g firm tofu", "For the tofu"],
         )}
-        facts={{ ingredients: { i2: { parse: null, match: null, conversion: null } }, steps: {} }}
+        facts={{
+          ingredients: { i2: { parse: null, match: null, conversion: null, substitutions: null } },
+          steps: {},
+          difficulty: null,
+        }}
       />,
     );
     expect([...markup.matchAll(/<h2>(.*?)<\/h2>/g)].map(([, h]) => h)).toEqual([
@@ -211,6 +221,7 @@ describe("Steps", () => {
               uses: { ...fact, ...unconfirmed, uses: [{ ref: "i1", portion: 0.5 }] },
             },
           },
+          difficulty: null,
         }}
       />,
     );
