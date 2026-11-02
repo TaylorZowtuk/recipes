@@ -230,8 +230,9 @@ def test_an_answer_to_an_older_offer_is_rejected() -> None:
 
     assert errors(work(), answer(offer_id=older)) == [
         (
-            "its offer changed since the packet: make a new packet and answer that, or apply "
-            "with the same --substitutes file the packet was made with"
+            "its offer changed since the packet: make a new packet and answer that, "
+            "if you used a different --substitutes file, "
+            "apply with the one the packet was made with"
         )
     ]
 
@@ -1067,6 +1068,12 @@ def test_a_quote_inside_a_longer_word_is_rejected() -> None:
     assert rejected.value.errors == [f'{RECIPE_ID} i2: "egg" isn\'t in description']
 
 
+def test_a_quote_starting_and_ending_in_punctuation_may_touch_a_letter() -> None:
+    touching = recipe(description="1 tsp fresh thyme(or 2 tsp dried thyme)")
+
+    work(touching, substitutes=substitutes(("(or 2 tsp dried thyme)", "description")))
+
+
 def test_a_quote_may_come_from_its_own_line_ignoring_case() -> None:
     lines = ("2 quill eggs", "1-2 tsp glimmer oil or zorbleberry oil")
     own_line = work(recipe(*lines), substitutes=substitutes(("ZORBLEBERRY OIL", "i2")))
@@ -1183,6 +1190,15 @@ def test_a_substitute_that_is_the_lines_own_match_is_rejected() -> None:
     own = substitution(canonical_id=GLIMMER_ID, fdc_id=2004, portion_id=606)
 
     assert errors(offering(wordings=[]), answer(line(substitutions=[own]))) == [
+        f"i2: substitute zorbleberry oil: Canonical Ingredient {GLIMMER_ID} is the line's own match"
+    ]
+
+
+def test_a_substitute_is_the_lines_own_match_when_a_new_ingredient_names_it() -> None:
+    new = {"new": {"name": "Glimmer Oil", "family": "oil", "store_category_id": "aisles"}}
+    own = substitution(canonical_id=GLIMMER_ID, fdc_id=2004, portion_id=606)
+
+    assert errors(offering(wordings=[]), answer(line(canonical=new, substitutions=[own]))) == [
         f"i2: substitute zorbleberry oil: Canonical Ingredient {GLIMMER_ID} is the line's own match"
     ]
 

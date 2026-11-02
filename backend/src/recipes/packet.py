@@ -181,8 +181,12 @@ def readable_quantities(text: str, parse: ParseFact | None) -> list[float]:
 
 
 def mentions(text: str, name: str) -> bool:
-    """Whether the text names `name` as whole words, ignoring case."""
-    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
+    """Whether the text names `name` as whole words, ignoring case. A boundary is required only
+    beside a word character, so a name that starts or ends with punctuation may touch a letter.
+    """
+    before = r"(?<!\w)" if name[:1].isalnum() or name[:1] == "_" else ""
+    after = r"(?!\w)" if name[-1:].isalnum() or name[-1:] == "_" else ""
+    return re.search(f"{before}{re.escape(name)}{after}", text, re.IGNORECASE) is not None
 
 
 def default_uses(recipe: Recipe, facts: RecipeFacts) -> dict[str, list[StepUse]]:
@@ -590,7 +594,8 @@ class Work:
                 [
                     (
                         "its offer changed since the packet: make a new packet and answer that, "
-                        "or apply with the same --substitutes file the packet was made with"
+                        "if you used a different --substitutes file, "
+                        "apply with the one the packet was made with"
                     )
                 ]
             )

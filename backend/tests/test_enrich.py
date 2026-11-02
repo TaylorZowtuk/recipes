@@ -5,6 +5,7 @@ answer against what the packet offered and writes the facts through the API.
 import hashlib
 import io
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -790,3 +791,50 @@ def test_main_without_the_service_token_stops_and_says_so(
 
     with pytest.raises(SystemExit, match="PLATEFUL_SERVICE_TOKEN"):
         main(["packet", "https://d111111abcdef8.cloudfront.net"])
+
+
+@pytest.mark.parametrize(
+    ("argv", "called", "expected"),
+    [
+        (["substitutes"], "ask", ()),
+        (["packet", "--substitutes", "f"], "packet", ("snapshot", "quotes")),
+        (["apply", "a.json", "--substitutes", "f"], "apply", ("snapshot", "answer text", "quotes")),
+    ],
+    ids=["substitutes", "packet", "apply"],
+)
+def test_main_runs_the_command_it_is_given_and_pass_1_needs_no_snapshot(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], called: str, expected: tuple[str, ...]
+) -> None:
+    url = "https://d111111abcdef8.cloudfront.net"
+    monkeypatch.setenv("PLATEFUL_SERVICE_TOKEN", SERVICE_TOKEN)
+    calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    def recorder(name: str) -> Any:
+        def record(base_url: str, send: object, *rest: Any) -> bool:
+            assert send == "send"
+            calls.append((name, (base_url, *rest)))
+            return False
+
+        return record
+
+    def constant(value: str) -> Callable[..., str]:
+        return lambda *_args: value
+
+    def no_snapshot() -> object:
+        message = "pass 1 doesn't load the snapshot"
+        raise AssertionError(message)
+
+    for name in ("ask", "packet", "apply"):
+        monkeypatch.setattr(f"recipes.enrich.{name}", recorder(name))
+    monkeypatch.setattr("recipes.enrich.SameOriginSession", io.StringIO)
+    monkeypatch.setattr("recipes.enrich.send_with", constant("send"))
+    monkeypatch.setattr("recipes.enrich.read_answer", constant("answer text"))
+    monkeypatch.setattr("recipes.enrich.read_substitutes", constant("quotes"))
+    snapshot = constant("snapshot") if expected else no_snapshot
+    monkeypatch.setattr("recipes.enrich.load_snapshot", snapshot)
+
+    with pytest.raises(SystemExit) as stopped:
+        main([argv[0], url, *argv[1:]])
+
+    assert stopped.value.code == 0
+    assert calls == [(called, (url, *expected))]
