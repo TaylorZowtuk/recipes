@@ -8,6 +8,7 @@ from recipes.models import (
     SourceGuard,
     SpreadsheetSource,
     Step,
+    SubstitutionsFact,
     WebsiteSource,
     new_ulid,
     normalize_wording,
@@ -89,3 +90,49 @@ def test_the_seeds_step_segments_are_their_steps_text(recipe: Recipe) -> None:
             assert use.ref in lines
             portions[use.ref] = portions.get(use.ref, 0) + use.portion
     assert all(total <= 1 for total in portions.values())
+
+
+FDC_NUMBERS = {
+    "dataset": "sr_legacy",
+    "release": "foundation-2026-04-01+sr_legacy-2018-04",
+    "density_g_per_ml": 1.03,
+    "grams_per_count": None,
+    "count_unit": None,
+    "refused": None,
+    "per_100g": {"kcal": 60, "protein_g": 3, "fat_g": 3, "carbs_g": 5, "sodium_mg": 40},
+}
+
+
+def substitution(**fields: object) -> dict[str, object]:
+    return {
+        "wording": "whole milk",
+        "canonical_id": "01K7Q0000000000000000000C3",
+        "ratio": 1,
+        "note": "a little thinner",
+        "fdc_id": 1003,
+        "portion_id": None,
+        "fdc": FDC_NUMBERS,
+        **fields,
+    }
+
+
+def substitutions(*items: dict[str, object]) -> SubstitutionsFact:
+    return SubstitutionsFact.model_validate(
+        {"provenance": "llm", "confidence": 0.6, "estimated": True, "items": list(items)}
+    )
+
+
+@pytest.mark.parametrize("ratio", [0.05, 1, 10])
+def test_a_substitutions_ratio_is_more_than_none_and_at_most_ten(ratio: float) -> None:
+    assert substitutions(substitution(ratio=ratio)).items[0].ratio == ratio
+
+
+@pytest.mark.parametrize("ratio", [0, -1, 10.5, float("inf"), float("nan")])
+def test_a_substitution_ratio_out_of_bounds_is_refused(ratio: float) -> None:
+    with pytest.raises(ValidationError):
+        substitutions(substitution(ratio=ratio))
+
+
+def test_a_substitutions_fact_has_at_least_one_item() -> None:
+    with pytest.raises(ValidationError):
+        substitutions()

@@ -35,6 +35,7 @@ from recipes.models import (
     Difficulty,
     DurationSegment,
     Enrichment,
+    Fact,
     Image,
     IngredientFacts,
     IngredientSegment,
@@ -45,6 +46,7 @@ from recipes.models import (
     QueuedIngestState,
     Recipe,
     StepFacts,
+    Substitution,
     TemperatureSegment,
     Ulid,
     WebsiteSource,
@@ -459,11 +461,12 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
         422: {
             "description": "A fact or Enrichment Issue is for a line or step the recipe doesn't "
             "have, a step's segments aren't its text, its segments or uses name a line the recipe "
-            "doesn't have, a line's portions add up to more than 1, an issue isn't open, a "
-            "wording isn't a parsed line's name, it learns more than one write holds, a fact "
-            "names an unknown Canonical Ingredient or Store Category, or a new Canonical "
-            "Ingredient or wording is confirmed or at another schema version, or the enriched "
-            "recipe is too big to store"
+            "doesn't have, a line's portions add up to more than 1, an issue isn't open, "
+            "substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a "
+            "substitute is its line's own match, a wording isn't a parsed line's name, it learns "
+            "more than one write holds, a fact names an unknown Canonical Ingredient or Store "
+            "Category, or a new Canonical Ingredient or wording is confirmed or at another schema "
+            "version, or the enriched recipe is too big to store"
         },
     },
 )
@@ -477,9 +480,10 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     duration or temperature segment is one code finds in its step's text, a step with segments has
     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-    with no confirm batch, every wording is the normalized
-    name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
-    names a Canonical Ingredient that exists or is new here, every new one's Store Category
+    with no confirm batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
+    and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
+    one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
+    wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
     the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
     """
@@ -490,6 +494,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
         raise HTTPException(409, "Only a Pending recipe can be enriched")
     _check_lines(body, recipe)
     _check_steps(body, recipe)
+    _check_suggestions(body)
     if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
         raise HTTPException(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
@@ -575,9 +580,11 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
     steps = {step.id for step in recipe.original.steps}
-    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields} | {
-        f"{step}.{fact}" for step in steps for fact in StepFacts.model_fields
-    }
+    facts = (
+        {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
+        | {f"{step}.{fact}" for step in steps for fact in StepFacts.model_fields}
+        | {"difficulty"}
+    )
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment.
@@ -649,9 +656,39 @@ def _check_step(step_id: str, text: str, facts: StepFacts, lines: set[str]) -> N
         )
 
 
+def _check_suggestions(body: Enrichment) -> None:
+    """Refuse substitutions or a suggested Difficulty that aren't the LLM's unconfirmed estimate,
+    and a substitute that is its line's own Canonical Ingredient.
+    """
+    lines = body.facts.ingredients.values()
+    suggestions: list[Fact] = [facts.substitutions for facts in lines if facts.substitutions]
+    if body.facts.difficulty:
+        suggestions.append(body.facts.difficulty)
+    if any(
+        fact.provenance != "llm"
+        or not fact.estimated
+        or fact.confirmed
+        or fact.confirmed_by
+        or fact.confirmed_at
+        or fact.confirm_batch
+        for fact in suggestions
+    ):
+        raise HTTPException(
+            422, "Substitutions and a suggested Difficulty arrive as the LLM's unconfirmed estimate"
+        )
+    for facts in lines:
+        match = facts.match.canonical_id if facts.match else None
+        if any(item.canonical_id == match for item in _substitutes(facts)):
+            raise HTTPException(422, "A substitute isn't its line's own Canonical Ingredient")
+
+
+def _substitutes(facts: IngredientFacts) -> list[Substitution]:
+    return facts.substitutions.items if facts.substitutions else []
+
+
 def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
-    """Refuse a match or wording for an unknown Canonical Ingredient, and a new one in a Store
-    Category that isn't in the Kitchen settings.
+    """Refuse a match, substitute or wording for an unknown Canonical Ingredient, and a new one in
+    a Store Category that isn't in the Kitchen settings.
     """
     categories = {category.id for category in store.kitchen_settings().store_categories}
     if any(new.store_category_id not in categories for new in body.canonical_ingredients):
@@ -665,9 +702,12 @@ def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
     known = {canonical.id for canonical in store.canonical_ingredients()} | {
         new.id for new in body.canonical_ingredients
     }
-    matched = {
-        facts.match.canonical_id for facts in body.facts.ingredients.values() if facts.match
-    } | {wording.canonical_id for wording in body.wordings}
+    lines = body.facts.ingredients.values()
+    matched = (
+        {facts.match.canonical_id for facts in lines if facts.match}
+        | {item.canonical_id for facts in lines for item in _substitutes(facts)}
+        | {wording.canonical_id for wording in body.wordings}
+    )
     if unknown := sorted(matched - known):
         raise HTTPException(422, f"No Canonical Ingredient {', '.join(unknown)}")
 

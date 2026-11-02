@@ -1,7 +1,6 @@
 """The domain model: one shape for DynamoDB items and the API (recipe data model ADR).
 
-The other enrichment facts (substitutions) and Our Version join these models when the features
-that write them arrive.
+Our Version joins these models when the feature that writes it arrives.
 """
 
 import secrets
@@ -225,12 +224,11 @@ class Per100g(Model):
     sodium_mg: Nutrient | None
 
 
-class ConversionFact(Fact):
-    """How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
-    grams in one count unit for a count, or the reason it doesn't convert.
+class FdcNumbers(Model):
+    """The FDC Snapshot's numbers for a food, copied in: a density for a volume, the grams in one
+    count unit for a count, or the reason it doesn't convert, and its nutrition.
     """
 
-    fdc_id: int
     dataset: Dataset
     release: Label
     density_g_per_ml: Amount | None
@@ -240,10 +238,41 @@ class ConversionFact(Fact):
     per_100g: Per100g
 
 
+class ConversionFact(Fact, FdcNumbers):
+    """How the line converts to grams, with its FDC food's numbers copied from the FDC Snapshot."""
+
+    fdc_id: int
+
+
+# How much of a substitute stands in for one unit of the line's amount, in the line's unit.
+Ratio = Annotated[float, Field(gt=0, le=10, allow_inf_nan=False)]
+
+
+class Substitution(Model):
+    """Something the recipe says may stand in for the line, quoted as the recipe words it, with
+    its Canonical Ingredient, how much to use, and its FDC food's numbers.
+    """
+
+    wording: Label
+    canonical_id: Ulid
+    ratio: Ratio
+    note: Label  # e.g. "use half as much if dried"
+    fdc_id: int
+    portion_id: int | None
+    fdc: FdcNumbers
+
+
+class SubstitutionsFact(Fact):
+    """A line's substitutions, which an editor confirms together in one tap."""
+
+    items: Annotated[list[Substitution], Field(min_length=1)]
+
+
 class IngredientFacts(Model):
     parse: ParseFact | None = None
     match: MatchFact | None = None
     conversion: ConversionFact | None = None
+    substitutions: SubstitutionsFact | None = None
 
 
 class TextSegment(Model):
@@ -330,13 +359,22 @@ class StepFacts(Model):
     uses: UsesFact | None = None
 
 
+class DifficultyFact(Fact):
+    """The Difficulty enrichment suggests. An editor's own Difficulty always wins over it."""
+
+    prep: Rating
+    cook: Rating
+    cleanup: Rating
+
+
 class RecipeFacts(Model):
     """A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-    `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
+    `ingredients["i3"].parse`, `s2.uses` is `steps["s2"].uses`, and `difficulty` is `difficulty`.
     """
 
     ingredients: dict[str, IngredientFacts] = {}
     steps: dict[str, StepFacts] = {}
+    difficulty: DifficultyFact | None = None
 
 
 class EnrichmentIssue(Model):
@@ -450,6 +488,7 @@ class Card(Model):
     site_name: str | None
     stated_seconds: int | None
     difficulty: Difficulty | None
+    difficulty_suggested: bool = False  # the difficulty is enrichment's suggestion, not an editor's
     tags: list[str]
     status: EnrichmentStatus
     preview: Preview | None
@@ -467,14 +506,23 @@ def stated_seconds(times: StatedTimes) -> int | None:
 
 
 def card_for(recipe: Recipe) -> Card:
-    """Card upkeep: the card is derived from its recipe and nothing else."""
+    """Card upkeep: the card is derived from its recipe and nothing else. It shows the editor's
+    Difficulty, or else enrichment's suggestion.
+    """
+    difficulty, suggested = recipe.difficulty, False
+    if difficulty is None and (suggestion := recipe.facts.difficulty):
+        difficulty = Difficulty.model_validate(
+            suggestion.model_dump(include={"prep", "cook", "cleanup"})
+        )
+        suggested = True
     return Card(
         id=recipe.id,
         schema_version=recipe.schema_version,
         title=recipe.original.title,
         site_name=recipe.source.site_name if isinstance(recipe.source, WebsiteSource) else None,
         stated_seconds=stated_seconds(recipe.original.stated_times),
-        difficulty=recipe.difficulty,
+        difficulty=difficulty,
+        difficulty_suggested=suggested,
         tags=recipe.tags,
         status=recipe.status,
         preview=recipe.preview,

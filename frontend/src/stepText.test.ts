@@ -56,10 +56,11 @@ function facts(ingredients: Record<string, ParseFact | null>, s1?: StepFacts): R
     ingredients: Object.fromEntries(
       Object.entries(ingredients).map(([ref, p]) => [
         ref,
-        { parse: p, match: null, conversion: null },
+        { parse: p, match: null, conversion: null, substitutions: null },
       ]),
     ),
     steps: s1 ? { s1 } : {},
+    difficulty: null,
   };
 }
 
