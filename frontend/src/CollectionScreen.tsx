@@ -1,17 +1,24 @@
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { Card } from "./api/client";
-import { activeFilterCount, collectionTags, filterCards, noFilters } from "./cardFilters";
+import {
+  activeFilterCount,
+  collectionTags,
+  filterCards,
+  isChosen,
+  noFilters,
+  toggleTag,
+} from "./cardFilters";
 import { useCollection } from "./collection";
 import { DifficultyMeters } from "./DifficultyMeters";
-import { FiltersSheet, TagChip } from "./FiltersSheet";
+import { FiltersSheet } from "./FiltersSheet";
 import { SearchIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
 import { Screen } from "./Screen";
 import { recipePath } from "./slug";
 import { formatStatedTime } from "./statedTime";
-import { TagList } from "./TagList";
+import { TagChip, TagList } from "./TagList";
 import { byTitle, titleMatches } from "./titleSearch";
 
 // The Recipes tab: every card in the Collection, by title, narrowed by a title search, a tap on a
@@ -28,8 +35,6 @@ export function CollectionScreen() {
   const shown = filterCards(cards, filters).filter((card) => titleMatches(card.title, query));
   const active = activeFilterCount(filters);
   const status = useRef<HTMLParagraphElement>(null);
-  const sheet = useRef<HTMLDialogElement>(null);
-  const filtersButton = useRef<HTMLButtonElement>(null);
 
   return (
     <Screen title="Collection">
@@ -44,37 +49,22 @@ export function CollectionScreen() {
             onChange={(event) => setQuery(event.target.value)}
           />
         </search>
-        <button
-          ref={filtersButton}
-          type="button"
-          className="button button-secondary"
-          aria-haspopup="dialog"
-          onClick={() => {
-            sheet.current?.showModal();
-            sheet.current?.querySelector("h2")?.focus();
-          }}
-        >
-          {active > 0 ? `Filters · ${active}` : "Filters"}
-        </button>
+        <FiltersSheet tags={tags} filters={filters} shown={shown.length} onChange={setFilters} />
       </div>
       {/* One row of chips that scrolls sideways rather than wrapping. */}
       {tags.length > 0 && (
         <ul className="chips chips-row" aria-label="Filter by Tag">
           {tags.map((tag) => (
             <li key={tag}>
-              <TagChip tag={tag} filters={filters} onChange={setFilters} />
+              <TagChip
+                tag={tag}
+                pressed={isChosen(filters, tag)}
+                onToggle={() => setFilters(toggleTag(filters, tag))}
+              />
             </li>
           ))}
         </ul>
       )}
-      <FiltersSheet
-        ref={sheet}
-        tags={tags}
-        filters={filters}
-        shown={shown.length}
-        onChange={setFilters}
-        onClose={() => filtersButton.current?.focus()}
-      />
       {/* Always rendered, so screen readers hear each change: loading, then how many match. */}
       <p ref={status} role="status" tabIndex={-1} className="result-count">
         {collection.state === "loading" && "Loading the Collection…"}

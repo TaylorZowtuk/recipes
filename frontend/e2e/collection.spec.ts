@@ -206,6 +206,7 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   // The sheet covers the status line, so its Done button carries the live count.
   const done = sheet.getByRole("button", { name: /^(Show \d+ recipes?|No recipes match)$/ });
   await expect(done).toHaveText("Show 1 recipe");
+  await expect(sheet.getByRole("status")).toHaveText("Show 1 recipe");
 
   // Clear empties every filter, the chip row's too.
   await sheet.getByRole("button", { name: "Clear" }).click();
@@ -235,6 +236,7 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await time.getByText("30 min", { exact: true }).click();
   await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
   await expect(filters).toHaveText("Filters · 1");
+  await expect(done).toHaveText(/^Show \d+ recipes$/);
 
   // Done closes the sheet and returns focus to the Filters button; the filters stay.
   await expectTapTarget(done);
@@ -243,6 +245,25 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await expect(sheet).toBeHidden();
   await expect(filters).toBeFocused();
   await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
+
+  // A tap in the sheet's own margin, beside a pill, leaves it open; Escape closes it.
+  await filters.click();
+  const box = await sheet.boundingBox();
+  const any = difficulty.getByText("Any", { exact: true });
+  await any.scrollIntoViewIfNeeded();
+  const pill = await any.boundingBox();
+  if (!box || !pill) throw new Error("The sheet isn't laid out");
+  await page.mouse.click(box.x + 4, pill.y + pill.height / 2);
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
+
+  // A tap on the backdrop, outside the sheet, closes it.
+  await filters.click();
+  await page.mouse.click(4, 4);
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
 
   // Nothing matching says so, with the search too.
   await weeknight.click();
