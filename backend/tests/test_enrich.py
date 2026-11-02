@@ -34,6 +34,7 @@ from recipes.models import (
     IngredientLine,
     Original,
     Recipe,
+    Step,
     WebsiteSource,
     Wording,
     new_ulid,
@@ -207,7 +208,7 @@ def test_apply_writes_each_answered_lines_match_and_conversion_and_learns_its_wo
     assert failed == 0
     assert "Garlic Tofu → awaiting_review" in capsys.readouterr().out
     enriched = stored(editor_client, recipe.id)
-    assert enriched["enrichment_version"] == ENRICHMENT_VERSION == 2
+    assert enriched["enrichment_version"] == ENRICHMENT_VERSION == 3
     assert enriched["fdc_release"] == SNAPSHOT.release
     facts = enriched["facts"]["ingredients"]
     assert sorted(facts) == ["i1", "i2", "i3", "i4"]
@@ -235,6 +236,48 @@ def test_apply_writes_each_answered_lines_match_and_conversion_and_learns_its_wo
     ] == [("glimmer oil", created["id"], False)]
     (issue,) = enriched["issues"]
     assert issue["reason"] == "new Canonical Ingredient glimmer oil (oil, Aisles)"
+
+
+def test_apply_writes_each_answered_steps_segments_and_uses(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    steps = [
+        Step(id="s1", text="Warm the glimmer oil to 180C for 2 minutes."),
+        Step(id="s2", text="Add the snorp garlic."),
+    ]
+    recipe = add(api_store, "Garlic Tofu")
+    original = recipe.original.model_copy(update={"steps": steps})
+    recipe = api_store.update_recipe(recipe.model_copy(update={"original": original}))
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    warm, garlic = offered["recipes"][0]["steps"]
+    assert [(o["id"], o["written"]) for o in warm["offers"]] == [
+        ("o1", "180C"),
+        ("o2", "2 minutes"),
+    ]
+    assert garlic["default_uses"] == [{"ref": "i2", "portion": 1.0}]
+    answered = json.loads(answer_text(offered))
+    answered["recipes"][0]["steps"] = [
+        {
+            "step_id": "s1",
+            "keep": ["o1"],
+            "ingredients": [{"ref": "i1", "written": "glimmer oil", "portion": 1.0}],
+        }
+    ]
+
+    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(answered))
+
+    assert failed == 0
+    facts = stored(editor_client, recipe.id)["facts"]["steps"]
+    assert sorted(facts) == ["s1"]
+    assert [(s["t"], s.get("v") or s["written"]) for s in facts["s1"]["segments"]["segments"]] == [
+        ("text", "Warm the "),
+        ("ingredient", "glimmer oil"),
+        ("text", " to "),
+        ("temperature", "180C"),
+        ("text", " for 2 minutes."),
+    ]
+    assert facts["s1"]["uses"]["uses"] == [{"ref": "i1", "portion": 1.0}]
 
 
 def test_a_new_canonical_named_in_two_recipes_is_created_once(

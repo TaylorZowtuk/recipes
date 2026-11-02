@@ -1,5 +1,7 @@
 # A recipe is one self-contained JSON item: an immutable Original, a whole-line Our Version overlay, and enrichment facts addressed by path
 
+Partly superseded by [Ingredient segments carry their portion](2026-10-31-ingredient-segments-carry-their-portion.md): the ingredient segment's shape.
+
 A recipe is stored as one JSON document, defined once as Pydantic v2 models in `backend/` with `snake_case` names. The same shape goes into DynamoDB, into the nightly JSON Lines backups and out of the API, and the TypeScript client is generated from the OpenAPI schema. The item holds everything the phone needs to scale, convert units, compute nutrition and render cooking mode **offline**, including the FoodData Central (FDC) numbers enrichment used. We chose this over storing only FDC ids and looking the numbers up when read, because the lookup would mean shipping the FDC snapshot to the PWA, and a newer FDC release would silently change recipes the [enrichment ADR](2026-09-26-enrichment-pipeline.md) says are frozen.
 
 ## Ids and layout

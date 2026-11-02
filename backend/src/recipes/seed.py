@@ -15,8 +15,10 @@ from PIL import Image, ImageDraw
 from recipes.models import (
     SCHEMA_VERSION,
     Difficulty,
+    DurationSegment,
     IngredientFacts,
     IngredientLine,
+    IngredientSegment,
     Original,
     ParseFact,
     Preview,
@@ -24,10 +26,17 @@ from recipes.models import (
     Recipe,
     RecipeFacts,
     RecipeYield,
+    Segment,
+    SegmentsFact,
     SpreadsheetSource,
     StatedTime,
     StatedTimes,
     Step,
+    StepFacts,
+    StepUse,
+    TemperatureSegment,
+    TextSegment,
+    UsesFact,
     WebsiteSource,
 )
 
@@ -87,6 +96,36 @@ def _parse(
     )
 
 
+def _ingredient(ref: str, written: str, portion: float = 1.0) -> IngredientSegment:
+    return IngredientSegment(ref=ref, written=written, portion=portion)
+
+
+def _duration(low_s: int, high_s: int, written: str) -> DurationSegment:
+    return DurationSegment(low_s=low_s, high_s=high_s, written=written)
+
+
+def _temperature(c: int, written: str) -> TemperatureSegment:
+    return TemperatureSegment(c=c, written=written)
+
+
+def _step_facts(*parts: str | Segment, uses: dict[str, float] | None = None) -> StepFacts:
+    """A step's segments and uses, written by hand for the seed. A string is a text segment, and
+    a step with no parts has no segments, so it shows its text as written.
+    """
+    segments = [TextSegment(v=part) if isinstance(part, str) else part for part in parts]
+    return StepFacts(
+        segments=SegmentsFact(provenance="llm", confidence=0.8, estimated=False, segments=segments)
+        if segments
+        else None,
+        uses=UsesFact(
+            provenance="llm",
+            confidence=0.8,
+            estimated=True,
+            uses=[StepUse(ref=ref, portion=portion) for ref, portion in (uses or {}).items()],
+        ),
+    )
+
+
 RECIPES = [
     Recipe(
         id="01K7SEED000000000000000001",
@@ -123,6 +162,28 @@ RECIPES = [
         tags=["Sunday", "roast"],
         difficulty=Difficulty(prep=1, cook=2, cleanup=2),
         status="ready",
+        facts=RecipeFacts(
+            steps={
+                "s1": _step_facts("Heat the oven to ", _temperature(218, "425°F"), "."),
+                "s2": _step_facts(
+                    "Lay ",
+                    _ingredient("i5", "the onions"),
+                    " in a roasting pan and set ",
+                    _ingredient("i1", "the chicken"),
+                    " on top.",
+                    uses={"i5": 1.0, "i1": 1.0},
+                ),
+                "s4": _step_facts(
+                    "Roast ",
+                    _duration(4200, 4800, "70-80 minutes"),
+                    ", until the thigh reads ",
+                    _temperature(74, "165°F"),
+                    ". Rest ",
+                    _duration(600, 600, "10 minutes"),
+                    " before carving.",
+                ),
+            }
+        ),
     ),
     Recipe(
         id=E2E_RECIPE_ID,
@@ -167,8 +228,9 @@ RECIPES = [
                     start=2,
                 ),
                 *_steps(
-                    "Cook the noodles, rinse under cold water and drain well.",
-                    "Toss with the sauce and top with the tofu and green onions.",
+                    "Cook the noodles, rinse under cold water, drain well and toss with half the "
+                    "green onions.",
+                    "Toss with the sauce and top with the tofu and the rest of the green onions.",
                     component="For the noodles",
                     start=4,
                 ),
@@ -194,7 +256,41 @@ RECIPES = [
                 "i7": _parse(3, "tbsp", "volume", "neutral oil"),
                 "i8": _parse(250, "g", "mass", "wheat noodles"),
                 "i9": _parse((1, 2), None, "count", "green onions", "sliced"),
-            }
+            },
+            steps={
+                # "the sauce ingredients" names no one line, so the step has no segments.
+                "s1": _step_facts(uses={"i1": 1.0, "i2": 1.0, "i3": 1.0, "i4": 1.0}),
+                "s2": _step_facts(
+                    "Toss ",
+                    _ingredient("i5", "the tofu"),
+                    " in ",
+                    _ingredient("i6", "cornstarch"),
+                    ".",
+                    uses={"i5": 1.0, "i6": 1.0},
+                ),
+                "s3": _step_facts(
+                    "Fry in ",
+                    _ingredient("i7", "the oil"),
+                    " over medium-high heat for ",
+                    _duration(480, 600, "8-10 minutes"),
+                    ", turning, until crisp.",
+                    uses={"i7": 1.0},
+                ),
+                "s4": _step_facts(
+                    "Cook ",
+                    _ingredient("i8", "the noodles"),
+                    ", rinse under cold water, drain well and toss with ",
+                    _ingredient("i9", "half the green onions", 0.5),
+                    ".",
+                    uses={"i8": 1.0, "i9": 0.5},
+                ),
+                "s5": _step_facts(
+                    "Toss with the sauce and top with the tofu and ",
+                    _ingredient("i9", "the rest of the green onions", 0.5),
+                    ".",
+                    uses={"i9": 0.5},
+                ),
+            },
         ),
         enrichment_version=1,
     ),

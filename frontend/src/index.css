@@ -828,6 +828,11 @@ h1:focus {
   padding-left: calc(var(--space) * 1);
 }
 
+/* An amount a step uses, as heavy as the amounts in the ingredient list. */
+.step-amount {
+  font-weight: 700;
+}
+
 .steps li::marker {
   color: var(--accent-text);
   font-family: var(--font-display);

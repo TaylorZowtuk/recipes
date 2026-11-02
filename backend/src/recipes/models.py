@@ -1,7 +1,7 @@
 """The domain model: one shape for DynamoDB items and the API (recipe data model ADR).
 
-The other enrichment facts (segments, substitutions) and Our Version join these models when the
-features that write them arrive.
+The other enrichment facts (substitutions) and Our Version join these models when the features
+that write them arrive.
 """
 
 import secrets
@@ -246,12 +246,97 @@ class IngredientFacts(Model):
     conversion: ConversionFact | None = None
 
 
+class TextSegment(Model):
+    t: Literal["text"] = "text"
+    v: Line
+
+
+# How much of an ingredient line one mention or one step uses: more than none, and at most all of
+# it.
+Portion = Annotated[float, Field(gt=0, le=1, allow_inf_nan=False)]
+# How far past 1 a line's portions may add up to, for floating point: nine ninths.
+PORTION_TOLERANCE = 1e-9
+
+
+class IngredientSegment(Model):
+    """Where a step names an ingredient line, which renders its amount times its portion, scaled."""
+
+    t: Literal["ingredient"] = "ingredient"
+    ref: Label  # the ingredient line's id
+    written: Line
+    portion: Portion  # of the line, used where the step names it here
+
+
+Seconds = Annotated[int, Field(ge=0)]
+
+
+class DurationSegment(Model):
+    """A time written in a step, as a range in seconds: a timer chimes at its low end."""
+
+    t: Literal["duration"] = "duration"
+    low_s: Seconds
+    high_s: Seconds
+    written: Line
+
+    @model_validator(mode="after")
+    def _runs_upward(self) -> DurationSegment:
+        if self.high_s < self.low_s:
+            msg = "A duration's high_s is at least its low_s"
+            raise ValueError(msg)
+        return self
+
+
+class TemperatureSegment(Model):
+    """A temperature written in a step, in whole degrees Celsius."""
+
+    t: Literal["temperature"] = "temperature"
+    c: int
+    written: Line
+
+
+Segment = Annotated[
+    TextSegment | IngredientSegment | DurationSegment | TemperatureSegment,
+    Field(discriminator="t"),
+]
+
+
+def written_as(segment: Segment) -> str:
+    """The words of the step's text a segment is."""
+    return segment.v if isinstance(segment, TextSegment) else segment.written
+
+
+class SegmentsFact(Fact):
+    """A step's text split into typed pieces, in order, which together are its text exactly."""
+
+    segments: Annotated[list[Segment], Field(max_length=MAX_LINES)]
+
+
+class StepUse(Model):
+    ref: Label  # the ingredient line's id
+    portion: Portion
+
+
+class UsesFact(Fact):
+    """The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
+    an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+    is its ingredient segments' Step Portions summed.
+    """
+
+    uses: Annotated[list[StepUse], Field(max_length=MAX_LINES)]
+
+
+class StepFacts(Model):
+    segments: SegmentsFact | None = None
+    uses: UsesFact | None = None
+
+
 class RecipeFacts(Model):
     """A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-    `ingredients["i3"].parse`.
+    `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
     """
 
     ingredients: dict[str, IngredientFacts] = {}
+    steps: dict[str, StepFacts] = {}
 
 
 class EnrichmentIssue(Model):

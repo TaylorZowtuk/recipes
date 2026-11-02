@@ -150,8 +150,12 @@ export interface paths {
          *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
          *     in Awaiting Review for an editor to check it.
          *
-         *     Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
-         *     one of their facts and arrives open with no confirm batch, every wording is the normalized
+         *     Refused unless every fact is for one of the recipe's lines or steps, every step's segments
+         *     are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
+         *     duration or temperature segment is one code finds in its step's text, a step with segments has
+         *     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
+         *     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
+         *     with no confirm batch, every wording is the normalized
          *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
          *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
          *     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
@@ -460,6 +464,40 @@ export interface components {
             recipe_id: string | null;
         };
         /**
+         * DurationSegment
+         * @description A time written in a step, as a range in seconds: a timer chimes at its low end.
+         */
+        "DurationSegment-Input": {
+            /** High S */
+            high_s: number;
+            /** Low S */
+            low_s: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "duration";
+            /** Written */
+            written: string;
+        };
+        /**
+         * DurationSegment
+         * @description A time written in a step, as a range in seconds: a timer chimes at its low end.
+         */
+        "DurationSegment-Output": {
+            /** High S */
+            high_s: number;
+            /** Low S */
+            low_s: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "duration";
+            /** Written */
+            written: string;
+        };
+        /**
          * Enrichment
          * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
          *     Canonical Ingredients it creates and the wordings it learns.
@@ -599,6 +637,40 @@ export interface components {
             id: string;
             /** Text */
             text: string;
+        };
+        /**
+         * IngredientSegment
+         * @description Where a step names an ingredient line, which renders its amount times its portion, scaled.
+         */
+        "IngredientSegment-Input": {
+            /** Portion */
+            portion: number;
+            /** Ref */
+            ref: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "ingredient";
+            /** Written */
+            written: string;
+        };
+        /**
+         * IngredientSegment
+         * @description Where a step names an ingredient line, which renders its amount times its portion, scaled.
+         */
+        "IngredientSegment-Output": {
+            /** Portion */
+            portion: number;
+            /** Ref */
+            ref: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "ingredient";
+            /** Written */
+            written: string;
         };
         /** KitchenSettings */
         KitchenSettings: {
@@ -910,7 +982,8 @@ export interface components {
             enrichment_version: number | null;
             /**
              * @default {
-             *       "ingredients": {}
+             *       "ingredients": {},
+             *       "steps": {}
              *     }
              */
             facts: components["schemas"]["RecipeFacts-Output"];
@@ -962,7 +1035,7 @@ export interface components {
         /**
          * RecipeFacts
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-         *     `ingredients["i3"].parse`.
+         *     `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
          */
         "RecipeFacts-Input": {
             /**
@@ -972,11 +1045,18 @@ export interface components {
             ingredients: {
                 [key: string]: components["schemas"]["IngredientFacts-Input"];
             };
+            /**
+             * Steps
+             * @default {}
+             */
+            steps: {
+                [key: string]: components["schemas"]["StepFacts-Input"];
+            };
         };
         /**
          * RecipeFacts
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-         *     `ingredients["i3"].parse`.
+         *     `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
          */
         "RecipeFacts-Output": {
             /**
@@ -985,6 +1065,13 @@ export interface components {
              */
             ingredients: {
                 [key: string]: components["schemas"]["IngredientFacts-Output"];
+            };
+            /**
+             * Steps
+             * @default {}
+             */
+            steps: {
+                [key: string]: components["schemas"]["StepFacts-Output"];
             };
         };
         /** RecipeYield */
@@ -1004,6 +1091,62 @@ export interface components {
             text: string;
             /** Unit */
             unit: string | null;
+        };
+        /**
+         * SegmentsFact
+         * @description A step's text split into typed pieces, in order, which together are its text exactly.
+         */
+        "SegmentsFact-Input": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Segments */
+            segments: (components["schemas"]["TextSegment-Input"] | components["schemas"]["IngredientSegment-Input"] | components["schemas"]["DurationSegment-Input"] | components["schemas"]["TemperatureSegment-Input"])[];
+        };
+        /**
+         * SegmentsFact
+         * @description A step's text split into typed pieces, in order, which together are its text exactly.
+         */
+        "SegmentsFact-Output": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Segments */
+            segments: (components["schemas"]["TextSegment-Output"] | components["schemas"]["IngredientSegment-Output"] | components["schemas"]["DurationSegment-Output"] | components["schemas"]["TemperatureSegment-Output"])[];
         };
         /**
          * Session
@@ -1125,6 +1268,23 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** StepFacts */
+        "StepFacts-Input": {
+            segments?: components["schemas"]["SegmentsFact-Input"] | null;
+            uses?: components["schemas"]["UsesFact-Input"] | null;
+        };
+        /** StepFacts */
+        "StepFacts-Output": {
+            segments: components["schemas"]["SegmentsFact-Output"] | null;
+            uses: components["schemas"]["UsesFact-Output"] | null;
+        };
+        /** StepUse */
+        StepUse: {
+            /** Portion */
+            portion: number;
+            /** Ref */
+            ref: string;
+        };
         /** StoreCategory */
         StoreCategory: {
             /** Id */
@@ -1147,6 +1307,116 @@ export interface components {
             weeks: {
                 [key: string]: number;
             } | null;
+        };
+        /**
+         * TemperatureSegment
+         * @description A temperature written in a step, in whole degrees Celsius.
+         */
+        "TemperatureSegment-Input": {
+            /** C */
+            c: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "temperature";
+            /** Written */
+            written: string;
+        };
+        /**
+         * TemperatureSegment
+         * @description A temperature written in a step, in whole degrees Celsius.
+         */
+        "TemperatureSegment-Output": {
+            /** C */
+            c: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "temperature";
+            /** Written */
+            written: string;
+        };
+        /** TextSegment */
+        "TextSegment-Input": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "text";
+            /** V */
+            v: string;
+        };
+        /** TextSegment */
+        "TextSegment-Output": {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            t: "text";
+            /** V */
+            v: string;
+        };
+        /**
+         * UsesFact
+         * @description The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
+         *     an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+         *     is its ingredient segments' Step Portions summed.
+         */
+        "UsesFact-Input": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Uses */
+            uses: components["schemas"]["StepUse"][];
+        };
+        /**
+         * UsesFact
+         * @description The ingredient lines a step uses, with how much of each. Across all of a recipe's steps,
+         *     an ingredient's `portion`s add up to at most 1. In a step with segments, each line's `portion`
+         *     is its ingredient segments' Step Portions summed.
+         */
+        "UsesFact-Output": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+            /** Uses */
+            uses: components["schemas"]["StepUse"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -1635,7 +1905,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact or Enrichment Issue is for a line the recipe doesn't have, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description A fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

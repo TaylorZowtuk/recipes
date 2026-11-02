@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Original, ParseFact } from "./api/client";
-import { formatAmount, formatQuantity, Ingredients } from "./RecipeScreen";
+import { Ingredients, Steps } from "./RecipeScreen";
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",
@@ -48,42 +48,6 @@ function lines(markup: string): (string | [string, string])[][] {
   });
 }
 
-describe("formatQuantity", () => {
-  it("writes kitchen fractions and ranges", () => {
-    expect(formatQuantity({ low: 1.5, high: 1.5 })).toBe("1½");
-    expect(formatQuantity({ low: 0.25, high: 0.25 })).toBe("¼");
-    expect(formatQuantity({ low: 0.75, high: 0.75 })).toBe("¾");
-    expect(formatQuantity({ low: 1 / 3, high: 1 / 3 })).toBe("⅓");
-    expect(formatQuantity({ low: 0.125, high: 0.125 })).toBe("⅛");
-    expect(formatQuantity({ low: 1.125, high: 1.125 })).toBe("1⅛");
-    expect(formatQuantity({ low: 0.375, high: 0.375 })).toBe("⅜");
-    expect(formatQuantity({ low: 2.625, high: 2.625 })).toBe("2⅝");
-    expect(formatQuantity({ low: 0.875, high: 0.875 })).toBe("⅞");
-    expect(formatQuantity({ low: 2, high: 2 })).toBe("2");
-    expect(formatQuantity({ low: 1, high: 2 })).toBe("1–2");
-    expect(formatQuantity({ low: 0.5, high: 1 })).toBe("½–1");
-  });
-
-  it("keeps an amount with no kitchen fraction as a short decimal", () => {
-    expect(formatQuantity({ low: 1.15, high: 1.15 })).toBe("1.15");
-  });
-});
-
-describe("formatAmount", () => {
-  it("writes cups in the plural above one", () => {
-    expect(formatAmount({ low: 8, high: 8 }, "cup")).toBe("8 cups");
-    expect(formatAmount({ low: 1, high: 2 }, "cup")).toBe("1–2 cups");
-    expect(formatAmount({ low: 1, high: 1 }, "cup")).toBe("1 cup");
-    expect(formatAmount({ low: 0.75, high: 0.75 }, "cup")).toBe("¾ cup");
-  });
-
-  it("leaves other units as stored, and a count without one", () => {
-    expect(formatAmount({ low: 2, high: 2 }, "tbsp")).toBe("2 tbsp");
-    expect(formatAmount({ low: 3, high: 3 }, "cloves")).toBe("3 cloves");
-    expect(formatAmount({ low: 2, high: 2 }, null)).toBe("2");
-  });
-});
-
 describe("Ingredients", () => {
   it("puts the name and preparation on the left and the amount on the right", () => {
     const markup = renderToStaticMarkup(
@@ -98,6 +62,7 @@ describe("Ingredients", () => {
               preparation: "minced",
             }),
           },
+          steps: {},
         }}
       />,
     );
@@ -128,6 +93,7 @@ describe("Ingredients", () => {
               comment: "or to taste",
             }),
           },
+          steps: {},
         }}
       />,
     );
@@ -157,6 +123,7 @@ describe("Ingredients", () => {
             i3: parse({ quantity: { low: 2, high: 2 }, name: "eggs" }),
             i4: parse({ name: "salt" }),
           },
+          steps: {},
         }}
       />,
     );
@@ -184,7 +151,7 @@ describe("Ingredients", () => {
           ["i1", "3 tbsp tahini", "For the sauce"],
           ["i2", "400 g firm tofu", "For the tofu"],
         )}
-        facts={{ ingredients: { i2: { parse: null, match: null, conversion: null } } }}
+        facts={{ ingredients: { i2: { parse: null, match: null, conversion: null } }, steps: {} }}
       />,
     );
     expect([...markup.matchAll(/<h2>(.*?)<\/h2>/g)].map(([, h]) => h)).toEqual([
@@ -201,5 +168,55 @@ describe("Ingredients", () => {
     expect(markup).toBe(
       '<section class="component"><ul class="ingredients"><li>3 tbsp tahini</li></ul></section>',
     );
+  });
+});
+
+describe("Steps", () => {
+  it("marks a step's amount, reads naturally as text, and keeps a step without segments raw", () => {
+    const fact = { provenance: "llm", confidence: 0.8, estimated: false } as const;
+    const unconfirmed = {
+      confirmed: false,
+      confirmed_by: null,
+      confirmed_at: null,
+      confirm_batch: null,
+    };
+    const markup = renderToStaticMarkup(
+      <Steps
+        original={{
+          ...original(["i1", "4 cloves garlic", null]),
+          steps: [
+            { id: "s1", component: null, text: "Add half the garlic." },
+            { id: "s2", component: null, text: "Add the rest of the garlic." },
+          ],
+        }}
+        facts={{
+          ingredients: {
+            i1: parse({ quantity: { low: 4, high: 4 }, unit: "cloves", name: "garlic" }),
+          },
+          steps: {
+            s1: {
+              segments: {
+                ...fact,
+                ...unconfirmed,
+                segments: [
+                  { t: "text", v: "Add " },
+                  { t: "ingredient", ref: "i1", written: "half the garlic", portion: 0.5 },
+                  { t: "text", v: "." },
+                ],
+              },
+              uses: { ...fact, ...unconfirmed, uses: [{ ref: "i1", portion: 0.5 }] },
+            },
+            s2: {
+              segments: null,
+              uses: { ...fact, ...unconfirmed, uses: [{ ref: "i1", portion: 0.5 }] },
+            },
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('<span class="step-amount">2 cloves</span> garlic');
+    expect(
+      [...markup.matchAll(/<li>(.*?)<\/li>/g)].map(([, li = ""]) => li.replace(/<[^>]+>/g, "")),
+    ).toEqual(["Add 2 cloves garlic.", "Add the rest of the garlic."]);
   });
 });

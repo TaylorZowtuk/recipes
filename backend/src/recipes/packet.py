@@ -2,9 +2,11 @@
 of the model's answer against those offers before anything is written (enrichment pipeline ADR).
 
 The model only chooses: a Canonical Ingredient among the candidates (or a new one, in a Store
-Category that exists), an FDC food among the candidates and one of its portions, and a quantity
-among the numbers written in the line. Every number written comes from the parser or the FDC
-Snapshot.
+Category that exists), an FDC food among the candidates and one of its portions, a quantity
+among the numbers written in the line, which of the durations and temperatures found in a step
+are ones, and where a step names an ingredient line. Every number written comes from the parser,
+the FDC Snapshot or the step's text, except how much of a line each mention in a step uses: its
+Step Portion.
 """
 
 import hashlib
@@ -13,7 +15,7 @@ import math
 import re
 import sys
 import unicodedata
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -26,14 +28,17 @@ from pydantic import (
 
 from recipes import fdc
 from recipes.models import (
+    PORTION_TOLERANCE,
     SCHEMA_VERSION,
     Amount,
     CanonicalIngredient,
     ConversionFact,
     Dataset,
+    DurationSegment,
     Enrichment,
     EnrichmentIssue,
     IngredientFacts,
+    IngredientSegment,
     Label,
     Line,
     MatchFact,
@@ -41,19 +46,27 @@ from recipes.models import (
     Quantity,
     Recipe,
     RecipeFacts,
+    Segment,
+    SegmentsFact,
+    StepFacts,
+    StepUse,
     StoreCategory,
+    TextSegment,
+    UsesFact,
     Wording,
     new_ulid,
     normalize_wording,
+    written_as,
 )
+from recipes.offers import NUMBER, find_offers, number_value
 from recipes.parse import parse_line
 from recipes.store import MAX_LEARNED
 
 if TYPE_CHECKING:
-    from recipes.models import IngredientLine
+    from recipes.models import IngredientLine, Step
 
 # Recorded on each recipe enriched, so recipes enriched by an older version can be found.
-ENRICHMENT_VERSION = 2
+ENRICHMENT_VERSION = 3
 # The most Canonical Ingredients and FDC foods a line is offered.
 MAX_CANDIDATES = 8
 # The most doubts a line's answer may raise, so a steered model can't swell the recipe.
@@ -71,17 +84,20 @@ INSTRUCTIONS = (
     "food from fdc_candidates and the portion row of that food that matches the line's unit, or "
     "null. Give quantity only to correct the parse, from readable_quantities, with "
     "corrections_reason. Add a doubt for anything an editor should check. Leave out a line you "
-    "can't match."
+    "can't match. "
+    "For each step, keep by id each of its offers (a duration or temperature found in its text) "
+    "that the step means as one. Give each place the step names an ingredient line as an "
+    "ingredient: the line's ref, the whole phrase in the text that names it, copied exactly, "
+    'with its amount, article and portion words ("1 tsp salt", "the tofu", "half the '
+    'garlic", "the rest of the onions"), because the app replaces that phrase with the computed '
+    "amount and the ingredient's name, and the portion of the line that phrase uses, more than 0 "
+    "and at most 1. Code gives default_uses as a start: each line all used (portion 1.0) in the "
+    "first step that mentions its name. These are suggestions, not applied for you: list every "
+    "ingredient each step names, including those in default_uses. Change them where a recipe "
+    "uses a line over several steps, such as half the salt in one step and the rest in another: "
+    "a line's portions add up to at most 1 across all the steps. Leave out a step you can't read."
 )
 
-VULGAR = "¼½¾⅐⅑⅒⅓⅔⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞"
-NUMBER = re.compile(
-    rf"""(?P<whole>\d+)(?:\s+|-)(?P<num>\d+)/(?P<den>\d+)  # 1 1/2, 1-1/2
-    |(?P<fnum>\d+)/(?P<fden>\d+)                          # 1/2
-    |(?P<uwhole>\d+)?\s*(?P<vulgar>[{VULGAR}])            # ½, 1½, 1 ½
-    |(?P<decimal>\d*\.\d+|\d+)                            # 2, 2.5, .5""",
-    re.VERBOSE,
-)
 WORD_NUMBERS = {
     "a": 1.0,
     "an": 1.0,
@@ -115,6 +131,8 @@ AND_A_HALF = re.compile(
 )
 # How close a model's quantity is to a readable one to be it: "0.333" is ⅓.
 TOLERANCE = 1e-3
+# How confident a step's segments and uses are: the model read them, and an editor checks them.
+STEP_CONFIDENCE = 0.8
 # A new Canonical Ingredient's name ("2% milk", "half & half") and family ("dairy"), so a line
 # steering the model can't name one with a link or markup.
 NEW_NAME = re.compile(r"(?:[^\W_]|[ '\u2019%&-])+")
@@ -126,19 +144,12 @@ def readable_quantities(text: str, parse: ParseFact | None) -> list[float]:
     a mixed number or a word ("a", "half", "one" to "twelve"), a number "and a half", each end of
     a range, and the parser's own reading ("2 dozen" is 24, "1 lb 2 oz" is 1.125 lb).
     """
-    found: set[float] = set()
     # "\u2044" is the fraction slash.
-    for match in NUMBER.finditer(text.replace("\u2044", "/")):
-        if match["den"]:
-            if int(match["den"]):
-                found.add(int(match["whole"]) + int(match["num"]) / int(match["den"]))
-        elif match["fden"]:
-            if int(match["fden"]):
-                found.add(int(match["fnum"]) / int(match["fden"]))
-        elif match["vulgar"]:
-            found.add(int(match["uwhole"] or 0) + unicodedata.numeric(match["vulgar"]))
-        else:
-            found.add(float(match["decimal"]))
+    found = {
+        value
+        for match in NUMBER.finditer(text.replace("\u2044", "/"))
+        if (value := number_value(match)) is not None
+    }
     found.update(WORD_NUMBERS[word.lower()] for word in WORD_NUMBER.findall(text))
     for match in AND_A_HALF.finditer(text):
         whole = float(match["digits"]) if match["digits"] else WORD_NUMBERS[match["word"].lower()]
@@ -146,6 +157,29 @@ def readable_quantities(text: str, parse: ParseFact | None) -> list[float]:
     if parse and parse.quantity:
         found.update((parse.quantity.low, parse.quantity.high))
     return sorted({round(value, 4) for value in found})
+
+
+def _mentions(text: str, name: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
+
+
+def default_uses(recipe: Recipe, facts: RecipeFacts) -> dict[str, list[StepUse]]:
+    """Each step's default uses: each parsed line all used in the first step whose text mentions
+    its short name or name, ignoring case.
+    """
+    uses: dict[str, list[StepUse]] = {step.id: [] for step in recipe.original.steps}
+    for line in recipe.original.ingredients:
+        fact = facts.ingredients.get(line.id)
+        parse = fact.parse if fact else None
+        if parse is None:
+            continue
+        names = [name for name in (parse.short_name, parse.name) if name]
+        step = next(
+            (s for s in recipe.original.steps if any(_mentions(s.text, n) for n in names)), None
+        )
+        if step:
+            uses[step.id].append(StepUse(ref=line.id, portion=1.0))
+    return uses
 
 
 def facts_for(recipe: Recipe) -> RecipeFacts:
@@ -206,12 +240,40 @@ class PacketLine(Strict):
     fdc_candidates: list[FdcCandidate]
 
 
+class OfferedDuration(Strict):
+    id: str
+    t: Literal["duration"] = "duration"
+    low_s: int
+    high_s: int
+    written: str
+
+
+class OfferedTemperature(Strict):
+    id: str
+    t: Literal["temperature"] = "temperature"
+    c: int
+    written: str
+
+
+class OfferedUse(Strict):
+    ref: str
+    portion: float
+
+
+class PacketStep(Strict):
+    step_id: str
+    text: str
+    offers: list[OfferedDuration | OfferedTemperature]
+    default_uses: list[OfferedUse]
+
+
 class PacketRecipe(Strict):
     recipe_id: str
     # The SHA-256 of what this recipe is offered, so an answer to an older offer is refused.
     offer_id: str = ""
     title: str
     lines: list[PacketLine]
+    steps: list[PacketStep]
 
 
 class Packet(Strict):
@@ -266,10 +328,28 @@ class AnsweredLine(Strict):
     corrections_reason: Line | None = None
 
 
+Written = Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+
+
+class AnsweredIngredient(Strict):
+    """Where a step names an ingredient line, and how much of the line it uses."""
+
+    ref: str
+    written: Written  # as in the step's text
+    portion: float
+
+
+class AnsweredStep(Strict):
+    step_id: str
+    keep: list[str] = []  # the ids of the offers that are durations and temperatures
+    ingredients: list[AnsweredIngredient] = []
+
+
 class AnsweredRecipe(Strict):
     recipe_id: str
     offer_id: str  # the offer_id of the recipe it answers
     lines: list[AnsweredLine]
+    steps: list[AnsweredStep] = []
 
 
 class Answer(Strict):
@@ -338,7 +418,13 @@ class Work:
         for line in recipe.original.ingredients:
             fact = facts.ingredients.get(line.id)
             lines.append(self._offer_line(line, fact.parse if fact else None))
-        return PacketRecipe(recipe_id=recipe.id, title=recipe.original.title, lines=lines)
+        uses = default_uses(recipe, facts)
+        return PacketRecipe(
+            recipe_id=recipe.id,
+            title=recipe.original.title,
+            lines=lines,
+            steps=[_offer_step(step, uses[step.id]) for step in recipe.original.steps],
+        )
 
     def _offer_line(self, line: IngredientLine, parse: ParseFact | None) -> PacketLine:
         name = _name(line.text, parse)
@@ -405,7 +491,7 @@ class Work:
             )
         _, facts = self.recipes[answered.recipe_id]
         lines = {line.line_id: line for line in offered.lines}
-        recipe = _Answering(self, facts, model)
+        recipe = _Answering(self, facts, model, set(lines))
         for answered_line in answered.lines:
             line = lines.get(answered_line.line_id)
             if line is None:
@@ -414,6 +500,7 @@ class Work:
                 recipe.errors.append(f"{line.line_id}: answered twice")
             else:
                 recipe.answer(line, answered_line)
+        recipe.answer_steps(offered.steps, answered.steps)
         if recipe.errors:
             raise Rejected(recipe.errors)
         if (learned := len(recipe.created) + len(recipe.learned)) > MAX_LEARNED:
@@ -425,7 +512,7 @@ class Work:
         return Enrichment(
             enrichment_version=ENRICHMENT_VERSION,
             fdc_release=self.snapshot.release,
-            facts=RecipeFacts(ingredients=recipe.ingredients),
+            facts=RecipeFacts(ingredients=recipe.ingredients, steps=recipe.steps),
             issues=recipe.issues,
             canonical_ingredients=list(recipe.created.values()),
             wordings=list(recipe.learned.values()),
@@ -441,12 +528,18 @@ class Work:
 
 
 class _Answering:
-    """One recipe's answer, line by line: its errors, or the facts and what it learns."""
+    """One recipe's answer, line by line and step by step: its errors, or the facts and what it
+    learns.
+    """
 
-    def __init__(self, work: Work, facts: RecipeFacts, model: str) -> None:
+    def __init__(self, work: Work, facts: RecipeFacts, model: str, line_ids: set[str]) -> None:
         self.work = work
         self.model = model
+        self.line_ids = line_ids
         self.ingredients = dict(facts.ingredients)
+        self.steps: dict[str, StepFacts] = {}
+        # How much of each line the answered steps use, all told.
+        self.portions: dict[str, float] = {}
         self.errors: list[str] = []
         self.answered: set[str] = set()
         self.issues: list[EnrichmentIssue] = []
@@ -506,6 +599,88 @@ class _Answering:
         # A line without a parse has only its text, which is no wording to learn.
         if parse:
             self._learn(wording, canonical)
+
+    def answer_steps(self, offered: list[PacketStep], answered: list[AnsweredStep]) -> None:
+        """Each answered step's segments and uses, refusing a line whose portions across the
+        steps add up to more than all of it.
+        """
+        steps = {step.step_id: step for step in offered}
+        for answered_step in answered:
+            step = steps.get(answered_step.step_id)
+            if step is None:
+                self.errors.append(f"no step {answered_step.step_id}")
+            elif answered_step.step_id in self.steps:
+                self.errors.append(f"{step.step_id}: answered twice")
+            else:
+                self._answer_step(step, answered_step)
+        self.errors += [
+            f"{ref}: its portions add up to {total:g}, more than all of it"
+            for ref, total in self.portions.items()
+            if total > 1 + PORTION_TOLERANCE
+        ]
+
+    def _answer_step(self, step: PacketStep, answered: AnsweredStep) -> None:
+        """The step's segments, built by placing its kept offers and its ingredients, each with
+        its portion, where they are written, with text between, and its uses, each line's portions
+        summed.
+        """
+        offers = {f"o{n}": found for n, found in enumerate(find_offers(step.text), 1)}
+        errors: list[str] = []
+        placed: list[tuple[int, Segment]] = []
+        for offer_id in dict.fromkeys(answered.keep):
+            if offer_id in offers:
+                placed.append(offers[offer_id])
+            else:
+                errors.append(f"offer {offer_id} wasn't made")
+        uses: dict[str, float] = {}
+        for ingredient in answered.ingredients:
+            if ingredient.ref not in self.line_ids:
+                errors.append(f"no line {ingredient.ref}")
+                continue
+            if not 0 < ingredient.portion <= 1:
+                errors.append(
+                    f"{ingredient.ref}'s portion {ingredient.portion:g} isn't more than 0 and at "
+                    "most 1"
+                )
+                continue
+            start = _place(step.text, ingredient.written, placed)
+            if isinstance(start, str):
+                errors.append(start)
+                continue
+            placed.append(
+                (
+                    start,
+                    IngredientSegment(
+                        ref=ingredient.ref, written=ingredient.written, portion=ingredient.portion
+                    ),
+                )
+            )
+            uses[ingredient.ref] = uses.get(ingredient.ref, 0) + ingredient.portion
+        errors += [
+            f"{ref}'s portions add up to {total:g}, more than all of it"
+            for ref, total in uses.items()
+            if total > 1 + PORTION_TOLERANCE
+        ]
+        if errors:
+            self.errors += [f"{step.step_id}: {error}" for error in errors]
+            return
+        for ref, portion in uses.items():
+            self.portions[ref] = self.portions.get(ref, 0) + portion
+        self.steps[step.step_id] = StepFacts(
+            segments=SegmentsFact(
+                provenance="llm",
+                confidence=STEP_CONFIDENCE,
+                estimated=False,
+                segments=_segments(step.text, placed),
+            ),
+            uses=UsesFact(
+                provenance="llm",
+                confidence=STEP_CONFIDENCE,
+                estimated=True,
+                # A sum past 1 by no more than the tolerance is all of the line.
+                uses=[StepUse(ref=ref, portion=min(portion, 1)) for ref, portion in uses.items()],
+            ),
+        )
 
     def _parse(self, line_id: str) -> ParseFact | None:
         facts = self.ingredients.get(line_id)
@@ -621,6 +796,47 @@ def _check_food(answered: AnsweredLine, food: FdcCandidate | None) -> list[str]:
     if answered.portion_id is not None and answered.portion_id not in {p.id for p in food.portions}:
         return [f"portion {answered.portion_id} isn't one of FDC food {food.fdc_id}'s"]
     return []
+
+
+def _offer_step(step: Step, uses: list[StepUse]) -> PacketStep:
+    offers: list[OfferedDuration | OfferedTemperature] = []
+    for n, (_, segment) in enumerate(find_offers(step.text), 1):
+        if isinstance(segment, DurationSegment):
+            offers.append(OfferedDuration(id=f"o{n}", **segment.model_dump(exclude={"t"})))
+        else:
+            offers.append(OfferedTemperature(id=f"o{n}", **segment.model_dump(exclude={"t"})))
+    return PacketStep(
+        step_id=step.id,
+        text=step.text,
+        offers=offers,
+        default_uses=[OfferedUse(ref=use.ref, portion=use.portion) for use in uses],
+    )
+
+
+def _place(text: str, written: str, placed: list[tuple[int, Segment]]) -> int | str:
+    """Where `written` goes in the text: the first place it occurs that nothing placed overlaps,
+    or else why it can't go.
+    """
+    starts = [n for n in range(len(text)) if text.startswith(written, n)]
+    if not starts:
+        return f"{written} isn't in the text"
+    taken = [(start, start + len(written_as(segment))) for start, segment in placed]
+    free = (s for s in starts if all(s + len(written) <= a or b <= s for a, b in taken))
+    return next(free, f"{written} overlaps another part of the step")
+
+
+def _segments(text: str, placed: list[tuple[int, Segment]]) -> list[Segment]:
+    """The placed segments in the order they're written, with the text between them."""
+    segments: list[Segment] = []
+    at = 0
+    for start, segment in sorted(placed, key=lambda each: each[0]):
+        if start > at:
+            segments.append(TextSegment(v=text[at:start]))
+        segments.append(segment)
+        at = start + len(written_as(segment))
+    if at < len(text):
+        segments.append(TextSegment(v=text[at:]))
+    return segments
 
 
 def _offered_parse(parse: ParseFact | None) -> OfferedParse | None:

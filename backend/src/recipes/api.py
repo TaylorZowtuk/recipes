@@ -28,26 +28,33 @@ from recipes.ingest import (
 )
 from recipes.models import (
     MAX_RECIPE_BYTES,
+    PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
     Card,
     Difficulty,
+    DurationSegment,
     Enrichment,
     Image,
     IngredientFacts,
+    IngredientSegment,
     KitchenSettings,
     Original,
     Preview,
     QueuedIngest,
     QueuedIngestState,
     Recipe,
+    StepFacts,
+    TemperatureSegment,
     Ulid,
     WebsiteSource,
     WebUrl,
     Wording,
     new_ulid,
     normalize_wording,
+    written_as,
 )
+from recipes.offers import find_offers
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -450,11 +457,13 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
             "Ingredient's id is taken, or an editor confirmed a wording"
         },
         422: {
-            "description": "A fact or Enrichment Issue is for a line the recipe doesn't have, an "
-            "issue isn't open, a wording isn't a parsed line's name, it learns more than one "
-            "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a "
-            "new Canonical Ingredient or wording is confirmed or at another schema version, or "
-            "the enriched recipe is too big to store"
+            "description": "A fact or Enrichment Issue is for a line or step the recipe doesn't "
+            "have, a step's segments aren't its text, its segments or uses name a line the recipe "
+            "doesn't have, a line's portions add up to more than 1, an issue isn't open, a "
+            "wording isn't a parsed line's name, it learns more than one write holds, a fact "
+            "names an unknown Canonical Ingredient or Store Category, or a new Canonical "
+            "Ingredient or wording is confirmed or at another schema version, or the enriched "
+            "recipe is too big to store"
         },
     },
 )
@@ -463,8 +472,12 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
     in Awaiting Review for an editor to check it.
 
-    Refused unless every fact is for one of the recipe's lines, every Enrichment Issue is on
-    one of their facts and arrives open with no confirm batch, every wording is the normalized
+    Refused unless every fact is for one of the recipe's lines or steps, every step's segments
+    are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
+    duration or temperature segment is one code finds in its step's text, a step with segments has
+    uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
+    the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
+    with no confirm batch, every wording is the normalized
     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
     names a Canonical Ingredient that exists or is new here, every new one's Store Category
     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
@@ -476,6 +489,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     if recipe.status != "pending":
         raise HTTPException(409, "Only a Pending recipe can be enriched")
     _check_lines(body, recipe)
+    _check_steps(body, recipe)
     if len(body.canonical_ingredients) + len(body.wordings) > MAX_LEARNED:
         raise HTTPException(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
@@ -554,13 +568,16 @@ def delete_recipe(
 
 
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
-    """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no fact or not
-    open, and a wording that isn't a parsed line's name.
+    """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no line or step
+    fact or not open, and a wording that isn't a parsed line's name.
     """
     lines = {line.id for line in recipe.original.ingredients}
     if unknown := sorted(body.facts.ingredients.keys() - lines):
         raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
-    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
+    steps = {step.id for step in recipe.original.steps}
+    facts = {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields} | {
+        f"{step}.{fact}" for step in steps for fact in StepFacts.model_fields
+    }
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment.
@@ -573,6 +590,63 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     }
     if unknown := sorted({wording.wording for wording in body.wordings} - names):
         raise HTTPException(422, f"No parsed line is named {', '.join(unknown)}")
+
+
+def _check_steps(body: Enrichment, recipe: Recipe) -> None:
+    """Refuse a fact for a step the recipe doesn't have, a step's facts `_check_step` refuses, and
+    a line used more than once over across the steps.
+    """
+    texts = {step.id: step.text for step in recipe.original.steps}
+    if unknown := sorted(body.facts.steps.keys() - texts.keys()):
+        raise HTTPException(422, f"The recipe has no step {', '.join(unknown)}")
+    lines = {line.id for line in recipe.original.ingredients}
+    portions: dict[str, float] = {}
+    for step_id, facts in body.facts.steps.items():
+        _check_step(step_id, texts[step_id], facts, lines)
+        for use in facts.uses.uses if facts.uses else []:
+            portions[use.ref] = portions.get(use.ref, 0) + use.portion
+    if over := sorted(ref for ref, total in portions.items() if total > 1 + PORTION_TOLERANCE):
+        raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
+
+
+def _check_step(step_id: str, text: str, facts: StepFacts, lines: set[str]) -> None:
+    """Refuse segments or uses naming a line the recipe doesn't have, a line used twice, segments
+    that aren't the step's text, a duration or temperature that isn't what code finds where it's
+    written, and, in a step with segments, uses that aren't its ingredient segments' portions
+    summed per line.
+    """
+    uses = facts.uses.uses if facts.uses else []
+    segments = facts.segments.segments if facts.segments else []
+    named = {s.ref for s in segments if isinstance(s, IngredientSegment)}
+    if unknown := sorted(({use.ref for use in uses} | named) - lines):
+        raise HTTPException(422, f"The recipe has no line {', '.join(unknown)}")
+    refs = [use.ref for use in uses]
+    if twice := sorted({ref for ref in refs if refs.count(ref) > 1}):
+        raise HTTPException(422, f"Step {step_id} uses {', '.join(twice)} twice")
+    used = {use.ref: use.portion for use in uses}
+    if facts.segments is None:
+        return
+    if "".join(written_as(segment) for segment in segments) != text:
+        raise HTTPException(422, f"Step {step_id}'s segments aren't its text")
+    found = {(start, segment.written): segment for start, segment in find_offers(text)}
+    summed: dict[str, float] = {}
+    at = 0
+    for segment in segments:
+        if isinstance(segment, DurationSegment | TemperatureSegment) and (
+            found.get((at, segment.written)) != segment
+        ):
+            raise HTTPException(
+                422, f"Step {step_id}'s {segment.written} isn't what code finds there"
+            )
+        if isinstance(segment, IngredientSegment):
+            summed[segment.ref] = summed.get(segment.ref, 0) + segment.portion
+        at += len(written_as(segment))
+    if used.keys() != summed.keys() or any(
+        abs(portion - summed[ref]) > PORTION_TOLERANCE for ref, portion in used.items()
+    ):
+        raise HTTPException(
+            422, f"Step {step_id}'s uses aren't its ingredient segments' portions summed"
+        )
 
 
 def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:

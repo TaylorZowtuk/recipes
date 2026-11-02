@@ -16,11 +16,19 @@ from recipes.models import (
     IngredientLine,
     Original,
     Recipe,
+    Step,
     StoreCategory,
     WebsiteSource,
     Wording,
 )
-from recipes.packet import Answer, AnsweredRecipe, Rejected, Work, readable_quantities
+from recipes.offers import find_offers
+from recipes.packet import (
+    Answer,
+    AnsweredRecipe,
+    Rejected,
+    Work,
+    readable_quantities,
+)
 from recipes.parse import parse_line
 
 FIXTURE = Path(__file__).parent / "fixtures" / "fdc-snapshot.json"
@@ -39,7 +47,7 @@ GLIMMER = CanonicalIngredient(
 LINES = ["2 quill eggs", "1-2 tsp glimmer oil", "3 cloves snorp garlic, minced", "salt, to taste"]
 
 
-def recipe(*lines: str, recipe_id: str = RECIPE_ID) -> Recipe:
+def recipe(*lines: str, recipe_id: str = RECIPE_ID, steps: tuple[str, ...] = ()) -> Recipe:
     return Recipe(
         id=recipe_id,
         schema_version=SCHEMA_VERSION,
@@ -56,7 +64,7 @@ def recipe(*lines: str, recipe_id: str = RECIPE_ID) -> Recipe:
             ingredients=[
                 IngredientLine(id=f"i{n}", text=text) for n, text in enumerate(lines or LINES, 1)
             ],
-            steps=[],
+            steps=[Step(id=f"s{n}", text=text) for n, text in enumerate(steps, 1)],
         ),
         status="pending",
     )
@@ -97,15 +105,20 @@ def line(line_id: str = "i2", **fields: Any) -> dict[str, Any]:
     }
 
 
-def answer(*lines: dict[str, Any], recipe_id: str = RECIPE_ID, offer_id: str = "") -> Answer:
-    return Answer.model_validate(
-        {
-            "model": "a-model",
-            "recipes": [
-                {"recipe_id": recipe_id, "offer_id": offer_id, "lines": list(lines or [line()])}
-            ],
-        }
-    )
+def answer(
+    *lines: dict[str, Any],
+    recipe_id: str = RECIPE_ID,
+    offer_id: str = "",
+    steps: list[dict[str, Any]] | None = None,
+) -> Answer:
+    answered: dict[str, Any] = {
+        "recipe_id": recipe_id,
+        "offer_id": offer_id,
+        "lines": list(lines or [line()]),
+    }
+    if steps is not None:
+        answered["steps"] = steps
+    return Answer.model_validate({"model": "a-model", "recipes": [answered]})
 
 
 def answering(work: Work, answered: Answer) -> AnsweredRecipe:
@@ -554,3 +567,292 @@ def test_an_answer_with_unknown_fields_is_refused() -> None:
                 ],
             }
         )
+
+
+# Steps
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Simmer 8-10 minutes.", [("duration", 480, 600, "8-10 minutes")]),
+        ("Simmer 8 to 10 minutes.", [("duration", 480, 600, "8 to 10 minutes")]),
+        ("Simmer 8\u201310 mins.", [("duration", 480, 600, "8\u201310 mins")]),
+        ("Rest 1 hour.", [("duration", 3600, 3600, "1 hour")]),
+        ("Whisk for 30 seconds.", [("duration", 30, 30, "30 seconds")]),
+        ("Braise 1\u00bd hours.", [("duration", 5400, 5400, "1\u00bd hours")]),
+        ("Braise 1 1/2 hours.", [("duration", 5400, 5400, "1 1/2 hours")]),
+        ("Braise 2.5 hrs.", [("duration", 9000, 9000, "2.5 hrs")]),
+        ("Chill 45 min, then serve.", [("duration", 2700, 2700, "45 min")]),
+        ("Heat the oven to 350\u00b0F.", [("temperature", 177, 177, "350\u00b0F")]),
+        ("Heat the oven to 180 \u00b0C.", [("temperature", 180, 180, "180 \u00b0C")]),
+        ("Heat the oven to 180C.", [("temperature", 180, 180, "180C")]),
+        ("Heat the oven to 425 degrees F.", [("temperature", 218, 218, "425 degrees F")]),
+        (
+            "Bake at 350\u00b0F for 20 minutes.",
+            [("temperature", 177, 177, "350\u00b0F"), ("duration", 1200, 1200, "20 minutes")],
+        ),
+        ("Braise 1-1/2 hours.", [("duration", 5400, 5400, "1-1/2 hours")]),
+        ("Heat the oven to 350\u00b0f.", [("temperature", 177, 177, "350\u00b0f")]),
+        ("Heat the oven to 180c.", []),
+        ("Heat the oven to 180\u00b0c.", [("temperature", 180, 180, "180\u00b0c")]),
+        ("Add 2c sugar.", []),
+        ("Add 1/2c milk.", []),
+        (
+            "Heat the oven to 425 degrees fahrenheit.",
+            [("temperature", 218, 218, "425 degrees fahrenheit")],
+        ),
+        ("Heat the oven to 350 Degrees F.", [("temperature", 177, 177, "350 Degrees F")]),
+        ("Give it a 15-minute rest.", [("duration", 900, 900, "15-minute")]),
+        ("Add the minced snorp garlic and 2 cups of water.", []),
+        ("Cut into 2 C-shaped pieces.", []),
+        ("Stir in 2 c sugar.", []),
+        ("Simmer 10-8 minutes.", []),
+    ],
+    ids=[
+        "range",
+        "range with to",
+        "en dash range",
+        "hour",
+        "seconds",
+        "vulgar fraction",
+        "mixed number",
+        "decimal",
+        "min",
+        "fahrenheit",
+        "celsius with a space",
+        "celsius attached",
+        "degrees",
+        "both in order",
+        "hyphenated mixed number",
+        "lowercase fahrenheit",
+        "lowercase celsius attached without a degree sign",
+        "lowercase celsius with a degree sign",
+        "cups, not celsius",
+        "fractional cups, not celsius",
+        "lowercase degrees fahrenheit",
+        "capitalised degrees",
+        "hyphenated adjective",
+        "minced is no minute",
+        "C-shaped is no temperature",
+        "c for cups is no temperature",
+        "reversed range",
+    ],
+)
+def test_durations_and_temperatures_are_found_in_a_steps_text(
+    text: str, expected: list[tuple[str, int, int, str]]
+) -> None:
+    found = [
+        (s.t, s.low_s, s.high_s, s.written) if s.t == "duration" else (s.t, s.c, s.c, s.written)
+        for _, s in find_offers(text)
+    ]
+
+    assert found == expected
+    assert all(text[start:].startswith(s.written) for start, s in find_offers(text))
+
+
+STEPS = (
+    "Heat the glimmer oil to 350\u00b0F.",
+    "Fry the quill eggs and snorp garlic for 8-10 minutes, then add half the salt.",
+    "Rest 1 hour. Season with the rest of the salt, salt and more salt.",
+)
+
+
+def stepped() -> Work:
+    return work(recipe(steps=STEPS))
+
+
+def step(step_id: str, *spans: dict[str, Any], keep: list[str] | None = None) -> dict[str, Any]:
+    return {"step_id": step_id, "keep": keep or [], "ingredients": list(spans)}
+
+
+def span(ref: str, written: str, portion: float = 1.0) -> dict[str, Any]:
+    return {"ref": ref, "written": written, "portion": portion}
+
+
+def test_the_packet_offers_each_step_its_durations_temperatures_and_default_uses() -> None:
+    (offered,) = stepped().packet().recipes
+
+    assert [s.step_id for s in offered.steps] == ["s1", "s2", "s3"]
+    oil, fry, rest = offered.steps
+    assert oil.text == STEPS[0]
+    assert [(o.id, o.t, o.written) for o in oil.offers] == [("o1", "temperature", "350\u00b0F")]
+    assert [(o.id, o.t, o.written) for o in fry.offers] == [("o1", "duration", "8-10 minutes")]
+    assert [(o.id, o.written) for o in rest.offers] == [("o1", "1 hour")]
+    # Each line is all used in the first step that mentions its name.
+    assert [(u.ref, u.portion) for u in oil.default_uses] == [("i2", 1.0)]
+    assert [(u.ref, u.portion) for u in fry.default_uses] == [
+        ("i1", 1.0),
+        ("i3", 1.0),
+        ("i4", 1.0),
+    ]
+    assert rest.default_uses == []
+
+
+def test_the_steps_offers_are_part_of_the_offer_id() -> None:
+    assert offer_id(stepped()) != offer_id(work(recipe(steps=STEPS[:2])))
+
+
+def test_an_answered_step_gets_segments_and_uses_built_from_its_text() -> None:
+    enrichment = enrich(
+        stepped(),
+        answer(steps=[step("s1", span("i2", "glimmer oil"), keep=["o1"])]),
+    )
+
+    oil = enrichment.facts.steps["s1"]
+    assert oil.segments is not None
+    assert [s.model_dump(exclude_defaults=False) for s in oil.segments.segments] == [
+        {"t": "text", "v": "Heat the "},
+        {"t": "ingredient", "ref": "i2", "written": "glimmer oil", "portion": 1.0},
+        {"t": "text", "v": " to "},
+        {"t": "temperature", "c": 177, "written": "350\u00b0F"},
+        {"t": "text", "v": "."},
+    ]
+    assert oil.segments.provenance == "llm"
+    assert oil.uses is not None
+    assert [(u.ref, u.portion) for u in oil.uses.uses] == [("i2", 1.0)]
+    assert (oil.uses.provenance, oil.uses.estimated) == ("llm", True)
+    # A step the answer leaves out keeps its raw text.
+    assert sorted(enrichment.facts.steps) == ["s1"]
+
+
+def test_an_offer_the_answer_drops_stays_text() -> None:
+    enrichment = enrich(stepped(), answer(steps=[step("s1")]))
+
+    oil = enrichment.facts.steps["s1"]
+    assert oil.segments is not None
+    assert [s.model_dump() for s in oil.segments.segments] == [{"t": "text", "v": STEPS[0]}]
+    assert oil.uses is not None
+    assert oil.uses.uses == []
+
+
+def test_an_ingredient_split_across_steps_uses_a_portion_in_each() -> None:
+    enrichment = enrich(
+        stepped(),
+        answer(
+            steps=[
+                step(
+                    "s2",
+                    span("i1", "quill eggs"),
+                    span("i3", "snorp garlic"),
+                    span("i4", "salt", 0.25),
+                    keep=["o1"],
+                ),
+                step("s3", span("i4", "salt", 0.5), span("i4", "salt", 0.25), keep=["o1"]),
+            ]
+        ),
+    )
+
+    fry, rest = enrichment.facts.steps["s2"], enrichment.facts.steps["s3"]
+    assert fry.uses is not None
+    assert [(u.ref, u.portion) for u in fry.uses.uses] == [("i1", 1), ("i3", 1), ("i4", 0.25)]
+    assert rest.uses is not None
+    assert [(u.ref, u.portion) for u in rest.uses.uses] == [("i4", 0.75)]
+    assert rest.segments is not None
+    segments = rest.segments.segments
+    assert "".join(s.v if s.t == "text" else s.written for s in segments) == STEPS[2]
+    # The same words written twice take the first two places they occur.
+    assert [s.t for s in segments] == [
+        "text",
+        "duration",
+        "text",
+        "ingredient",
+        "text",
+        "ingredient",
+        "text",
+    ]
+    assert [s.v for s in segments if s.t == "text"][1:3] == [
+        ". Season with the rest of the ",
+        ", ",
+    ]
+    # Each mention keeps its own portion, and the step's use is their sum.
+    assert [s.portion for s in segments if s.t == "ingredient"] == [0.5, 0.25]
+
+
+@pytest.mark.parametrize(
+    ("steps", "error"),
+    [
+        ([step("s9")], "no step s9"),
+        ([step("s1"), step("s1")], "s1: answered twice"),
+        ([step("s1", span("i9", "glimmer oil"))], "s1: no line i9"),
+        ([step("s1", span("i2", "glimmer butter"))], "s1: glimmer butter isn't in the text"),
+        ([step("s1", keep=["o7"])], "s1: offer o7 wasn't made"),
+        (
+            [step("s1", span("i2", "350"), keep=["o1"])],
+            "s1: 350 overlaps another part of the step",
+        ),
+        (
+            [step("s1", span("i2", "glimmer oil"), span("i2", "oil"))],
+            "s1: oil overlaps another part of the step",
+        ),
+        (
+            [step("s1", span("i2", "glimmer oil", 0))],
+            "s1: i2's portion 0 isn't more than 0 and at most 1",
+        ),
+        (
+            [step("s1", span("i2", "glimmer oil", 1.5))],
+            "s1: i2's portion 1.5 isn't more than 0 and at most 1",
+        ),
+        (
+            [step("s3", span("i4", "salt", 0.75), span("i4", "salt", 0.75))],
+            "s3: i4's portions add up to 1.5, more than all of it",
+        ),
+        (
+            [step("s2", span("i4", "salt", 0.75)), step("s3", span("i4", "salt", 0.5))],
+            "i4: its portions add up to 1.25, more than all of it",
+        ),
+    ],
+    ids=[
+        "unknown step",
+        "step answered twice",
+        "unknown line",
+        "written not in the text",
+        "unknown offer",
+        "span overlapping an offer",
+        "spans overlapping",
+        "zero portion",
+        "portion over 1",
+        "portions over 1 in one step",
+        "portions over 1 across steps",
+    ],
+)
+def test_a_step_answer_outside_the_offers_is_rejected(
+    steps: list[dict[str, Any]], error: str
+) -> None:
+    assert errors(stepped(), answer(steps=steps)) == [error]
+
+
+def test_portions_adding_up_to_all_of_an_ingredient_are_allowed() -> None:
+    # Nine ninths add up to a little more than 1 in floating point.
+    salted = work(recipe(steps=("Season with salt.",) * 9))
+    ninths = [step(f"s{n}", span("i4", "salt", 1 / 9)) for n in range(1, 10)]
+
+    enrichment = enrich(salted, answer(steps=ninths))
+
+    assert len(enrichment.facts.steps) == 9
+
+
+def test_a_steps_portions_adding_up_to_all_of_an_ingredient_use_all_of_it() -> None:
+    salted = work(recipe(steps=("Season with salt" + ", salt" * 8 + ".",)))
+
+    enrichment = enrich(salted, answer(steps=[step("s1", *[span("i4", "salt", 1 / 9)] * 9)]))
+
+    season = enrichment.facts.steps["s1"]
+    assert season.uses is not None
+    assert [(u.ref, u.portion) for u in season.uses.uses] == [("i4", 1.0)]
+    assert season.segments is not None
+    assert [s.portion for s in season.segments.segments if s.t == "ingredient"] == [1 / 9] * 9
+
+
+def test_an_offer_kept_twice_is_one_segment() -> None:
+    enrichment = enrich(stepped(), answer(steps=[step("s1", keep=["o1", "o1"])]))
+
+    oil = enrichment.facts.steps["s1"]
+    assert oil.segments is not None
+    assert [s.t for s in oil.segments.segments] == ["text", "temperature", "text"]
+
+
+def test_the_instructions_state_the_default_uses_rule() -> None:
+    instructions = work().packet().instructions
+    assert "first step that mentions" in instructions
+    assert "not applied for you: list every ingredient each step names" in instructions
