@@ -33,6 +33,7 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
   const button = useRef<HTMLButtonElement>(null);
   const sheet = useRef<HTMLDialogElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
+  const downOnBackdrop = useRef(false);
   const active = activeFilterCount(filters);
   return (
     <>
@@ -49,14 +50,23 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
       >
         {active > 0 ? `Filters · ${active}` : "Filters"}
       </button>
-      {/* The padding is on .sheet-body, so only a tap on the backdrop targets the dialog itself. */}
+      {/* The padding is on .sheet-body, so only a tap on the backdrop targets the dialog itself.
+          Closing also needs the press to have begun there: a drag from a chip released on the backdrop
+          clicks the dialog. */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: a tap on the backdrop; Escape closes it too. */}
       <dialog
         ref={sheet}
         className="sheet"
         aria-labelledby={`${id}-title`}
         onClose={() => button.current?.focus()}
-        onClick={(event) => event.target === event.currentTarget && event.currentTarget.close()}
+        onPointerDown={(event) => {
+          downOnBackdrop.current = event.target === event.currentTarget;
+        }}
+        onClick={(event) =>
+          downOnBackdrop.current &&
+          event.target === event.currentTarget &&
+          event.currentTarget.close()
+        }
       >
         <div className="sheet-body">
           <h2 ref={title} id={`${id}-title`} className="sheet-title" tabIndex={-1}>
@@ -108,7 +118,9 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
           />
           {/* showModal() makes the page's status line inert, so the count is announced from here. */}
           <p role="status" className="visually-hidden">
-            {matchCount(shown)}
+            {shown === 0
+              ? "No recipes match"
+              : `${shown} ${shown === 1 ? "recipe matches" : "recipes match"}`}
           </p>
           <div className="sheet-actions">
             <button

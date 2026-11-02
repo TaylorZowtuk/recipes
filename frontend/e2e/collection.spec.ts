@@ -206,7 +206,7 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   // The sheet covers the status line, so its Done button carries the live count.
   const done = sheet.getByRole("button", { name: /^(Show \d+ recipes?|No recipes match)$/ });
   await expect(done).toHaveText("Show 1 recipe");
-  await expect(sheet.getByRole("status")).toHaveText("Show 1 recipe");
+  await expect(sheet.getByRole("status")).toHaveText("1 recipe matches");
 
   // Clear empties every filter, the chip row's too.
   await sheet.getByRole("button", { name: "Clear" }).click();
@@ -258,6 +258,21 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await page.keyboard.press("Escape");
   await expect(sheet).toBeHidden();
   await expect(filters).toBeFocused();
+
+  // Pressing a chip and releasing on the backdrop leaves the sheet open and the chip unchanged.
+  await filters.click();
+  const dragChip = sheet.getByRole("button", { name: "weeknight", exact: true });
+  const pressedBefore = await dragChip.getAttribute("aria-pressed");
+  const chipBox = await dragChip.boundingBox();
+  if (!chipBox) throw new Error("The chip isn't laid out");
+  await page.mouse.move(chipBox.x + chipBox.width / 2, chipBox.y + chipBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(4, 4);
+  await page.mouse.up();
+  await expect(sheet).toBeVisible();
+  await expect(dragChip).toHaveAttribute("aria-pressed", pressedBefore ?? "false");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
 
   // A tap on the backdrop, outside the sheet, closes it.
   await filters.click();
