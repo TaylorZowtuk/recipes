@@ -24,6 +24,13 @@ async function shownCount(page: Page) {
 // The Shell's sync status is the other status on every screen.
 const resultCount = (page: Page) => page.getByRole("status").and(page.locator(".result-count"));
 
+// The sheet slides in; measuring or clicking by coordinates mid-slide gives fractional boxes.
+async function settled(sheet: Locator) {
+  await sheet.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)),
+  );
+}
+
 async function expectTapTarget(target: Locator) {
   const box = await target.boundingBox();
   expect(box?.width).toBeGreaterThanOrEqual(50);
@@ -192,6 +199,7 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await filters.click();
   const sheet = page.getByRole("dialog", { name: "Filters" });
   await expect(sheet).toBeVisible();
+  await settled(sheet);
   await expect(sheet.getByRole("heading", { name: "Filters" })).toBeFocused();
   await expect(sheet.getByRole("button", { name: "weeknight", exact: true })).toHaveAttribute(
     "aria-pressed",
@@ -248,6 +256,8 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
 
   // A tap in the sheet's own margin, beside a pill, leaves it open; Escape closes it.
   await filters.click();
+  await expect(sheet).toBeVisible();
+  await settled(sheet);
   const box = await sheet.boundingBox();
   const any = difficulty.getByText("Any", { exact: true });
   await any.scrollIntoViewIfNeeded();
@@ -261,6 +271,8 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
 
   // Pressing a chip and releasing on the backdrop leaves the sheet open and the chip unchanged.
   await filters.click();
+  await expect(sheet).toBeVisible();
+  await settled(sheet);
   const dragChip = sheet.getByRole("button", { name: "weeknight", exact: true });
   const pressedBefore = await dragChip.getAttribute("aria-pressed");
   const chipBox = await dragChip.boundingBox();
