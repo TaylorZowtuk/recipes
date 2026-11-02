@@ -1,4 +1,5 @@
 import type { Difficulty } from "./api/client";
+import { totalDifficulty } from "./cardFilters";
 
 const METERS = [
   ["Prep", "prep"],
@@ -11,7 +12,7 @@ const METERS = [
 // one.
 export function DifficultyMeters({ difficulty }: { difficulty: Difficulty | null }) {
   if (!difficulty) return null;
-  const total = difficulty.prep + difficulty.cook + difficulty.cleanup;
+  const total = totalDifficulty(difficulty);
   const spoken = METERS.map(([label, key]) => `${label} ${difficulty[key]} of 3`).join(", ");
   return (
     <span

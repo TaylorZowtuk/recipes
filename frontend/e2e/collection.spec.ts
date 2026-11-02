@@ -159,6 +159,96 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await expect(seededCards(page)).toHaveCount(seededCount);
 });
 
+test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", async ({
+  page,
+}) => {
+  await page.goto("/recipes");
+  await shownCount(page);
+  const seededTitles = () => seededCards(page).locator(".card-title");
+
+  // A row of the Collection's Tags, one tap each, that scrolls sideways rather than wrapping.
+  const chips = page.getByRole("list", { name: "Filter by Tag" });
+  const weeknight = chips.getByRole("button", { name: "weeknight", exact: true });
+  await expect(weeknight).toHaveAttribute("aria-pressed", "false");
+  await expectTapTarget(weeknight);
+  const row = await chips.evaluate((list) => ({
+    style: getComputedStyle(list).overflowX,
+    tops: new Set([...list.children].map((chip) => chip.getBoundingClientRect().top)).size,
+  }));
+  expect(row.style).toBe("auto");
+  expect(row.tops).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => document.documentElement.clientWidth),
+  );
+
+  await weeknight.click();
+  await expect(weeknight).toHaveAttribute("aria-pressed", "true");
+  await expect(seededTitles()).toHaveText([recipeTitle, "Tomato Lentil Soup"]);
+  const filters = page.getByRole("button", { name: /^Filters/ });
+  await expect(filters).toHaveText("Filters · 1");
+  await expectTapTarget(filters);
+
+  // The sheet shares the chosen Tags, and a second one must also match.
+  await filters.click();
+  const sheet = page.getByRole("dialog", { name: "Filters" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("heading", { name: "Filters" })).toBeFocused();
+  await expect(sheet.getByRole("button", { name: "weeknight", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const vegetarian = sheet.getByRole("button", { name: "vegetarian", exact: true });
+  await expectTapTarget(vegetarian);
+  await vegetarian.click();
+  await expect(seededTitles()).toHaveText([recipeTitle]);
+  await expect(filters).toHaveText("Filters · 2");
+
+  // Clear empties every filter, the chip row's too.
+  await sheet.getByRole("button", { name: "Clear" }).click();
+  await expect(seededCards(page)).toHaveCount(seededCount);
+  await expect(filters).toHaveText("Filters");
+  await expect(weeknight).toHaveAttribute("aria-pressed", "false");
+
+  // A maximum Total Difficulty, then easy cleanup, each drop the cards without a Difficulty.
+  const difficulty = sheet.getByRole("group", { name: "Total Difficulty at most" });
+  await expect(difficulty.getByRole("radio", { name: "Any" })).toBeChecked();
+  await expectTapTarget(difficulty.locator("label").filter({ hasText: "4" }));
+  await difficulty.getByText("4", { exact: true }).click();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await difficulty.getByText("Any", { exact: true }).click();
+  await expect(seededCards(page)).toHaveCount(seededCount);
+
+  const cleanup = sheet.getByRole("checkbox", { name: "Easy cleanup" });
+  const cleanupLabel = sheet.locator("label", { hasText: "Easy cleanup" });
+  await expectTapTarget(cleanupLabel);
+  await cleanupLabel.click();
+  await expect(cleanup).toBeChecked();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await cleanupLabel.click();
+
+  // A maximum Stated Time drops the cards without one.
+  const time = sheet.getByRole("group", { name: "Stated Time at most" });
+  await time.getByText("30 min", { exact: true }).click();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
+  await expect(filters).toHaveText("Filters · 1");
+
+  // Done closes the sheet and returns focus to the Filters button; the filters stay.
+  const done = sheet.getByRole("button", { name: "Done" });
+  await expectTapTarget(done);
+  await expectTapTarget(sheet.getByRole("button", { name: "Clear" }));
+  await done.click();
+  await expect(sheet).toBeHidden();
+  await expect(filters).toBeFocused();
+  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", recipeTitle]);
+
+  // Nothing matching says so, with the search too.
+  await weeknight.click();
+  await chips.getByRole("button", { name: "breakfast", exact: true }).click();
+  await expect(resultCount(page)).toHaveText("No recipes match these filters.");
+  await page.getByRole("searchbox", { name: "Search recipe titles" }).fill("oats");
+  await expect(resultCount(page)).toHaveText("No recipes match “oats” and these filters.");
+});
+
 test("a stale or missing slug still opens the recipe and corrects itself", async ({ page }) => {
   for (const path of [`/recipes/${recipeId}/wrong-slug`, `/recipes/${recipeId}`]) {
     await page.goto("/recipes");
