@@ -40,7 +40,7 @@ _Avoid_: Library, cookbook
 One dish in the collection, together with everything the household has recorded about it.
 
 **Card**:
-A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty, tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
+A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty (or else the Suggested Difficulty, labelled as one), tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
 _Avoid_: Tile, summary, listing
 
 **Candidate Photo**:
