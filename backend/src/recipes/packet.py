@@ -594,7 +594,7 @@ class Work:
                 [
                     (
                         "its offer changed since the packet: make a new packet and answer that, "
-                        "if you used a different --substitutes file, "
+                        "or, if you used a different --substitutes file, "
                         "apply with the one the packet was made with"
                     )
                 ]

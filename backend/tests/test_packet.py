@@ -231,7 +231,7 @@ def test_an_answer_to_an_older_offer_is_rejected() -> None:
     assert errors(work(), answer(offer_id=older)) == [
         (
             "its offer changed since the packet: make a new packet and answer that, "
-            "if you used a different --substitutes file, "
+            "or, if you used a different --substitutes file, "
             "apply with the one the packet was made with"
         )
     ]
