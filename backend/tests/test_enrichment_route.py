@@ -728,3 +728,121 @@ def test_an_issue_on_a_steps_fact_is_accepted(
     response = enrich_matched(editor_client, recipe.id, issues=[{**issue(1), "fact_id": fact_id}])
 
     assert response.status_code == 200
+
+
+CHUCK = {**BEEF, "id": CHUCK_ID, "name": "beef chuck"}
+SUGGESTION = {"provenance": "llm", "confidence": 0.6, "estimated": True}
+SWAP = {
+    "wording": "beef chuck",
+    "canonical_id": CHUCK_ID,
+    "ratio": 1,
+    "note": "simmer a little longer",
+    "fdc_id": 1002,
+    "portion_id": None,
+    "fdc": {
+        key: MATCHED["ingredients"]["i1"]["conversion"][key]
+        for key in ("dataset", "release", "density_g_per_ml", "grams_per_count", "count_unit")
+    }
+    | {"refused": None, "per_100g": MATCHED["ingredients"]["i1"]["conversion"]["per_100g"]},
+}
+
+
+def suggesting(
+    substitutions: dict[str, Any] | None = None, difficulty: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """The matched facts, with substitutions for the beef and a suggested Difficulty, each
+    changed by its fields.
+    """
+    beef = MATCHED["ingredients"]["i1"]
+    return {
+        "ingredients": {
+            "i1": {
+                **beef,
+                "substitutions": {**SUGGESTION, "items": [SWAP], **(substitutions or {})},
+            }
+        },
+        "difficulty": {**SUGGESTION, "prep": 1, "cook": 2, "cleanup": 3, **(difficulty or {})},
+    }
+
+
+def test_substitutions_and_a_suggested_difficulty_are_stored_with_the_recipe(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(
+        editor_client, recipe.id, facts=suggesting(), canonical_ingredients=[BEEF, CHUCK]
+    )
+
+    assert response.status_code == 200
+    stored = fetch(editor_client, recipe.id)["facts"]
+    swap = stored["ingredients"]["i1"]["substitutions"]
+    assert swap["items"] == [SWAP]
+    assert (swap["provenance"], swap["estimated"], swap["confirmed"]) == ("llm", True, False)
+    assert stored["difficulty"] == {**SUGGESTION, "prep": 1, "cook": 2, "cleanup": 3} | {
+        "confirmed": False,
+        "confirmed_by": None,
+        "confirmed_at": None,
+        "confirm_batch": None,
+    }
+    card = next(card for card in bundle(editor_client)["cards"] if card["id"] == recipe.id)
+    assert card["difficulty"] == {"prep": 1, "cook": 2, "cleanup": 3}
+    assert card["difficulty_suggested"] is True
+
+
+@pytest.mark.parametrize(
+    ("facts", "canonicals"),
+    [
+        (suggesting(substitutions={"confirmed": True}), [BEEF, CHUCK]),
+        (suggesting(difficulty={"confirmed": True}), [BEEF, CHUCK]),
+        (suggesting(difficulty={"confirm_batch": "batch-1"}), [BEEF, CHUCK]),
+        (suggesting(substitutions={"confirmed_by": "editor@example.com"}), [BEEF, CHUCK]),
+        (suggesting(substitutions={"provenance": "fdc"}), [BEEF, CHUCK]),
+        (suggesting(difficulty={"provenance": "editor"}), [BEEF, CHUCK]),
+        (suggesting(difficulty={"estimated": False}), [BEEF, CHUCK]),
+        (suggesting(), [BEEF]),
+        (suggesting(substitutions={"items": [{**SWAP, "canonical_id": BEEF_ID}]}), [BEEF]),
+    ],
+    ids=[
+        "confirmed substitutions",
+        "confirmed difficulty",
+        "difficulty in a confirm batch",
+        "substitutions confirmed by an editor",
+        "substitutions not from the LLM",
+        "difficulty not from the LLM",
+        "difficulty not estimated",
+        "unknown substitute",
+        "substitute is the line's own match",
+    ],
+)
+def test_substitutions_or_a_difficulty_enrichment_cant_vouch_for_are_refused(
+    editor_client: TestClient,
+    api_store: Store,
+    facts: dict[str, Any],
+    canonicals: list[dict[str, Any]],
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(
+        editor_client, recipe.id, facts=facts, canonical_ingredients=canonicals
+    )
+
+    assert response.status_code == 422
+    assert_nothing_written(editor_client, recipe)
+
+
+@pytest.mark.parametrize("fact_id", ["difficulty", "i1.substitutions"])
+def test_an_issue_on_a_suggestion_is_accepted(
+    editor_client: TestClient, api_store: Store, fact_id: str
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(
+        editor_client,
+        recipe.id,
+        facts=suggesting(),
+        canonical_ingredients=[BEEF, CHUCK],
+        issues=[{**issue(1), "fact_id": fact_id}],
+    )
+
+    assert response.status_code == 200
