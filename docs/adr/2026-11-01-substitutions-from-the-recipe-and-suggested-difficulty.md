@@ -23,7 +23,7 @@ We chose this because a model that proposes substitutes from its own cooking kno
 ## Consequences
 
 - Fewer substitutions than a model would invent: a recipe that states none has none until the household adds one.
-- Enrichment of substitutions takes two passes and a file between them. The cost is one extra model call per recipe that states a substitute.
+- Enrichment of substitutions takes two passes and a file between them. Pass 1 reads every Pending recipe, so each enrichment run costs one extra model call.
 - A card can show a Difficulty the editor never set. Its label says so, and the editor's own value replaces it.
 
 ## Considered options
