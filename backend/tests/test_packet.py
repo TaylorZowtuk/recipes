@@ -28,11 +28,11 @@ from recipes.packet import (
     Answer,
     AnsweredRecipe,
     Rejected,
-    Substitutes,
     Work,
     readable_quantities,
 )
 from recipes.parse import parse_line
+from recipes.substitutes import Substitutes, checked, substitutes_packet
 
 FIXTURE = Path(__file__).parent / "fixtures" / "fdc-snapshot.json"
 SNAPSHOT = fdc.load_snapshot(FIXTURE)
@@ -97,13 +97,14 @@ def work(
     wordings: list[Wording] | None = None,
     substitutes: Substitutes | None = None,
 ) -> Work:
+    pending = list(recipes) or [recipe()]
     return Work(
-        recipes=list(recipes) or [recipe()],
+        recipes=pending,
         canonical_ingredients=[GLIMMER] if canonicals is None else canonicals,
         wordings=[wording("glimmer oil")] if wordings is None else wordings,
         store_categories=CATEGORIES,
         snapshot=SNAPSHOT,
-        substitutes=substitutes,
+        substitutes=checked(substitutes, pending) if substitutes else None,
     )
 
 
@@ -228,7 +229,10 @@ def test_an_answer_to_an_older_offer_is_rejected() -> None:
     older = offer_id(work(canonicals=[]))
 
     assert errors(work(), answer(offer_id=older)) == [
-        "its offer changed since the packet: make a new packet and answer that"
+        (
+            "its offer changed since the packet: make a new packet and answer that, or apply "
+            "with the same --substitutes file the packet was made with"
+        )
     ]
 
 
@@ -471,6 +475,17 @@ def test_a_quantity_for_a_line_without_a_parse_is_rejected(monkeypatch: pytest.M
     ]
 
 
+def test_an_optional_correction_for_a_line_without_a_parse_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unparsed(monkeypatch, "1-2 tsp glimmer oil")
+    corrected = line(portion_id=None, optional=True, corrections_reason="the line says so")
+
+    assert errors(work(), answer(corrected)) == [
+        "i2: the line has no parse whose optional to correct"
+    ]
+
+
 def test_a_line_without_a_parse_learns_no_wording(monkeypatch: pytest.MonkeyPatch) -> None:
     unparsed(monkeypatch, "1-2 tsp glimmer oil")
 
@@ -571,6 +586,13 @@ def test_a_doubt_raises_an_issue_and_lowers_the_conversions_confidence() -> None
 def test_a_line_with_more_than_five_doubts_is_refused() -> None:
     with pytest.raises(ValueError, match="doubts"):
         answer(line(doubts=["Is it toasted?"] * 6))
+
+
+def test_a_line_with_more_than_five_substitutes_is_refused() -> None:
+    with pytest.raises(ValueError, match="substitutions"):
+        answer(line(substitutions=[substitution()] * 6))
+    with pytest.raises(ValueError, match="substitutes"):
+        substitutes(*[("zorbleberry oil", "description")] * 6)
 
 
 def test_an_answer_with_unknown_fields_is_refused() -> None:
@@ -913,7 +935,7 @@ def substitution(**fields: Any) -> dict[str, Any]:
 
 
 def test_the_substitutes_packet_gives_each_recipe_its_lines_steps_and_description() -> None:
-    packet = work(described()).substitutes_packet()
+    packet = substitutes_packet([described()])
 
     (offered,) = packet.recipes
     assert (offered.recipe_id, offered.title, offered.description) == (
@@ -974,15 +996,36 @@ def test_the_substitute_offers_are_part_of_the_offer_id() -> None:
         ),
         (
             substitutes(("snorp garlic oil", "s9")),
-            f"{RECIPE_ID} i2: no line, step or description s9",
+            f"{RECIPE_ID} i2: s9 isn't the line itself, a step or the description",
+        ),
+        (
+            substitutes(("snorp garlic", "i3")),
+            f"{RECIPE_ID} i2: i3 isn't the line itself, a step or the description",
+        ),
+        (
+            substitutes(("quill egg", "s1")),
+            f'{RECIPE_ID} i2: "quill egg" isn\'t in s1',
         ),
         (
             substitutes(("zorbleberry oil", "description"), ("Zorbleberry Oil", "description")),
             f'{RECIPE_ID} i2: "Zorbleberry Oil" is quoted twice',
         ),
         (
-            substitutes(("zorbleberry oil", "description"), recipe_id="01K7Q0000000000000000000R9"),
-            "01K7Q0000000000000000000R9 isn't a Pending recipe",
+            Substitutes.model_validate({"recipes": [ZORBLEBERRY_OIL.recipes[0].model_dump()] * 2}),
+            f"{RECIPE_ID}: given twice",
+        ),
+        (
+            Substitutes.model_validate(
+                {
+                    "recipes": [
+                        {
+                            "recipe_id": RECIPE_ID,
+                            "lines": [ZORBLEBERRY_OIL.recipes[0].lines[0].model_dump()] * 2,
+                        }
+                    ]
+                }
+            ),
+            f"{RECIPE_ID} i2: given twice",
         ),
     ],
     ids=[
@@ -990,8 +1033,11 @@ def test_the_substitute_offers_are_part_of_the_offer_id() -> None:
         "not in the step",
         "unknown line",
         "unknown step",
+        "another line",
+        "part of a word",
         "duplicate",
-        "unknown recipe",
+        "recipe given twice",
+        "line given twice",
     ],
 )
 def test_a_substitutes_file_quoting_what_the_recipe_doesnt_say_is_rejected(
@@ -1007,13 +1053,65 @@ def test_a_quote_from_a_recipe_without_a_description_is_rejected() -> None:
     with pytest.raises(Rejected) as rejected:
         work(recipe(steps=FRY), substitutes=ZORBLEBERRY_OIL)
 
-    assert rejected.value.errors == [f"{RECIPE_ID} i2: no line, step or description description"]
+    assert rejected.value.errors == [
+        f"{RECIPE_ID} i2: description isn't the line itself, a step or the description"
+    ]
 
 
-def test_a_quote_may_come_from_another_line_ignoring_case() -> None:
-    (offered,) = offering(substitutes(("SNORP GARLIC", "i3"))).packet().recipes
+def test_a_quote_inside_a_longer_word_is_rejected() -> None:
+    eggplant = recipe(description="A plonk eggplant works too.")
 
-    assert [o.wording for o in offered.lines[1].substitute_offers] == ["SNORP GARLIC"]
+    with pytest.raises(Rejected) as rejected:
+        work(eggplant, substitutes=substitutes(("egg", "description")))
+
+    assert rejected.value.errors == [f'{RECIPE_ID} i2: "egg" isn\'t in description']
+
+
+def test_a_quote_may_come_from_its_own_line_ignoring_case() -> None:
+    lines = ("2 quill eggs", "1-2 tsp glimmer oil or zorbleberry oil")
+    own_line = work(recipe(*lines), substitutes=substitutes(("ZORBLEBERRY OIL", "i2")))
+
+    (offered,) = own_line.packet().recipes
+
+    assert [o.wording for o in offered.lines[1].substitute_offers] == ["ZORBLEBERRY OIL"]
+
+
+def test_quotes_for_a_recipe_that_isnt_pending_are_skipped_with_a_note(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    other = "01K7Q0000000000000000000R9"
+    quoted = Substitutes.model_validate(
+        {
+            "recipes": [
+                substitutes(("plonk beans", "s1"), recipe_id=other).recipes[0].model_dump(),
+                ZORBLEBERRY_OIL.recipes[0].model_dump(),
+            ]
+        }
+    )
+
+    (offered,) = offering(quoted).packet().recipes
+
+    assert [o.wording for o in offered.lines[1].substitute_offers] == ["zorbleberry oil"]
+    assert f"{other} isn't a Pending recipe" in capsys.readouterr().err
+
+
+def test_a_quoted_substitute_with_an_amount_is_offered_its_cached_canonical_first() -> None:
+    zorbleberry_oil = canonical(31, "zorbleberry oil")
+    amount = recipe(description="Or use 2 tsp zorbleberry oil.")
+    offered_work = work(
+        amount,
+        canonicals=[GLIMMER, ZORBLE, zorbleberry_oil],
+        wordings=[wording("glimmer oil"), wording("zorbleberry oil", ZORBLE.id)],
+        substitutes=substitutes(("2 tsp zorbleberry oil", "description")),
+    )
+
+    (offered,) = offered_work.packet().recipes
+
+    (offer,) = offered.lines[1].substitute_offers
+    assert [(c.id, c.from_wording) for c in offer.canonical_candidates] == [
+        (ZORBLE.id, True),
+        (zorbleberry_oil.id, False),
+    ]
 
 
 def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_with_fdc_numbers() -> None:
@@ -1086,6 +1184,17 @@ def test_a_substitute_that_is_the_lines_own_match_is_rejected() -> None:
 
     assert errors(offering(wordings=[]), answer(line(substitutions=[own]))) == [
         f"i2: substitute zorbleberry oil: Canonical Ingredient {GLIMMER_ID} is the line's own match"
+    ]
+
+
+def test_a_substitute_that_is_the_lines_own_match_is_reported_with_its_other_errors() -> None:
+    own = substitution(canonical_id=GLIMMER_ID, fdc_id=2004, portion_id=606)
+    answered = answer(line(quantity={"low": 7}, substitutions=[own]))
+    own_match = f"Canonical Ingredient {GLIMMER_ID} is the line's own match"
+
+    assert errors(offering(wordings=[]), answered) == [
+        "i2: 7 isn't a number in the line",
+        f"i2: substitute zorbleberry oil: {own_match}",
     ]
 
 

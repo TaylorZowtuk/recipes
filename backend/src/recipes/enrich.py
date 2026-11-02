@@ -25,7 +25,8 @@ from pydantic import ValidationError
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.fdc import Snapshot, load_snapshot
 from recipes.models import CanonicalIngredient, KitchenSettings, Recipe, Wording
-from recipes.packet import Answer, Rejected, Substitutes, Work
+from recipes.packet import Answer, Rejected, Work
+from recipes.substitutes import Substitutes, checked, substitutes_packet
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -38,12 +39,9 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "api"}
 type Send = Callable[[str, str, bytes | None], tuple[int, Any]]
 
 
-def fetch_work(
-    base_url: str, send: Send, snapshot: Snapshot, substitutes: Substitutes | None = None
-) -> Work | None:
-    """The Collection's Pending recipes, Canonical Ingredients, wordings and Store Categories, or
-    None when the API couldn't give them or the substitutes file quotes what its recipes don't
-    say, which is printed to stderr.
+def fetch_pending(base_url: str, send: Send) -> tuple[Any, list[Recipe]] | None:
+    """The Collection and its Pending recipes, or None when the API couldn't give them, which is
+    printed to stderr.
     """
     status, collection = send("GET", f"{base_url}/api/collection", None)
     if status != HTTPStatus.OK:
@@ -58,42 +56,59 @@ def fetch_work(
             print(f"Couldn't read {card['title']}: {status} {body}", file=sys.stderr)
             return None
         recipes.append(Recipe.model_validate(body))
+    return collection, recipes
+
+
+def fetch_work(
+    base_url: str, send: Send, snapshot: Snapshot, substitutes: Substitutes | None = None
+) -> Work | None:
+    """The Collection's Pending recipes, Canonical Ingredients, wordings and Store Categories, with
+    the substitutes each recipe states, or None when the API couldn't give them or the substitutes
+    file quotes what its recipes don't say, which is printed to stderr.
+    """
+    fetched = fetch_pending(base_url, send)
+    if fetched is None:
+        return None
+    collection, recipes = fetched
     try:
-        return Work(
-            recipes=recipes,
-            canonical_ingredients=[
-                CanonicalIngredient.model_validate(c) for c in collection["canonical_ingredients"]
-            ],
-            wordings=[Wording.model_validate(w) for w in collection["wordings"]],
-            store_categories=KitchenSettings.model_validate(
-                collection["kitchen_settings"]
-            ).store_categories,
-            snapshot=snapshot,
-            substitutes=substitutes,
-        )
+        stated = checked(substitutes, recipes) if substitutes else {}
     except Rejected as rejected:
         print("The substitutes file doesn't match the Pending recipes:", file=sys.stderr)
         print("\n".join(f"  {error}" for error in rejected.errors), file=sys.stderr)
         return None
+    return Work(
+        recipes=recipes,
+        canonical_ingredients=[
+            CanonicalIngredient.model_validate(c) for c in collection["canonical_ingredients"]
+        ],
+        wordings=[Wording.model_validate(w) for w in collection["wordings"]],
+        store_categories=KitchenSettings.model_validate(
+            collection["kitchen_settings"]
+        ).store_categories,
+        snapshot=snapshot,
+        substitutes=stated,
+    )
 
 
-def substitutes(base_url: str, send: Send, snapshot: Snapshot) -> int:
+def ask(base_url: str, send: Send) -> int:
     """Print the Substitutes Packet for every Pending recipe, writing nothing. Returns 1 when the
     API couldn't give it.
     """
-    work = fetch_work(base_url, send, snapshot)
-    if work is None:
+    fetched = fetch_pending(base_url, send)
+    if fetched is None:
         return 1
-    print(work.substitutes_packet().model_dump_json(indent=2))
+    print(substitutes_packet(fetched[1]).model_dump_json(indent=2))
     return 0
 
 
-def packet(base_url: str, send: Send, snapshot: Snapshot, quoted: Substitutes | None = None) -> int:
+def packet(
+    base_url: str, send: Send, snapshot: Snapshot, substitutes: Substitutes | None = None
+) -> int:
     """Print the Work Packet for every Pending recipe, with offers for each substitute the
     substitutes file quotes, writing nothing. Returns 1 when the API couldn't give it or the
     substitutes file doesn't match the recipes.
     """
-    work = fetch_work(base_url, send, snapshot, quoted)
+    work = fetch_work(base_url, send, snapshot, substitutes)
     if work is None:
         return 1
     print(work.packet().model_dump_json(indent=2))
@@ -101,7 +116,11 @@ def packet(base_url: str, send: Send, snapshot: Snapshot, quoted: Substitutes | 
 
 
 def apply(
-    base_url: str, send: Send, snapshot: Snapshot, text: str, quoted: Substitutes | None = None
+    base_url: str,
+    send: Send,
+    snapshot: Snapshot,
+    text: str,
+    substitutes: Substitutes | None = None,
 ) -> int:
     """Check a model's answer against the packet it answers, rebuilt from the API and the same
     substitutes file, and write each recipe whose offer hasn't changed since and whose every line
@@ -113,7 +132,7 @@ def apply(
     except ValidationError as error:
         print(f"That isn't an answer to a Work Packet: {error}")
         return 1
-    work = fetch_work(base_url, send, snapshot, quoted)
+    work = fetch_work(base_url, send, snapshot, substitutes)
     if work is None:
         return 1
     failed = 0
@@ -149,7 +168,11 @@ def read_substitutes(path: str | None) -> Substitutes | None:
     if path is None:
         return None
     try:
-        return Substitutes.model_validate_json(Path(path).read_text())
+        text = Path(path).read_text()
+    except OSError as error:
+        sys.exit(f"Couldn't read {path}: {error}")
+    try:
+        return Substitutes.model_validate_json(text)
     except ValidationError as error:
         sys.exit(f"That isn't a substitutes file: {error}")
 
@@ -220,17 +243,18 @@ def main(argv: list[str] | None = None) -> None:
     token = os.environ.get(SERVICE_TOKEN_ENV)
     if not token:
         sys.exit(f"Set {SERVICE_TOKEN_ENV} to the stack's service token")
-    text = read_answer(args.answer) if args.command == "apply" else None
-    quoted = read_substitutes(getattr(args, "substitutes", None))
-    snapshot = load_snapshot()
     with SameOriginSession() as session:
         send = send_with(session, token)
-        if args.command == "substitutes":
-            failed = substitutes(base_url, send, snapshot)
-        elif text is None:
-            failed = packet(base_url, send, snapshot, quoted)
-        else:
-            failed = apply(base_url, send, snapshot, text, quoted)
+        match args.command:
+            case "substitutes":
+                failed = ask(base_url, send)
+            case "packet":
+                substitutes = read_substitutes(args.substitutes)
+                failed = packet(base_url, send, load_snapshot(), substitutes)
+            case _:
+                text = read_answer(args.answer)
+                substitutes = read_substitutes(args.substitutes)
+                failed = apply(base_url, send, load_snapshot(), text, substitutes)
     sys.exit(1 if failed else 0)
 
 

@@ -20,12 +20,13 @@ from recipes.enrich import (
     SameOriginSession,
     Send,
     apply,
+    ask,
     checked_base_url,
     main,
     packet,
     read_answer,
+    read_substitutes,
     send_with,
-    substitutes,
 )
 from recipes.models import (
     MAX_LABEL,
@@ -40,7 +41,8 @@ from recipes.models import (
     Wording,
     new_ulid,
 )
-from recipes.packet import ENRICHMENT_VERSION, Substitutes
+from recipes.packet import ENRICHMENT_VERSION
+from recipes.substitutes import Substitutes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -297,7 +299,7 @@ def test_substitutes_then_packet_then_apply_writes_substitutions_and_difficulty(
     adapter = api(editor_client)
     send = through(adapter)
 
-    assert substitutes(BASE_URL, send, SNAPSHOT) == 0
+    assert ask(BASE_URL, send) == 0
     (asked,) = json.loads(capsys.readouterr().out)["recipes"]
     assert (asked["recipe_id"], asked["description"]) == (recipe.id, ZORBLEBERRY_OIL)
     quoted = quoting(recipe.id, "zorbleberry oil")
@@ -345,6 +347,53 @@ def test_an_answer_applied_with_other_substitutes_than_its_packet_is_rejected(
         capsys.readouterr().out
     )
     assert stored(editor_client, recipe.id)["status"] == "pending"
+
+
+def test_rerunning_apply_after_a_partial_success_writes_the_rest(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first, zorbleberry = substituting(api_store)
+    # The glimmer oil exists and its wording is cached, so writing one recipe changes no offer.
+    glimmer = zorbleberry.model_copy(
+        update={"id": new_ulid(), "name": "glimmer oil", "family": "oil"}
+    )
+    cached = Wording(wording="glimmer oil", canonical_id=glimmer.id, schema_version=SCHEMA_VERSION)
+    api_store.enrich_recipe(add(api_store, "Ready Soup", status="ready"), [glimmer], [cached])
+    second = add(api_store, "Chili Noodles")
+    original = second.original.model_copy(update={"description": ZORBLEBERRY_OIL})
+    second = api_store.update_recipe(second.model_copy(update={"original": original}))
+    quoted = Substitutes.model_validate(
+        {
+            "recipes": [
+                quoting(recipe.id, "zorbleberry oil").recipes[0].model_dump()
+                for recipe in (first, second)
+            ]
+        }
+    )
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, quoted) == 0
+    offered = json.loads(capsys.readouterr().out)
+    answered = json.loads(substituted_answer(offered, zorbleberry.id))
+    for recipe in answered["recipes"]:
+        recipe["lines"][0]["canonical"] = {"id": glimmer.id}
+    text = json.dumps(answered)
+
+    def second_unavailable(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if method == "PUT" and second.id in url:
+            return 503, "unavailable"
+        return send(method, url, body)
+
+    assert apply(BASE_URL, second_unavailable, SNAPSHOT, text, quoted) == 1
+    assert stored(editor_client, first.id)["status"] == "awaiting_review"
+    capsys.readouterr()
+
+    failed = apply(BASE_URL, send, SNAPSHOT, text, quoted)
+
+    printed = capsys.readouterr()
+    assert f"{first.id} isn't a Pending recipe" in printed.err
+    assert "Chili Noodles → awaiting_review" in printed.out
+    assert failed == 1  # the first recipe, which isn't in the packet any more
+    assert stored(editor_client, second.id)["facts"]["ingredients"]["i1"]["substitutions"]
 
 
 def test_a_substitutes_file_the_recipes_dont_bear_out_prints_every_error_and_no_packet(
@@ -429,6 +478,11 @@ def test_the_answer_is_read_from_a_file_or_stdin(
 
     assert read_answer(str(path)) == '{"from": "file"}'
     assert read_answer("-") == '{"from": "stdin"}'
+
+
+def test_a_substitutes_file_that_cant_be_read_stops_with_one_line(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match=r"^Couldn't read .*subs\.jsn: "):
+        read_substitutes(str(tmp_path / "subs.jsn"))
 
 
 def test_a_recipe_whose_offer_changed_is_rejected_and_the_rest_are_written(
