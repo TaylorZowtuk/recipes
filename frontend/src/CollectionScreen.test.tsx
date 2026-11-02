@@ -12,6 +12,7 @@ const card = (fields: Partial<Card>): Card => ({
   status: "ready",
   preview: null,
   difficulty: null,
+  difficulty_suggested: false,
   tags: [],
   needs_review: { open_issues: 0, unconfirmed: 0 },
   recipe_version: 1,
@@ -40,6 +41,16 @@ describe("RecipeCard", () => {
     expect(markup).toContain(">spicy</li>");
     expect(markup).not.toContain("make ahead");
     expect(markup).toContain("+1<span");
+  });
+
+  it("labels a Suggested Difficulty as a suggestion", () => {
+    const markup = render(
+      card({ difficulty: { prep: 1, cook: 2, cleanup: 2 }, difficulty_suggested: true }),
+    );
+    expect(markup).toContain(
+      'aria-label="Suggested difficulty: Prep 1 of 3, Cook 2 of 3, Cleanup 2 of 3, total 5 of 9"',
+    );
+    expect(markup).toContain(">Suggested</span>");
   });
 
   it("leaves out the Difficulty and Tags a recipe doesn't have", () => {

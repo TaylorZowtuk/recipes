@@ -7,8 +7,11 @@ from pydantic import ValidationError
 from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
+    Difficulty,
+    DifficultyFact,
     EnrichmentIssue,
     QueuedIngest,
+    RecipeFacts,
     SourceGuard,
     StatedTime,
     StatedTimes,
@@ -53,6 +56,38 @@ def test_card_upkeep_copies_the_recipes_card_fields() -> None:
     assert card.recipe_version == 4
     assert card.needs_review.open_issues == 0
     assert card.needs_review.unconfirmed == 0
+
+
+SUGGESTED = DifficultyFact(
+    provenance="llm", confidence=0.7, estimated=True, prep=2, cook=3, cleanup=1
+)
+
+
+@pytest.mark.parametrize(
+    ("editors", "suggestion", "card_shows"),
+    [
+        (
+            Difficulty(prep=1, cook=1, cleanup=2),
+            SUGGESTED,
+            (Difficulty(prep=1, cook=1, cleanup=2), False),
+        ),
+        (None, SUGGESTED, (Difficulty(prep=2, cook=3, cleanup=1), True)),
+        (None, None, (None, False)),
+    ],
+    ids=["the editor's over a suggestion", "the suggestion", "neither"],
+)
+def test_card_upkeep_shows_the_editors_difficulty_or_else_the_suggestion(
+    editors: Difficulty | None,
+    suggestion: DifficultyFact | None,
+    card_shows: tuple[Difficulty | None, bool],
+) -> None:
+    recipe = RECIPES[0].model_copy(
+        update={"difficulty": editors, "facts": RecipeFacts(difficulty=suggestion)}
+    )
+
+    card = card_for(recipe)
+
+    assert (card.difficulty, card.difficulty_suggested) == card_shows
 
 
 @pytest.mark.parametrize(
