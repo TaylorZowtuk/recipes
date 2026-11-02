@@ -25,6 +25,7 @@ from recipes.enrich import (
     packet,
     read_answer,
     send_with,
+    substitutes,
 )
 from recipes.models import (
     MAX_LABEL,
@@ -39,7 +40,7 @@ from recipes.models import (
     Wording,
     new_ulid,
 )
-from recipes.packet import ENRICHMENT_VERSION
+from recipes.packet import ENRICHMENT_VERSION, Substitutes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -208,7 +209,7 @@ def test_apply_writes_each_answered_lines_match_and_conversion_and_learns_its_wo
     assert failed == 0
     assert "Garlic Tofu → awaiting_review" in capsys.readouterr().out
     enriched = stored(editor_client, recipe.id)
-    assert enriched["enrichment_version"] == ENRICHMENT_VERSION == 3
+    assert enriched["enrichment_version"] == ENRICHMENT_VERSION == 4
     assert enriched["fdc_release"] == SNAPSHOT.release
     facts = enriched["facts"]["ingredients"]
     assert sorted(facts) == ["i1", "i2", "i3", "i4"]
@@ -236,6 +237,129 @@ def test_apply_writes_each_answered_lines_match_and_conversion_and_learns_its_wo
     ] == [("glimmer oil", created["id"], False)]
     (issue,) = enriched["issues"]
     assert issue["reason"] == "new Canonical Ingredient glimmer oil (oil, Aisles)"
+
+
+ZORBLEBERRY_OIL = "Zorbleberry oil works in place of the glimmer oil."
+
+
+def substituting(api_store: Store) -> tuple[Recipe, CanonicalIngredient]:
+    """A Pending recipe whose description states a substitute for its glimmer oil, and the
+    zorbleberry Canonical Ingredient another recipe made.
+    """
+    zorbleberry = CanonicalIngredient(
+        id=new_ulid(),
+        name="zorbleberry",
+        family="berry",
+        store_category_id="produce",
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+    api_store.enrich_recipe(add(api_store, "Ready Stew", status="ready"), [zorbleberry], [])
+    recipe = add(api_store, "Garlic Tofu")
+    original = recipe.original.model_copy(update={"description": ZORBLEBERRY_OIL})
+    return api_store.update_recipe(recipe.model_copy(update={"original": original})), zorbleberry
+
+
+def quoting(recipe_id: str, *wordings: str) -> Substitutes:
+    """A substitutes file quoting each wording for line i1 from the description."""
+    quoted = [{"wording": wording, "quoted_from": "description"} for wording in wordings]
+    return Substitutes.model_validate(
+        {"recipes": [{"recipe_id": recipe_id, "lines": [{"line_id": "i1", "substitutes": quoted}]}]}
+    )
+
+
+def substituted_answer(offered: dict[str, Any], canonical_id: str) -> str:
+    answered = json.loads(
+        answer_text(
+            offered,
+            oil_line(
+                substitutions=[
+                    {
+                        "wording": "zorbleberry oil",
+                        "canonical_id": canonical_id,
+                        "fdc_id": 1001,
+                        "portion_id": 501,
+                        "ratio": 1.5,
+                        "note": "fruitier",
+                    }
+                ]
+            ),
+        )
+    )
+    answered["recipes"][0]["difficulty"] = {"prep": 1, "cook": 2, "cleanup": 1}
+    return json.dumps(answered)
+
+
+def test_substitutes_then_packet_then_apply_writes_substitutions_and_difficulty(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe, zorbleberry = substituting(api_store)
+    adapter = api(editor_client)
+    send = through(adapter)
+
+    assert substitutes(BASE_URL, send, SNAPSHOT) == 0
+    (asked,) = json.loads(capsys.readouterr().out)["recipes"]
+    assert (asked["recipe_id"], asked["description"]) == (recipe.id, ZORBLEBERRY_OIL)
+    quoted = quoting(recipe.id, "zorbleberry oil")
+    assert packet(BASE_URL, send, SNAPSHOT, quoted) == 0
+    offered = json.loads(capsys.readouterr().out)
+    (offer,) = offered["recipes"][0]["lines"][0]["substitute_offers"]
+    assert [c["id"] for c in offer["canonical_candidates"]] == [zorbleberry.id]
+
+    failed = apply(BASE_URL, send, SNAPSHOT, substituted_answer(offered, zorbleberry.id), quoted)
+
+    assert failed == 0
+    assert {request.method for request in adapter.requests} == {"GET", "PUT"}
+    facts = stored(editor_client, recipe.id)["facts"]
+    fact = facts["ingredients"]["i1"]["substitutions"]
+    assert (fact["provenance"], fact["estimated"], fact["confirmed"]) == ("llm", True, False)
+    (item,) = fact["items"]
+    assert (item["wording"], item["canonical_id"], item["ratio"]) == (
+        "zorbleberry oil",
+        zorbleberry.id,
+        1.5,
+    )
+    assert item["fdc"]["per_100g"] == SNAPSHOT.food(1001).per_100g.model_dump()
+    difficulty = facts["difficulty"]
+    assert (difficulty["prep"], difficulty["cook"], difficulty["cleanup"]) == (1, 2, 1)
+    assert (difficulty["provenance"], difficulty["confirmed"]) == ("llm", False)
+
+
+@pytest.mark.parametrize("later", [None, "Zorbleberry oil"], ids=["none", "another"])
+def test_an_answer_applied_with_other_substitutes_than_its_packet_is_rejected(
+    editor_client: TestClient,
+    api_store: Store,
+    capsys: pytest.CaptureFixture[str],
+    later: str | None,
+) -> None:
+    recipe, zorbleberry = substituting(api_store)
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, quoting(recipe.id, "zorbleberry oil")) == 0
+    offered = json.loads(capsys.readouterr().out)
+    stale = quoting(recipe.id, later) if later else None
+
+    failed = apply(BASE_URL, send, SNAPSHOT, substituted_answer(offered, zorbleberry.id), stale)
+
+    assert failed == 1
+    assert "Garlic Tofu → rejected, nothing written:\n  its offer changed since the packet" in (
+        capsys.readouterr().out
+    )
+    assert stored(editor_client, recipe.id)["status"] == "pending"
+
+
+def test_a_substitutes_file_the_recipes_dont_bear_out_prints_every_error_and_no_packet(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe, _ = substituting(api_store)
+    send = through(api(editor_client))
+
+    failed = packet(BASE_URL, send, SNAPSHOT, quoting(recipe.id, "plonk beans", "quill eggs"))
+
+    assert failed == 1
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert f'{recipe.id} i1: "plonk beans" isn\'t in description' in printed.err
+    assert f'{recipe.id} i1: "quill eggs" isn\'t in description' in printed.err
 
 
 def test_apply_writes_each_answered_steps_segments_and_uses(
