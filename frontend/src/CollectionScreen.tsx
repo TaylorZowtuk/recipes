@@ -71,6 +71,7 @@ export function CollectionScreen() {
         ref={sheet}
         tags={tags}
         filters={filters}
+        shown={shown.length}
         onChange={setFilters}
         onClose={() => filtersButton.current?.focus()}
       />

@@ -42,14 +42,16 @@ export function TagChip({
 type SheetProps = {
   tags: string[];
   filters: CardFilters;
+  shown: number;
   onChange: (filters: CardFilters) => void;
   onClose: () => void;
   ref: Ref<HTMLDialogElement>;
 };
 
 // The Filters sheet, a modal dialog the Recipes tab opens. Every change applies at once; Clear
-// empties every filter and Done, Escape or a tap outside it closes it.
-export function FiltersSheet({ tags, filters, onChange, onClose, ref }: SheetProps) {
+// empties every filter and Done, Escape or a tap outside it closes it. Done shows how many
+// recipes match, since the sheet covers the status line.
+export function FiltersSheet({ tags, filters, shown, onChange, onClose, ref }: SheetProps) {
   const id = useId();
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: a tap on the backdrop; Escape closes it too.
@@ -117,7 +119,7 @@ export function FiltersSheet({ tags, filters, onChange, onClose, ref }: SheetPro
           className="button"
           onClick={(event) => event.currentTarget.closest("dialog")?.close()}
         >
-          Done
+          {shown === 0 ? "No recipes match" : `Show ${shown} ${shown === 1 ? "recipe" : "recipes"}`}
         </button>
       </div>
     </dialog>

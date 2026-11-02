@@ -203,6 +203,10 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await expect(seededTitles()).toHaveText([recipeTitle]);
   await expect(filters).toHaveText("Filters · 2");
 
+  // The sheet covers the status line, so its Done button carries the live count.
+  const done = sheet.getByRole("button", { name: /^(Show \d+ recipes?|No recipes match)$/ });
+  await expect(done).toHaveText("Show 1 recipe");
+
   // Clear empties every filter, the chip row's too.
   await sheet.getByRole("button", { name: "Clear" }).click();
   await expect(seededCards(page)).toHaveCount(seededCount);
@@ -233,7 +237,6 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await expect(filters).toHaveText("Filters · 1");
 
   // Done closes the sheet and returns focus to the Filters button; the filters stay.
-  const done = sheet.getByRole("button", { name: "Done" });
   await expectTapTarget(done);
   await expectTapTarget(sheet.getByRole("button", { name: "Clear" }));
   await done.click();
@@ -244,6 +247,10 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   // Nothing matching says so, with the search too.
   await weeknight.click();
   await chips.getByRole("button", { name: "breakfast", exact: true }).click();
+  await filters.click();
+  await expect(done).toHaveText("No recipes match");
+  await done.click();
+  await expect(sheet).toBeHidden();
   await expect(resultCount(page)).toHaveText("No recipes match these filters.");
   await page.getByRole("searchbox", { name: "Search recipe titles" }).fill("oats");
   await expect(resultCount(page)).toHaveText("No recipes match “oats” and these filters.");
