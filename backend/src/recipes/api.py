@@ -45,6 +45,7 @@ from recipes.models import (
     QueuedIngest,
     QueuedIngestState,
     Recipe,
+    RecipeFacts,
     StepFacts,
     Substitution,
     TemperatureSegment,
@@ -583,7 +584,7 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     facts = (
         {f"{line}.{fact}" for line in lines for fact in IngredientFacts.model_fields}
         | {f"{step}.{fact}" for step in steps for fact in StepFacts.model_fields}
-        | {"difficulty"}
+        | (RecipeFacts.model_fields.keys() - {"ingredients", "steps"})
     )
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")

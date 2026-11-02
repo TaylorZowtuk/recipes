@@ -262,10 +262,14 @@ class Substitution(Model):
     fdc: FdcNumbers
 
 
+# The most substitutes a line holds, so recipe text steering the model can't swell the recipe.
+MAX_SUBSTITUTES = 5
+
+
 class SubstitutionsFact(Fact):
     """A line's substitutions, which an editor confirms together in one tap."""
 
-    items: Annotated[list[Substitution], Field(min_length=1)]
+    items: Annotated[list[Substitution], Field(min_length=1, max_length=MAX_SUBSTITUTES)]
 
 
 class IngredientFacts(Model):
@@ -359,12 +363,8 @@ class StepFacts(Model):
     uses: UsesFact | None = None
 
 
-class DifficultyFact(Fact):
+class DifficultyFact(Fact, Difficulty):
     """The Difficulty enrichment suggests. An editor's own Difficulty always wins over it."""
-
-    prep: Rating
-    cook: Rating
-    cleanup: Rating
 
 
 class RecipeFacts(Model):
@@ -512,7 +512,7 @@ def card_for(recipe: Recipe) -> Card:
     difficulty, suggested = recipe.difficulty, False
     if difficulty is None and (suggestion := recipe.facts.difficulty):
         difficulty = Difficulty.model_validate(
-            suggestion.model_dump(include={"prep", "cook", "cleanup"})
+            suggestion.model_dump(include=set(Difficulty.model_fields))
         )
         suggested = True
     return Card(

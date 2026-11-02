@@ -790,27 +790,45 @@ def test_substitutions_and_a_suggested_difficulty_are_stored_with_the_recipe(
     assert card["difficulty_suggested"] is True
 
 
+UNVOUCHED = "Substitutions and a suggested Difficulty arrive as the LLM's unconfirmed estimate"
+CONFIRMED_AT = "2026-10-01T12:00:00Z"
+
+
 @pytest.mark.parametrize(
-    ("facts", "canonicals"),
+    ("facts", "canonicals", "detail"),
     [
-        (suggesting(substitutions={"confirmed": True}), [BEEF, CHUCK]),
-        (suggesting(difficulty={"confirmed": True}), [BEEF, CHUCK]),
-        (suggesting(difficulty={"confirm_batch": "batch-1"}), [BEEF, CHUCK]),
-        (suggesting(substitutions={"confirmed_by": "editor@example.com"}), [BEEF, CHUCK]),
-        (suggesting(substitutions={"provenance": "fdc"}), [BEEF, CHUCK]),
-        (suggesting(difficulty={"provenance": "editor"}), [BEEF, CHUCK]),
-        (suggesting(difficulty={"estimated": False}), [BEEF, CHUCK]),
-        (suggesting(), [BEEF]),
-        (suggesting(substitutions={"items": [{**SWAP, "canonical_id": BEEF_ID}]}), [BEEF]),
+        (suggesting(substitutions={"confirmed": True}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"confirmed": True}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"confirm_batch": "batch-1"}), [BEEF, CHUCK], UNVOUCHED),
+        (
+            suggesting(substitutions={"confirmed_by": "editor@example.com"}),
+            [BEEF, CHUCK],
+            UNVOUCHED,
+        ),
+        (suggesting(difficulty={"confirmed_by": "editor@example.com"}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"confirmed_at": CONFIRMED_AT}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(substitutions={"provenance": "fdc"}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"provenance": "editor"}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"estimated": False}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(substitutions={"estimated": False}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(), [BEEF], f"No Canonical Ingredient {CHUCK_ID}"),
+        (
+            suggesting(substitutions={"items": [{**SWAP, "canonical_id": BEEF_ID}]}),
+            [BEEF],
+            "A substitute isn't its line's own Canonical Ingredient",
+        ),
     ],
     ids=[
         "confirmed substitutions",
         "confirmed difficulty",
         "difficulty in a confirm batch",
         "substitutions confirmed by an editor",
+        "difficulty confirmed by an editor",
+        "difficulty confirmed at a time",
         "substitutions not from the LLM",
         "difficulty not from the LLM",
         "difficulty not estimated",
+        "substitutions not estimated",
         "unknown substitute",
         "substitute is the line's own match",
     ],
@@ -820,6 +838,7 @@ def test_substitutions_or_a_difficulty_enrichment_cant_vouch_for_are_refused(
     api_store: Store,
     facts: dict[str, Any],
     canonicals: list[dict[str, Any]],
+    detail: str,
 ) -> None:
     recipe = add(api_store)
 
@@ -828,6 +847,25 @@ def test_substitutions_or_a_difficulty_enrichment_cant_vouch_for_are_refused(
     )
 
     assert response.status_code == 422
+    assert response.json()["detail"] == detail
+    assert_nothing_written(editor_client, recipe)
+
+
+def test_a_line_with_more_than_five_substitutes_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    swaps = [{**SWAP, "wording": f"beef chuck {n}"} for n in range(6)]
+
+    response = enrich_matched(
+        editor_client,
+        recipe.id,
+        facts=suggesting(substitutions={"items": swaps}),
+        canonical_ingredients=[BEEF, CHUCK],
+    )
+
+    assert response.status_code == 422
+    assert "items" in str(response.json()["detail"])
     assert_nothing_written(editor_client, recipe)
 
 
