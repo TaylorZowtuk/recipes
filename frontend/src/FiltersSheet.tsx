@@ -1,5 +1,6 @@
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import { activeFilterCount, type CardFilters, isChosen, noFilters, toggleTag } from "./cardFilters";
+import { Sheet } from "./Sheet";
 import { formatStatedTime } from "./statedTime";
 import { TagChip } from "./TagList";
 
@@ -38,9 +39,7 @@ type SheetProps = {
 export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
   const id = useId();
   const button = useRef<HTMLButtonElement>(null);
-  const sheet = useRef<HTMLDialogElement>(null);
-  const title = useRef<HTMLHeadingElement>(null);
-  const downOnBackdrop = useRef(false);
+  const [open, setOpen] = useState(false);
   const active = activeFilterCount(filters);
   return (
     <>
@@ -49,106 +48,87 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
         type="button"
         className="button button-secondary"
         aria-haspopup="dialog"
-        onClick={() => {
-          sheet.current?.showModal();
-          // Focus the title, so no control looks chosen before it's touched.
-          title.current?.focus();
-        }}
+        onClick={() => setOpen(true)}
       >
         {active > 0 ? `Filters · ${active}` : "Filters"}
       </button>
-      {/* The padding is on .sheet-body, so only a tap on the backdrop targets the dialog itself.
-          Closing also needs the press to have begun there: a drag from a chip released on the backdrop
-          clicks the dialog. */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: a tap on the backdrop; Escape closes it too. */}
-      <dialog
-        ref={sheet}
-        className="sheet"
-        aria-labelledby={`${id}-title`}
-        onClose={() => button.current?.focus()}
-        onPointerDown={(event) => {
-          downOnBackdrop.current = event.target === event.currentTarget;
+      <Sheet
+        open={open}
+        title="Filters"
+        onClose={() => {
+          setOpen(false);
+          button.current?.focus();
         }}
-        onClick={(event) =>
-          downOnBackdrop.current &&
-          event.target === event.currentTarget &&
-          event.currentTarget.close()
-        }
       >
-        <div className="sheet-body">
-          <h2 ref={title} id={`${id}-title`} className="sheet-title" tabIndex={-1}>
-            Filters
-          </h2>
-          {tags.length > 0 && (
-            <section className="sheet-section" aria-labelledby={`${id}-tags`}>
-              <h3 id={`${id}-tags`}>Tags</h3>
-              <ul className="chips chips-wrap" aria-labelledby={`${id}-tags`}>
-                {tags.map((tag) => (
-                  <li key={tag}>
-                    <TagChip
-                      tag={tag}
-                      pressed={isChosen(filters, tag)}
-                      onToggle={() => onChange(toggleTag(filters, tag))}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <Choices
-            label="Total Difficulty at most"
-            name={`${id}-difficulty`}
-            options={DIFFICULTIES}
-            value={filters.maxTotalDifficulty}
-            onChange={(maxTotalDifficulty) => onChange({ ...filters, maxTotalDifficulty })}
-          />
-          <fieldset className="sheet-section easy-parts" aria-describedby={`${id}-easy`}>
-            <legend>Easy</legend>
-            <p id={`${id}-easy`} className="field-hint">
-              Rated 1 of 3
-            </p>
-            <div className="choices">
-              {EASY_PARTS.map(([key, part]) => (
-                <label key={key} className="choice">
-                  <input
-                    type="checkbox"
-                    className="visually-hidden"
-                    aria-label={`Easy ${part.toLowerCase()}`}
-                    checked={filters[key]}
-                    onChange={(event) => onChange({ ...filters, [key]: event.target.checked })}
+        {tags.length > 0 && (
+          <section className="sheet-section" aria-labelledby={`${id}-tags`}>
+            <h3 id={`${id}-tags`}>Tags</h3>
+            <ul className="chips chips-wrap" aria-labelledby={`${id}-tags`}>
+              {tags.map((tag) => (
+                <li key={tag}>
+                  <TagChip
+                    tag={tag}
+                    pressed={isChosen(filters, tag)}
+                    onToggle={() => onChange(toggleTag(filters, tag))}
                   />
-                  <span className="choice-text">{part}</span>
-                </label>
+                </li>
               ))}
-            </div>
-          </fieldset>
-          <Choices
-            label="Stated Time at most"
-            name={`${id}-time`}
-            options={TIMES}
-            value={filters.maxStatedSeconds}
-            onChange={(maxStatedSeconds) => onChange({ ...filters, maxStatedSeconds })}
-          />
-          {/* showModal() makes the page's status line inert, so the count is announced from here. */}
-          <p role="status" className="visually-hidden">
-            {shown === 0
-              ? "No recipes match"
-              : `${shown} ${shown === 1 ? "recipe matches" : "recipes match"}`}
+            </ul>
+          </section>
+        )}
+        <Choices
+          label="Total Difficulty at most"
+          name={`${id}-difficulty`}
+          options={DIFFICULTIES}
+          value={filters.maxTotalDifficulty}
+          onChange={(maxTotalDifficulty) => onChange({ ...filters, maxTotalDifficulty })}
+        />
+        <fieldset className="sheet-section easy-parts" aria-describedby={`${id}-easy`}>
+          <legend>Easy</legend>
+          <p id={`${id}-easy`} className="field-hint">
+            Rated 1 of 3
           </p>
-          <div className="sheet-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => onChange(noFilters)}
-            >
-              Clear
-            </button>
-            <button type="button" className="button" onClick={() => sheet.current?.close()}>
-              {matchCount(shown)}
-            </button>
+          <div className="choices">
+            {EASY_PARTS.map(([key, part]) => (
+              <label key={key} className="choice">
+                <input
+                  type="checkbox"
+                  className="visually-hidden"
+                  aria-label={`Easy ${part.toLowerCase()}`}
+                  checked={filters[key]}
+                  onChange={(event) => onChange({ ...filters, [key]: event.target.checked })}
+                />
+                <span className="choice-text">{part}</span>
+              </label>
+            ))}
           </div>
+        </fieldset>
+        <Choices
+          label="Stated Time at most"
+          name={`${id}-time`}
+          options={TIMES}
+          value={filters.maxStatedSeconds}
+          onChange={(maxStatedSeconds) => onChange({ ...filters, maxStatedSeconds })}
+        />
+        {/* showModal() makes the page's status line inert, so the count is announced from here. */}
+        <p role="status" className="visually-hidden">
+          {shown === 0
+            ? "No recipes match"
+            : `${shown} ${shown === 1 ? "recipe matches" : "recipes match"}`}
+        </p>
+        <div className="sheet-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => onChange(noFilters)}
+          >
+            Clear
+          </button>
+          <button type="button" className="button" onClick={() => setOpen(false)}>
+            {matchCount(shown)}
+          </button>
         </div>
-      </dialog>
+      </Sheet>
     </>
   );
 }

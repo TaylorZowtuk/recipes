@@ -1,8 +1,9 @@
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import type { ReactNode } from "react";
 import { formatAmount } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
+import { Sheet } from "./Sheet";
 import { reviewCounts } from "./needsReview";
 import { confirmableOn, tabCounts, uncheckedOn } from "./review";
 
@@ -316,8 +317,9 @@ function itemTitle(item: ReviewItem, recipe: Recipe) {
   return recipe.original.steps.find((s) => s.id === owner)?.text ?? item.id;
 }
 
-// The sheet for one Review Item, a modal dialog like the Filters sheet: its detail, then Confirm,
-// or Accept correction while flagged. Escape, Close or a tap outside it closes it.
+// The sheet for one Review Item, shown while there is one: its detail, then Confirm, or Accept
+// correction while flagged. Escape, Close or a tap outside it closes it; `onClose` should be
+// safe to call twice, as Close calls it and the sheet calls it again once it has closed.
 export function ItemSheet({
   item,
   recipe,
@@ -335,50 +337,17 @@ export function ItemSheet({
   onConfirm: (factIds: string[]) => void;
   onClose: () => void;
 }) {
-  const id = useId();
-  const sheet = useRef<HTMLDialogElement>(null);
-  const title = useRef<HTMLHeadingElement>(null);
-  const downOnBackdrop = useRef(false);
-  const shownId = item?.id;
-
-  useEffect(() => {
-    if (!shownId || sheet.current?.open) return;
-    sheet.current?.showModal();
-    title.current?.focus();
-  }, [shownId]);
-
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: a tap on the backdrop; Escape closes it too.
-    <dialog
-      ref={sheet}
-      className="sheet"
-      aria-labelledby={`${id}-title`}
-      onClose={onClose}
-      onPointerDown={(event) => {
-        downOnBackdrop.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) =>
-        downOnBackdrop.current &&
-        event.target === event.currentTarget &&
-        event.currentTarget.close()
-      }
-    >
+    <Sheet open={!!item} title={item ? itemTitle(item, recipe) : ""} onClose={onClose}>
       {item && (
-        <div className="sheet-body">
-          <h2 ref={title} id={`${id}-title`} className="sheet-title" tabIndex={-1}>
-            {itemTitle(item, recipe)}
-          </h2>
+        <>
           <p className="review-sheet-mark">
             <ReviewMark mark={item.mark} shown />
           </p>
           <ItemDetail item={item} recipe={recipe} collection={collection} />
           {note}
           <div className="sheet-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => sheet.current?.close()}
-            >
+            <button type="button" className="button button-secondary" onClick={onClose}>
               Close
             </button>
             {item.mark !== "confirmed" && (
@@ -387,7 +356,7 @@ export function ItemSheet({
                 className="button"
                 disabled={disabled}
                 onClick={() => {
-                  sheet.current?.close();
+                  onClose();
                   onConfirm(item.factIds);
                 }}
               >
@@ -395,8 +364,8 @@ export function ItemSheet({
               </button>
             )}
           </div>
-        </div>
+        </>
       )}
-    </dialog>
+    </Sheet>
   );
 }
