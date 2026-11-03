@@ -148,6 +148,7 @@ async function statusOf(page: Page, id: string) {
 // The toast, apart from the sync status, which is a status region too.
 const toast = (page: Page, text: string) => page.getByRole("status").filter({ hasText: text });
 const undo = (page: Page) => page.getByRole("status").getByRole("button", { name: "Undo" });
+const CHANGED = "This recipe changed on another device. Showing the newer version.";
 const READY =
   "Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching.";
 
@@ -242,4 +243,43 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   await about.getByRole("button", { name: "Confirm 1 on this tab" }).click();
   await expect(toast(page, READY)).toBeVisible();
   expect(await statusOf(page, id)).toBe("ready");
+});
+
+test("a review write that lost a race shows the newer recipe, says so, and stays on the tab", async ({
+  page,
+}, testInfo) => {
+  const path = `lemon-rice-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`lemon rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+
+  // The same recipe open on two devices, both on Steps.
+  const other = await page.context().newPage();
+  const steps = (tab: Page) => tab.getByRole("tabpanel", { name: /^Steps/ });
+  const stepsTab = (tab: Page) => tab.getByRole("tab", { name: /^Steps/ });
+  for (const tab of [page, other]) {
+    await tab.goto(`/recipes/${id}`);
+    await stepsTab(tab).click();
+  }
+
+  // The first device confirms; the second confirms at the version it showed.
+  const confirmed = page.waitForResponse((r) => r.url().endsWith("/confirm"));
+  await steps(page).getByRole("button", { name: "Confirm 2 on this tab" }).click();
+  const batch = (await (await confirmed).json()).confirm_batch;
+  await expect(toast(page, "Confirmed.")).toBeVisible();
+  await steps(other).getByRole("button", { name: "Confirm 2 on this tab" }).click();
+  await expect(toast(other, CHANGED)).toBeVisible();
+  await expect(stepsTab(other)).toHaveAttribute("aria-selected", "true");
+  await expect(steps(other).getByRole("button", { name: /^Confirmed: / })).toHaveCount(2);
+
+  // Another device undoes that Confirm Batch first, so this device's Undo finds nothing.
+  const undone = await page.request.post(`/api/recipes/${id}/confirm-batches/${batch}/undo`);
+  expect(undone.status(), await undone.text()).toBe(200);
+  await undo(page).click();
+  await expect(toast(page, CHANGED)).toBeVisible();
+  await expect(stepsTab(page)).toHaveAttribute("aria-selected", "true");
+  await expect(steps(page).getByRole("button", { name: /^Confirmed: / })).toHaveCount(0);
 });

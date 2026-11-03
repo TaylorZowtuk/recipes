@@ -162,8 +162,19 @@ export function rememberRecipe(recipe: Recipe) {
   recipes.set(recipeKey(recipe.id, recipe.version), recipe);
 }
 
-// Waits while there is no card, so a screen can call it before the Collection has loaded.
+// The newest version of the recipe in memory, if any.
+function newestOf(id: string): Recipe | undefined {
+  let newest: Recipe | undefined;
+  for (const recipe of recipes.values())
+    if (recipe.id === id && (!newest || recipe.version > newest.version)) newest = recipe;
+  return newest;
+}
+
+// Waits while there is no card, so a screen can call it before the Collection has loaded. When
+// the card moves on to a version not yet loaded, as after a conflict, the newest version in memory
+// stays on screen meanwhile, so the page keeps its state (selected tab, toast) instead of remounting.
 export function useRecipe(card: Card | undefined): Loaded<Recipe> {
   const key = card ? recipeKey(card.id, card.recipe_version) : "";
-  return useLoaded(key, card && (() => loadRecipe(card)), recipes.get(key));
+  const cached = card && (recipes.get(key) ?? newestOf(card.id));
+  return useLoaded(key, card && (() => loadRecipe(card)), cached);
 }

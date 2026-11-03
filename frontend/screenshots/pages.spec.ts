@@ -5,7 +5,9 @@ import { expect, test } from "@playwright/test";
 // shows once a page's data has arrived, for pages that render before it does. `editor` signs in
 // first (with the local API's fake sign-in), `menu` opens the account menu and `tab` opens that tab. `ingest` fetches
 // that path on the local API's fake web in Add a recipe, made unique to the project. `click` presses
-// the button with that name last, such as Edit, without saving anything.
+// the button with that name last, such as Edit, without saving anything, and `shows` is text that
+// shows once it has. `stubConfirm` answers a review confirm as if it made the recipe Ready, writing
+// nothing, since every project shares the seeded recipe.
 type Shot = {
   name: string;
   path: string;
@@ -15,8 +17,11 @@ type Shot = {
   menu?: boolean;
   ingest?: string;
   tab?: string;
-  click?: string;
+  click?: string | RegExp;
+  shows?: string;
+  stubConfirm?: boolean;
 };
+const REVIEW_RECIPE = "/recipes/01K7SEED000000000000000007/garlic-butter-green-beans";
 const pages: Shot[] = [
   {
     name: "recipes",
@@ -78,6 +83,42 @@ const pages: Shot[] = [
     editor: true,
     click: "Edit",
   },
+  {
+    name: "recipes-needs-review",
+    path: "/recipes",
+    ready: "Collection",
+    loaded: "Sesame Noodles with Crispy Tofu",
+    editor: true,
+    click: /^Needs Review · \d+$/,
+    shows: "Awaiting Review",
+  },
+  {
+    name: "recipe-review",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "2 to check · 1 flagged",
+    editor: true,
+  },
+  {
+    name: "recipe-review-sheet",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "2 to check · 1 flagged",
+    editor: true,
+    click: /^Flagged: butter/,
+    shows: "The line says butter, so it is a new Canonical Ingredient, not margarine.",
+  },
+  {
+    name: "recipe-review-ready-toast",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "2 to check · 1 flagged",
+    editor: true,
+    tab: "Steps",
+    stubConfirm: true,
+    click: "Confirm 1 on this tab",
+    shows: "Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching.",
+  },
 ];
 
 // In Playwright's WebKit, page.route stops seeing requests once the app registers a service worker.
@@ -103,13 +144,23 @@ const fakeGoogle = `window.google = { accounts: { id: {
   },
 } } };`;
 
-for (const { name, path: url, ready, loaded, editor, menu, ingest, tab, click } of pages) {
+for (const shot of pages) {
+  const { name, path: url, ready, loaded, editor, menu, ingest, tab, click, shows } = shot;
   test(name, async ({ page }, testInfo) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("https://accounts.google.com/gsi/client", (route) =>
       route.fulfill({ contentType: "text/javascript", body: fakeGoogle }),
     );
+    if (shot.stubConfirm) {
+      await page.route("**/api/recipes/*/confirm", async (route) => {
+        const id = new URL(route.request().url()).pathname.split("/")[3];
+        const recipe = await (await page.request.get(`/api/recipes/${id}`)).json();
+        await route.fulfill({
+          json: { recipe, confirm_batch: "01K7SHOT00000000000000000B", ready: true },
+        });
+      });
+    }
     if (editor) {
       const signedIn = await page.request.post("/api/session", {
         data: { credential: "fake:editor@example.com" },
@@ -170,7 +221,7 @@ for (const { name, path: url, ready, loaded, editor, menu, ingest, tab, click } 
       if (editor) await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
     }
     if (click) {
-      const button = page.getByRole("button", { name: click, exact: true });
+      const button = page.getByRole("button", { name: click, exact: true }).first();
       if (mayBeMissing) {
         const shown = await button.waitFor({ timeout: 3000 }).then(
           () => true,
@@ -179,6 +230,11 @@ for (const { name, path: url, ready, loaded, editor, menu, ingest, tab, click } 
         test.skip(!shown, `no ${click} button on this branch`);
       }
       await button.click();
+      if (shows) {
+        const shown = page.getByText(shows, { exact: true }).first();
+        if (mayBeMissing) await shown.waitFor({ timeout: 3000 }).catch(() => {});
+        else await expect(shown).toBeVisible();
+      }
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     }
     // Photos load after the data that names them.
