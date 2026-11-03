@@ -6,7 +6,13 @@ import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
 
 // The Collection the recipe page reads its card from, with the recipe itself loading until a test
 // gives it one, and whether this device's person is an editor.
-const shown: { cards: Card[]; recipe?: Recipe; editor: boolean; offline?: boolean } = {
+const shown: {
+  cards: Card[];
+  recipe?: Recipe;
+  editor: boolean;
+  offline?: boolean;
+  newerLoading?: boolean;
+} = {
   cards: [],
   editor: false,
 };
@@ -19,7 +25,10 @@ vi.mock("./collection", () => ({
       kitchen_settings: { store_categories: [] },
     },
   }),
-  useRecipe: () => (shown.recipe ? { state: "ready", value: shown.recipe } : { state: "loading" }),
+  useRecipe: () =>
+    shown.recipe
+      ? { state: "ready", value: shown.recipe, newerLoading: shown.newerLoading }
+      : { state: "loading" },
   useSync: () => undefined,
 }));
 vi.mock("./session", () => ({
@@ -502,6 +511,18 @@ describe("RecipeScreen review", () => {
       expect(markup).toContain("You’re offline. Review the recipe once you’re back online.");
     } finally {
       shown.offline = false;
+    }
+  });
+
+  it("turns an editor's review controls off while a newer version of the recipe loads", () => {
+    shown.newerLoading = true;
+    try {
+      const markup = render(true, "awaiting_review");
+      const confirms = [...markup.matchAll(/<button[^>]*>Confirm \d+ on this tab<\/button>/g)];
+      expect(confirms).toHaveLength(2);
+      for (const [button] of confirms) expect(button).toContain('disabled=""');
+    } finally {
+      shown.newerLoading = false;
     }
   });
 

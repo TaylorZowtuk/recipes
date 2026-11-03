@@ -151,7 +151,11 @@ function RecipePage() {
         />
       )}
       {card && recipe.state === "ready" && !draft && collection.state === "ready" && (
-        <RecipeTabs recipe={recipe.value} collection={collection.value} />
+        <RecipeTabs
+          recipe={recipe.value}
+          collection={collection.value}
+          newerLoading={!!recipe.newerLoading}
+        />
       )}
     </Screen>
   );
@@ -169,7 +173,15 @@ const UNDO_OFFLINE = "You’re offline. Undo once you’re back online.";
 // The Ingredients, Steps and About tabs. To an editor, each tab counts what is left to check on
 // it, its Review Items are marked buttons that open their sheet, and a review bar confirms the
 // tab's unchecked items. Every confirm shows a toast with Undo; writes are never queued.
-function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collection }) {
+function RecipeTabs({
+  recipe,
+  collection,
+  newerLoading,
+}: {
+  recipe: Recipe;
+  collection: Collection;
+  newerLoading: boolean;
+}) {
   const isEditor = useIsEditor();
   const blocked = useEditBlock();
   const mounted = useMounted();
@@ -216,6 +228,8 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
     refocus.current = false;
     setToast(null);
   }, []);
+  // Writes wait for the newer version too, or they'd be refused as made at an old one.
+  const off = !!blocked || busy || newerLoading;
   const note = blocked && (
     <p className="screen-note">{blocked === "offline" ? BLOCKED_REVIEW : PAUSED}</p>
   );
@@ -224,7 +238,7 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
       <ReviewBar
         items={items}
         tab={tab}
-        disabled={!!blocked || busy}
+        disabled={off}
         note={note}
         onConfirm={confirm}
       />
@@ -273,7 +287,7 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
             item={openId ? items.get(openId) : undefined}
             recipe={recipe}
             collection={collection}
-            disabled={!!blocked || busy}
+            disabled={off}
             note={note}
             onConfirm={confirm}
             onClose={() => {
@@ -284,7 +298,7 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
           />
           <Toast
             toast={toast}
-            disabled={!!blocked || busy}
+            disabled={off}
             why={blocked && (blocked === "offline" ? UNDO_OFFLINE : PAUSED)}
             onDone={done}
             onUndo={(batch) => write(() => undoBatch(recipe, batch), batch)}

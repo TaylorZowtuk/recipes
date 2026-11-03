@@ -109,7 +109,8 @@ export async function loadRecipe(card: Card): Promise<Recipe> {
 export type Loaded<T> =
   | { state: "loading" }
   | { state: "failed"; notFound: boolean; retry: () => void }
-  | { state: "ready"; value: T };
+  // `newerLoading`: what shows is an older version, kept on screen while the newer one loads.
+  | { state: "ready"; value: T; newerLoading?: boolean };
 
 // Runs `load` whenever `key` changes, or on a retry, and reports how it went. `cached` is shown at
 // once, with no loading state, when the value is already in memory. With no `load` yet, it waits.
@@ -172,9 +173,13 @@ function newestOf(id: string): Recipe | undefined {
 
 // Waits while there is no card, so a screen can call it before the Collection has loaded. When
 // the card moves on to a version not yet loaded, as after a conflict, the newest version in memory
-// stays on screen meanwhile, so the page keeps its state (selected tab, toast) instead of remounting.
+// stays on screen meanwhile, so the page keeps its state (selected tab, toast) instead of remounting,
+// and says so, so the page can hold off writing at that old version.
 export function useRecipe(card: Card | undefined): Loaded<Recipe> {
   const key = card ? recipeKey(card.id, card.recipe_version) : "";
   const cached = card && (recipes.get(key) ?? newestOf(card.id));
-  return useLoaded(key, card && (() => loadRecipe(card)), cached);
+  const loaded = useLoaded(key, card && (() => loadRecipe(card)), cached);
+  return loaded.state === "ready" && card && loaded.value.version !== card.recipe_version
+    ? { ...loaded, newerLoading: true }
+    : loaded;
 }
