@@ -217,6 +217,17 @@ describe("editing", () => {
     ).toEqual({ draft: null });
   });
 
+  it("says so when the save made the recipe Ready", () => {
+    expect(
+      editing(open, {
+        type: "settled",
+        outcome: { kind: "saved", recipe: r },
+        refreshed: true,
+        nowReady: true,
+      }).notice,
+    ).toBe("Saved. This recipe is now Ready, so it joins the Grocery List and fridge matching.");
+  });
+
   it("leaves Edit once saved but says so when the Collection couldn't refresh", () => {
     expect(
       editing(open, {

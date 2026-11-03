@@ -562,7 +562,8 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
 )
 def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: StoreDep) -> Recipe:
     """Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
-    `body.version`, with its card, in one write.
+    `body.version`, with its card, in one write. A recipe Awaiting Review with nothing left to
+    review is Ready.
     """
     recipe = _recipe(store, recipe_id)
     changes: dict[str, object] = {"version": body.version}
@@ -577,7 +578,13 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
                 if preview and preview.image_id not in {image.id for image in recipe.images}:
                     raise HTTPException(422, "The preview shows one of the recipe's images")
                 changes["preview"] = preview
-    return store.update_recipe(recipe.model_copy(update=changes))
+    edited = recipe.model_copy(update=changes)
+    # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
+    # review: the recipe is then Ready, though no Confirm Batch made it so.
+    left = needs_review(edited)
+    if edited.status == "awaiting_review" and left.open_issues == left.unconfirmed == 0:
+        edited = edited.model_copy(update={"status": "ready"})
+    return store.update_recipe(edited)
 
 
 @router.delete(

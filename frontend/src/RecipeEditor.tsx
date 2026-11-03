@@ -84,7 +84,11 @@ export function RecipeEditor({
       outcome.kind === "saved" || outcome.kind === "conflict" ? await reloadCollection() : true;
     if (!mounted.current) return;
     setBusy(undefined);
-    dispatch({ type: "settled", outcome, refreshed });
+    const nowReady =
+      outcome.kind === "saved" &&
+      recipe.status === "awaiting_review" &&
+      outcome.recipe.status === "ready";
+    dispatch({ type: "settled", outcome, refreshed, nowReady });
   };
 
   const save = async (event: FormEvent) => {

@@ -539,6 +539,25 @@ def test_a_recipe_with_the_editors_difficulty_is_ready_without_confirming_the_su
     assert response.json()["ready"] is True
 
 
+def test_setting_the_editors_difficulty_on_the_last_item_left_makes_the_recipe_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+    every_line_and_step = ["i1.parse", "i1.match", "i1.conversion", "i9.parse", "s1.uses"]
+    batch = confirm(editor_client, recipe, *every_line_and_step).json()["confirm_batch"]
+    body = {
+        "version": stored(api_store, recipe.id).version,
+        "operations": [{"op": "set_difficulty", "difficulty": {"prep": 1, "cook": 1, "cleanup": 1}}],
+    }
+
+    response = editor_client.patch(f"/api/recipes/{recipe.id}", json=body, headers=EDITOR)
+
+    assert response.status_code == 200
+    assert (response.json()["status"], response.json()["ready_batch"]) == ("ready", None)
+    assert card(api_store, recipe.id)["status"] == "ready"
+    assert undo(editor_client, recipe.id, batch).json()["status"] == "ready"
+
+
 def test_undo_unconfirms_a_suggestion_the_editors_difficulty_overrode_since(
     editor_client: TestClient, api_store: Store
 ) -> None:

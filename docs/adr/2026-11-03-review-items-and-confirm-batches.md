@@ -22,6 +22,7 @@ The API's `review_items` and the PWA's `reviewItems` both apply this rule. One s
 
 - Confirming stamps every fact it confirms, every open Enrichment Issue it resolves and every Canonical Ingredient it confirms (`CanonicalIngredient.confirm_batch`) with one new `confirm_batch` id. A fact already Confirmed keeps its own batch.
 - `Recipe.ready_batch` records the batch that moved the recipe from *Awaiting Review* to *Ready*, so undoing that batch moves it back.
+- Setting the recipe's own Difficulty can leave nothing to review, and the recipe is then *Ready* with no `ready_batch`, so undoing an earlier batch leaves it *Ready*.
 - Undo reverses exactly one batch on the recipe as it is now: it unconfirms the batch's facts, reopens its issues, and unconfirms each Canonical Ingredient still stamped with it. One stamped with another batch, such as one first confirmed from another recipe, stays Confirmed. Learned wordings stay.
 
 ## `confirmed_by` names no one
