@@ -6,8 +6,13 @@ import type { Mark, ReviewItem, ReviewTab } from "./review";
 import { reviewCounts } from "./needsReview";
 import { confirmableOn, tabCounts, uncheckedOn } from "./review";
 
-// What the recipe view needs to show an editor Review Items: each item by id, and opening one.
-export type ReviewTarget = { items: Map<string, ReviewItem>; open: (id: string) => void };
+// What the recipe view needs to show an editor Review Items: each item by id, opening one, and
+// the ids of the unconfirmed Canonical Ingredients, whose lines it marks new.
+export type ReviewTarget = {
+  items: Map<string, ReviewItem>;
+  open: (id: string) => void;
+  newCanonicals: Set<string>;
+};
 
 const MARK_TEXT: Record<Mark, string> = {
   unchecked: "Unchecked",

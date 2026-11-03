@@ -175,6 +175,9 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
     items,
+    newCanonicals: new Set(
+      collection.canonical_ingredients.filter((c) => !c.confirmed).map((c) => c.id),
+    ),
     open: (id) => {
       opener.current = document.activeElement as HTMLElement | null;
       setOpenId(id);
@@ -286,9 +289,10 @@ export function Ingredients({
       {part.component && <h2>{part.component}</h2>}
       <ul className="ingredients">
         {part.lines.map((line) => {
-          const parse = facts?.ingredients[line.id]?.parse;
-          const shown = parse ? <ParsedLine parse={parse} /> : line.text;
+          const { parse, match } = facts?.ingredients[line.id] ?? {};
           const item = review?.items.get(line.id);
+          const isNew = !!(item && match && review?.newCanonicals.has(match.canonical_id));
+          const shown = parse ? <ParsedLine parse={parse} isNew={isNew} /> : line.text;
           return (
             <li key={line.id}>
               {item && review ? (
@@ -353,7 +357,8 @@ function Substitutions({
   );
 }
 
-function ParsedLine({ parse }: { parse: ParseFact }) {
+// `isNew` marks, for an editor, a line matched to a Canonical Ingredient not yet confirmed.
+function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolean }) {
   const amount = parse.quantity && formatAmount(parse.quantity, parse.unit);
   // The preparation and the line's remark follow the name, as in "garlic, minced, to taste".
   const remarks = [parse.preparation, parse.comment].filter(Boolean).join(", ");
@@ -362,6 +367,7 @@ function ParsedLine({ parse }: { parse: ParseFact }) {
       <span className="ingredient-name">
         {parse.name}
         {remarks && <span className="ingredient-prep">, {remarks}</span>}
+        {isNew && <span className="review-new">new</span>}
       </span>
       {/* The space is invisible in the flex row, but copied text reads "tahini 3 tbsp". */}
       {amount && (

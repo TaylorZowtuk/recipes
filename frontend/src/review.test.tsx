@@ -466,10 +466,24 @@ describe("confirm and undo", () => {
 describe("the recipe view, for an editor", () => {
   const items = reviewOf(recipe());
   const open = () => {};
+  const newCanonicals = new Set([NEW_CANONICAL]);
+
+  it("marks a line matched to a new Canonical Ingredient as new", () => {
+    const markup = renderToStaticMarkup(
+      <Ingredients
+        original={recipe().original}
+        facts={recipe().facts}
+        review={{ items, open, newCanonicals }}
+      />,
+    );
+    expect(markup.match(/<li>.*?<\/li>/g)?.filter((li) => li.includes("review-new"))).toEqual([
+      expect.stringMatching(/butter<span class="review-new">new<\/span>/),
+    ]);
+  });
 
   it("marks each item and makes it a button that opens its sheet", () => {
     const markup = renderToStaticMarkup(
-      <Ingredients original={recipe().original} facts={recipe().facts} review={{ items, open }} />,
+      <Ingredients original={recipe().original} facts={recipe().facts} review={{ items, open, newCanonicals }} />,
     );
     expect(markup).toContain("review-mark-flagged");
     expect(markup).toContain("review-mark-confirmed");
@@ -483,7 +497,7 @@ describe("the recipe view, for an editor", () => {
 
   it("marks steps too", () => {
     const markup = renderToStaticMarkup(
-      <Steps original={recipe().original} facts={recipe().facts} review={{ items, open }} />,
+      <Steps original={recipe().original} facts={recipe().facts} review={{ items, open, newCanonicals }} />,
     );
     expect([...markup.matchAll(/review-mark-unchecked/g)]).toHaveLength(1);
     expect(markup).toContain("<li>Serve.</li>");
