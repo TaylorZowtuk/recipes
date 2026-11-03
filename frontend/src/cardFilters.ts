@@ -2,10 +2,13 @@ import type { Card } from "./api/client";
 import { totalDifficulty } from "./DifficultyMeters";
 import { alphabetical } from "./titleSearch";
 
-// What the Recipes tab narrows the Collection by. Each chosen Tag must match; null means "Any".
+// What the Recipes tab narrows the Collection by. Each chosen Tag must match; null means "Any". Each
+// easy part set keeps only cards rated 1 on that part of their Difficulty.
 export type CardFilters = {
   tags: readonly string[];
   maxTotalDifficulty: number | null;
+  easyPrep: boolean;
+  easyCook: boolean;
   easyCleanup: boolean;
   maxStatedSeconds: number | null;
 };
@@ -13,6 +16,8 @@ export type CardFilters = {
 export const noFilters: CardFilters = {
   tags: [],
   maxTotalDifficulty: null,
+  easyPrep: false,
+  easyCook: false,
   easyCleanup: false,
   maxStatedSeconds: null,
 };
@@ -26,13 +31,20 @@ export function filterCards<C extends Card>(cards: readonly C[], filters: CardFi
   return cards.filter(({ tags, difficulty, stated_seconds }) => {
     const keys = new Set(tags.map(tagKey));
     if (!chosen.every((tag) => keys.has(tag))) return false;
-    if (filters.maxTotalDifficulty !== null || filters.easyCleanup) {
+    if (
+      filters.maxTotalDifficulty !== null ||
+      filters.easyPrep ||
+      filters.easyCook ||
+      filters.easyCleanup
+    ) {
       if (!difficulty) return false;
       if (
         filters.maxTotalDifficulty !== null &&
         totalDifficulty(difficulty) > filters.maxTotalDifficulty
       )
         return false;
+      if (filters.easyPrep && difficulty.prep !== 1) return false;
+      if (filters.easyCook && difficulty.cook !== 1) return false;
       if (filters.easyCleanup && difficulty.cleanup !== 1) return false;
     }
     if (filters.maxStatedSeconds !== null) {
@@ -58,6 +70,8 @@ export function activeFilterCount(filters: CardFilters): number {
   return (
     filters.tags.length +
     Number(filters.maxTotalDifficulty !== null) +
+    Number(filters.easyPrep) +
+    Number(filters.easyCook) +
     Number(filters.easyCleanup) +
     Number(filters.maxStatedSeconds !== null)
   );

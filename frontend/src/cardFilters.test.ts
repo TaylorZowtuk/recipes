@@ -62,8 +62,24 @@ describe("filterCards", () => {
     expect(titles({ maxTotalDifficulty: 3 })).toEqual(["Synthetic Oats"]);
   });
 
+  it("keeps cards with easy prep (Prep 1), dropping those without a Difficulty", () => {
+    expect(titles({ easyPrep: true })).toEqual(["Synthetic Soup", "Synthetic Oats"]);
+  });
+
+  it("keeps cards with easy cooking (Cook 1), dropping those without a Difficulty", () => {
+    expect(titles({ easyCook: true })).toEqual(["Synthetic Oats"]);
+  });
+
   it("keeps cards with easy cleanup (Cleanup 1), dropping those without a Difficulty", () => {
     expect(titles({ easyCleanup: true })).toEqual(["Synthetic Soup", "Synthetic Oats"]);
+  });
+
+  it("keeps only cards easy on every part chosen", () => {
+    expect(titles({ easyPrep: true, easyCleanup: true })).toEqual([
+      "Synthetic Soup",
+      "Synthetic Oats",
+    ]);
+    expect(titles({ easyPrep: true, easyCook: true })).toEqual(["Synthetic Oats"]);
   });
 
   it("keeps cards at or under a maximum Stated Time, dropping those without one", () => {
@@ -106,10 +122,18 @@ describe("activeFilterCount", () => {
       activeFilterCount({
         tags: ["weeknight", "soup"],
         maxTotalDifficulty: 5,
+        easyPrep: true,
+        easyCook: true,
         easyCleanup: true,
         maxStatedSeconds: 900,
       }),
-    ).toBe(5);
+    ).toBe(7);
+  });
+});
+
+describe("noFilters", () => {
+  it("sets no easy part", () => {
+    expect(noFilters).toMatchObject({ easyPrep: false, easyCook: false, easyCleanup: false });
   });
 });
 

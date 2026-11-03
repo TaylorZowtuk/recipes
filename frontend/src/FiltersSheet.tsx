@@ -15,6 +15,12 @@ const TIMES: [number | null, string][] = [
   ...[900, 1800, 2700, 3600, 7200].map((s): [number, string] => [s, formatStatedTime(s) ?? ""]),
 ];
 
+const EASY_PARTS: ["easyPrep" | "easyCook" | "easyCleanup", string, string][] = [
+  ["easyPrep", "Easy prep", "Prep 1 of 3"],
+  ["easyCook", "Easy cooking", "Cook 1 of 3"],
+  ["easyCleanup", "Easy cleanup", "Cleanup 1 of 3"],
+];
+
 const matchCount = (shown: number) =>
   shown === 0 ? "No recipes match" : `Show ${shown} ${shown === 1 ? "recipe" : "recipes"}`;
 
@@ -96,18 +102,22 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
             onChange={(maxTotalDifficulty) => onChange({ ...filters, maxTotalDifficulty })}
           />
           <div className="sheet-section">
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={filters.easyCleanup}
-                aria-describedby={`${id}-cleanup`}
-                onChange={(event) => onChange({ ...filters, easyCleanup: event.target.checked })}
-              />
-              Easy cleanup
-            </label>
-            <p id={`${id}-cleanup`} className="field-hint">
-              Cleanup 1 of 3
-            </p>
+            {EASY_PARTS.map(([key, label, hint]) => (
+              <div key={key}>
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={filters[key]}
+                    aria-describedby={`${id}-${key}`}
+                    onChange={(event) => onChange({ ...filters, [key]: event.target.checked })}
+                  />
+                  {label}
+                </label>
+                <p id={`${id}-${key}`} className="field-hint">
+                  {hint}
+                </p>
+              </div>
+            ))}
           </div>
           <Choices
             label="Stated Time at most"
