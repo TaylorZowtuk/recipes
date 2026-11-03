@@ -292,6 +292,7 @@ type SharedCase = {
   open_issues: string[];
   items: Record<string, string[]>;
   unconfirmed: number;
+  flagged: number;
 };
 const shared: { cases: SharedCase[] } = JSON.parse(
   readFileSync(new URL("../../backend/tests/fixtures/review_items.json", import.meta.url), "utf8"),
@@ -349,12 +350,20 @@ describe.each(shared.cases)("the shared Review Items case: $name", (c) => {
     expect(reviewLeft(reviewOf(shown))).toEqual({
       open_issues: c.open_issues.length,
       unconfirmed: c.unconfirmed,
+      flagged: c.flagged,
     });
+  });
+
+  it("badges each tab with as many items as its review bar counts", () => {
+    const items = reviewOf(shown);
+    const tabs = ["ingredients", "steps", "about"] as const;
+    const bars = Object.fromEntries(tabs.map((tab) => [tab, reviewLeft(items, tab).unconfirmed]));
+    expect(tabCounts(items)).toEqual(bars);
   });
 });
 
 describe("the review bar on a tab holding every item", () => {
-  // Shared case 3: three open issues, one of them on the only unconfirmed fact.
+  // Shared case 3: three open issues on three items, one of them the only unconfirmed fact's.
   const c = shared.cases[2] as SharedCase;
   const items = reviewOf(sharedRecipe(c));
 
@@ -362,13 +371,13 @@ describe("the review bar on a tab holding every item", () => {
     const bar = text(
       renderToStaticMarkup(<ReviewBar items={items} tab="ingredients" onConfirm={() => {}} />),
     );
-    const card = reviewCounts({ open_issues: c.open_issues.length, unconfirmed: c.unconfirmed });
-    expect(card).toBe("1 to check, incl. 3 flagged");
+    const card = reviewCounts(c);
+    expect(card).toBe("3 to check, incl. 3 flagged");
     expect(bar).toContain(card);
   });
 
   it("counts only the tab's items", () => {
-    expect(reviewLeft(items, "steps")).toEqual({ open_issues: 0, unconfirmed: 0 });
+    expect(reviewLeft(items, "steps")).toEqual({ open_issues: 0, unconfirmed: 0, flagged: 0 });
     expect(renderToStaticMarkup(<ReviewBar items={items} tab="steps" onConfirm={() => {}} />)).toBe(
       "",
     );
@@ -538,7 +547,7 @@ describe("the recipe view, for an editor", () => {
     const bar = text(
       renderToStaticMarkup(<ReviewBar items={items} tab="ingredients" onConfirm={open} />),
     );
-    // As on the card: the items with an unconfirmed fact, and the open issues among them.
+    // As on the card: the items left to check, and the flagged ones among them.
     expect(bar).toContain("3 to check, incl. 1 flagged");
     expect(bar).toContain("Confirm 2 on this tab");
     const flaggedOnly = reviewOf(

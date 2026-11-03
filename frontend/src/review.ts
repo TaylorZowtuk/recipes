@@ -15,8 +15,6 @@ export type ReviewItem = {
   // The item's facts, and any fact an open Enrichment Issue of it is on: what confirming it sends.
   factIds: string[];
   mark: Mark;
-  // Whether a fact the item has is unconfirmed, as a card's `needs_review` counts it.
-  unconfirmed: boolean;
   issues: EnrichmentIssue[];
 };
 
@@ -77,7 +75,6 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
       tab: id === "difficulty" ? "about" : stepIds.has(id) ? "steps" : "ingredients",
       factIds: paths,
       mark: issues.length ? "flagged" : unconfirmed ? "unchecked" : "confirmed",
-      unconfirmed: paths.some((path) => factAt(recipe.facts, path)?.confirmed === false),
       issues,
     });
   }
@@ -87,19 +84,21 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
 const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
   [...items.values()].filter((item) => item.tab === tab);
 
-// How many of each tab's items an editor has still to check, flagged ones included.
-export function tabCounts(items: Map<string, ReviewItem>): Record<ReviewTab, number> {
-  const count = (tab: ReviewTab) => onTab(items, tab).filter((i) => i.mark !== "confirmed").length;
-  return { ingredients: count("ingredients"), steps: count("steps"), about: count("about") };
-}
-
-// What is left to review of the items, or of a tab's, counted as a card's `needs_review` is.
+// What is left to review of the items, or of a tab's, counted as a card's `needs_review` is:
+// every item still to check, the flagged ones among them, and their open Enrichment Issues.
 export function reviewLeft(items: Map<string, ReviewItem>, tab?: ReviewTab): NeedsReview {
   const left = tab ? onTab(items, tab) : [...items.values()];
   return {
-    unconfirmed: left.filter((item) => item.unconfirmed).length,
+    unconfirmed: left.filter((item) => item.mark !== "confirmed").length,
+    flagged: left.filter((item) => item.mark === "flagged").length,
     open_issues: left.reduce((n, item) => n + item.issues.length, 0),
   };
+}
+
+// How many of each tab's items an editor has still to check, as the tab's review bar counts them.
+export function tabCounts(items: Map<string, ReviewItem>): Record<ReviewTab, number> {
+  const count = (tab: ReviewTab) => reviewLeft(items, tab).unconfirmed;
+  return { ingredients: count("ingredients"), steps: count("steps"), about: count("about") };
 }
 
 // The unchecked items on a tab, which Confirm N on this tab confirms. Never a flagged one.

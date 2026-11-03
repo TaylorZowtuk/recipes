@@ -76,7 +76,7 @@ export function ReviewBar({
 }) {
   const unchecked = uncheckedOn(items, tab);
   const left = reviewLeft(items, tab);
-  if (left.unconfirmed + left.open_issues === 0) return null;
+  if (left.unconfirmed === 0) return null;
   return (
     <div className="review-bar">
       <p className="review-bar-left">{reviewCounts(left)}</p>

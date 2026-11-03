@@ -332,7 +332,7 @@ describe("RecipeScreen", () => {
     difficulty: { prep: 2, cook: 1, cleanup: 1 },
     difficulty_suggested: true,
     tags: [],
-    needs_review: { open_issues: 0, unconfirmed: 0 },
+    needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
     recipe_version: 1,
     schema_version: 1,
   };
@@ -439,7 +439,7 @@ describe("RecipeScreen review", () => {
     difficulty: { prep: 2, cook: 1, cleanup: 1 },
     difficulty_suggested: true,
     tags: [],
-    needs_review: { open_issues: 0, unconfirmed: 3 },
+    needs_review: { open_issues: 0, unconfirmed: 3, flagged: 0 },
     recipe_version: 2,
     schema_version: 1,
   };

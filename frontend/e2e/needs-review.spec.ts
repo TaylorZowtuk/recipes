@@ -48,11 +48,11 @@ test("an editor narrows the grid to Needs Review and back", async ({ page }) => 
   await expect(chip(page)).toHaveAttribute("aria-pressed", "true");
   const first = grid(page).getByRole("listitem").first();
   await expect(first.getByText("Awaiting Review")).toBeVisible();
-  await expect(first.getByText(/flagged|to check/)).toBeVisible();
+  await expect(first.getByText(/\d+ to check/)).toBeVisible();
   expect(await grid(page).getByRole("listitem").count()).toBeLessThan(all);
 
   await chip(page).click();
   await expect(chip(page)).toHaveAttribute("aria-pressed", "false");
   await expect(grid(page).getByRole("listitem")).toHaveCount(all);
-  await expect(grid(page).getByText(/flagged|to check/)).toHaveCount(0);
+  await expect(grid(page).getByText(/\d+ to check/)).toHaveCount(0);
 });

@@ -26,7 +26,7 @@ const card = (fields: Partial<Card>): Card => ({
   difficulty: null,
   difficulty_suggested: false,
   tags: [],
-  needs_review: { open_issues: 0, unconfirmed: 0 },
+  needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   schema_version: 1,
   ...fields,
@@ -41,7 +41,7 @@ const render = () =>
 
 describe("Shell", () => {
   beforeEach(() => {
-    shown.cards = [card({ needs_review: { open_issues: 1, unconfirmed: 0 } })];
+    shown.cards = [card({ needs_review: { open_issues: 1, unconfirmed: 1, flagged: 1 } })];
   });
 
   it("marks the Recipes tab with a dot for an editor while anything needs review", () => {

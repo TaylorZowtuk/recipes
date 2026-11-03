@@ -25,7 +25,7 @@ const card = (fields: Partial<Card>): Card => ({
   difficulty: null,
   difficulty_suggested: false,
   tags: [],
-  needs_review: { open_issues: 0, unconfirmed: 0 },
+  needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   schema_version: 1,
   ...fields,
@@ -81,7 +81,10 @@ describe("RecipeCard", () => {
 describe("RecipeCard under Needs Review", () => {
   it("shows its status and how many items are flagged and to check", () => {
     const markup = render(
-      card({ status: "awaiting_review", needs_review: { open_issues: 1, unconfirmed: 3 } }),
+      card({
+        status: "awaiting_review",
+        needs_review: { open_issues: 1, unconfirmed: 3, flagged: 1 },
+      }),
       true,
     );
     expect(markup).toContain(">Awaiting Review</span>");
@@ -90,7 +93,10 @@ describe("RecipeCard under Needs Review", () => {
 
   it("leaves out the counts outside Needs Review", () => {
     const markup = render(
-      card({ status: "awaiting_review", needs_review: { open_issues: 1, unconfirmed: 3 } }),
+      card({
+        status: "awaiting_review",
+        needs_review: { open_issues: 1, unconfirmed: 3, flagged: 1 },
+      }),
     );
     expect(markup).not.toContain("flagged");
     expect(markup).not.toContain("Awaiting Review");
@@ -100,8 +106,16 @@ describe("RecipeCard under Needs Review", () => {
 describe("the Needs Review chip", () => {
   beforeEach(() => {
     shown.cards = [
-      card({ id: "a", title: "Synthetic Beans", needs_review: { open_issues: 1, unconfirmed: 0 } }),
-      card({ id: "b", title: "Synthetic Dal", needs_review: { open_issues: 0, unconfirmed: 2 } }),
+      card({
+        id: "a",
+        title: "Synthetic Beans",
+        needs_review: { open_issues: 1, unconfirmed: 1, flagged: 1 },
+      }),
+      card({
+        id: "b",
+        title: "Synthetic Dal",
+        needs_review: { open_issues: 0, unconfirmed: 2, flagged: 0 },
+      }),
       card({ id: "c", title: "Synthetic Eggs" }),
     ];
   });

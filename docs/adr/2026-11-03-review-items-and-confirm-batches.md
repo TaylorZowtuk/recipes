@@ -14,7 +14,7 @@ A **Review Item** is what an editor checks and confirms in one tap, and what Nee
 - **The Suggested Difficulty** (`difficulty`), unless the editor set the recipe's own Difficulty, which always wins over the suggestion. Confirming it then would change nothing, so it isn't asked for.
 - **An open Enrichment Issue** joins the item its fact belongs to (`i3.match` to `i3`, `difficulty` to `difficulty`), and makes that item when the recipe lacks its facts, such as an issue on `i5.match` for a line with no facts. Otherwise the editor would have nothing to accept the correction from, while the issue kept the recipe from *Ready*.
 
-An item is unconfirmed while any fact it has is. A card's `needs_review` holds `unconfirmed`, the number of unconfirmed Review Items, and `open_issues`, the number of open Enrichment Issues. A recipe *Awaiting Review* becomes *Ready* once both are 0.
+An item is unconfirmed while any fact it has is, and flagged while it carries an open Enrichment Issue; it is left to check while either holds. A card's `needs_review` holds `unconfirmed`, the number of Review Items left to check, `flagged`, how many of those are flagged, and `open_issues`, the number of open Enrichment Issues, which the Needs Review sort uses. The card and each tab's review bar read "M to check, incl. N flagged" from `unconfirmed` and `flagged`, so N is never above M, and a tab's badge is its M. A recipe *Awaiting Review* becomes *Ready* once `unconfirmed` is 0, which also means no open issue is left.
 
 The API's `review_items` and the PWA's `reviewItems` both apply this rule. One shared synthetic fixture, `backend/tests/fixtures/review_items.json`, holds the expected items and count for each case, and pytest and Vitest both check against it.
 

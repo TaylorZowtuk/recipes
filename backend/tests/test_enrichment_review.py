@@ -330,7 +330,11 @@ def test_the_card_counts_review_items_left_to_check_not_facts() -> None:
     )
     recipe = STEW.model_copy(update={"facts": facts, "issues": [issue(1, "i5.match")]})
 
-    assert card_for(recipe).needs_review.model_dump() == {"open_issues": 1, "unconfirmed": 4, "flagged": 1}
+    assert card_for(recipe).needs_review.model_dump() == {
+        "open_issues": 1,
+        "unconfirmed": 4,
+        "flagged": 1,
+    }
 
 
 def test_the_editors_own_difficulty_leaves_the_suggestion_out_of_review() -> None:
@@ -388,7 +392,11 @@ def test_confirming_stamps_one_batch_on_the_facts_issues_and_canonical_ingredien
             schema_version=SCHEMA_VERSION,
         )
     ]
-    assert card(api_store, recipe.id)["needs_review"] == {"open_issues": 0, "unconfirmed": 3, "flagged": 0}
+    assert card(api_store, recipe.id)["needs_review"] == {
+        "open_issues": 0,
+        "unconfirmed": 3,
+        "flagged": 0,
+    }
 
 
 def test_a_confirmed_recipe_served_to_anyone_names_no_editor(
@@ -512,7 +520,11 @@ def test_the_last_confirm_moves_an_awaiting_review_recipe_to_ready(
     assert last["recipe"]["status"] == "ready"
     assert last["recipe"]["ready_batch"] == last["confirm_batch"]
     assert card(api_store, recipe.id)["status"] == "ready"
-    assert card(api_store, recipe.id)["needs_review"] == {"open_issues": 0, "unconfirmed": 0, "flagged": 0}
+    assert card(api_store, recipe.id)["needs_review"] == {
+        "open_issues": 0,
+        "unconfirmed": 0,
+        "flagged": 0,
+    }
 
 
 def test_an_open_issue_keeps_a_recipe_awaiting_review(
@@ -587,7 +599,11 @@ def test_undoing_the_batch_that_made_a_recipe_ready_moves_it_back(
     assert response.json()["status"] == "awaiting_review"
     assert response.json()["ready_batch"] is None
     assert card(api_store, recipe.id)["status"] == "awaiting_review"
-    assert card(api_store, recipe.id)["needs_review"] == {"open_issues": 0, "unconfirmed": 2, "flagged": 0}
+    assert card(api_store, recipe.id)["needs_review"] == {
+        "open_issues": 0,
+        "unconfirmed": 2,
+        "flagged": 0,
+    }
 
 
 def test_undo_leaves_a_ready_bulk_import_recipe_ready(
@@ -691,4 +707,8 @@ def test_the_seed_has_a_recipe_awaiting_review_with_something_flagged(
     assert fact(recipe, "i2.conversion")["density_g_per_ml"] is not None
     assert [(i.fact_id, i.status) for i in recipe.issues] == [("i2.match", "open")]
     assert canonical(store, BUTTER.id).confirmed is False
-    assert card(store, REVIEW_RECIPE_ID)["needs_review"] == {"open_issues": 1, "unconfirmed": 4, "flagged": 1}
+    assert card(store, REVIEW_RECIPE_ID)["needs_review"] == {
+        "open_issues": 1,
+        "unconfirmed": 4,
+        "flagged": 1,
+    }
