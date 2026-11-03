@@ -12,10 +12,10 @@ export const CHANGED_ELSEWHERE =
 // The conflict's notice once the reloaded Collection no longer has the recipe.
 export const DELETED_ELSEWHERE = "This recipe was deleted on another device.";
 // When the Collection reload after a write fails, the page still shows the old recipe.
+export const SAVED_NOT_REFRESHED = "Saved, but couldn’t refresh. Reload to see the latest.";
 // Setting the recipe's own Difficulty can leave nothing to review, so the save makes it Ready.
 export const SAVED_READY =
   "Saved. This recipe is now Ready, so it joins the Grocery List and fridge matching.";
-export const SAVED_NOT_REFRESHED = "Saved, but couldn’t refresh. Reload to see the latest.";
 export const CHANGED_NOT_REFRESHED =
   "This recipe changed on another device, but couldn’t refresh. Reload to see the newer version.";
 const NOT_AN_EDITOR = "Only the household’s editors can edit recipes. Sign in again.";
