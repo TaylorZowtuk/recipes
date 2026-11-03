@@ -55,6 +55,16 @@ export function forgetCollection() {
   for (const listener of forgotten) listener();
 }
 
+// Loads the Collection this device just changed, so the page shows the newer recipe at once.
+// Says whether it loaded; if not, the page still shows the old one.
+export async function reloadCollection(): Promise<boolean> {
+  forgetCollection();
+  return loadCollection().then(
+    () => true,
+    () => false,
+  );
+}
+
 // The sync poll: undefined until it answers, null when it failed. It loads again after this device
 // changes the Collection, and when the network comes back, which asks again only after a failure.
 export function useSync(): Sync | null | undefined {
