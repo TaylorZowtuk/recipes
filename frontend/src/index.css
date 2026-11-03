@@ -645,6 +645,18 @@ h1:focus {
   font-weight: 700;
 }
 
+/* Enrichment's guess, not an editor's rating: a quiet word after the Total, on the same line. */
+.difficulty-suggested {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.difficulty-suggested::before {
+  content: " · ";
+  font-style: normal;
+}
+
 /* Tags as small chips that wrap, centred under the card's or the recipe's title. */
 .tags {
   display: flex;

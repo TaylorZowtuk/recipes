@@ -29,6 +29,28 @@ describe("DifficultyMeters", () => {
     );
   });
 
+  it("labels Suggested Difficulty as a suggestion, to the eye and to screen readers", () => {
+    const markup = renderToStaticMarkup(
+      <DifficultyMeters difficulty={{ prep: 2, cook: 1, cleanup: 3 }} suggested />,
+    );
+    expect(meters(markup)).toEqual([
+      ["Prep", 2],
+      ["Cook", 1],
+      ["Cleanup", 3],
+    ]);
+    expect(markup).toContain('<span class="difficulty-suggested">Suggested</span>');
+    expect(markup).toContain(
+      'aria-label="Suggested difficulty: Prep 2 of 3, Cook 1 of 3, Cleanup 3 of 3, total 6 of 9"',
+    );
+  });
+
+  it("doesn't label an editor's Difficulty as a suggestion", () => {
+    const markup = renderToStaticMarkup(
+      <DifficultyMeters difficulty={{ prep: 2, cook: 1, cleanup: 3 }} suggested={false} />,
+    );
+    expect(markup).not.toContain("uggested");
+  });
+
   it("renders nothing for a recipe without a Difficulty", () => {
     expect(renderToStaticMarkup(<DifficultyMeters difficulty={null} />)).toBe("");
   });

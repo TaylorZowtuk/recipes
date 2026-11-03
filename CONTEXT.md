@@ -40,7 +40,7 @@ _Avoid_: Library, cookbook
 One dish in the collection, together with everything the household has recorded about it.
 
 **Card**:
-A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty, tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
+A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty (or else the Suggested Difficulty, labelled as one), tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
 _Avoid_: Tile, summary, listing
 
 **Candidate Photo**:
@@ -90,6 +90,10 @@ _Avoid_: Duplicate check, dedupe index
 **Enrichment**:
 Structured facts added to a recipe once, after it is ingested, and stored with it. This includes parsed ingredients, substitutions, nutrition estimates and grocery categories.
 _Avoid_: AI processing, augmentation
+
+**Substitution**:
+A substitute for an ingredient line that the recipe itself states, such as "butter or margarine", with an estimated ratio and the FDC numbers for the substitute. Enrichment records only what the recipe states, as unconfirmed, and a household's own substitutions go in Our Version. Only a Confirmed substitution is used: fridge matching then shows a **swap**. The stored fact is a Substitution; "swap" is only how fridge matching shows one.
+_Avoid_: Swap (for the stored fact), alternative, replacement
 
 **Fact**:
 One piece of enrichment that an editor confirms in one tap, such as an ingredient line's parse (its quantity, unit, name and preparation). It records its provenance (source, parser, FDC, LLM or editor), a confidence and whether it is estimated. Each fact belongs to one ingredient line, one step or the recipe. Facts are kept apart from the Original.
@@ -144,6 +148,10 @@ _Avoid_: Personal adjustment, variant, fork
 **Difficulty**:
 How hard a recipe is, rated separately for **Prep**, **Cook** and **Cleanup**. Each is rated 1–3. **Total Difficulty** is their sum (3–9).
 _Avoid_: Effort, complexity
+
+**Suggested Difficulty**:
+The Difficulty that enrichment guesses for a recipe, stored as its own unconfirmed fact apart from the editor's Difficulty. The card and recipe view show it, labelled as a suggestion, and the card's Difficulty filters use it, only while the editor hasn't set a Difficulty. Confirming it makes it the recipe's Difficulty.
+_Avoid_: Auto difficulty, estimated difficulty
 
 **Stated Time**:
 The prep, cook or total time a source gives for a recipe, kept as written. It is separate from difficulty.

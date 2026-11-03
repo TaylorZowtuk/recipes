@@ -172,6 +172,20 @@ test("a stale or missing slug still opens the recipe and corrects itself", async
   }
 });
 
+test("a Suggested Difficulty is labelled as a suggestion on its card and recipe", async ({
+  page,
+}) => {
+  const spoken = "Suggested difficulty: Prep 2 of 3, Cook 1 of 3, Cleanup 1 of 3, total 4 of 9";
+  await page.goto("/recipes");
+  const card = grid(page).getByRole("link", { name: /Tomato Lentil Soup/ });
+  await expect(card.getByRole("img", { name: spoken })).toContainText("Suggested");
+
+  await card.click();
+  const hero = page.getByRole("img", { name: spoken });
+  await expect(hero).toContainText("Total 4/9");
+  await expect(hero.locator(".difficulty-suggested")).toBeVisible();
+});
+
 // These tests fail one request with page.route. Once the app's service worker takes control of the
 // page (it claims it as soon as it activates), WebKit sends the page's fetches through it, and
 // page.route no longer sees them. So the service worker stays out of the way here.

@@ -44,6 +44,39 @@ describe("draftOf", () => {
   });
 });
 
+describe("a Suggested Difficulty", () => {
+  // Enrichment's suggestion, in the recipe's facts; the editor hasn't set a Difficulty.
+  const suggested = recipe({
+    difficulty: null,
+    facts: {
+      ingredients: {},
+      steps: {},
+      difficulty: {
+        prep: 2,
+        cook: 1,
+        cleanup: 1,
+        provenance: "llm",
+        confidence: 0.6,
+        estimated: true,
+        confirmed: false,
+        confirmed_by: null,
+        confirmed_at: null,
+        confirm_batch: null,
+      },
+    },
+  });
+
+  it("isn't put in the draft as if the editor had set it", () => {
+    expect(draftOf(suggested).difficulty).toEqual({});
+  });
+
+  it("isn't written by a save that leaves Difficulty alone", () => {
+    const draft = edited(suggested, { tags: "soup" });
+    expect(changeCount(suggested, draft)).toBe(1);
+    expect(draftOperations(suggested, draft)).toEqual([{ op: "set_tags", tags: ["soup"] }]);
+  });
+});
+
 describe("changeCount and draftOperations", () => {
   it("count nothing and send nothing for an untouched draft", () => {
     const r = recipe();

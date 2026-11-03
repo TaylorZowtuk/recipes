@@ -3,7 +3,8 @@
 `load` adds it through the store, so the cards and `META#collection` come from card upkeep,
 giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests rely on
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
-"sesame-noodles-with-crispy-tofu".
+"sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
+enrichment's suggestion.
 """
 
 import io
@@ -15,6 +16,7 @@ from PIL import Image, ImageDraw
 from recipes.models import (
     SCHEMA_VERSION,
     Difficulty,
+    DifficultyFact,
     DurationSegment,
     IngredientFacts,
     IngredientLine,
@@ -348,6 +350,12 @@ RECIPES = [
             stated_times=StatedTimes(prep=_time("10 min", 600), cook=_time("30 min", 1800)),
         ),
         tags=["soup", "weeknight"],
+        # No editor Difficulty, so the card and the recipe page show this one as a suggestion.
+        facts=RecipeFacts(
+            difficulty=DifficultyFact(
+                provenance="llm", confidence=0.6, estimated=True, prep=2, cook=1, cleanup=1
+            )
+        ),
         status="awaiting_review",
     ),
     Recipe(

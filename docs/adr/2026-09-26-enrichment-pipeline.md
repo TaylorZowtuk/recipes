@@ -2,6 +2,8 @@
 
 Partly superseded by [Wording Cache learns unconfirmed mappings](2026-10-28-wording-cache-learns-unconfirmed.md): the Wording Cache part.
 
+Partly superseded by [Substitutions come only from the recipe, and enrichment suggests a Difficulty](2026-11-01-substitutions-from-the-recipe-and-suggested-difficulty.md): substitutions come only from the recipe.
+
 Enrichment runs after a recipe is saved, not during ingest. Deterministic code fills every field it can. An LLM then checks **every** field and fills in the ones that need judgment, but it may only **choose among options that code offers** or write text. Every density, gram weight and nutrient value comes from the bundled USDA FoodData Central (FDC) snapshot. We chose this over letting an LLM enrich freely and validating afterwards, because a model that invents a density or a calorie count produces errors that look plausible and that nobody would catch.
 
 ## Who fills what

@@ -71,7 +71,7 @@ export function RecipeCard({ card }: { card: Card }) {
       <span className="card-title">{card.title}</span>
       {card.site_name && <span className="card-meta">{card.site_name}</span>}
       {time && <span className="card-meta">{time}</span>}
-      <DifficultyMeters difficulty={card.difficulty} />
+      <DifficultyMeters difficulty={card.difficulty} suggested={card.difficulty_suggested} />
       <TagList tags={card.tags} limit={4} />
       {card.status === "pending" && <span className="badge">Enrichment pending</span>}
     </Link>
