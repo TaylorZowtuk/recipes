@@ -542,7 +542,8 @@ describe("the item sheet", () => {
   });
 
   it("notes that confirming a new Canonical Ingredient adds it for every recipe", () => {
-    expect(detail("i1")).toMatch(/adds butter for every recipe that uses it/);
+    // Last, after the Enrichment Issue, so it sits just above the sheet's actions.
+    expect(detail("i1")).toMatch(/The line says butter\..*adds butter for every recipe that uses it/);
     expect(detail("i2")).not.toMatch(/every recipe/);
   });
 

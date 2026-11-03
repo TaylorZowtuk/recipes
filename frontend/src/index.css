@@ -1857,6 +1857,7 @@ h1:focus {
 }
 
 .review-note {
+  margin: calc(var(--space) * 3) 0 0;
   padding: calc(var(--space) * 2) calc(var(--space) * 3);
   border-radius: 12px;
   background: var(--accent-soft);

@@ -158,6 +158,8 @@ export function ItemDetail({
   const line = recipe.facts.ingredients[owner];
   const step = recipe.facts.steps[owner];
   const sections: ReactNode[] = [];
+  // Last of all, so it shows just above the sheet's actions rather than scrolled under them.
+  let newNote: ReactNode = null;
 
   if (item.id === "difficulty" && recipe.facts.difficulty) {
     sections.push(
@@ -219,14 +221,15 @@ export function ItemDetail({
             ]}
           />
           <Source fact={match} />
-          {canonical && !canonical.confirmed && (
-            <p className="review-note">
-              {canonical.name} is a new Canonical Ingredient. Confirming adds {canonical.name} for
-              every recipe that uses it.
-            </p>
-          )}
         </Section>,
       );
+      if (canonical && !canonical.confirmed)
+        newNote = (
+          <p className="review-note">
+            {canonical.name} is a new Canonical Ingredient. Confirming adds {canonical.name} for
+            every recipe that uses it.
+          </p>
+        );
     }
     if (conversion) {
       const weight = conversion.refused
@@ -295,6 +298,7 @@ export function ItemDetail({
           <p>{issue.reason}</p>
         </Section>
       ))}
+      {newNote}
     </>
   );
 }
