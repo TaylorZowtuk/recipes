@@ -24,6 +24,13 @@ const pages: Shot[] = [
     ready: "Collection",
     loaded: "Sesame Noodles with Crispy Tofu",
   },
+  {
+    name: "recipes-filters",
+    path: "/recipes",
+    ready: "Collection",
+    loaded: "Sesame Noodles with Crispy Tofu",
+    click: "Filters",
+  },
   { name: "week", path: "/week", ready: "Week Plan" },
   { name: "fridge", path: "/fridge", ready: "Fridge" },
   { name: "sites", path: "/sites", ready: "Favorite Sites" },
@@ -172,6 +179,7 @@ for (const { name, path: url, ready, loaded, editor, menu, ingest, tab, click } 
         test.skip(!shown, `no ${click} button on this branch`);
       }
       await button.click();
+      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     }
     // Photos load after the data that names them.
     await page.waitForFunction(() => Array.from(document.images).every((image) => image.complete));

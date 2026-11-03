@@ -1,5 +1,8 @@
 import type { Difficulty } from "./api/client";
 
+export const totalDifficulty = (difficulty: Difficulty) =>
+  difficulty.prep + difficulty.cook + difficulty.cleanup;
+
 const METERS = [
   ["Prep", "prep"],
   ["Cook", "cook"],
@@ -17,7 +20,7 @@ export function DifficultyMeters({
   suggested?: boolean;
 }) {
   if (!difficulty) return null;
-  const total = difficulty.prep + difficulty.cook + difficulty.cleanup;
+  const total = totalDifficulty(difficulty);
   const spoken = METERS.map(([label, key]) => `${label} ${difficulty[key]} of 3`).join(", ");
   return (
     <span

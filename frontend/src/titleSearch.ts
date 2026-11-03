@@ -6,8 +6,9 @@ export function titleMatches(title: string, query: string): boolean {
   return fold(title).includes(fold(query.trim()));
 }
 
-const collator = new Intl.Collator("en", { sensitivity: "base" });
+// Orders strings alphabetically, ignoring case and accents: titles and Tags sort the same way.
+export const alphabetical = new Intl.Collator("en", { sensitivity: "base" }).compare;
 
-// Orders cards alphabetically by title, ignoring case and accents.
+// Orders cards alphabetically by title.
 export const byTitle = (a: { title: string }, b: { title: string }) =>
-  collator.compare(a.title, b.title);
+  alphabetical(a.title, b.title);
