@@ -1,15 +1,29 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import type { Card, Original, ParseFact } from "./api/client";
+import type { Card, Original, ParseFact, Recipe } from "./api/client";
 import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
 
-// The Collection the recipe page reads its card from, with the recipe itself still loading.
-const shown: { cards: Card[] } = { cards: [] };
+// The Collection the recipe page reads its card from, with the recipe itself loading until a test
+// gives it one, and whether this device's person is an editor.
+const shown: { cards: Card[]; recipe?: Recipe; editor: boolean } = { cards: [], editor: false };
 vi.mock("./collection", () => ({
-  useCollection: () => ({ state: "ready", value: shown }),
-  useRecipe: () => ({ state: "loading" }),
+  useCollection: () => ({
+    state: "ready",
+    value: {
+      cards: shown.cards,
+      canonical_ingredients: [],
+      kitchen_settings: { store_categories: [] },
+    },
+  }),
+  useRecipe: () => (shown.recipe ? { state: "ready", value: shown.recipe } : { state: "loading" }),
+  useSync: () => undefined,
 }));
+vi.mock("./session", () => ({
+  useIsEditor: () => shown.editor,
+  EditorOnly: ({ children }: { children: unknown }) => (shown.editor ? children : null),
+}));
+vi.mock("./online", () => ({ useOnline: () => true }));
 // The account menu reads the browser's session, which a server render has none of.
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 
@@ -335,5 +349,128 @@ describe("RecipeScreen", () => {
       'aria-label="Difficulty: Prep 2 of 3, Cook 1 of 3, Cleanup 1 of 3, total 4 of 9"',
     );
     expect(markup).not.toContain("uggested");
+  });
+});
+
+describe("RecipeScreen review", () => {
+  const unconfirmed = {
+    provenance: "llm",
+    confidence: 0.7,
+    estimated: true,
+    confirmed: false,
+    confirmed_by: null,
+    confirmed_at: null,
+    confirm_batch: null,
+  } as const;
+  const fdc = {
+    dataset: "sr_legacy",
+    release: "2018-04",
+    per_100g: { kcal: 700, protein_g: 1, fat_g: 80, carbs_g: 0, sodium_mg: 600 },
+    density_g_per_ml: 0.96,
+    count_unit: null,
+    grams_per_count: null,
+    refused: null,
+  } as const;
+  // A Ready recipe whose facts are still unconfirmed: a weight, a substitution and a suggestion.
+  const recipe = (status: Recipe["status"]): Recipe =>
+    ({
+      id: "01K7TEST000000000000000002",
+      version: 2,
+      status,
+      difficulty: null,
+      tags: [],
+      images: [],
+      preview: null,
+      issues: [],
+      source: {
+        kind: "website",
+        url: "https://example.com/beans",
+        site_name: "example.com",
+        captured_at: "2026-11-01T00:00:00Z",
+      },
+      original: {
+        ...original(["i1", "2 tbsp butter or margarine", null]),
+        steps: [{ id: "s1", text: "Melt the butter.", component: null }],
+      },
+      facts: {
+        ingredients: {
+          i1: {
+            ...parse({ quantity: { low: 2, high: 2 }, unit: "tbsp", name: "butter" }),
+            conversion: { ...unconfirmed, provenance: "fdc", fdc_id: 1, ...fdc },
+            substitutions: {
+              ...unconfirmed,
+              items: [
+                {
+                  wording: "margarine",
+                  canonical_id: "01K7TEST0000000000000000C1",
+                  ratio: 1,
+                  note: "use the same amount",
+                  fdc_id: 1,
+                  portion_id: null,
+                  fdc,
+                },
+              ],
+            },
+          },
+        },
+        steps: {},
+        difficulty: { ...unconfirmed, prep: 2, cook: 1, cleanup: 1 },
+      },
+    }) as unknown as Recipe;
+  const card: Card = {
+    id: "01K7TEST000000000000000002",
+    title: "Synthetic Test Beans",
+    site_name: "example.com",
+    stated_seconds: null,
+    status: "ready",
+    preview: null,
+    difficulty: { prep: 2, cook: 1, cleanup: 1 },
+    difficulty_suggested: true,
+    tags: [],
+    needs_review: { open_issues: 0, unconfirmed: 3 },
+    recipe_version: 2,
+    schema_version: 1,
+  };
+  const render = (editor: boolean, status: Recipe["status"] = "ready") => {
+    shown.cards = [{ ...card, status }];
+    shown.recipe = recipe(status);
+    shown.editor = editor;
+    try {
+      return renderToStaticMarkup(
+        <MemoryRouter initialEntries={[`/recipes/${card.id}/synthetic-test-beans`]}>
+          <Routes>
+            <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    } finally {
+      shown.recipe = undefined;
+      shown.editor = false;
+    }
+  };
+  const tabs = (markup: string) =>
+    [...markup.matchAll(/role="tab"[^>]*>(.*?)<\/button>/g)].map(([, t = ""]) =>
+      t.replace(/<[^>]+>/g, ""),
+    );
+
+  it("shows an editor each tab's count of unchecked Review Items", () => {
+    const markup = render(true, "awaiting_review");
+    expect(tabs(markup)).toEqual(["Ingredients, 2 to check", "Steps", "About, 1 to check"]);
+    expect(markup).toContain("review-mark-unchecked");
+  });
+
+  it("shows a visitor no counts, marks or review controls", () => {
+    const markup = render(false, "awaiting_review");
+    expect(tabs(markup)).toEqual(["Ingredients", "Steps", "About"]);
+    expect(markup).not.toMatch(/review-|to check|Confirm/);
+  });
+
+  it("keeps a Ready recipe's unconfirmed facts safe: written units, no substitutions, a suggestion", () => {
+    const markup = render(false);
+    const ingredients = markup.match(/<ul class="ingredients">(.*?)<\/ul>/)?.[1] ?? "";
+    expect(ingredients.replace(/<[^>]+>/g, "")).toBe("butter 2 tbsp");
+    expect(markup).not.toMatch(/margarine|same amount|\bg\/ml|≈/);
+    expect(markup).toContain(">Suggested</span>");
+    expect(markup).toContain('aria-label="Suggested difficulty: Prep 2 of 3');
   });
 });

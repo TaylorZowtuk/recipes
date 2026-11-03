@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 
-type Tab = { label: string; panel: ReactNode };
+// `count`, when above 0, shows as a red badge after the label: what is left to check on that tab.
+type Tab = { label: string; count?: number; panel: ReactNode };
 
 // A tab list with one panel showing. Only the selected tab is in the Tab order; the arrow keys,
 // Home and End move between tabs and select them.
@@ -46,6 +47,13 @@ export function Tabs({ label, tabs }: { label: string; tabs: Tab[] }) {
             onClick={() => setSelected(index)}
           >
             {tab.label}
+            {!!tab.count && (
+              <span className="tab-count">
+                <span className="visually-hidden">, </span>
+                {tab.count}
+                <span className="visually-hidden"> to check</span>
+              </span>
+            )}
           </button>
         ))}
       </div>
