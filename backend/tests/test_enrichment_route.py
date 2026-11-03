@@ -822,7 +822,7 @@ CONFIRMED_AT = "2026-10-01T12:00:00Z"
     ids=[
         "confirmed substitutions",
         "confirmed difficulty",
-        "difficulty in a confirm batch",
+        "difficulty in a Confirm Batch",
         "substitutions confirmed by an editor",
         "difficulty confirmed by an editor",
         "difficulty confirmed at a time",

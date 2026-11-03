@@ -415,7 +415,7 @@ class CanonicalIngredient(Model):
     store_category_id: str  # one of the Kitchen settings' Store Categories
     pantry_staple: bool = False
     confirmed: bool = False
-    confirm_batch: Label | None = None  # the confirm batch that confirmed it, which undo reverts
+    confirm_batch: Label | None = None  # the Confirm Batch that confirmed it, which undo reverts
     version: int
     schema_version: int
 
@@ -474,7 +474,7 @@ class Recipe(Model):
     enrichment_version: int | None = None
     fdc_release: Label | None = None
     issues: list[EnrichmentIssue] = []
-    # The confirm batch that moved it from Awaiting Review to Ready, so undoing it moves it back.
+    # The Confirm Batch that moved it from Awaiting Review to Ready, so undoing it moves it back.
     ready_batch: Label | None = None
 
 

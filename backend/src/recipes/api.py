@@ -220,7 +220,7 @@ MAX_FACT_IDS = 6 * MAX_LINES + 1
 
 
 class ConfirmFacts(BaseModel):
-    """An editor confirming facts of the recipe at `version` as one confirm batch, by path. Each
+    """An editor confirming facts of the recipe at `version` as one Confirm Batch, by path. Each
     open Enrichment Issue on a listed path is resolved with them, which accepts its correction.
     """
 
@@ -229,7 +229,7 @@ class ConfirmFacts(BaseModel):
 
 
 class ConfirmedBatch(BaseModel):
-    """The recipe after a confirm, the confirm batch that undoes it, and whether the batch moved
+    """The recipe after a confirm, the Confirm Batch that undoes it, and whether the batch moved
     the recipe from Awaiting Review to Ready.
     """
 
@@ -510,7 +510,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     duration or temperature segment is one code finds in its step's text, a step with segments has
     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-    with no confirm batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
+    with no Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
     and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
     one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
     wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
@@ -626,7 +626,7 @@ CONFIRMED_BY = "editor"
 def confirm_facts(
     recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
-    """Confirm the listed facts of the recipe at `body.version` as one new confirm batch, and
+    """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
     resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
 
     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
@@ -703,14 +703,14 @@ def _confirm_matches(
     dependencies=EDITORS_ONLY,
     responses={
         403: DUPLICATE[403],
-        404: {"description": "No such recipe, or nothing on it is in the confirm batch"},
+        404: {"description": "No such recipe, or nothing on it is in the Confirm Batch"},
         409: {"description": "The recipe or a Canonical Ingredient changed meanwhile"},
     },
 )
 def undo_confirm_batch(
     recipe_id: Annotated[Ulid, Path()], batch: Annotated[Ulid, Path()], store: StoreDep
 ) -> Recipe:
-    """Reverse one confirm batch on the recipe as it is now: unconfirm its facts, reopen its
+    """Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
     Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
     unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
     """
@@ -718,7 +718,7 @@ def undo_confirm_batch(
     facts = recipe.facts.model_copy(deep=True)
     undone = [p for p in fact_paths(facts) if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
     if not undone and all(issue.confirm_batch != batch for issue in recipe.issues):
-        raise HTTPException(404, "Nothing on the recipe is in that confirm batch")
+        raise HTTPException(404, "Nothing on the recipe is in that Confirm Batch")
     canonicals: dict[str, CanonicalIngredient] = {}
     for path in undone:
         fact = cast("Fact", fact_at(facts, path))
@@ -765,7 +765,7 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment.
     if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
-        raise HTTPException(422, "An Enrichment Issue arrives open, in no confirm batch")
+        raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
     names = {
         normalize_wording(facts.parse.name)
         for facts in body.facts.ingredients.values()
