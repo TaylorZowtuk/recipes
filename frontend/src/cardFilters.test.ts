@@ -17,6 +17,7 @@ const card = (title: string, fields: Partial<Card> = {}): Card => ({
   status: "ready",
   preview: null,
   difficulty: null,
+  difficulty_suggested: false,
   tags: [],
   needs_review: { open_issues: 0, unconfirmed: 0 },
   recipe_version: 1,
@@ -68,6 +69,16 @@ describe("filterCards", () => {
   it("keeps cards at or under a maximum Stated Time, dropping those without one", () => {
     expect(titles({ maxStatedSeconds: 1800 })).toEqual(["Synthetic Noodles", "Synthetic Blend"]);
     expect(titles({ maxStatedSeconds: 900 })).toEqual(["Synthetic Blend"]);
+  });
+
+  it("filters a card by its Suggested Difficulty like any other", () => {
+    const stew = card("Synthetic Stew", {
+      difficulty: { prep: 1, cook: 1, cleanup: 1 },
+      difficulty_suggested: true,
+    });
+    expect(filterCards([stew], { ...noFilters, maxTotalDifficulty: 3, easyCleanup: true })).toEqual(
+      [stew],
+    );
   });
 
   it("combines every filter", () => {

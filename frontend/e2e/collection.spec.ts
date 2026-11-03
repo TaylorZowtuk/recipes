@@ -227,7 +227,11 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await expect(difficulty.getByRole("radio", { name: "Any" })).toBeChecked();
   await expectTapTarget(difficulty.locator("label").filter({ hasText: "4" }));
   await difficulty.getByText("4", { exact: true }).click();
-  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await expect(seededTitles()).toHaveText([
+    "Garlic Butter Green Beans",
+    "Overnight Oats",
+    "Tomato Lentil Soup",
+  ]);
   await difficulty.getByText("Any", { exact: true }).click();
   await expect(seededCards(page)).toHaveCount(seededCount);
 
@@ -236,7 +240,11 @@ test("filter the Collection by Tag, Total Difficulty, Cleanup and Stated Time", 
   await expectTapTarget(cleanupLabel);
   await cleanupLabel.click();
   await expect(cleanup).toBeChecked();
-  await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
+  await expect(seededTitles()).toHaveText([
+    "Garlic Butter Green Beans",
+    "Overnight Oats",
+    "Tomato Lentil Soup",
+  ]);
   await cleanupLabel.click();
 
   // A maximum Stated Time drops the cards without one.
