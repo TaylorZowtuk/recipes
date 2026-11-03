@@ -43,17 +43,14 @@ export function Tabs({ label, tabs }: { label: string; tabs: Tab[] }) {
             aria-selected={index === selected}
             aria-controls={`${id}-panel-${index}`}
             tabIndex={index === selected ? 0 : -1}
+            // Named whole, as the hidden text around an inline-block badge was heard with a space
+            // before its comma: "Ingredients , 3 to check".
+            aria-label={tab.count ? `${tab.label}, ${tab.count} to check` : undefined}
             className="tab"
             onClick={() => setSelected(index)}
           >
             {tab.label}
-            {!!tab.count && (
-              <span className="tab-count">
-                <span className="visually-hidden">, </span>
-                {tab.count}
-                <span className="visually-hidden"> to check</span>
-              </span>
-            )}
+            {!!tab.count && <span className="tab-count">{tab.count}</span>}
           </button>
         ))}
       </div>

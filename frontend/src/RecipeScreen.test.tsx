@@ -448,9 +448,10 @@ describe("RecipeScreen review", () => {
       shown.editor = false;
     }
   };
+  // Each tab's accessible name: its aria-label if it has one, else its text.
   const tabs = (markup: string) =>
-    [...markup.matchAll(/role="tab"[^>]*>(.*?)<\/button>/g)].map(([, t = ""]) =>
-      t.replace(/<[^>]+>/g, ""),
+    [...markup.matchAll(/<button([^>]*role="tab"[^>]*)>(.*?)<\/button>/g)].map(
+      ([, attrs = "", t = ""]) => attrs.match(/aria-label="([^"]*)"/)?.[1] ?? t.replace(/<[^>]+>/g, ""),
     );
 
   it("shows an editor each tab's count of unchecked Review Items", () => {

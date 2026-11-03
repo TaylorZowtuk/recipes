@@ -171,11 +171,8 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   await card.click();
 
   // Each tab counts what's left to check on it, flagged items included.
-  // A count is its own element, so browsers may hear a space before its comma.
   const tab = (label: string, count = 0) =>
-    page.getByRole("tab", {
-      name: new RegExp(`^${label}${count ? ` ?, ${count} to check` : ""}$`),
-    });
+    page.getByRole("tab", { name: count ? `${label}, ${count} to check` : label, exact: true });
   await expect(tab("Ingredients", 3)).toBeVisible();
   await expect(tab("Steps", 2)).toBeVisible();
   await expect(tab("About", 1)).toBeVisible();
