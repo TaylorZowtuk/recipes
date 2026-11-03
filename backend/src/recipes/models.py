@@ -5,6 +5,7 @@ Our Version joins these models when the feature that writes it arrives.
 
 import secrets
 import string
+from itertools import chain
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
@@ -482,11 +483,25 @@ LINE_ITEM = ("parse", "match", "conversion")
 STEP_ITEM = ("segments", "uses")
 
 
-def review_items(facts: RecipeFacts) -> dict[str, list[str]]:
+def fact_paths(facts: RecipeFacts) -> list[str]:
+    """The path of every fact the recipe has."""
+    holders = chain(facts.ingredients.items(), facts.steps.items())
+    paths = [
+        f"{owner}.{kind}"
+        for owner, holder in holders
+        for kind in type(holder).model_fields
+        if getattr(holder, kind)
+    ]
+    return paths + (["difficulty"] if facts.difficulty else [])
+
+
+def review_items(recipe: Recipe) -> dict[str, list[str]]:
     """Each Review Item's fact paths, by the item's id, for the facts the recipe has: a line's
     parse, match and conversion (`i3`), a line's substitutions (`i3.substitutions`), a step's
-    segments and uses (`s2`), and the suggested Difficulty (`difficulty`).
+    segments and uses (`s2`), and the suggested Difficulty (`difficulty`) unless the editor set
+    the recipe's own.
     """
+    facts = recipe.facts
     items: dict[str, list[str]] = {}
     for line_id, line in facts.ingredients.items():
         items[line_id] = [f"{line_id}.{kind}" for kind in LINE_ITEM if getattr(line, kind)]
@@ -494,7 +509,7 @@ def review_items(facts: RecipeFacts) -> dict[str, list[str]]:
             items[f"{line_id}.substitutions"] = [f"{line_id}.substitutions"]
     for step_id, step in facts.steps.items():
         items[step_id] = [f"{step_id}.{kind}" for kind in STEP_ITEM if getattr(step, kind)]
-    if facts.difficulty:
+    if facts.difficulty and recipe.difficulty is None:
         items["difficulty"] = ["difficulty"]
     return {item: paths for item, paths in items.items() if paths}
 
@@ -519,7 +534,7 @@ def needs_review(recipe: Recipe) -> NeedsReview:
     """What the recipe still has for an editor to check."""
     unconfirmed = sum(
         any(not fact.confirmed for path in paths if (fact := fact_at(recipe.facts, path)))
-        for paths in review_items(recipe.facts).values()
+        for paths in review_items(recipe).values()
     )
     return NeedsReview(
         open_issues=sum(issue.status == "open" for issue in recipe.issues), unconfirmed=unconfirmed

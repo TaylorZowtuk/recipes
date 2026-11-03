@@ -57,10 +57,10 @@ from recipes.models import (
     WebUrl,
     Wording,
     fact_at,
+    fact_paths,
     needs_review,
     new_ulid,
     normalize_wording,
-    review_items,
     written_as,
 )
 from recipes.offers import find_offers
@@ -716,8 +716,7 @@ def undo_confirm_batch(
     """
     recipe = _recipe(store, recipe_id)
     facts = recipe.facts.model_copy(deep=True)
-    paths = [path for paths in review_items(facts).values() for path in paths]
-    undone = [p for p in paths if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
+    undone = [p for p in fact_paths(facts) if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
     if not undone and all(issue.confirm_batch != batch for issue in recipe.issues):
         raise HTTPException(404, "Nothing on the recipe is in that confirm batch")
     canonicals: dict[str, CanonicalIngredient] = {}

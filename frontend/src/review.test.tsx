@@ -224,7 +224,7 @@ const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/\s+/g,
 
 describe("reviewItems", () => {
   it("groups the facts the recipe has into Review Items, as the API does", () => {
-    expect(reviewItems(recipe().facts)).toEqual({
+    expect(reviewItems(recipe())).toEqual({
       i1: ["i1.parse", "i1.match", "i1.conversion"],
       i2: ["i2.parse", "i2.match", "i2.conversion"],
       i3: ["i3.parse"],
@@ -238,8 +238,14 @@ describe("reviewItems", () => {
     const facts = recipe().facts;
     const s1 = facts.steps.s1;
     if (!s1) throw new Error("fixture");
-    const items = reviewItems({ ...facts, steps: { s1: { ...s1, segments: null } } });
+    const items = reviewItems(recipe({ facts: { ...facts, steps: { s1: { ...s1, segments: null } } } }));
     expect(items.s1).toEqual(["s1.uses"]);
+  });
+
+  it("leaves out the suggested Difficulty when the editor set the recipe's own", () => {
+    const own = recipe({ difficulty: { prep: 1, cook: 1, cleanup: 1 } });
+    expect(reviewItems(own).difficulty).toBeUndefined();
+    expect(tabCounts(reviewOf(own)).about).toBe(0);
   });
 });
 

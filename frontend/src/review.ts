@@ -23,8 +23,9 @@ const STEP_ITEM = ["segments", "uses"] as const;
 
 // Each Review Item's fact paths, by the item's id, for the facts the recipe has: as the API's
 // `review_items`, a line's parse, match and conversion, its substitutions, a step's segments and
-// uses, and the suggested Difficulty.
-export function reviewItems(facts: RecipeFacts): Record<string, string[]> {
+// uses, and the suggested Difficulty unless the editor set the recipe's own.
+export function reviewItems(recipe: Recipe): Record<string, string[]> {
+  const { facts } = recipe;
   const items: Record<string, string[]> = {};
   for (const [lineId, line] of Object.entries(facts.ingredients)) {
     items[lineId] = LINE_ITEM.filter((kind) => line[kind]).map((kind) => `${lineId}.${kind}`);
@@ -33,7 +34,7 @@ export function reviewItems(facts: RecipeFacts): Record<string, string[]> {
   for (const [stepId, step] of Object.entries(facts.steps)) {
     items[stepId] = STEP_ITEM.filter((kind) => step[kind]).map((kind) => `${stepId}.${kind}`);
   }
-  if (facts.difficulty) items.difficulty = ["difficulty"];
+  if (facts.difficulty && !recipe.difficulty) items.difficulty = ["difficulty"];
   return Object.fromEntries(Object.entries(items).filter(([, paths]) => paths.length > 0));
 }
 
@@ -55,7 +56,7 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   const stepIds = new Set(recipe.original.steps.map((step) => step.id));
   const open = recipe.issues.filter((issue) => issue.status === "open");
   const items = new Map<string, ReviewItem>();
-  for (const [id, paths] of Object.entries(reviewItems(recipe.facts))) {
+  for (const [id, paths] of Object.entries(reviewItems(recipe))) {
     const issues = open.filter((issue) => itemOf(issue.fact_id) === id);
     const unconfirmed = paths.some((path) => !factAt(recipe.facts, path)?.confirmed);
     items.set(id, {

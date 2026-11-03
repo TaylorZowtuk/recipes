@@ -231,7 +231,7 @@ def test_review_items_group_a_recipes_facts_as_an_editor_checks_them() -> None:
         }
     )
 
-    assert review_items(facts) == {
+    assert review_items(STEW.model_copy(update={"facts": facts})) == {
         "i1": ["i1.parse", "i1.match", "i1.conversion"],
         "i9": ["i9.parse"],
         "i2": ["i2.parse"],
@@ -260,6 +260,15 @@ def test_the_card_counts_unconfirmed_review_items_not_facts() -> None:
     recipe = STEW.model_copy(update={"facts": facts, "issues": [issue(1, "i5.match")]})
 
     assert card_for(recipe).needs_review.model_dump() == {"open_issues": 1, "unconfirmed": 3}
+
+
+def test_the_editors_own_difficulty_leaves_the_suggestion_out_of_review() -> None:
+    recipe = STEW.model_copy(
+        update={"facts": FACTS, "difficulty": Difficulty(prep=1, cook=1, cleanup=1)}
+    )
+
+    assert "difficulty" not in review_items(recipe)
+    assert card_for(recipe).needs_review.unconfirmed == 3
 
 
 def test_a_confirmed_suggested_difficulty_is_the_recipes_difficulty() -> None:
@@ -447,6 +456,34 @@ def test_an_open_issue_keeps_a_recipe_awaiting_review(
         False,
         "awaiting_review",
     )
+
+
+def test_a_recipe_with_the_editors_difficulty_is_ready_without_confirming_the_suggestion(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, difficulty=Difficulty(prep=1, cook=1, cleanup=1))
+
+    every_line_and_step = ["i1.parse", "i1.match", "i1.conversion", "i9.parse", "s1.uses"]
+    response = confirm(editor_client, recipe, *every_line_and_step)
+
+    assert response.json()["ready"] is True
+
+
+def test_undo_unconfirms_a_suggestion_the_editors_difficulty_overrode_since(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+    batch = confirm(editor_client, recipe, "difficulty").json()["confirm_batch"]
+    overrode = api_store.update_recipe(
+        stored(api_store, recipe.id).model_copy(
+            update={"difficulty": Difficulty(prep=1, cook=1, cleanup=1)}
+        )
+    )
+
+    response = undo(editor_client, overrode.id, batch)
+
+    assert response.status_code == 200
+    assert fact(stored(api_store, recipe.id), "difficulty")["confirmed"] is False
 
 
 def test_undoing_the_batch_that_made_a_recipe_ready_moves_it_back(
