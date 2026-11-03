@@ -4,6 +4,9 @@ import { expect, type Page, type TestInfo, test } from "@playwright/test";
 // on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in, fake web and token");
 
+// In Playwright's WebKit, page.route stops seeing requests once the app registers a service worker.
+test.use({ serviceWorkers: "block" });
+
 const SERVICE_TOKEN = { "x-plateful-service-token": "local-dev-service-token" };
 
 // Every project shares one local API for the whole run, so each attempt adds its own Source and
@@ -288,7 +291,7 @@ test("a review write that lost a race shows the newer recipe, says so, and stays
   await expect(steps(page).getByRole("button", { name: /^Confirmed: / })).toHaveCount(0);
 });
 
-test("the toast waits while Undo has focus, and Undo is off while offline", async ({
+test("the toast waits while Undo has focus or the mouse, keeps focus on a failed Undo, and Undo is off while offline", async ({
   page,
   context,
 }, testInfo) => {
@@ -323,9 +326,26 @@ test("the toast waits while Undo has focus, and Undo is off while offline", asyn
   const about = page.getByRole("tabpanel", { name: /^About/ });
   await about.getByRole("button", { name: "Confirm 1 on this tab" }).click();
   await expect(toast(page, "Confirmed.")).toBeVisible();
+
+  // With the mouse over it, the toast stays too.
+  if (testInfo.project.name.startsWith("desktop")) {
+    await undo(page).hover();
+    await page.clock.runFor(15_000);
+    await expect(toast(page, "Confirmed.")).toBeVisible();
+    await page.mouse.move(0, 0);
+  }
+
+  // An Undo that fails keeps its button, and focus stays on it.
+  await page.route("**/confirm-batches/*/undo", (route) => route.abort());
+  await undo(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(toast(page, "Couldn’t reach Plateful. Try again.")).toBeVisible();
+  await expect(undo(page)).toBeFocused();
+  await page.unroute("**/confirm-batches/*/undo");
+
   await context.setOffline(true);
   await expect(undo(page)).toBeDisabled();
-  await expect(toast(page, "Confirmed.")).toContainText(
+  await expect(toast(page, "Couldn’t reach Plateful.")).toContainText(
     "You’re offline. Undo once you’re back online.",
   );
   await context.setOffline(false);

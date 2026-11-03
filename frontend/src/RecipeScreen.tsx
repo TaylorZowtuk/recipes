@@ -202,21 +202,26 @@ function RecipeTabs({
     },
   };
 
-  // A review write can remove the control that started it (Confirm N on this tab once nothing is
-  // left unchecked, Undo once undone), even when the newer recipe arrives later. Until its toast
-  // goes, focus that falls to the page moves to the selected tab.
+  // A review write disables the control that started it, which drops its focus, and can remove
+  // it (Confirm N on this tab once nothing is left unchecked, Undo once undone), even when the
+  // newer recipe arrives later. Until its toast goes, focus that falls to the page returns to
+  // that control while it's there and enabled, else moves to the selected tab.
   const refocus = useRef(false);
+  const starter = useRef<HTMLElement | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: checked whenever what's shown changes.
   useEffect(() => {
     const active = document.activeElement;
     if (!refocus.current || busy || (active && active !== document.body && active.isConnected))
       return;
-    focusSelectedTab();
+    const control = starter.current;
+    if (control?.isConnected && !control.matches(":disabled")) control.focus();
+    else focusSelectedTab();
   }, [recipe, toast, busy]);
 
   const write = async (run: () => Promise<ReviewOutcome>, retry?: string) => {
     if (busy) return;
     refocus.current = true;
+    starter.current = document.activeElement as HTMLElement | null;
     setBusy(true);
     const shown = await runReview(run, retry);
     if (!mounted.current) return;
