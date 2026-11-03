@@ -2,6 +2,7 @@ import { api, type Recipe, type RecipeFacts } from "./api/client";
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
 import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED } from "./editRecipe";
+import type { ToastMessage } from "./Toast";
 import { type Answer, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
 export type EnrichmentIssue = components["schemas"]["EnrichmentIssue-Output"];
@@ -127,12 +128,9 @@ export const READY_TOAST =
   "Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching.";
 const NOT_REFRESHED = " Couldn’t refresh, so reload to see the latest.";
 
-// What a toast says after a review write, and the Confirm Batch its Undo reverses, if any.
-export type Toast = { text: string; undo?: string };
-
 // Runs a review write and settles it as edits do: a written recipe is remembered and the
 // Collection reloaded, as it is on a conflict, so the page shows the newer recipe.
-export async function runReview(write: () => Promise<ReviewOutcome>): Promise<Toast> {
+export async function runReview(write: () => Promise<ReviewOutcome>): Promise<ToastMessage> {
   let outcome: ReviewOutcome;
   try {
     outcome = await write();

@@ -1,7 +1,9 @@
 import { useEffect } from "react";
-import type { Toast as ToastMessage } from "./review";
 
 const SHOWN_MS = 10_000;
+
+// What a toast says, and the Confirm Batch its Undo reverses, if any.
+export type ToastMessage = { text: string; undo?: string };
 
 // A short message at the foot of the screen, with Undo when there's a Confirm Batch to reverse.
 // The status region stays mounted so screen readers announce each new message; it goes after a

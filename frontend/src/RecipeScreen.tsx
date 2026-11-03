@@ -18,7 +18,6 @@ import {
   type ReviewTab,
   reviewOf,
   runReview,
-  type Toast as ToastMessage,
   tabCounts,
   undoBatch,
 } from "./review";
@@ -29,7 +28,7 @@ import { formatStatedTime, statedTimeText } from "./statedTime";
 import { stepText } from "./stepText";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
-import { Toast } from "./Toast";
+import { Toast, type ToastMessage } from "./Toast";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
