@@ -157,6 +157,12 @@ function RecipePage() {
   );
 }
 
+// The selected tab, where focus goes when the control that had it is gone.
+const focusSelectedTab = () =>
+  document
+    .querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    ?.focus({ preventScroll: true });
+
 const BLOCKED_REVIEW = "You’re offline. Review the recipe once you’re back online.";
 const UNDO_OFFLINE = "You’re offline. Undo once you’re back online.";
 
@@ -184,8 +190,21 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
     },
   };
 
+  // A review write can remove the control that started it (Confirm N on this tab once nothing is
+  // left unchecked, Undo once undone), even when the newer recipe arrives later. Until its toast
+  // goes, focus that falls to the page moves to the selected tab.
+  const refocus = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: checked whenever what's shown changes.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (!refocus.current || busy || (active && active !== document.body && active.isConnected))
+      return;
+    focusSelectedTab();
+  }, [recipe, toast, busy]);
+
   const write = async (run: () => Promise<ReviewOutcome>, retry?: string) => {
     if (busy) return;
+    refocus.current = true;
     setBusy(true);
     const shown = await runReview(run, retry);
     if (!mounted.current) return;
@@ -193,7 +212,10 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
     setToast(shown);
   };
   const confirm = (factIds: string[]) => write(() => confirmItems(recipe, factIds));
-  const done = useCallback(() => setToast(null), []);
+  const done = useCallback(() => {
+    refocus.current = false;
+    setToast(null);
+  }, []);
   const note = blocked && (
     <p className="screen-note">{blocked === "offline" ? BLOCKED_REVIEW : PAUSED}</p>
   );
@@ -256,7 +278,8 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
             onConfirm={confirm}
             onClose={() => {
               setOpenId(undefined);
-              opener.current?.focus({ preventScroll: true });
+              if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+              else focusSelectedTab();
             }}
           />
           <Toast

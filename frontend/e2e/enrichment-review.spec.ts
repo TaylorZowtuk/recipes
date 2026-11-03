@@ -182,6 +182,8 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   await expect(ingredients).toContainText("1 flagged · 3 to check");
   await ingredients.getByRole("button", { name: "Confirm 2 on this tab" }).click();
   await expect(toast(page, "Confirmed.")).toBeVisible();
+  // The button is gone, so focus moves to the tab rather than dropping to the page.
+  await expect(tab("Ingredients", 1)).toBeFocused();
   await expect(ingredients.getByRole("button", { name: /^Confirmed: olive oil/ })).toBeVisible();
   await expect(ingredients.getByRole("button", { name: /^Confirmed: kosher salt/ })).toBeVisible();
   const flagged = ingredients.getByRole("button", { name: /^Flagged: cooked rice/ });
@@ -204,9 +206,10 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   await expect(ingredients.getByRole("button", { name: /^Confirmed: cooked rice/ })).toBeVisible();
   await expect(tab("Ingredients")).toBeVisible();
 
-  // Undo puts it back as it was: flagged.
+  // Undo puts it back as it was: flagged. Undo is gone then, so focus moves to the tab.
   await undo(page).click();
   await expect(toast(page, "Undone.")).toBeVisible();
+  await expect(tab("Ingredients", 1)).toBeFocused();
   await expect(flagged).toBeVisible();
   await expect(tab("Ingredients", 1)).toBeVisible();
 
@@ -220,7 +223,7 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   const steps = page.getByRole("tabpanel", { name: /^Steps/ });
   await steps.getByRole("button", { name: "Confirm 2 on this tab" }).click();
   await expect(steps.getByRole("button", { name: /^Confirmed: / })).toHaveCount(2);
-  await expect(tab("Steps")).toBeVisible();
+  await expect(tab("Steps")).toBeFocused();
   expect(await statusOf(page, id)).toBe("awaiting_review");
 
   // Confirming the last item makes the recipe Ready.
