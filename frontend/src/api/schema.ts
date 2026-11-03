@@ -914,6 +914,8 @@ export interface components {
         };
         /** NeedsReview */
         NeedsReview: {
+            /** Flagged */
+            flagged: number;
             /** Open Issues */
             open_issues: number;
             /** Unconfirmed */
