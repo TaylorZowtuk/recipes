@@ -182,7 +182,7 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
 
   // Confirm N on this tab takes the unchecked lines and leaves the flagged one.
   const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
-  await expect(ingredients).toContainText("2 to check · 1 flagged");
+  await expect(ingredients).toContainText("1 flagged · 3 to check");
   await ingredients.getByRole("button", { name: "Confirm 2 on this tab" }).click();
   await expect(toast(page, "Confirmed.")).toBeVisible();
   await expect(ingredients.getByRole("button", { name: /^Confirmed: olive oil/ })).toBeVisible();

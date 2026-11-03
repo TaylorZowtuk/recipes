@@ -490,9 +490,12 @@ describe("the recipe view, for an editor", () => {
   });
 
   it("offers Confirm N on this tab, skipping flagged items, and nothing when none are left", () => {
-    expect(
-      text(renderToStaticMarkup(<ReviewBar items={items} tab="ingredients" onConfirm={open} />)),
-    ).toContain("Confirm 2 on this tab");
+    const bar = text(
+      renderToStaticMarkup(<ReviewBar items={items} tab="ingredients" onConfirm={open} />),
+    );
+    // As on the card: every item left to check, of which some are flagged.
+    expect(bar).toContain("1 flagged · 3 to check");
+    expect(bar).toContain("Confirm 2 on this tab");
     const flaggedOnly = reviewOf(
       recipe({
         facts: { ...recipe().facts, ingredients: { i1: recipe().facts.ingredients.i1 } as never },
@@ -502,7 +505,7 @@ describe("the recipe view, for an editor", () => {
       <ReviewBar items={flaggedOnly} tab="ingredients" onConfirm={open} />,
     );
     expect(markup).not.toContain("Confirm");
-    expect(text(markup)).toContain("1 flagged");
+    expect(text(markup)).toContain("1 flagged · 1 to check");
   });
 });
 
