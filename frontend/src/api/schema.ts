@@ -136,6 +136,52 @@ export interface paths {
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
     };
+    "/api/recipes/{recipe_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Facts
+         * @description Confirm the listed facts of the recipe at `body.version` as one new confirm batch, and
+         *     resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
+         *
+         *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
+         *     wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+         */
+        post: operations["confirm_facts_api_recipes__recipe_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipes/{recipe_id}/confirm-batches/{batch}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo Confirm Batch
+         * @description Reverse one confirm batch on the recipe as it is now: unconfirm its facts, reopen its
+         *     Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
+         *     unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+         */
+        post: operations["undo_confirm_batch_api_recipes__recipe_id__confirm_batches__batch__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipes/{recipe_id}/enrichment": {
         parameters: {
             query?: never;
@@ -258,6 +304,8 @@ export interface components {
          * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
          */
         "CanonicalIngredient-Input": {
+            /** Confirm Batch */
+            confirm_batch?: string | null;
             /**
              * Confirmed
              * @default false
@@ -286,6 +334,8 @@ export interface components {
          * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
          */
         "CanonicalIngredient-Output": {
+            /** Confirm Batch */
+            confirm_batch: string | null;
             /**
              * Confirmed
              * @default false
@@ -356,6 +406,29 @@ export interface components {
             kitchen_settings: components["schemas"]["KitchenSettings"];
             /** Wordings */
             wordings: components["schemas"]["Wording-Output"][];
+        };
+        /**
+         * ConfirmFacts
+         * @description An editor confirming facts of the recipe at `version` as one confirm batch, by path. Each
+         *     open Enrichment Issue on a listed path is resolved with them, which accepts its correction.
+         */
+        ConfirmFacts: {
+            /** Fact Ids */
+            fact_ids: string[];
+            /** Version */
+            version: number;
+        };
+        /**
+         * ConfirmedBatch
+         * @description The recipe after a confirm, the confirm batch that undoes it, and whether the batch moved
+         *     the recipe from Awaiting Review to Ready.
+         */
+        ConfirmedBatch: {
+            /** Confirm Batch */
+            confirm_batch: string;
+            /** Ready */
+            ready: boolean;
+            recipe: components["schemas"]["Recipe"];
         };
         /**
          * ConversionFact
@@ -1098,6 +1171,8 @@ export interface components {
             issues: components["schemas"]["EnrichmentIssue-Output"][];
             original: components["schemas"]["Original-Output"];
             preview: components["schemas"]["Preview"] | null;
+            /** Ready Batch */
+            ready_batch: string | null;
             /** Schema Version */
             schema_version: number;
             /** Source */
@@ -2028,6 +2103,113 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    confirm_facts_api_recipes__recipe_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmFacts"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmedBatch"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe, or a Canonical Ingredient or wording it confirms, changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A path is neither one of the recipe's facts nor named by an open Enrichment Issue, every listed fact is already Confirmed with no open issue, or it confirms more Canonical Ingredients and wordings than one write holds */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    undo_confirm_batch_api_recipes__recipe_id__confirm_batches__batch__undo_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe, or nothing on it is in the confirm batch */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe or a Canonical Ingredient changed meanwhile */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
