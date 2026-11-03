@@ -2,6 +2,8 @@
 and undoing a batch, which may move the recipe between Awaiting Review and Ready.
 """
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -28,6 +30,7 @@ from recipes.models import (
     UsesFact,
     Wording,
     card_for,
+    needs_review,
     review_items,
 )
 from recipes.seed import BUTTER, RECIPES, REVIEW_RECIPE_ID, load
@@ -240,6 +243,49 @@ def test_review_items_group_a_recipes_facts_as_an_editor_checks_them() -> None:
         "s2": ["s2.segments", "s2.uses"],
         "difficulty": ["difficulty"],
     }
+
+
+# Cases the PWA's review.test.tsx checks too, so the two groupings can't drift apart.
+SHARED = json.loads((Path(__file__).parent / "fixtures" / "review_items.json").read_text())
+
+
+# One unconfirmed fact of each kind, to build a shared case's facts from.
+ONE_OF_EACH = {
+    "parse": parse("flour"),
+    "match": match(),
+    "conversion": conversion(),
+    "substitutions": SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [SWAP]}),
+    "segments": SegmentsFact.model_validate({**LLM, "segments": [TextSegment(v="Stir.")]}),
+    "uses": uses(),
+    "difficulty": suggestion(),
+}
+
+
+def shared_recipe(case: dict[str, Any]) -> Recipe:
+    facts: dict[str, Any] = {"ingredients": {}, "steps": {}}
+    for path, confirmed in case["facts"].items():
+        owner, _, kind = path.rpartition(".")
+        made = ONE_OF_EACH[kind].model_dump() | (CONFIRMED if confirmed else {})
+        if not owner:
+            facts[kind] = made
+        else:
+            facts["ingredients" if owner[0] == "i" else "steps"].setdefault(owner, {})[kind] = made
+    editors = Difficulty(prep=1, cook=1, cleanup=1) if case["editor_difficulty"] else None
+    return STEW.model_copy(
+        update={
+            "facts": RecipeFacts.model_validate(facts),
+            "issues": [issue(n, fact_id) for n, fact_id in enumerate(case["open_issues"])],
+            "difficulty": editors,
+        }
+    )
+
+
+@pytest.mark.parametrize("case", SHARED["cases"], ids=[c["name"] for c in SHARED["cases"]])
+def test_review_items_are_the_shared_cases(case: dict[str, Any]) -> None:
+    recipe = shared_recipe(case)
+
+    assert review_items(recipe) == case["items"]
+    assert needs_review(recipe).unconfirmed == case["unconfirmed"]
 
 
 def test_an_open_issue_on_a_fact_the_recipe_lacks_is_a_review_item_of_its_line() -> None:

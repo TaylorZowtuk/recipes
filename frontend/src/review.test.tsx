@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Collection, type Recipe } from "./api/client";
@@ -6,6 +7,7 @@ import { ItemDetail, ReviewBar } from "./ReviewSheet";
 import {
   confirmableOn,
   confirmItems,
+  factAt,
   READY_TOAST,
   reviewItems,
   reviewOf,
@@ -276,6 +278,71 @@ describe("reviewOf", () => {
     expect(confirmableOn(items, "ingredients")).toEqual(["i3.parse", "i3.substitutions"]);
     expect(confirmableOn(items, "steps")).toEqual(["s1.segments", "s1.uses"]);
     expect(confirmableOn(items, "about")).toEqual(["difficulty"]);
+  });
+});
+
+// Cases the API's test_enrichment_review.py checks too, so the two groupings can't drift apart.
+type SharedCase = {
+  name: string;
+  facts: Record<string, boolean>;
+  editor_difficulty: boolean;
+  open_issues: string[];
+  items: Record<string, string[]>;
+  unconfirmed: number;
+};
+const shared: { cases: SharedCase[] } = JSON.parse(
+  readFileSync(new URL("../../backend/tests/fixtures/review_items.json", import.meta.url), "utf8"),
+);
+
+const oneOfEach = (kind: string, confirmed: boolean): object =>
+  ({
+    parse: parse("flour", confirmed),
+    match: match(KNOWN_CANONICAL, confirmed),
+    conversion: conversion(confirmed, {}),
+    substitutions: { ...stamp(confirmed), items: [] },
+    segments: { ...stamp(confirmed), segments: [] },
+    uses: { ...stamp(confirmed), uses: [] },
+    difficulty: { ...stamp(confirmed), prep: 2, cook: 1, cleanup: 1 },
+  })[kind] ?? {};
+
+const sharedRecipe = (c: SharedCase) => {
+  const holders: Record<"i" | "s", Record<string, Record<string, object>>> = { i: {}, s: {} };
+  let difficulty: object | null = null;
+  for (const [path, confirmed] of Object.entries(c.facts)) {
+    const [owner = "", kind = ""] = path.split(".");
+    if (path === "difficulty") difficulty = oneOfEach(path, confirmed);
+    else (holders[owner.startsWith("i") ? "i" : "s"][owner] ??= {})[kind] = oneOfEach(kind, confirmed);
+  }
+  return recipe({
+    facts: { ingredients: holders.i, steps: holders.s, difficulty } as unknown as Recipe["facts"],
+    difficulty: c.editor_difficulty ? { prep: 1, cook: 1, cleanup: 1 } : null,
+    issues: c.open_issues.map((fact_id, n) => ({
+      id: `01K7TESTISSUE0000000000${n}`,
+      fact_id,
+      before: null,
+      after: null,
+      reason: "Unsure.",
+      status: "open" as const,
+      confirm_batch: null,
+      model: "test",
+    })),
+  });
+};
+
+describe.each(shared.cases)("the shared Review Items case: $name", (c) => {
+  const shown = sharedRecipe(c);
+
+  it("groups the facts and issues as the API does", () => {
+    expect(reviewItems(shown)).toEqual(c.items);
+    const items = reviewOf(shown);
+    expect(Object.fromEntries([...items].map(([id, item]) => [id, item.factIds]))).toEqual(c.items);
+  });
+
+  it("has as many items with an unconfirmed fact as the card counts", () => {
+    const unconfirmed = [...reviewOf(shown).values()].filter((item) =>
+      item.factIds.some((path) => factAt(shown.facts, path)?.confirmed === false),
+    );
+    expect(unconfirmed).toHaveLength(c.unconfirmed);
   });
 });
 
