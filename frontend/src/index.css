@@ -1622,3 +1622,44 @@ h1:focus {
     }
   }
 }
+
+/* Needs Review: collection */
+
+/* The editor's Needs Review chip, in Emphasis red, filled while pressed. */
+.chip-review {
+  background: color-mix(in srgb, var(--emphasis) 14%, var(--surface));
+  color: var(--emphasis-text);
+}
+
+.chip-review[aria-pressed="true"] {
+  background: var(--emphasis);
+  color: var(--surface);
+}
+
+.badge-review {
+  background: color-mix(in srgb, var(--emphasis) 14%, var(--surface));
+  color: var(--emphasis-text);
+}
+
+.card-review {
+  margin-top: var(--space);
+  color: var(--emphasis-text);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+/* The dot on the Recipes tab, at the top right of its icon, while anything needs review. */
+.place {
+  position: relative;
+}
+
+.place-dot {
+  position: absolute;
+  top: calc(var(--space) * 2);
+  left: calc(50% + 10px);
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--emphasis);
+}

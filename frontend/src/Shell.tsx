@@ -1,14 +1,16 @@
 import { useEffect, useRef } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router";
 import { AccountMenu } from "./AccountMenu";
-import { useSync } from "./collection";
+import { useCollection, useSync } from "./collection";
 import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
+import { needsReview } from "./needsReview";
 import { useOnline } from "./online";
 import { focusTitle } from "./Screen";
+import { EditorOnly } from "./session";
 import { syncStatus } from "./syncStatus";
 
 const tabs = [
-  { to: "/recipes", label: "Recipes", icon: <RecipesIcon /> },
+  { to: "/recipes", label: "Recipes", icon: <RecipesIcon />, mark: <ReviewDot /> },
   { to: "/week", label: "Week", icon: <WeekIcon /> },
   { to: "/fridge", label: "Fridge", icon: <FridgeIcon /> },
   { to: "/sites", label: "Sites", icon: <SitesIcon /> },
@@ -37,10 +39,13 @@ export function Shell() {
   return (
     <div className="shell">
       <nav className="places" aria-label="Places">
-        {tabs.map(({ to, label, icon }) => (
+        {tabs.map(({ to, label, icon, mark }) => (
           <NavLink key={to} to={to} className="place">
             {icon}
-            <span>{label}</span>
+            <span>
+              {label}
+              {mark && <EditorOnly>{mark}</EditorOnly>}
+            </span>
           </NavLink>
         ))}
         <AccountMenu placement="rail" />
@@ -50,5 +55,17 @@ export function Shell() {
         {status}
       </p>
     </div>
+  );
+}
+
+// A dot on the Recipes tab while any card needs review, said as part of the tab's name.
+function ReviewDot() {
+  const collection = useCollection();
+  if (collection.state !== "ready" || !collection.value.cards.some(needsReview)) return null;
+  return (
+    <>
+      <span className="visually-hidden">(needs review)</span>
+      <span className="place-dot" aria-hidden="true" />
+    </>
   );
 }
