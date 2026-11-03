@@ -6,7 +6,10 @@ import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
 
 // The Collection the recipe page reads its card from, with the recipe itself loading until a test
 // gives it one, and whether this device's person is an editor.
-const shown: { cards: Card[]; recipe?: Recipe; editor: boolean } = { cards: [], editor: false };
+const shown: { cards: Card[]; recipe?: Recipe; editor: boolean; offline?: boolean } = {
+  cards: [],
+  editor: false,
+};
 vi.mock("./collection", () => ({
   useCollection: () => ({
     state: "ready",
@@ -23,7 +26,7 @@ vi.mock("./session", () => ({
   useIsEditor: () => shown.editor,
   EditorOnly: ({ children }: { children: unknown }) => (shown.editor ? children : null),
 }));
-vi.mock("./online", () => ({ useOnline: () => true }));
+vi.mock("./online", () => ({ useOnline: () => !shown.offline }));
 // The account menu reads the browser's session, which a server render has none of.
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 
@@ -487,6 +490,19 @@ describe("RecipeScreen review", () => {
     const text = markup.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
     expect(text).toContain("Suggested Difficulty Flagged: No Difficulty suggested");
     expect(text).toContain("Flagged: No substitutions suggested for butter");
+  });
+
+  it("turns an editor's review controls off while offline, saying why", () => {
+    shown.offline = true;
+    try {
+      const markup = render(true, "awaiting_review");
+      const confirms = [...markup.matchAll(/<button[^>]*>Confirm \d+ on this tab<\/button>/g)];
+      expect(confirms).toHaveLength(2);
+      for (const [button] of confirms) expect(button).toContain('disabled=""');
+      expect(markup).toContain("You’re offline. Review the recipe once you’re back online.");
+    } finally {
+      shown.offline = false;
+    }
   });
 
   it("shows a visitor no counts, marks or review controls", () => {
