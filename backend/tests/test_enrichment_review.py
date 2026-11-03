@@ -545,10 +545,8 @@ def test_setting_the_editors_difficulty_on_the_last_item_left_makes_the_recipe_r
     recipe = awaiting(api_store)
     every_line_and_step = ["i1.parse", "i1.match", "i1.conversion", "i9.parse", "s1.uses"]
     batch = confirm(editor_client, recipe, *every_line_and_step).json()["confirm_batch"]
-    body = {
-        "version": stored(api_store, recipe.id).version,
-        "operations": [{"op": "set_difficulty", "difficulty": {"prep": 1, "cook": 1, "cleanup": 1}}],
-    }
+    own = {"op": "set_difficulty", "difficulty": {"prep": 1, "cook": 1, "cleanup": 1}}
+    body = {"version": stored(api_store, recipe.id).version, "operations": [own]}
 
     response = editor_client.patch(f"/api/recipes/{recipe.id}", json=body, headers=EDITOR)
 

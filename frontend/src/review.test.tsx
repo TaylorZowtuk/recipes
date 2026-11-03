@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Collection, type Recipe } from "./api/client";
-import { Ingredients, Steps } from "./RecipeScreen";
 import { reviewCounts } from "./needsReview";
+import { Ingredients, Steps } from "./RecipeScreen";
 import { ItemDetail, NewCanonicalNote, ReviewBar } from "./ReviewSheet";
 import {
   confirmableOn,

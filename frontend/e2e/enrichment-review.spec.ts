@@ -291,7 +291,9 @@ test("a review write that lost a race shows the newer recipe, says so, and stays
   await expect(steps(page).getByRole("button", { name: /^Confirmed: / })).toHaveCount(0);
 
   // A sheet whose opener is gone when it closes returns focus to the selected tab.
-  const opener = steps(page).getByRole("button", { name: /^Unchecked: / }).first();
+  const opener = steps(page)
+    .getByRole("button", { name: /^Unchecked: / })
+    .first();
   await opener.click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await opener.evaluate((button) => button.remove());
