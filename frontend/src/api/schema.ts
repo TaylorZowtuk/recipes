@@ -147,7 +147,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm Facts
-         * @description Confirm the listed facts of the recipe at `body.version` as one new confirm batch, and
+         * @description Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
          *     resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
          *
          *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
@@ -171,7 +171,7 @@ export interface paths {
         put?: never;
         /**
          * Undo Confirm Batch
-         * @description Reverse one confirm batch on the recipe as it is now: unconfirm its facts, reopen its
+         * @description Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
          *     Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
          *     unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
          */
@@ -201,7 +201,7 @@ export interface paths {
          *     duration or temperature segment is one code finds in its step's text, a step with segments has
          *     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
          *     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-         *     with no confirm batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
+         *     with no Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
          *     and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
          *     one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
          *     wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
@@ -409,7 +409,7 @@ export interface components {
         };
         /**
          * ConfirmFacts
-         * @description An editor confirming facts of the recipe at `version` as one confirm batch, by path. Each
+         * @description An editor confirming facts of the recipe at `version` as one Confirm Batch, by path. Each
          *     open Enrichment Issue on a listed path is resolved with them, which accepts its correction.
          */
         ConfirmFacts: {
@@ -420,7 +420,7 @@ export interface components {
         };
         /**
          * ConfirmedBatch
-         * @description The recipe after a confirm, the confirm batch that undoes it, and whether the batch moved
+         * @description The recipe after a confirm, the Confirm Batch that undoes it, and whether the batch moved
          *     the recipe from Awaiting Review to Ready.
          */
         ConfirmedBatch: {
@@ -2188,7 +2188,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description No such recipe, or nothing on it is in the confirm batch */
+            /** @description No such recipe, or nothing on it is in the Confirm Batch */
             404: {
                 headers: {
                     [name: string]: unknown;
