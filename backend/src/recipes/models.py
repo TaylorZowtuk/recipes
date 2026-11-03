@@ -540,17 +540,23 @@ def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
 
 class NeedsReview(Model):
     open_issues: int
-    unconfirmed: int  # Review Items with a fact not yet Confirmed
+    unconfirmed: int  # Review Items left to check: a fact not yet Confirmed, or an open issue
+    flagged: int  # the Review Items left to check that carry an open Enrichment Issue
 
 
 def needs_review(recipe: Recipe) -> NeedsReview:
     """What the recipe still has for an editor to check."""
-    unconfirmed = sum(
+    open_facts = [issue.fact_id for issue in recipe.issues if issue.status == "open"]
+    items = review_items(recipe).values()
+    flagged = [any(path in open_facts for path in paths) for paths in items]
+    unconfirmed = [
         any(not fact.confirmed for path in paths if (fact := fact_at(recipe.facts, path)))
-        for paths in review_items(recipe).values()
-    )
+        for paths in items
+    ]
     return NeedsReview(
-        open_issues=sum(issue.status == "open" for issue in recipe.issues), unconfirmed=unconfirmed
+        open_issues=len(open_facts),
+        unconfirmed=sum(f or u for f, u in zip(flagged, unconfirmed, strict=True)),
+        flagged=sum(flagged),
     )
 
 

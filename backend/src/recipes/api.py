@@ -581,8 +581,7 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
     edited = recipe.model_copy(update=changes)
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
-    left = needs_review(edited)
-    if edited.status == "awaiting_review" and left.open_issues == left.unconfirmed == 0:
+    if edited.status == "awaiting_review" and needs_review(edited).unconfirmed == 0:
         edited = edited.model_copy(update={"status": "ready"})
     return store.update_recipe(edited)
 
@@ -665,8 +664,7 @@ def confirm_facts(
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
     reviewed = recipe.model_copy(update={"facts": facts, "issues": issues})
-    left = needs_review(reviewed)
-    ready = recipe.status == "awaiting_review" and left.open_issues == left.unconfirmed == 0
+    ready = recipe.status == "awaiting_review" and needs_review(reviewed).unconfirmed == 0
     if ready:
         reviewed = reviewed.model_copy(update={"status": "ready", "ready_batch": batch})
     saved = store.review_recipe(reviewed, canonicals, wordings)

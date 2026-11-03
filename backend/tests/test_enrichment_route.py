@@ -125,7 +125,7 @@ def test_the_card_shows_the_new_status(editor_client: TestClient, api_store: Sto
     assert card["status"] == "awaiting_review"
     assert card["recipe_version"] == recipe.version + 1
     # Its two parsed lines are each a Review Item.
-    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 2}
+    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 2, "flagged": 0}
 
 
 def test_a_recipe_that_is_not_pending_is_refused(
@@ -328,7 +328,9 @@ def test_a_match_may_name_an_existing_canonical_ingredient(
     assert len(bundle(editor_client)["canonical_ingredients"]) == 1
 
 
-def test_the_card_counts_the_open_issues(editor_client: TestClient, api_store: Store) -> None:
+def test_the_card_counts_the_open_issues_and_the_one_item_they_flag(
+    editor_client: TestClient, api_store: Store
+) -> None:
     issues = [
         EnrichmentIssue.model_validate(issue(n, status))
         for n, status in enumerate(["open", "resolved", "open"], 1)
@@ -336,7 +338,8 @@ def test_the_card_counts_the_open_issues(editor_client: TestClient, api_store: S
     recipe = api_store.enrich_recipe(add(api_store).model_copy(update={"issues": issues}), [], [])
 
     card = next(card for card in bundle(editor_client)["cards"] if card["id"] == recipe.id)
-    assert card["needs_review"] == {"open_issues": 2, "unconfirmed": 0}
+    # Both open issues are on i1.match, which the recipe lacks: one item, left to check.
+    assert card["needs_review"] == {"open_issues": 2, "unconfirmed": 1, "flagged": 1}
 
 
 def assert_nothing_written(editor_client: TestClient, recipe: Recipe) -> None:

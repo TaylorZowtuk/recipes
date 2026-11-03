@@ -1,5 +1,5 @@
 {
-  "about": "Review Items, shared by the API's review_items and needs_review (test_enrichment_review.py) and the PWA's reviewItems and reviewOf (review.test.tsx). facts maps each fact the recipe has to whether it is Confirmed; editor_difficulty is whether the editor set the recipe's own Difficulty; open_issues are the fact ids of its open Enrichment Issues; items are the expected Review Items' fact ids by item id; unconfirmed is how many items have a fact not yet Confirmed.",
+  "about": "Review Items, shared by the API's review_items and needs_review (test_enrichment_review.py) and the PWA's reviewItems and reviewOf (review.test.tsx). facts maps each fact the recipe has to whether it is Confirmed; editor_difficulty is whether the editor set the recipe's own Difficulty; open_issues are the fact ids of its open Enrichment Issues; items are the expected Review Items' fact ids by item id; unconfirmed is how many items are left to check: with a fact not yet Confirmed or an open issue; flagged is how many of those carry an open issue.",
   "cases": [
     {
       "name": "lines, substitutions, steps and the suggested Difficulty",
@@ -24,7 +24,8 @@
         "s2": ["s2.uses"],
         "difficulty": ["difficulty"]
       },
-      "unconfirmed": 4
+      "unconfirmed": 4,
+      "flagged": 0
     },
     {
       "name": "the editor's own Difficulty leaves the suggestion out",
@@ -32,7 +33,8 @@
       "editor_difficulty": true,
       "open_issues": [],
       "items": { "i1": ["i1.parse"] },
-      "unconfirmed": 0
+      "unconfirmed": 0,
+      "flagged": 0
     },
     {
       "name": "an open issue joins its line's item, made for a line with no facts",
@@ -44,7 +46,8 @@
         "i3": ["i3.parse", "i3.match"],
         "i5": ["i5.match"]
       },
-      "unconfirmed": 1
+      "unconfirmed": 3,
+      "flagged": 3
     },
     {
       "name": "an open issue on missing substitutions, and on a Difficulty the editor overrode",
@@ -56,7 +59,8 @@
         "i2.substitutions": ["i2.substitutions"],
         "difficulty": ["difficulty"]
       },
-      "unconfirmed": 0
+      "unconfirmed": 2,
+      "flagged": 2
     }
   ]
 }
