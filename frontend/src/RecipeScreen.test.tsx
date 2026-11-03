@@ -431,9 +431,13 @@ describe("RecipeScreen review", () => {
     recipe_version: 2,
     schema_version: 1,
   };
-  const render = (editor: boolean, status: Recipe["status"] = "ready") => {
+  const render = (
+    editor: boolean,
+    status: Recipe["status"] = "ready",
+    change: (r: Recipe) => Recipe = (r) => r,
+  ) => {
     shown.cards = [{ ...card, status }];
-    shown.recipe = recipe(status);
+    shown.recipe = change(recipe(status));
     shown.editor = editor;
     try {
       return renderToStaticMarkup(
@@ -458,6 +462,31 @@ describe("RecipeScreen review", () => {
     const markup = render(true, "awaiting_review");
     expect(tabs(markup)).toEqual(["Ingredients, 2 to check", "Steps", "About, 1 to check"]);
     expect(markup).toContain("review-mark-unchecked");
+  });
+
+  it("shows an editor an item that only an open Enrichment Issue makes, with nothing suggested", () => {
+    const issue = (n: number, fact_id: string) => ({
+      id: `01K7TESTISSUE00000000000${n}`,
+      fact_id,
+      before: null,
+      after: null,
+      reason: "Unsure.",
+      status: "open" as const,
+      confirm_batch: null,
+      model: "test",
+    });
+    const markup = render(true, "awaiting_review", (r) => ({
+      ...r,
+      issues: [issue(11, "difficulty"), issue(12, "i1.substitutions")],
+      facts: {
+        ...r.facts,
+        difficulty: null,
+        ingredients: { i1: { ...r.facts.ingredients.i1, substitutions: null } } as never,
+      },
+    }));
+    const text = markup.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    expect(text).toContain("Suggested Difficulty Flagged: No Difficulty suggested");
+    expect(text).toContain("Flagged: No substitutions suggested for butter");
   });
 
   it("shows a visitor no counts, marks or review controls", () => {

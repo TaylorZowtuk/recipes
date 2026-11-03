@@ -161,15 +161,18 @@ export function ItemDetail({
   // Last of all, so it shows just above the sheet's actions rather than scrolled under them.
   let newNote: ReactNode = null;
 
-  if (item.id === "difficulty" && recipe.facts.difficulty) {
-    sections.push(
+  // An item an open Enrichment Issue alone makes has no facts of its own to show.
+  if (item.id === "difficulty") {
+    if (recipe.facts.difficulty)
+      sections.push(
       <Section key="difficulty" title="Suggested Difficulty">
         <DifficultyMeters difficulty={recipe.facts.difficulty} suggested />
         <Source fact={recipe.facts.difficulty} />
       </Section>,
     );
-  } else if (item.id.endsWith(".substitutions") && line?.substitutions) {
-    sections.push(
+  } else if (item.id.endsWith(".substitutions")) {
+    if (line?.substitutions)
+      sections.push(
       <Section key="substitutions" title="Substitutions">
         <ul className="review-list">
           {line.substitutions.items.map((sub) => (

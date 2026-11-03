@@ -344,7 +344,9 @@ function Substitutions({
               <li key={line.id}>
                 <ReviewButton item={item} review={review}>
                   <span className="ingredient-name">
-                    {subs.map((sub) => `${sub.wording} ≈ ×${sub.ratio}`).join(", ")}
+                    {subs.length
+                      ? subs.map((sub) => `${sub.wording} ≈ ×${sub.ratio}`).join(", ")
+                      : "No substitutions suggested"}
                     <span className="ingredient-prep"> for {name}</span>
                   </span>
                 </ReviewButton>
@@ -456,11 +458,16 @@ function About({ recipe, review }: { recipe: Recipe; review?: ReviewTarget }) {
 
   return (
     <>
-      {suggestion && review && recipe.facts.difficulty && (
+      {suggestion && review && (
         <section className="component">
           <h2>Suggested Difficulty</h2>
           <ReviewButton item={suggestion} review={review}>
-            <DifficultyMeters difficulty={recipe.facts.difficulty} suggested />
+            {/* An open Enrichment Issue alone makes the item when there's no suggestion. */}
+            {recipe.facts.difficulty ? (
+              <DifficultyMeters difficulty={recipe.facts.difficulty} suggested />
+            ) : (
+              "No Difficulty suggested"
+            )}
           </ReviewButton>
         </section>
       )}
