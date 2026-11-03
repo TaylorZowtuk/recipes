@@ -1,4 +1,4 @@
-import { api, type Recipe, type RecipeFacts } from "./api/client";
+import { api, type Card, type Recipe, type RecipeFacts } from "./api/client";
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
 import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED } from "./editRecipe";
@@ -6,6 +6,7 @@ import type { ToastMessage } from "./Toast";
 import { type Answer, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
 export type EnrichmentIssue = components["schemas"]["EnrichmentIssue-Output"];
+type NeedsReview = Card["needs_review"];
 export type ReviewTab = "ingredients" | "steps" | "about";
 export type Mark = "unchecked" | "flagged" | "confirmed";
 export type ReviewItem = {
@@ -14,6 +15,8 @@ export type ReviewItem = {
   // The item's facts, and any fact an open Enrichment Issue of it is on: what confirming it sends.
   factIds: string[];
   mark: Mark;
+  // Whether a fact the item has is unconfirmed, as a card's `needs_review` counts it.
+  unconfirmed: boolean;
   issues: EnrichmentIssue[];
 };
 
@@ -74,6 +77,7 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
       tab: id === "difficulty" ? "about" : stepIds.has(id) ? "steps" : "ingredients",
       factIds: paths,
       mark: issues.length ? "flagged" : unconfirmed ? "unchecked" : "confirmed",
+      unconfirmed: paths.some((path) => factAt(recipe.facts, path)?.confirmed === false),
       issues,
     });
   }
@@ -87,6 +91,15 @@ const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
 export function tabCounts(items: Map<string, ReviewItem>): Record<ReviewTab, number> {
   const count = (tab: ReviewTab) => onTab(items, tab).filter((i) => i.mark !== "confirmed").length;
   return { ingredients: count("ingredients"), steps: count("steps"), about: count("about") };
+}
+
+// What is left to review of the items, or of a tab's, counted as a card's `needs_review` is.
+export function reviewLeft(items: Map<string, ReviewItem>, tab?: ReviewTab): NeedsReview {
+  const left = tab ? onTab(items, tab) : [...items.values()];
+  return {
+    unconfirmed: left.filter((item) => item.unconfirmed).length,
+    open_issues: left.reduce((n, item) => n + item.issues.length, 0),
+  };
 }
 
 // The unchecked items on a tab, which Confirm N on this tab confirms. Never a flagged one.

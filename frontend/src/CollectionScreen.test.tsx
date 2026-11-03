@@ -85,7 +85,7 @@ describe("RecipeCard under Needs Review", () => {
       true,
     );
     expect(markup).toContain(">Awaiting Review</span>");
-    expect(markup).toContain(">1 flagged · 3 to check</span>");
+    expect(markup).toContain(">3 to check, incl. 1 flagged</span>");
   });
 
   it("leaves out the counts outside Needs Review", () => {

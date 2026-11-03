@@ -4,7 +4,7 @@ import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { reviewCounts } from "./needsReview";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { confirmableOn, tabCounts, uncheckedOn } from "./review";
+import { confirmableOn, reviewLeft, uncheckedOn } from "./review";
 import { Sheet } from "./Sheet";
 
 // What the recipe view needs to show an editor Review Items: each item by id, opening one, and
@@ -58,9 +58,9 @@ export function ReviewButton({
   );
 }
 
-// Above the tab bar: what is left to check on this tab, flagged items included, counted as the
-// card counts them; and Confirm N on this tab, which takes every unchecked item and never a
-// flagged one. Nothing shows once the tab is all confirmed.
+// Above the tab bar: what is left to review on this tab, counted and worded as the card does; and
+// Confirm N on this tab, which takes every unchecked item and never a flagged one. Nothing shows
+// once the tab has nothing left.
 export function ReviewBar({
   items,
   tab,
@@ -75,14 +75,11 @@ export function ReviewBar({
   note?: ReactNode;
 }) {
   const unchecked = uncheckedOn(items, tab);
-  const toCheck = tabCounts(items)[tab];
-  if (toCheck === 0) return null;
-  const flagged = [...items.values()].filter((i) => i.tab === tab && i.mark === "flagged").length;
+  const left = reviewLeft(items, tab);
+  if (left.unconfirmed + left.open_issues === 0) return null;
   return (
     <div className="review-bar">
-      <p className="review-bar-left">
-        {reviewCounts({ open_issues: flagged, unconfirmed: toCheck })}
-      </p>
+      <p className="review-bar-left">{reviewCounts(left)}</p>
       {unchecked.length > 0 ? (
         <button
           type="button"

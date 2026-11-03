@@ -21,8 +21,10 @@ export function reviewQueue<C extends Card>(cards: readonly C[]): C[] {
     );
 }
 
-// "2 flagged · 5 to check", leaving out a part that is zero.
-export const reviewCounts = ({ open_issues, unconfirmed }: Counts) =>
-  [open_issues && `${open_issues} flagged`, unconfirmed && `${unconfirmed} to check`]
-    .filter(Boolean)
-    .join(" · ");
+// "5 to check, incl. 2 flagged", leaving out a part that is zero: the items with an unconfirmed
+// fact, and the open Enrichment Issues.
+export function reviewCounts({ open_issues, unconfirmed }: Counts): string {
+  const flagged = open_issues ? `${open_issues} flagged` : "";
+  if (!unconfirmed) return flagged;
+  return flagged ? `${unconfirmed} to check, incl. ${flagged}` : `${unconfirmed} to check`;
+}

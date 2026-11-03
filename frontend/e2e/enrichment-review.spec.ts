@@ -168,6 +168,7 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   await page.getByRole("button", { name: /^Needs Review · \d+$/ }).click();
   const card = cardOf(page, titleOf(path));
   await expect(card).toContainText("Awaiting Review");
+  await expect(card).toContainText("6 to check, incl. 1 flagged");
   await card.click();
 
   // Each tab counts what's left to check on it, flagged items included.
@@ -179,7 +180,8 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
 
   // Confirm N on this tab takes the unchecked lines and leaves the flagged one.
   const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
-  await expect(ingredients).toContainText("1 flagged · 3 to check");
+  // The bar counts this tab as the card counts the recipe.
+  await expect(ingredients).toContainText("3 to check, incl. 1 flagged");
   await ingredients.getByRole("button", { name: "Confirm 2 on this tab" }).click();
   await expect(toast(page, "Confirmed.")).toBeVisible();
   // The button is gone, so focus moves to the tab rather than dropping to the page.

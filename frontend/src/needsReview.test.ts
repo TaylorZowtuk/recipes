@@ -54,9 +54,10 @@ describe("reviewQueue", () => {
 });
 
 describe("reviewCounts", () => {
-  it("says how many items are flagged and how many to check, leaving out a zero", () => {
-    expect(reviewCounts({ open_issues: 2, unconfirmed: 5 })).toBe("2 flagged · 5 to check");
+  it("says how many items are to check, and how many of those are flagged", () => {
+    expect(reviewCounts({ open_issues: 2, unconfirmed: 5 })).toBe("5 to check, incl. 2 flagged");
     expect(reviewCounts({ open_issues: 0, unconfirmed: 5 })).toBe("5 to check");
+    // An issue on a fact already confirmed, or on one the recipe lacks, is flagged but not unchecked.
     expect(reviewCounts({ open_issues: 1, unconfirmed: 0 })).toBe("1 flagged");
     expect(reviewCounts({ open_issues: 0, unconfirmed: 0 })).toBe("");
   });
