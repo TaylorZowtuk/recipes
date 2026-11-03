@@ -3,7 +3,7 @@ import { formatAmount } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { uncheckedOn } from "./review";
+import { confirmableOn, uncheckedOn } from "./review";
 
 // What the recipe view needs to show an editor Review Items: each item by id, and opening one.
 export type ReviewTarget = { items: Map<string, ReviewItem>; open: (id: string) => void };
@@ -81,7 +81,7 @@ export function ReviewBar({
           type="button"
           className="button"
           disabled={disabled}
-          onClick={() => onConfirm(unchecked.flatMap((item) => item.factIds))}
+          onClick={() => onConfirm(confirmableOn(items, tab))}
         >
           Confirm {unchecked.length} on this tab
         </button>
