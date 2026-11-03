@@ -289,6 +289,15 @@ test("a review write that lost a race shows the newer recipe, says so, and stays
   await expect(toast(page, CHANGED)).toBeVisible();
   await expect(stepsTab(page)).toHaveAttribute("aria-selected", "true");
   await expect(steps(page).getByRole("button", { name: /^Confirmed: / })).toHaveCount(0);
+
+  // A sheet whose opener is gone when it closes returns focus to the selected tab.
+  const opener = steps(page).getByRole("button", { name: /^Unchecked: / }).first();
+  await opener.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await opener.evaluate((button) => button.remove());
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(stepsTab(page)).toBeFocused();
 });
 
 test("the toast waits while Undo has focus or the mouse, keeps focus on a failed Undo, and Undo is off while offline", async ({
