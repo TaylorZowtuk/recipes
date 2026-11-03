@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
 
-from recipes.auth import Auth, EditorDep, require_editor
+from recipes.auth import Auth, require_editor
 from recipes.auth import router as auth_router
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
@@ -602,8 +602,14 @@ def delete_recipe(
     return Response(status_code=204)
 
 
+# Who confirmed a fact, as recipes record it: never the editor's email, because recipes are public
+# and cached for good.
+CONFIRMED_BY = "editor"
+
+
 @router.post(
     "/recipes/{recipe_id}/confirm",
+    dependencies=EDITORS_ONLY,
     responses={
         403: DUPLICATE[403],
         **NO_SUCH_RECIPE,
@@ -618,7 +624,7 @@ def delete_recipe(
     },
 )
 def confirm_facts(
-    recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep, editor: EditorDep
+    recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
     """Confirm the listed facts of the recipe at `body.version` as one new confirm batch, and
     resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
@@ -640,7 +646,7 @@ def confirm_facts(
         raise HTTPException(422, "Every listed fact is already Confirmed")
     for path in confirming:
         fact = cast("Fact", fact_at(facts, path))
-        fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, editor.name, now
+        fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
     issues = [
         issue.model_copy(update={"status": "resolved", "confirm_batch": batch})

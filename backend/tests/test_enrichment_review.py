@@ -2,12 +2,12 @@
 and undoing a batch, which may move the recipe between Awaiting Review and Ready.
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from conftest import EDITOR, SERVICE_TOKEN
 
-from recipes.auth import SERVICE_TOKEN_EDITOR
+from recipes.auth import Editor, current_editor
 from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -33,6 +33,7 @@ from recipes.models import (
 from recipes.seed import BUTTER, RECIPES, REVIEW_RECIPE_ID, load
 
 if TYPE_CHECKING:
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from httpx2 import Response
 
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
 STEW = next(recipe for recipe in RECIPES if recipe.status == "pending")
 SECOND_ID = "01K7Q0000000000000000000E1"
 UNKNOWN_BATCH = "01K7Q0000000000000000000ZZ"
+GOOGLE_EDITOR = "editor@example.com"
 
 BEEF = CanonicalIngredient(
     id="01K7Q0000000000000000000C1",
@@ -126,7 +128,7 @@ def issue(n: int, fact_id: str = "i1.match", **fields: Any) -> EnrichmentIssue:
 
 CONFIRMED = {
     "confirmed": True,
-    "confirmed_by": "editor@example.com",
+    "confirmed_by": "editor",
     "confirmed_at": "2026-10-01T12:00:00Z",
     "confirm_batch": "01K7Q0000000000000000000B1",
 }
@@ -291,7 +293,7 @@ def test_confirming_stamps_one_batch_on_the_facts_issues_and_canonical_ingredien
     assert after.version == recipe.version + 1
     for path in ("i1.parse", "i1.match", "i1.conversion"):
         assert fact(after, path)["confirmed"] is True
-        assert fact(after, path)["confirmed_by"] == SERVICE_TOKEN_EDITOR
+        assert fact(after, path)["confirmed_by"] == "editor"
         assert fact(after, path)["confirmed_at"] is not None
         assert fact(after, path)["confirm_batch"] == batch
     assert fact(after, "i9.parse")["confirmed"] is False
@@ -307,6 +309,24 @@ def test_confirming_stamps_one_batch_on_the_facts_issues_and_canonical_ingredien
         )
     ]
     assert card(api_store, recipe.id)["needs_review"] == {"open_issues": 0, "unconfirmed": 3}
+
+
+def test_a_confirmed_recipe_served_to_anyone_names_no_editor(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # A Google sign-in's editor is named by their email, which must never reach a public recipe.
+    app = cast("FastAPI", editor_client.app)
+    signed_in = Editor(name=GOOGLE_EDITOR, email=GOOGLE_EDITOR)
+    app.dependency_overrides[current_editor] = lambda: signed_in
+    recipe = awaiting(api_store)
+
+    confirm(editor_client, recipe, "i1.parse", "i1.match", "i1.conversion")
+
+    after = stored(api_store, recipe.id)
+    served = editor_client.get(f"/api/v/recipes/{recipe.id}/{after.version}/{SCHEMA_VERSION}")
+    assert served.status_code == 200
+    assert "@" not in served.text
+    assert fact(after, "i1.parse")["confirmed_by"] == "editor"
 
 
 def test_accepting_a_correction_resolves_an_issue_on_a_fact_the_recipe_lacks(

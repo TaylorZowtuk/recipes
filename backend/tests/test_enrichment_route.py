@@ -802,11 +802,11 @@ CONFIRMED_AT = "2026-10-01T12:00:00Z"
         (suggesting(difficulty={"confirmed": True}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"confirm_batch": "batch-1"}), [BEEF, CHUCK], UNVOUCHED),
         (
-            suggesting(substitutions={"confirmed_by": "editor@example.com"}),
+            suggesting(substitutions={"confirmed_by": "editor"}),
             [BEEF, CHUCK],
             UNVOUCHED,
         ),
-        (suggesting(difficulty={"confirmed_by": "editor@example.com"}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"confirmed_by": "editor"}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"confirmed_at": CONFIRMED_AT}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(substitutions={"provenance": "fdc"}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"provenance": "editor"}), [BEEF, CHUCK], UNVOUCHED),

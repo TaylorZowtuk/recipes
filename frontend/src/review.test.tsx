@@ -26,7 +26,7 @@ const stamp = (confirmed: boolean) => ({
   confidence: 0.7,
   estimated: false,
   confirmed,
-  confirmed_by: confirmed ? "Editor" : null,
+  confirmed_by: confirmed ? "editor" : null,
   confirmed_at: confirmed ? "2026-11-01T00:00:00Z" : null,
   confirm_batch: confirmed ? "01K7TESTBATCH0000000000000" : null,
 });
