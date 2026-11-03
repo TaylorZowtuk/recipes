@@ -131,7 +131,8 @@ export interface paths {
         /**
          * Patch Recipe
          * @description Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
-         *     `body.version`, with its card, in one write.
+         *     `body.version`, with its card, in one write. A recipe Awaiting Review with nothing left to
+         *     review is Ready.
          */
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
