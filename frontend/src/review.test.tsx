@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Collection, type Recipe } from "./api/client";
 import { Ingredients, Steps } from "./RecipeScreen";
-import { ItemDetail, ReviewBar } from "./ReviewSheet";
+import { ItemDetail, NewCanonicalNote, ReviewBar } from "./ReviewSheet";
 import {
   confirmableOn,
   confirmItems,
@@ -550,11 +550,19 @@ describe("the item sheet", () => {
   });
 
   it("notes that confirming a new Canonical Ingredient adds it for every recipe", () => {
-    // Last, after the Enrichment Issue, so it sits just above the sheet's actions.
-    expect(detail("i1")).toMatch(
-      /The line says butter\..*adds butter for every recipe that uses it/,
+    const note = (id: string) => {
+      const r = recipe();
+      const item = reviewOf(r).get(id);
+      if (!item) throw new Error(`no item ${id}`);
+      return text(
+        renderToStaticMarkup(<NewCanonicalNote item={item} recipe={r} collection={collection} />),
+      ).trim();
+    };
+    expect(note("i1")).toBe(
+      "butter is a new Canonical Ingredient. Confirming adds butter for every recipe that uses it.",
     );
-    expect(detail("i2")).not.toMatch(/every recipe/);
+    expect(note("i2")).toBe("");
+    expect(note("i3.substitutions")).toBe("");
   });
 
   it("says why a weight stays in the written unit", () => {

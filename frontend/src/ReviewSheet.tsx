@@ -159,8 +159,6 @@ export function ItemDetail({
   const line = recipe.facts.ingredients[owner];
   const step = recipe.facts.steps[owner];
   const sections: ReactNode[] = [];
-  // Last of all, so it shows just above the sheet's actions rather than scrolled under them.
-  let newNote: ReactNode = null;
 
   // An item an open Enrichment Issue alone makes has no facts of its own to show.
   if (item.id === "difficulty") {
@@ -227,13 +225,6 @@ export function ItemDetail({
           <Source fact={match} />
         </Section>,
       );
-      if (canonical && !canonical.confirmed)
-        newNote = (
-          <p className="review-note">
-            {canonical.name} is a new Canonical Ingredient. Confirming adds {canonical.name} for
-            every recipe that uses it.
-          </p>
-        );
     }
     if (conversion) {
       const weight = conversion.refused
@@ -302,8 +293,30 @@ export function ItemDetail({
           <p>{issue.reason}</p>
         </Section>
       ))}
-      {newNote}
     </>
+  );
+}
+
+// Above the sheet's buttons, pinned with them, so it's in view before the editor confirms: that
+// confirming the line's new Canonical Ingredient adds it for every recipe.
+export function NewCanonicalNote({
+  item,
+  recipe,
+  collection,
+}: {
+  item: ReviewItem;
+  recipe: Recipe;
+  collection: Pick<Collection, "canonical_ingredients">;
+}) {
+  const [owner = ""] = item.id.split(".");
+  const match = item.id === owner ? recipe.facts.ingredients[owner]?.match : undefined;
+  const canonical = collection.canonical_ingredients.find((c) => c.id === match?.canonical_id);
+  if (!canonical || canonical.confirmed) return null;
+  return (
+    <p className="review-note">
+      {canonical.name} is a new Canonical Ingredient. Confirming adds {canonical.name} for every
+      recipe that uses it.
+    </p>
   );
 }
 
@@ -347,6 +360,7 @@ export function ItemSheet({
           <ItemDetail item={item} recipe={recipe} collection={collection} />
           {note}
           <div className="sheet-actions">
+            <NewCanonicalNote item={item} recipe={recipe} collection={collection} />
             <button type="button" className="button button-secondary" onClick={onClose}>
               Close
             </button>

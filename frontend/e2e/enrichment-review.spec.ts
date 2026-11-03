@@ -194,6 +194,8 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   // The flagged line's sheet shows the correction and that its Canonical Ingredient is new.
   await flagged.click();
   const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
+  // The note is in view as the sheet opens, not scrolled under its pinned actions.
+  await expect(sheet.locator(".review-note")).toBeInViewport({ ratio: 1 });
   await expect(sheet).toContainText("Flagged");
   await expect(sheet).toContainText(`rice → ${rice}`);
   await expect(sheet).toContainText("The line says cooked rice");
