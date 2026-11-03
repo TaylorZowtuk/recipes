@@ -2,6 +2,8 @@
 
 Partly superseded by [Ingredient segments carry their portion](2026-10-31-ingredient-segments-carry-their-portion.md): the ingredient segment's shape.
 
+Superseded in part by [An editor confirms a Review Item, not a fact, and a confirm names no one](2026-11-03-review-items-and-confirm-batches.md): an editor confirms a Review Item in one tap rather than a single fact, and `confirmed_by` holds `"editor"`, never who confirmed.
+
 A recipe is stored as one JSON document, defined once as Pydantic v2 models in `backend/` with `snake_case` names. The same shape goes into DynamoDB, into the nightly JSON Lines backups and out of the API, and the TypeScript client is generated from the OpenAPI schema. The item holds everything the phone needs to scale, convert units, compute nutrition and render cooking mode **offline**, including the FoodData Central (FDC) numbers enrichment used. We chose this over storing only FDC ids and looking the numbers up when read, because the lookup would mean shipping the FDC snapshot to the PWA, and a newer FDC release would silently change recipes the [enrichment ADR](2026-09-26-enrichment-pipeline.md) says are frozen.
 
 ## Ids and layout

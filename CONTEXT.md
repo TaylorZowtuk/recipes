@@ -128,11 +128,11 @@ The pinned copy of USDA FoodData Central's Foundation Foods and SR Legacy kept i
 _Avoid_: Nutrition database, USDA API
 
 **Needs Review**:
-The list of open enrichment issues and unconfirmed facts, across all recipes.
+What editors still have to check, across all recipes: each recipe's unconfirmed Review Items and open Enrichment Issues, counted on its card.
 _Avoid_: Inbox, queue
 
 **Review Item**:
-What an editor checks as one when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty. It is unconfirmed while any of its facts is, and a card's Needs Review count is of unconfirmed Review Items, not facts. A recipe Awaiting Review becomes Ready once it has no unconfirmed Review Item and no open Enrichment Issue.
+What an editor checks and confirms as one, in one tap, when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty, unless the editor set the recipe's own Difficulty. It is unconfirmed while any of its facts is, and Needs Review counts unconfirmed Review Items, not facts. An open Enrichment Issue belongs to the item of the line, step or suggestion its fact is on, and that item exists for it even when the recipe lacks the fact. A recipe Awaiting Review becomes Ready once it has no unconfirmed Review Item and no open Enrichment Issue.
 _Avoid_: Review row, fact group
 
 **Confirmed**:
@@ -140,7 +140,7 @@ Describes an enriched fact that an editor has accepted or corrected. Confirmed f
 _Avoid_: Approved, verified
 
 **Confirm Batch**:
-The facts an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe Ready, undo moves it back to Awaiting Review.
+The Review Items an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe Ready, undo moves it back to Awaiting Review.
 _Avoid_: Approval, transaction
 
 **Original**:
