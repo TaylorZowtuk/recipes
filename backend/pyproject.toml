@@ -62,7 +62,8 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 "src/recipes/dev.py" = ["TC001"] # FastAPI reads a route's annotations at runtime
 "src/recipes/fdc.py" = ["PLR0911"] # convert returns each reason a portion converts nothing
 "src/recipes/packet.py" = [
-    "BLE001", # the parser fails in many ways on a line it can't read, and any failure means no fact
+    "BLE001",  # the parser fails in many ways on a line it can't read, and any failure means no fact
+    "PLR0913", # Work takes the Collection's parts, the FDC Snapshot and the substitutes file, by name
 ]
 "src/recipes/images.py" = ["BLE001"] # Pillow fails in many ways on a file that isn't a photo
 "src/recipes/ingest.py" = [

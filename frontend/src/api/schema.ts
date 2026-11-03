@@ -155,9 +155,10 @@ export interface paths {
          *     duration or temperature segment is one code finds in its step's text, a step with segments has
          *     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
          *     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-         *     with no confirm batch, every wording is the normalized
-         *     name of one of the parsed lines, it learns at most MAX_LEARNED items, every match and wording
-         *     names a Canonical Ingredient that exists or is new here, every new one's Store Category
+         *     with no confirm batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
+         *     and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
+         *     one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
+         *     wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
          *     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
          *     the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
          */
@@ -314,6 +315,11 @@ export interface components {
          */
         Card: {
             difficulty: components["schemas"]["Difficulty"] | null;
+            /**
+             * Difficulty Suggested
+             * @default false
+             */
+            difficulty_suggested: boolean;
             /** Id */
             id: string;
             needs_review: components["schemas"]["NeedsReview"];
@@ -353,8 +359,7 @@ export interface components {
         };
         /**
          * ConversionFact
-         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
-         *     grams in one count unit for a count, or the reason it doesn't convert.
+         * @description How the line converts to grams, with its FDC food's numbers copied from the FDC Snapshot.
          */
         "ConversionFact-Input": {
             /** Confidence */
@@ -398,8 +403,7 @@ export interface components {
         };
         /**
          * ConversionFact
-         * @description How the line converts to grams, copied from the FDC Snapshot: a density for a volume, the
-         *     grams in one count unit for a count, or the reason it doesn't convert.
+         * @description How the line converts to grams, with its FDC food's numbers copied from the FDC Snapshot.
          */
         "ConversionFact-Output": {
             /** Confidence */
@@ -449,6 +453,70 @@ export interface components {
             cook: number;
             /** Prep */
             prep: number;
+        };
+        /**
+         * DifficultyFact
+         * @description The Difficulty enrichment suggests. An editor's own Difficulty always wins over it.
+         */
+        "DifficultyFact-Input": {
+            /** Cleanup */
+            cleanup: number;
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Cook */
+            cook: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Prep */
+            prep: number;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+        };
+        /**
+         * DifficultyFact
+         * @description The Difficulty enrichment suggests. An editor's own Difficulty always wins over it.
+         */
+        "DifficultyFact-Output": {
+            /** Cleanup */
+            cleanup: number;
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Cook */
+            cook: number;
+            /** Estimated */
+            estimated: boolean;
+            /** Prep */
+            prep: number;
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
         };
         /**
          * Duplicate
@@ -576,6 +644,29 @@ export interface components {
              */
             status: "open" | "resolved";
         };
+        /**
+         * FdcNumbers
+         * @description The FDC Snapshot's numbers for a food, copied in: a density for a volume, the grams in one
+         *     count unit for a count, or the reason it doesn't convert, and its nutrition.
+         */
+        FdcNumbers: {
+            /** Count Unit */
+            count_unit: string | null;
+            /**
+             * Dataset
+             * @enum {string}
+             */
+            dataset: "foundation" | "sr_legacy";
+            /** Density G Per Ml */
+            density_g_per_ml: number | null;
+            /** Grams Per Count */
+            grams_per_count: number | null;
+            per_100g: components["schemas"]["Per100g"];
+            /** Refused */
+            refused: string | null;
+            /** Release */
+            release: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -613,12 +704,14 @@ export interface components {
             conversion?: components["schemas"]["ConversionFact-Input"] | null;
             match?: components["schemas"]["MatchFact-Input"] | null;
             parse?: components["schemas"]["ParseFact-Input"] | null;
+            substitutions?: components["schemas"]["SubstitutionsFact-Input"] | null;
         };
         /** IngredientFacts */
         "IngredientFacts-Output": {
             conversion: components["schemas"]["ConversionFact-Output"] | null;
             match: components["schemas"]["MatchFact-Output"] | null;
             parse: components["schemas"]["ParseFact-Output"] | null;
+            substitutions: components["schemas"]["SubstitutionsFact-Output"] | null;
         };
         /** IngredientLine */
         "IngredientLine-Input": {
@@ -1035,9 +1128,10 @@ export interface components {
         /**
          * RecipeFacts
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-         *     `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
+         *     `ingredients["i3"].parse`, `s2.uses` is `steps["s2"].uses`, and `difficulty` is `difficulty`.
          */
         "RecipeFacts-Input": {
+            difficulty?: components["schemas"]["DifficultyFact-Input"] | null;
             /**
              * Ingredients
              * @default {}
@@ -1056,9 +1150,10 @@ export interface components {
         /**
          * RecipeFacts
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-         *     `ingredients["i3"].parse`, and `s2.uses` is `steps["s2"].uses`.
+         *     `ingredients["i3"].parse`, `s2.uses` is `steps["s2"].uses`, and `difficulty` is `difficulty`.
          */
         "RecipeFacts-Output": {
+            difficulty: components["schemas"]["DifficultyFact-Output"] | null;
             /**
              * Ingredients
              * @default {}
@@ -1291,6 +1386,82 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /**
+         * Substitution
+         * @description Something the recipe says may stand in for the line, quoted as the recipe words it, with
+         *     its Canonical Ingredient, how much to use, and its FDC food's numbers.
+         */
+        Substitution: {
+            /** Canonical Id */
+            canonical_id: string;
+            fdc: components["schemas"]["FdcNumbers"];
+            /** Fdc Id */
+            fdc_id: number;
+            /** Note */
+            note: string;
+            /** Portion Id */
+            portion_id: number | null;
+            /** Ratio */
+            ratio: number;
+            /** Wording */
+            wording: string;
+        };
+        /**
+         * SubstitutionsFact
+         * @description A line's substitutions, which an editor confirms together in one tap.
+         */
+        "SubstitutionsFact-Input": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Items */
+            items: components["schemas"]["Substitution"][];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
+        };
+        /**
+         * SubstitutionsFact
+         * @description A line's substitutions, which an editor confirms together in one tap.
+         */
+        "SubstitutionsFact-Output": {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at: string | null;
+            /** Confirmed By */
+            confirmed_by: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Items */
+            items: components["schemas"]["Substitution"][];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
         };
         /**
          * Sync
@@ -1905,7 +2076,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description A fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -1,8 +1,13 @@
 """The enrich CLI: hands a model a Work Packet of every Pending recipe, then checks the model's
-answer against what the packet offered and writes each recipe's facts through the API.
+answer against what the packet offered and writes each recipe's facts through the API. A
+Substitutes Packet comes first, whose answer (the substitutes file) the Work Packet offers
+candidates for.
 
-PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich packet <API base URL> > packet.json
-PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich apply <API base URL> <answer.json | ->
+PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich substitutes <API base URL> > ask.json
+PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich packet <API base URL> \
+    --substitutes substitutes.json > packet.json
+PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich apply <API base URL> <answer.json | -> \
+    --substitutes substitutes.json
 """
 
 import argparse
@@ -21,6 +26,7 @@ from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.fdc import Snapshot, load_snapshot
 from recipes.models import CanonicalIngredient, KitchenSettings, Recipe, Wording
 from recipes.packet import Answer, Rejected, Work
+from recipes.substitutes import Substitutes, checked, substitutes_packet
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,9 +39,9 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "api"}
 type Send = Callable[[str, str, bytes | None], tuple[int, Any]]
 
 
-def fetch_work(base_url: str, send: Send, snapshot: Snapshot) -> Work | None:
-    """The Collection's Pending recipes, Canonical Ingredients, wordings and Store Categories, or
-    None when the API couldn't give them, which is printed to stderr.
+def fetch_pending(base_url: str, send: Send) -> tuple[Any, list[Recipe]] | None:
+    """The Collection and its Pending recipes, or None when the API couldn't give them, which is
+    printed to stderr.
     """
     status, collection = send("GET", f"{base_url}/api/collection", None)
     if status != HTTPStatus.OK:
@@ -50,6 +56,26 @@ def fetch_work(base_url: str, send: Send, snapshot: Snapshot) -> Work | None:
             print(f"Couldn't read {card['title']}: {status} {body}", file=sys.stderr)
             return None
         recipes.append(Recipe.model_validate(body))
+    return collection, recipes
+
+
+def fetch_work(
+    base_url: str, send: Send, snapshot: Snapshot, substitutes: Substitutes | None = None
+) -> Work | None:
+    """The Collection's Pending recipes, Canonical Ingredients, wordings and Store Categories, with
+    the substitutes each recipe states, or None when the API couldn't give them or the substitutes
+    file quotes what its recipes don't say, which is printed to stderr.
+    """
+    fetched = fetch_pending(base_url, send)
+    if fetched is None:
+        return None
+    collection, recipes = fetched
+    try:
+        stated = checked(substitutes, recipes) if substitutes else {}
+    except Rejected as rejected:
+        print("The substitutes file doesn't match the Pending recipes:", file=sys.stderr)
+        print("\n".join(f"  {error}" for error in rejected.errors), file=sys.stderr)
+        return None
     return Work(
         recipes=recipes,
         canonical_ingredients=[
@@ -60,31 +86,53 @@ def fetch_work(base_url: str, send: Send, snapshot: Snapshot) -> Work | None:
             collection["kitchen_settings"]
         ).store_categories,
         snapshot=snapshot,
+        substitutes=stated,
     )
 
 
-def packet(base_url: str, send: Send, snapshot: Snapshot) -> int:
-    """Print the Work Packet for every Pending recipe, writing nothing. Returns 1 when the API
-    couldn't give it.
+def ask(base_url: str, send: Send) -> int:
+    """Print the Substitutes Packet for every Pending recipe, writing nothing. Returns 1 when the
+    API couldn't give it.
     """
-    work = fetch_work(base_url, send, snapshot)
+    fetched = fetch_pending(base_url, send)
+    if fetched is None:
+        return 1
+    print(substitutes_packet(fetched[1]).model_dump_json(indent=2))
+    return 0
+
+
+def packet(
+    base_url: str, send: Send, snapshot: Snapshot, substitutes: Substitutes | None = None
+) -> int:
+    """Print the Work Packet for every Pending recipe, with offers for each substitute the
+    substitutes file quotes, writing nothing. Returns 1 when the API couldn't give it or the
+    substitutes file doesn't match the recipes.
+    """
+    work = fetch_work(base_url, send, snapshot, substitutes)
     if work is None:
         return 1
     print(work.packet().model_dump_json(indent=2))
     return 0
 
 
-def apply(base_url: str, send: Send, snapshot: Snapshot, text: str) -> int:
-    """Check a model's answer against the packet it answers, rebuilt from the API, and write each
-    recipe whose offer hasn't changed since and whose every line chose among its offers. Prints
-    each recipe's result and returns how many were rejected or failed to write.
+def apply(
+    base_url: str,
+    send: Send,
+    snapshot: Snapshot,
+    text: str,
+    substitutes: Substitutes | None = None,
+) -> int:
+    """Check a model's answer against the packet it answers, rebuilt from the API and the same
+    substitutes file, and write each recipe whose offer hasn't changed since and whose every line
+    chose among its offers. Prints each recipe's result and returns how many were rejected or
+    failed to write.
     """
     try:
         answer = Answer.model_validate_json(text)
     except ValidationError as error:
         print(f"That isn't an answer to a Work Packet: {error}")
         return 1
-    work = fetch_work(base_url, send, snapshot)
+    work = fetch_work(base_url, send, snapshot, substitutes)
     if work is None:
         return 1
     failed = 0
@@ -113,6 +161,20 @@ def apply(base_url: str, send: Send, snapshot: Snapshot, text: str) -> int:
 def read_answer(source: str) -> str:
     """The model's answer, from a file or, for "-", stdin."""
     return sys.stdin.read() if source == "-" else Path(source).read_text()
+
+
+def read_substitutes(path: str | None) -> Substitutes | None:
+    """The substitutes file at `path`, if one is given. Stops when it isn't one."""
+    if path is None:
+        return None
+    try:
+        text = Path(path).read_text()
+    except OSError as error:
+        sys.exit(f"Couldn't read {path}: {error}")
+    try:
+        return Substitutes.model_validate_json(text)
+    except ValidationError as error:
+        sys.exit(f"That isn't a substitutes file: {error}")
 
 
 class SameOriginSession(requests.Session):
@@ -164,25 +226,35 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m recipes.enrich", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     base_help = "the API's base URL, e.g. http://localhost:5173"
+    substitutes_help = "the substitutes file: the answer to the Substitutes Packet"
+    substitutes_command = commands.add_parser(
+        "substitutes", help="print the Substitutes Packet, writing nothing"
+    )
+    substitutes_command.add_argument("base_url", help=base_help)
     packet_command = commands.add_parser("packet", help="print the Work Packet, writing nothing")
     packet_command.add_argument("base_url", help=base_help)
+    packet_command.add_argument("--substitutes", help=substitutes_help)
     apply_command = commands.add_parser("apply", help="check a model's answer and write it")
     apply_command.add_argument("base_url", help=base_help)
     apply_command.add_argument("answer", help="the answer's file, or - for stdin")
+    apply_command.add_argument("--substitutes", help=substitutes_help)
     args = parser.parse_args(argv)
     base_url = checked_base_url(args.base_url)
     token = os.environ.get(SERVICE_TOKEN_ENV)
     if not token:
         sys.exit(f"Set {SERVICE_TOKEN_ENV} to the stack's service token")
-    text = read_answer(args.answer) if args.command == "apply" else None
-    snapshot = load_snapshot()
     with SameOriginSession() as session:
         send = send_with(session, token)
-        failed = (
-            packet(base_url, send, snapshot)
-            if text is None
-            else apply(base_url, send, snapshot, text)
-        )
+        match args.command:
+            case "substitutes":
+                failed = ask(base_url, send)
+            case "packet":
+                substitutes = read_substitutes(args.substitutes)
+                failed = packet(base_url, send, load_snapshot(), substitutes)
+            case _:
+                text = read_answer(args.answer)
+                substitutes = read_substitutes(args.substitutes)
+                failed = apply(base_url, send, load_snapshot(), text, substitutes)
     sys.exit(1 if failed else 0)
 
 
