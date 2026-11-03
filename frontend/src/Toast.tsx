@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const SHOWN_MS = 10_000;
 
@@ -22,16 +22,38 @@ export function Toast({
   onUndo: (batch: string) => void;
   onDone: () => void;
 }) {
+  // The timer waits while the toast has focus or the pointer, so Undo can't vanish mid-reach,
+  // and starts afresh after.
+  const [focused, setFocused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const held = focused || hovered;
+  const shown = useRef<HTMLDivElement>(null);
+  // A control removed with focus or the pointer on it fires no blur or leave, so each new toast
+  // asks afresh.
   useEffect(() => {
-    if (!toast) return;
+    setFocused(!!toast && !!shown.current?.contains(document.activeElement));
+    if (!toast) setHovered(false);
+  }, [toast]);
+  useEffect(() => {
+    if (!toast || held) return;
     const timer = setTimeout(onDone, SHOWN_MS);
     return () => clearTimeout(timer);
-  }, [toast, onDone]);
+  }, [toast, held, onDone]);
 
   return (
     <div role="status" className="toast-region">
       {toast && (
-        <div className="toast">
+        <div
+          ref={shown}
+          className="toast"
+          onFocus={() => setFocused(true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false);
+          }}
+          // Only a mouse hovers: a tap leaves a touch pointer "over" the toast until the next one.
+          onPointerEnter={(event) => event.pointerType === "mouse" && setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
+        >
           <span>
             {toast.text}
             {toast.undo && why && <span className="toast-why"> {why}</span>}

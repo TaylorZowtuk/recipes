@@ -283,3 +283,47 @@ test("a review write that lost a race shows the newer recipe, says so, and stays
   await expect(stepsTab(page)).toHaveAttribute("aria-selected", "true");
   await expect(steps(page).getByRole("button", { name: /^Confirmed: / })).toHaveCount(0);
 });
+
+test("the toast waits while Undo has focus, and Undo is off while offline", async ({
+  page,
+  context,
+}, testInfo) => {
+  const path = `pear-crumble-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`pearl rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.clock.install();
+  await page.goto(`/recipes/${id}`);
+  await page.getByRole("tab", { name: /^Steps/ }).click();
+  const steps = page.getByRole("tabpanel", { name: /^Steps/ });
+  await steps.getByRole("button", { name: "Confirm 2 on this tab" }).click();
+  await expect(toast(page, "Confirmed.")).toBeVisible();
+
+  // Undo has focus, so the toast stays past its 10 seconds; it goes once focus leaves.
+  await undo(page).focus();
+  await page.clock.runFor(15_000);
+  await expect(toast(page, "Confirmed.")).toBeVisible();
+  await page.getByRole("tab", { name: /^Steps/ }).focus();
+  await page.mouse.move(0, 0);
+  // The timer restarts once the page has seen focus leave, so run the clock until it has.
+  await expect(async () => {
+    await page.clock.runFor(11_000);
+    await expect(toast(page, "Confirmed.")).toBeHidden({ timeout: 500 });
+  }).toPass();
+
+  // Offline, a new toast's Undo is off and says why.
+  await page.getByRole("tab", { name: /^About/ }).click();
+  const about = page.getByRole("tabpanel", { name: /^About/ });
+  await about.getByRole("button", { name: "Confirm 1 on this tab" }).click();
+  await expect(toast(page, "Confirmed.")).toBeVisible();
+  await context.setOffline(true);
+  await expect(undo(page)).toBeDisabled();
+  await expect(toast(page, "Confirmed.")).toContainText(
+    "You’re offline. Undo once you’re back online.",
+  );
+  await context.setOffline(false);
+  await expect(undo(page)).toBeEnabled();
+});
