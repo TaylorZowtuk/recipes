@@ -234,15 +234,7 @@ function RecipeTabs({
     <p className="screen-note">{blocked === "offline" ? BLOCKED_REVIEW : PAUSED}</p>
   );
   const bar = (tab: ReviewTab) =>
-    items && (
-      <ReviewBar
-        items={items}
-        tab={tab}
-        disabled={off}
-        note={note}
-        onConfirm={confirm}
-      />
-    );
+    items && <ReviewBar items={items} tab={tab} disabled={off} note={note} onConfirm={confirm} />;
 
   return (
     <>
@@ -299,7 +291,7 @@ function RecipeTabs({
           <Toast
             toast={toast}
             disabled={off}
-            why={blocked && (blocked === "offline" ? UNDO_OFFLINE : PAUSED)}
+            why={blocked ? (blocked === "offline" ? UNDO_OFFLINE : PAUSED) : undefined}
             onDone={done}
             onUndo={(batch) => write(() => undoBatch(recipe, batch), batch)}
           />

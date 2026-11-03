@@ -483,7 +483,11 @@ describe("the recipe view, for an editor", () => {
 
   it("marks each item and makes it a button that opens its sheet", () => {
     const markup = renderToStaticMarkup(
-      <Ingredients original={recipe().original} facts={recipe().facts} review={{ items, open, newCanonicals }} />,
+      <Ingredients
+        original={recipe().original}
+        facts={recipe().facts}
+        review={{ items, open, newCanonicals }}
+      />,
     );
     expect(markup).toContain("review-mark-flagged");
     expect(markup).toContain("review-mark-confirmed");
@@ -497,7 +501,11 @@ describe("the recipe view, for an editor", () => {
 
   it("marks steps too", () => {
     const markup = renderToStaticMarkup(
-      <Steps original={recipe().original} facts={recipe().facts} review={{ items, open, newCanonicals }} />,
+      <Steps
+        original={recipe().original}
+        facts={recipe().facts}
+        review={{ items, open, newCanonicals }}
+      />,
     );
     expect([...markup.matchAll(/review-mark-unchecked/g)]).toHaveLength(1);
     expect(markup).toContain("<li>Serve.</li>");
@@ -543,7 +551,9 @@ describe("the item sheet", () => {
 
   it("notes that confirming a new Canonical Ingredient adds it for every recipe", () => {
     // Last, after the Enrichment Issue, so it sits just above the sheet's actions.
-    expect(detail("i1")).toMatch(/The line says butter\..*adds butter for every recipe that uses it/);
+    expect(detail("i1")).toMatch(
+      /The line says butter\..*adds butter for every recipe that uses it/,
+    );
     expect(detail("i2")).not.toMatch(/every recipe/);
   });
 

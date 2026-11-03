@@ -18,7 +18,7 @@ export function Toast({
   toast: ToastMessage | null;
   disabled?: boolean;
   // Why Undo is off, when it's off for a reason beyond a write in flight.
-  why?: string | false;
+  why?: string;
   onUndo: (batch: string) => void;
   onDone: () => void;
 }) {
@@ -43,6 +43,7 @@ export function Toast({
   return (
     <div role="status" className="toast-region">
       {toast && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: it only notices focus and the mouse.
         <div
           ref={shown}
           className="toast"

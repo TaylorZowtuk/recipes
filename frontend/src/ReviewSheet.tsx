@@ -2,10 +2,10 @@ import type { ReactNode } from "react";
 import { formatAmount } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
-import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { Sheet } from "./Sheet";
 import { reviewCounts } from "./needsReview";
+import type { Mark, ReviewItem, ReviewTab } from "./review";
 import { confirmableOn, tabCounts, uncheckedOn } from "./review";
+import { Sheet } from "./Sheet";
 
 // What the recipe view needs to show an editor Review Items: each item by id, opening one, and
 // the ids of the unconfirmed Canonical Ingredients, whose lines it marks new.
@@ -166,26 +166,26 @@ export function ItemDetail({
   if (item.id === "difficulty") {
     if (recipe.facts.difficulty)
       sections.push(
-      <Section key="difficulty" title="Suggested Difficulty">
-        <DifficultyMeters difficulty={recipe.facts.difficulty} suggested />
-        <Source fact={recipe.facts.difficulty} />
-      </Section>,
-    );
+        <Section key="difficulty" title="Suggested Difficulty">
+          <DifficultyMeters difficulty={recipe.facts.difficulty} suggested />
+          <Source fact={recipe.facts.difficulty} />
+        </Section>,
+      );
   } else if (item.id.endsWith(".substitutions")) {
     if (line?.substitutions)
       sections.push(
-      <Section key="substitutions" title="Substitutions">
-        <ul className="review-list">
-          {line.substitutions.items.map((sub) => (
-            <li key={sub.wording}>
-              {sub.wording} × {sub.ratio}
-              {sub.note && ` · ${sub.note}`}
-            </li>
-          ))}
-        </ul>
-        <Source fact={line.substitutions} />
-      </Section>,
-    );
+        <Section key="substitutions" title="Substitutions">
+          <ul className="review-list">
+            {line.substitutions.items.map((sub) => (
+              <li key={sub.wording}>
+                {sub.wording} × {sub.ratio}
+                {sub.note && ` · ${sub.note}`}
+              </li>
+            ))}
+          </ul>
+          <Source fact={line.substitutions} />
+        </Section>,
+      );
   } else if (line) {
     const { parse, match, conversion } = line;
     if (parse) {
