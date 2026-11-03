@@ -1901,6 +1901,12 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   font-weight: 700;
 }
 
+.toast-why {
+  display: block;
+  margin-top: var(--space);
+  opacity: 0.8;
+}
+
 @media (min-width: 768px) {
   .review-bar {
     bottom: calc(var(--space) * 4);

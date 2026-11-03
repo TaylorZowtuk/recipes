@@ -158,6 +158,7 @@ function RecipePage() {
 }
 
 const BLOCKED_REVIEW = "You’re offline. Review the recipe once you’re back online.";
+const UNDO_OFFLINE = "You’re offline. Undo once you’re back online.";
 
 // The Ingredients, Steps and About tabs. To an editor, each tab counts what is left to check on
 // it, its Review Items are marked buttons that open their sheet, and a review bar confirms the
@@ -180,10 +181,10 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
     },
   };
 
-  const write = async (run: () => Promise<ReviewOutcome>) => {
+  const write = async (run: () => Promise<ReviewOutcome>, retry?: string) => {
     if (busy) return;
     setBusy(true);
-    const shown = await runReview(run);
+    const shown = await runReview(run, retry);
     if (!mounted.current) return;
     setBusy(false);
     setToast(shown);
@@ -257,8 +258,10 @@ function RecipeTabs({ recipe, collection }: { recipe: Recipe; collection: Collec
           />
           <Toast
             toast={toast}
+            disabled={!!blocked || busy}
+            why={blocked && (blocked === "offline" ? UNDO_OFFLINE : PAUSED)}
             onDone={done}
-            onUndo={(batch) => write(() => undoBatch(recipe, batch))}
+            onUndo={(batch) => write(() => undoBatch(recipe, batch), batch)}
           />
         </>
       )}

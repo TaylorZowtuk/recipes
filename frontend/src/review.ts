@@ -129,8 +129,12 @@ export const READY_TOAST =
 const NOT_REFRESHED = " Couldn’t refresh, so reload to see the latest.";
 
 // Runs a review write and settles it as edits do: a written recipe is remembered and the
-// Collection reloaded, as it is on a conflict, so the page shows the newer recipe.
-export async function runReview(write: () => Promise<ReviewOutcome>): Promise<ToastMessage> {
+// Collection reloaded, as it is on a conflict, so the page shows the newer recipe. An undo that
+// couldn't reach Plateful keeps its Confirm Batch (`retry`) on the toast, so Undo can try again.
+export async function runReview(
+  write: () => Promise<ReviewOutcome>,
+  retry?: string,
+): Promise<ToastMessage> {
   let outcome: ReviewOutcome;
   try {
     outcome = await write();
@@ -151,6 +155,6 @@ export async function runReview(write: () => Promise<ReviewOutcome>): Promise<To
     case "not-an-editor":
       return { text: "Only the household’s editors can review recipes. Sign in again." };
     default:
-      return { text: "Couldn’t reach Plateful. Try again." };
+      return { text: "Couldn’t reach Plateful. Try again.", ...(retry && { undo: retry }) };
   }
 }

@@ -450,6 +450,17 @@ describe("confirm and undo", () => {
     expect(reloadCollection).not.toHaveBeenCalled();
     expect(toast).toEqual({ text: "Couldn’t reach Plateful. Try again." });
   });
+
+  it("keeps Undo on the toast when an undo couldn't reach Plateful, so it can be tried again", async () => {
+    post.mockRejectedValueOnce(new TypeError("offline"));
+    const batch = "01K7TESTBATCH0000000000003";
+    const toast = await runReview(() => undoBatch(recipe(), batch), batch);
+    expect(toast).toEqual({ text: "Couldn’t reach Plateful. Try again.", undo: batch });
+
+    post.mockResolvedValueOnce(answer(404));
+    const gone = await runReview(() => undoBatch(recipe(), batch), batch);
+    expect(gone.undo).toBeUndefined();
+  });
 });
 
 describe("the recipe view, for an editor", () => {

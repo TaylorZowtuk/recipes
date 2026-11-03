@@ -10,10 +10,15 @@ export type ToastMessage = { text: string; undo?: string };
 // while, or as soon as another replaces it.
 export function Toast({
   toast,
+  disabled = false,
+  why,
   onUndo,
   onDone,
 }: {
   toast: ToastMessage | null;
+  disabled?: boolean;
+  // Why Undo is off, when it's off for a reason beyond a write in flight.
+  why?: string | false;
   onUndo: (batch: string) => void;
   onDone: () => void;
 }) {
@@ -27,11 +32,15 @@ export function Toast({
     <div role="status" className="toast-region">
       {toast && (
         <div className="toast">
-          <span>{toast.text}</span>
+          <span>
+            {toast.text}
+            {toast.undo && why && <span className="toast-why"> {why}</span>}
+          </span>
           {toast.undo && (
             <button
               type="button"
               className="text-button toast-undo"
+              disabled={disabled}
               onClick={() => toast.undo && onUndo(toast.undo)}
             >
               Undo
