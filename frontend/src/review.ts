@@ -21,9 +21,16 @@ type Fact = { confirmed: boolean };
 const LINE_ITEM = ["parse", "match", "conversion"] as const;
 const STEP_ITEM = ["segments", "uses"] as const;
 
+// The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself.
+const itemOf = (factId: string) =>
+  factId === "difficulty" || factId.endsWith(".substitutions")
+    ? factId
+    : (factId.split(".")[0] ?? factId);
+
 // Each Review Item's fact paths, by the item's id, for the facts the recipe has: as the API's
 // `review_items`, a line's parse, match and conversion, its substitutions, a step's segments and
-// uses, and the suggested Difficulty unless the editor set the recipe's own.
+// uses, and the suggested Difficulty unless the editor set the recipe's own. An open Enrichment
+// Issue's fact joins its item, which it makes if the recipe lacks the item's facts.
 export function reviewItems(recipe: Recipe): Record<string, string[]> {
   const { facts } = recipe;
   const items: Record<string, string[]> = {};
@@ -35,7 +42,12 @@ export function reviewItems(recipe: Recipe): Record<string, string[]> {
     items[stepId] = STEP_ITEM.filter((kind) => step[kind]).map((kind) => `${stepId}.${kind}`);
   }
   if (facts.difficulty && !recipe.difficulty) items.difficulty = ["difficulty"];
-  return Object.fromEntries(Object.entries(items).filter(([, paths]) => paths.length > 0));
+  const withFacts = Object.fromEntries(Object.entries(items).filter(([, p]) => p.length > 0));
+  for (const issue of recipe.issues.filter((issue) => issue.status === "open")) {
+    const paths = (withFacts[itemOf(issue.fact_id)] ??= []);
+    if (!paths.includes(issue.fact_id)) paths.push(issue.fact_id);
+  }
+  return withFacts;
 }
 
 export function factAt(facts: RecipeFacts, path: string): Fact | null {
@@ -45,10 +57,6 @@ export function factAt(facts: RecipeFacts, path: string): Fact | null {
     facts.ingredients[owner] ?? facts.steps[owner];
   return (holder?.[kind] as Fact | null | undefined) ?? null;
 }
-
-// The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself.
-const itemOf = (factId: string) =>
-  factId === "difficulty" || factId.endsWith(".substitutions") ? factId : factId.split(".")[0];
 
 // The recipe's Review Items in order, each with its tab and mark: flagged while an open
 // Enrichment Issue is on any of its facts, else unchecked while any fact is unconfirmed.
@@ -62,7 +70,7 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
     items.set(id, {
       id,
       tab: id === "difficulty" ? "about" : stepIds.has(id) ? "steps" : "ingredients",
-      factIds: [...new Set([...paths, ...issues.map((issue) => issue.fact_id)])],
+      factIds: paths,
       mark: issues.length ? "flagged" : unconfirmed ? "unchecked" : "confirmed",
       issues,
     });

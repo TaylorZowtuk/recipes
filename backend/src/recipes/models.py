@@ -499,7 +499,8 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
     """Each Review Item's fact paths, by the item's id, for the facts the recipe has: a line's
     parse, match and conversion (`i3`), a line's substitutions (`i3.substitutions`), a step's
     segments and uses (`s2`), and the suggested Difficulty (`difficulty`) unless the editor set
-    the recipe's own.
+    the recipe's own. An open Enrichment Issue's fact joins its item, which it makes if the
+    recipe lacks the item's facts, so the editor can accept its correction.
     """
     facts = recipe.facts
     items: dict[str, list[str]] = {}
@@ -511,7 +512,19 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
         items[step_id] = [f"{step_id}.{kind}" for kind in STEP_ITEM if getattr(step, kind)]
     if facts.difficulty and recipe.difficulty is None:
         items["difficulty"] = ["difficulty"]
-    return {item: paths for item, paths in items.items() if paths}
+    items = {item: paths for item, paths in items.items() if paths}
+    for fact_id in (issue.fact_id for issue in recipe.issues if issue.status == "open"):
+        paths = items.setdefault(_item_of(fact_id), [])
+        if fact_id not in paths:
+            paths.append(fact_id)
+    return items
+
+
+def _item_of(fact_id: str) -> str:
+    """The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself."""
+    if fact_id == "difficulty" or fact_id.endswith(".substitutions"):
+        return fact_id
+    return fact_id.partition(".")[0]
 
 
 def fact_at(facts: RecipeFacts, path: str) -> Fact | None:

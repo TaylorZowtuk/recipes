@@ -242,9 +242,33 @@ def test_review_items_group_a_recipes_facts_as_an_editor_checks_them() -> None:
     }
 
 
+def test_an_open_issue_on_a_fact_the_recipe_lacks_is_a_review_item_of_its_line() -> None:
+    issues = [
+        issue(1),
+        issue(2, "i9.match"),
+        issue(3, "i5.match"),
+        issue(4, "i5.parse", status="resolved"),
+        issue(5, "difficulty"),
+    ]
+    recipe = STEW.model_copy(
+        update={
+            "facts": FACTS,
+            "issues": issues,
+            "difficulty": Difficulty(prep=1, cook=1, cleanup=1),
+        }
+    )
+
+    items = review_items(recipe)
+
+    assert items["i1"] == ["i1.parse", "i1.match", "i1.conversion"]
+    assert items["i9"] == ["i9.parse", "i9.match"]
+    assert items["i5"] == ["i5.match"]
+    assert items["difficulty"] == ["difficulty"]
+
+
 def test_the_card_counts_unconfirmed_review_items_not_facts() -> None:
     # i1 is unconfirmed while any of its facts is; i9 is all confirmed; s1 has empty uses and no
-    # segments; the issue on a fact the recipe lacks is open but adds no review item.
+    # segments; the issue on a fact the recipe lacks is open, and its item has nothing unconfirmed.
     facts = FACTS.model_copy(
         update={
             "ingredients": {

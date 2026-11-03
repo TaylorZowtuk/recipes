@@ -279,6 +279,36 @@ describe("reviewOf", () => {
   });
 });
 
+describe("an open Enrichment Issue on a fact the line lacks", () => {
+  const issue = (n: number, fact_id: string) => ({
+    id: `01K7TESTISSUE00000000000${n}`,
+    fact_id,
+    before: null,
+    after: null,
+    reason: "Unsure.",
+    status: "open" as const,
+    confirm_batch: null,
+    model: "test",
+  });
+  const items = reviewOf(recipe({ issues: [issue(11, "i3.match"), issue(12, "i4.match")] }));
+
+  it("flags the line's item and adds the issue's fact to what confirming it sends", () => {
+    expect(items.get("i3")).toMatchObject({
+      tab: "ingredients",
+      mark: "flagged",
+      factIds: ["i3.parse", "i3.match"],
+    });
+  });
+
+  it("gives a line with no facts an item of its own", () => {
+    expect(items.get("i4")).toMatchObject({
+      tab: "ingredients",
+      mark: "flagged",
+      factIds: ["i4.match"],
+    });
+  });
+});
+
 describe("confirm and undo", () => {
   const post = vi.spyOn(api, "POST");
   beforeEach(() => {
