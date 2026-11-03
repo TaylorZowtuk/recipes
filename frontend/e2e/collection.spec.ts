@@ -235,45 +235,57 @@ test("filter the Collection by Tag, Total Difficulty, easy parts and Stated Time
   await difficulty.getByText("Any", { exact: true }).click();
   await expect(seededCards(page)).toHaveCount(seededCount);
 
-  // Easy prep, cooking and cleanup each keep the cards rated 1 on that part, and combine.
+  // Easy prep, cook and cleanup, one row of pill toggles, each keep the cards rated 1 on that part,
+  // and combine.
+  const easyGroup = sheet.getByRole("group", { name: "Easy" });
+  await expect(easyGroup).toHaveAccessibleDescription("Rated 1 of 3");
+  const easyPill = (part: string) => easyGroup.locator("label").filter({ hasText: part });
+  const easyBox = (part: string) => easyGroup.getByRole("checkbox", { name: `Easy ${part}` });
+  const tops = await Promise.all(
+    ["Prep", "Cook", "Cleanup"].map(async (part) => (await easyPill(part).boundingBox())?.y),
+  );
+  expect(new Set(tops).size).toBe(1);
   const easy = async (part: string) => {
-    const label = sheet.locator("label", { hasText: `Easy ${part}` });
-    await expectTapTarget(label);
-    await label.click();
-    await expect(sheet.getByRole("checkbox", { name: `Easy ${part}` })).toBeChecked();
+    await expectTapTarget(easyPill(part).locator(".choice-text"));
+    await easyPill(part).click();
+    await expect(easyBox(part)).toBeChecked();
   };
-  await easy("prep");
+  const uneasy = async (part: string) => {
+    await easyPill(part).click();
+    await expect(easyBox(part)).not.toBeChecked();
+  };
+  await easy("Prep");
   await expect(seededTitles()).toHaveText([
     "Garlic Butter Green Beans",
     "Lemon Herb Roast Chicken",
     "Overnight Oats",
   ]);
   await expect(filters).toHaveText("Filters · 1");
-  await easy("cooking");
+  await easy("Cook");
   await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
   await expect(filters).toHaveText("Filters · 2");
-  await easy("cleanup");
+  await easy("Cleanup");
   await expect(seededTitles()).toHaveText(["Garlic Butter Green Beans", "Overnight Oats"]);
   await expect(filters).toHaveText("Filters · 3");
   await sheet.getByRole("button", { name: "Clear" }).click();
   await expect(filters).toHaveText("Filters");
-  for (const part of ["prep", "cooking", "cleanup"])
-    await expect(sheet.getByRole("checkbox", { name: `Easy ${part}` })).not.toBeChecked();
+  for (const part of ["Prep", "Cook", "Cleanup"]) await expect(easyBox(part)).not.toBeChecked();
 
-  await easy("cooking");
+  await easy("Cook");
   await expect(seededTitles()).toHaveText([
     "Garlic Butter Green Beans",
     "Overnight Oats",
     "Tomato Lentil Soup",
   ]);
-  await sheet.locator("label", { hasText: "Easy cooking" }).click();
-  await easy("cleanup");
+  await uneasy("Cook");
+  await easy("Cleanup");
   await expect(seededTitles()).toHaveText([
     "Garlic Butter Green Beans",
     "Overnight Oats",
     "Tomato Lentil Soup",
   ]);
-  await sheet.locator("label", { hasText: "Easy cleanup" }).click();
+  await uneasy("Cleanup");
+  await expect(seededCards(page)).toHaveCount(seededCount);
 
   // A maximum Stated Time drops the cards without one.
   const time = sheet.getByRole("group", { name: "Stated Time at most" });

@@ -15,10 +15,11 @@ const TIMES: [number | null, string][] = [
   ...[900, 1800, 2700, 3600, 7200].map((s): [number, string] => [s, formatStatedTime(s) ?? ""]),
 ];
 
-const EASY_PARTS: ["easyPrep" | "easyCook" | "easyCleanup", string, string][] = [
-  ["easyPrep", "Easy prep", "Prep 1 of 3"],
-  ["easyCook", "Easy cooking", "Cook 1 of 3"],
-  ["easyCleanup", "Easy cleanup", "Cleanup 1 of 3"],
+// In Difficulty's order. The pill shows the part; its name says what ticking it means.
+const EASY_PARTS: ["easyPrep" | "easyCook" | "easyCleanup", string][] = [
+  ["easyPrep", "Prep"],
+  ["easyCook", "Cook"],
+  ["easyCleanup", "Cleanup"],
 ];
 
 const matchCount = (shown: number) =>
@@ -101,24 +102,26 @@ export function FiltersSheet({ tags, filters, shown, onChange }: SheetProps) {
             value={filters.maxTotalDifficulty}
             onChange={(maxTotalDifficulty) => onChange({ ...filters, maxTotalDifficulty })}
           />
-          <div className="sheet-section">
-            {EASY_PARTS.map(([key, label, hint]) => (
-              <div key={key}>
-                <label className="check">
+          <fieldset className="sheet-section easy-parts" aria-describedby={`${id}-easy`}>
+            <legend>Easy</legend>
+            <p id={`${id}-easy`} className="field-hint">
+              Rated 1 of 3
+            </p>
+            <div className="choices">
+              {EASY_PARTS.map(([key, part]) => (
+                <label key={key} className="choice">
                   <input
                     type="checkbox"
+                    className="visually-hidden"
+                    aria-label={`Easy ${part.toLowerCase()}`}
                     checked={filters[key]}
-                    aria-describedby={`${id}-${key}`}
                     onChange={(event) => onChange({ ...filters, [key]: event.target.checked })}
                   />
-                  {label}
+                  <span className="choice-text">{part}</span>
                 </label>
-                <p id={`${id}-${key}`} className="field-hint">
-                  {hint}
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </fieldset>
           <Choices
             label="Stated Time at most"
             name={`${id}-time`}

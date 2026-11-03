@@ -1561,24 +1561,19 @@ h1:focus {
   outline-offset: 2px;
 }
 
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--space) * 3);
-  min-height: var(--tap);
-  font-weight: 700;
-  cursor: pointer;
+/* The Easy hint sits beside its legend, on the legend's line, so the pills follow at once. */
+.easy-parts legend {
+  float: left;
+  margin-right: calc(var(--space) * 2);
 }
 
-.check input {
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  accent-color: var(--accent);
+.easy-parts .field-hint {
+  margin: 0 0 calc(var(--space) * 2);
+  line-height: calc(var(--text-body) * 1.5);
 }
 
-.sheet .field-hint {
-  margin: 0;
+.easy-parts .choices {
+  clear: both;
 }
 
 /* Clear and Done stay in view at the sheet's foot while its content scrolls. */
