@@ -4,7 +4,8 @@
 giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests rely on
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
 "sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
-enrichment's suggestion.
+enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Canonical Ingredient,
+a conversion and an open Enrichment Issue.
 """
 
 import io
@@ -15,14 +16,19 @@ from PIL import Image, ImageDraw
 
 from recipes.models import (
     SCHEMA_VERSION,
+    CanonicalIngredient,
+    ConversionFact,
     Difficulty,
     DifficultyFact,
     DurationSegment,
+    EnrichmentIssue,
     IngredientFacts,
     IngredientLine,
     IngredientSegment,
+    MatchFact,
     Original,
     ParseFact,
+    Per100g,
     Preview,
     Quantity,
     Recipe,
@@ -40,6 +46,7 @@ from recipes.models import (
     TextSegment,
     UsesFact,
     WebsiteSource,
+    Wording,
 )
 
 if TYPE_CHECKING:
@@ -50,6 +57,19 @@ CAPTURED_AT = datetime(2026, 9, 1, 12, tzinfo=UTC)
 
 E2E_RECIPE_ID = "01K7SEED000000000000000002"
 E2E_RECIPE_TITLE = "Sesame Noodles with Crispy Tofu"
+REVIEW_RECIPE_ID = "01K7SEED000000000000000007"
+
+# What enrichment learned from the recipe awaiting review: a new, unconfirmed Canonical Ingredient
+# and the wording that maps to it.
+BUTTER = CanonicalIngredient(
+    id="01K7SEED0000000000000000C1",
+    name="butter",
+    family="butter",
+    store_category_id="dairy",
+    version=1,
+    schema_version=SCHEMA_VERSION,
+)
+BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 
 
 def _ingredients(*lines: str, component: str | None = None, start: int = 1) -> list[IngredientLine]:
@@ -447,6 +467,63 @@ RECIPES = [
         tags=["side"],
         difficulty=Difficulty(prep=1, cook=1, cleanup=1),
         status="awaiting_review",
+        ingest_channel="add_a_recipe",
+        facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(450, "g", "mass", "green beans", "trimmed"),
+                "i2": _parse(2, "tbsp", "volume", "butter").model_copy(
+                    update={
+                        "match": MatchFact(
+                            provenance="llm",
+                            confidence=0.7,
+                            estimated=False,
+                            canonical_id=BUTTER.id,
+                            fdc_id=1001,
+                            portion_id=None,
+                        ),
+                        "conversion": ConversionFact(
+                            provenance="fdc",
+                            confidence=0.8,
+                            estimated=True,
+                            fdc_id=1001,
+                            dataset="sr_legacy",
+                            release="foundation-2026-04-01+sr_legacy-2018-04",
+                            density_g_per_ml=0.96,
+                            grams_per_count=None,
+                            count_unit=None,
+                            refused=None,
+                            per_100g=Per100g(
+                                kcal=717, protein_g=0.9, fat_g=81, carbs_g=0.1, sodium_mg=640
+                            ),
+                        ),
+                    }
+                ),
+                "i3": _parse(3, "cloves", "count", "garlic", "minced"),
+            },
+            steps={
+                "s2": _step_facts(
+                    "Melt ",
+                    _ingredient("i2", "the butter"),
+                    ", add ",
+                    _ingredient("i3", "the garlic"),
+                    " and cook ",
+                    _duration(60, 60, "1 minute"),
+                    ".",
+                    uses={"i2": 1.0, "i3": 1.0},
+                ),
+            },
+        ),
+        issues=[
+            EnrichmentIssue(
+                id="01K7SEED0000000000000000D1",
+                fact_id="i2.match",
+                before="margarine",
+                after="butter",
+                reason="The line says butter, so it is a new Canonical Ingredient, not margarine.",
+                model="seed",
+            )
+        ],
+        enrichment_version=1,
     ),
 ]
 
@@ -477,7 +554,9 @@ def placeholder_photo(
 
 def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
-        store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
+        added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
+        if added.id == REVIEW_RECIPE_ID:
+            store.enrich_recipe(added, [BUTTER], [BUTTER_WORDING])
 
 
 def _with_photo(recipe: Recipe, images: ImageStore) -> Recipe:

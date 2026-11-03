@@ -48,8 +48,8 @@ KITCHEN_KEY: Item = {"PK": {"S": "SETTINGS#kitchen"}, "SK": {"S": "SETTINGS"}}
 # The Store Categories a new stack starts with, in Grocery List order.
 STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy", "Frozen", "Bakery"]
 
-# A transaction holds at most 100 items. Store.enrich_recipe writes these three, and one more for
-# each Canonical Ingredient it creates and wording it learns.
+# A transaction holds at most 100 items. Store.enrich_recipe and Store.review_recipe write these
+# three, and one more for each Canonical Ingredient and wording they write.
 MAX_TRANSACTION_ITEMS = 100
 ENRICH_FIXED_ITEMS = ("the recipe", "its card", "META#collection")
 MAX_LEARNED = MAX_TRANSACTION_ITEMS - len(ENRICH_FIXED_ITEMS)
@@ -302,6 +302,40 @@ class Store:
                 raise WordingConfirmed from None
             raise
 
+    def review_recipe(
+        self,
+        recipe: Recipe,
+        canonical_ingredients: Iterable[CanonicalIngredient],
+        wordings: Iterable[Wording],
+    ) -> Recipe:
+        """`update_recipe`, writing each changed Canonical Ingredient if it is still at its
+        version and each wording unless an editor confirmed it meanwhile, in the same transaction:
+        ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+
+        Raises VersionConflict if any of them changed, writing nothing.
+        """
+        replaced = [
+            self._replace(
+                canonical.model_copy(update={"version": canonical.version + 1}),
+                canonical_key(canonical.id),
+                canonical.version,
+            )
+            for canonical in canonical_ingredients
+        ]
+        learned = [self._learn_wording(wording) for wording in wordings]
+        try:
+            return self._save_versioned(
+                recipe,
+                recipe_key(recipe.id),
+                shared=True,
+                also=lambda saved: [self._put_card(saved), *replaced, *learned],
+                unchanged=("dedupe_key",),
+            )
+        except _Cancelled as cancelled:
+            if any(cancelled.failed(item) for item in [*replaced, *learned]):
+                raise VersionConflict(recipe.id) from None
+            raise
+
     def delete_recipe(self, recipe: Recipe) -> None:
         """Delete the recipe, its card and its Source guard if the stored recipe is still at
         `recipe.version`, so its Source can be added again. Raises VersionConflict otherwise.
@@ -355,6 +389,15 @@ class Store:
     def canonical_ingredients(self, page_size: int | None = None) -> list[CanonicalIngredient]:
         """Every Canonical Ingredient, in id order. `page_size` lets tests force several pages."""
         return self._partition(CanonicalIngredient, "CANON", page_size)
+
+    def canonical_ingredient(self, canonical_id: str) -> CanonicalIngredient | None:
+        item = self._get(canonical_key(canonical_id), consistent=True)
+        return None if item is None else _from_item(CanonicalIngredient, item)
+
+    def wording(self, wording: str) -> Wording | None:
+        """The Wording Cache's entry for a normalized wording, if it has one."""
+        item = self._get(wording_key(wording), consistent=True)
+        return None if item is None else _from_item(Wording, item)
 
     def wordings(self, page_size: int | None = None) -> list[Wording]:
         """The Wording Cache, in wording order. `page_size` lets tests force several pages."""

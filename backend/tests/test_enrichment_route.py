@@ -124,7 +124,8 @@ def test_the_card_shows_the_new_status(editor_client: TestClient, api_store: Sto
     card = next(card for card in cards if card["id"] == recipe.id)
     assert card["status"] == "awaiting_review"
     assert card["recipe_version"] == recipe.version + 1
-    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 0}
+    # Its two parsed lines are each a Review Item.
+    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 2}
 
 
 def test_a_recipe_that_is_not_pending_is_refused(
@@ -303,7 +304,7 @@ def test_a_match_writes_its_new_canonical_ingredient_and_wording_with_the_recipe
     collection = bundle(editor_client)
     assert collection["collection_version"] == before + 1
     assert collection["canonical_ingredients"] == [
-        {**BEEF, "pantry_staple": False, "confirmed": False}
+        {**BEEF, "pantry_staple": False, "confirmed": False, "confirm_batch": None}
     ]
     assert collection["wordings"] == [
         {

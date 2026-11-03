@@ -414,6 +414,7 @@ class CanonicalIngredient(Model):
     store_category_id: str  # one of the Kitchen settings' Store Categories
     pantry_staple: bool = False
     confirmed: bool = False
+    confirm_batch: Label | None = None  # the confirm batch that confirmed it, which undo reverts
     version: int
     schema_version: int
 
@@ -472,11 +473,69 @@ class Recipe(Model):
     enrichment_version: int | None = None
     fdc_release: Label | None = None
     issues: list[EnrichmentIssue] = []
+    # The confirm batch that moved it from Awaiting Review to Ready, so undoing it moves it back.
+    ready_batch: Label | None = None
+
+
+# The facts an editor checks together as one Review Item, for an ingredient line and for a step.
+LINE_ITEM = ("parse", "match", "conversion")
+STEP_ITEM = ("segments", "uses")
+
+
+def review_items(facts: RecipeFacts) -> dict[str, list[str]]:
+    """Each Review Item's fact paths, by the item's id, for the facts the recipe has: a line's
+    parse, match and conversion (`i3`), a line's substitutions (`i3.substitutions`), a step's
+    segments and uses (`s2`), and the suggested Difficulty (`difficulty`).
+    """
+    items: dict[str, list[str]] = {}
+    for line_id, line in facts.ingredients.items():
+        items[line_id] = [f"{line_id}.{kind}" for kind in LINE_ITEM if getattr(line, kind)]
+        if line.substitutions:
+            items[f"{line_id}.substitutions"] = [f"{line_id}.substitutions"]
+    for step_id, step in facts.steps.items():
+        items[step_id] = [f"{step_id}.{kind}" for kind in STEP_ITEM if getattr(step, kind)]
+    if facts.difficulty:
+        items["difficulty"] = ["difficulty"]
+    return {item: paths for item, paths in items.items() if paths}
+
+
+def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
+    """The fact at `path`, such as `i3.match`, `s2.uses` or `difficulty`, if the recipe has it."""
+    if path == "difficulty":
+        return facts.difficulty
+    owner, _, kind = path.partition(".")
+    holder = facts.ingredients.get(owner) or facts.steps.get(owner)
+    if holder is None or kind not in type(holder).model_fields:
+        return None
+    return getattr(holder, kind)
 
 
 class NeedsReview(Model):
     open_issues: int
-    unconfirmed: int
+    unconfirmed: int  # Review Items with a fact not yet Confirmed
+
+
+def needs_review(recipe: Recipe) -> NeedsReview:
+    """What the recipe still has for an editor to check."""
+    unconfirmed = sum(
+        any(not fact.confirmed for path in paths if (fact := fact_at(recipe.facts, path)))
+        for paths in review_items(recipe.facts).values()
+    )
+    return NeedsReview(
+        open_issues=sum(issue.status == "open" for issue in recipe.issues), unconfirmed=unconfirmed
+    )
+
+
+def effective_difficulty(recipe: Recipe) -> tuple[Difficulty | None, bool]:
+    """The recipe's Difficulty and whether it is only a suggestion: the editor's, or else
+    enrichment's, which is a suggestion until an editor confirms it.
+    """
+    if recipe.difficulty is not None or (suggestion := recipe.facts.difficulty) is None:
+        return recipe.difficulty, False
+    difficulty = Difficulty.model_validate(
+        suggestion.model_dump(include=set(Difficulty.model_fields))
+    )
+    return difficulty, not suggestion.confirmed
 
 
 class Card(Model):
@@ -507,14 +566,9 @@ def stated_seconds(times: StatedTimes) -> int | None:
 
 def card_for(recipe: Recipe) -> Card:
     """Card upkeep: the card is derived from its recipe and nothing else. It shows the editor's
-    Difficulty, or else enrichment's suggestion.
+    Difficulty, or else enrichment's, as a suggestion until it is confirmed.
     """
-    difficulty, suggested = recipe.difficulty, False
-    if difficulty is None and (suggestion := recipe.facts.difficulty):
-        difficulty = Difficulty.model_validate(
-            suggestion.model_dump(include=set(Difficulty.model_fields))
-        )
-        suggested = True
+    difficulty, suggested = effective_difficulty(recipe)
     return Card(
         id=recipe.id,
         schema_version=recipe.schema_version,
@@ -526,10 +580,7 @@ def card_for(recipe: Recipe) -> Card:
         tags=recipe.tags,
         status=recipe.status,
         preview=recipe.preview,
-        # Unconfirmed facts aren't counted yet.
-        needs_review=NeedsReview(
-            open_issues=sum(issue.status == "open" for issue in recipe.issues), unconfirmed=0
-        ),
+        needs_review=needs_review(recipe),
         recipe_version=recipe.version,
     )
 

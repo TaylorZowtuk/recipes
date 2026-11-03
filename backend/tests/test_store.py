@@ -18,6 +18,7 @@ from recipes.models import (
     WebsiteSource,
     Wording,
     card_for,
+    needs_review,
 )
 from recipes.seed import RECIPES
 from recipes.store import (
@@ -54,8 +55,7 @@ def test_card_upkeep_copies_the_recipes_card_fields() -> None:
     assert card.status == recipe.status
     assert card.preview == recipe.preview
     assert card.recipe_version == 4
-    assert card.needs_review.open_issues == 0
-    assert card.needs_review.unconfirmed == 0
+    assert card.needs_review == needs_review(recipe)
 
 
 SUGGESTED = DifficultyFact(

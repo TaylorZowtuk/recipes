@@ -131,9 +131,17 @@ _Avoid_: Nutrition database, USDA API
 The list of open enrichment issues and unconfirmed facts, across all recipes.
 _Avoid_: Inbox, queue
 
+**Review Item**:
+What an editor checks as one when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty. It is unconfirmed while any of its facts is, and a card's Needs Review count is of unconfirmed Review Items, not facts. A recipe Awaiting Review becomes Ready once it has no unconfirmed Review Item and no open Enrichment Issue.
+_Avoid_: Review row, fact group
+
 **Confirmed**:
 Describes an enriched fact that an editor has accepted or corrected. Confirmed facts are never changed when enrichment runs again.
 _Avoid_: Approved, verified
+
+**Confirm Batch**:
+The facts an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe Ready, undo moves it back to Awaiting Review.
+_Avoid_: Approval, transaction
 
 **Original**:
 The recipe exactly as captured from its source. It never changes after ingest, except through a manual re-ingest that an editor has reviewed.
