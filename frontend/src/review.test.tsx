@@ -240,7 +240,9 @@ describe("reviewItems", () => {
     const facts = recipe().facts;
     const s1 = facts.steps.s1;
     if (!s1) throw new Error("fixture");
-    const items = reviewItems(recipe({ facts: { ...facts, steps: { s1: { ...s1, segments: null } } } }));
+    const items = reviewItems(
+      recipe({ facts: { ...facts, steps: { s1: { ...s1, segments: null } } } }),
+    );
     expect(items.s1).toEqual(["s1.uses"]);
   });
 
@@ -310,8 +312,12 @@ const sharedRecipe = (c: SharedCase) => {
   let difficulty: object | null = null;
   for (const [path, confirmed] of Object.entries(c.facts)) {
     const [owner = "", kind = ""] = path.split(".");
-    if (path === "difficulty") difficulty = oneOfEach(path, confirmed);
-    else (holders[owner.startsWith("i") ? "i" : "s"][owner] ??= {})[kind] = oneOfEach(kind, confirmed);
+    if (path === "difficulty") {
+      difficulty = oneOfEach(path, confirmed);
+    } else {
+      const holder = holders[owner.startsWith("i") ? "i" : "s"];
+      holder[owner] = { ...holder[owner], [kind]: oneOfEach(kind, confirmed) };
+    }
   }
   return recipe({
     facts: { ingredients: holders.i, steps: holders.s, difficulty } as unknown as Recipe["facts"],

@@ -5,8 +5,8 @@ Our Version joins these models when the feature that writes it arrives.
 
 import secrets
 import string
-from itertools import chain
 from datetime import UTC, datetime
+from itertools import chain
 from typing import Annotated, Literal
 
 from pydantic import (

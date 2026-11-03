@@ -44,8 +44,9 @@ export function reviewItems(recipe: Recipe): Record<string, string[]> {
   if (facts.difficulty && !recipe.difficulty) items.difficulty = ["difficulty"];
   const withFacts = Object.fromEntries(Object.entries(items).filter(([, p]) => p.length > 0));
   for (const issue of recipe.issues.filter((issue) => issue.status === "open")) {
-    const paths = (withFacts[itemOf(issue.fact_id)] ??= []);
-    if (!paths.includes(issue.fact_id)) paths.push(issue.fact_id);
+    const id = itemOf(issue.fact_id);
+    const paths = withFacts[id] ?? [];
+    if (!paths.includes(issue.fact_id)) withFacts[id] = [...paths, issue.fact_id];
   }
   return withFacts;
 }
