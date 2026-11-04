@@ -123,13 +123,6 @@ def dedupe_key(source: Source) -> str:
     return f"{source.sheet_id}/{source.entry_name}"
 
 
-def site_host(dedupe_key: str) -> str:
-    """A website's name when its page doesn't give one: the host of its dedupe key, cut to a
-    Label's length like a page's own name.
-    """
-    return urlsplit(dedupe_key).netloc[:MAX_LABEL]
-
-
 # Fetching
 
 

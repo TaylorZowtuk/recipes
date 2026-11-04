@@ -1,6 +1,7 @@
 """The HTTP API that CloudFront routes `/api/*` to."""
 
 import re
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
@@ -23,12 +24,14 @@ from recipes.ingest import (
     PoliteFetcher,
     TooLarge,
     parse,
-    site_host,
     website_dedupe_key,
 )
 from recipes.models import (
+    MAX_FAVORITE_SITES,
+    MAX_LABEL,
     MAX_LINES,
     MAX_RECIPE_BYTES,
+    MAX_SITE_NOTE,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -37,12 +40,15 @@ from recipes.models import (
     DurationSegment,
     Enrichment,
     Fact,
+    FavoriteSite,
+    FavoriteSites,
     Image,
     IngredientFacts,
     IngredientSegment,
     KitchenSettings,
     Label,
     MatchFact,
+    Model,
     Original,
     Preview,
     QueuedIngest,
@@ -61,6 +67,7 @@ from recipes.models import (
     needs_review,
     new_ulid,
     normalize_wording,
+    site_host,
     written_as,
 )
 from recipes.offers import find_offers
@@ -119,6 +126,17 @@ class Sync(BaseModel):
     weeks: dict[str, int] | None
 
 
+class CountedSite(FavoriteSite):
+    recipe_count: int  # the cards on its host, derived when read and never stored
+
+
+class CountedSites(Model):
+    """The Favorite Sites as phones see them, at the `version` an Edit of them sends back."""
+
+    version: int
+    sites: list[CountedSite]  # in the order the Sites tab shows them
+
+
 class Collection(BaseModel):
     """Everything a phone caches about the Collection, at one collection version."""
 
@@ -127,6 +145,7 @@ class Collection(BaseModel):
     canonical_ingredients: list[CanonicalIngredient]
     wordings: list[Wording]  # the Wording Cache
     kitchen_settings: KitchenSettings
+    favorite_sites: CountedSites
 
 
 class IngestUrl(BaseModel):
@@ -238,6 +257,66 @@ class ConfirmedBatch(BaseModel):
     ready: bool
 
 
+SiteName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_LABEL)
+]
+SiteNote = Annotated[str, StringConstraints(strip_whitespace=True, max_length=MAX_SITE_NOTE)]
+
+
+class RenameSite(BaseModel):
+    op: Literal["rename"]
+    id: Ulid
+    name: SiteName
+
+
+class SetSiteAddress(BaseModel):
+    op: Literal["set_address"]
+    id: Ulid
+    address: WebUrl
+
+
+class SetSiteNote(BaseModel):
+    op: Literal["set_note"]
+    id: Ulid
+    note: SiteNote
+
+
+class ReorderSites(BaseModel):
+    """Put the sites in this order, naming each site present at that point in the batch once."""
+
+    op: Literal["reorder"]
+    ids: list[Ulid]
+
+
+class DeleteSite(BaseModel):
+    op: Literal["delete"]
+    id: Ulid
+
+
+class AddSite(BaseModel):
+    """Add a site at the end of the list. The API mints its id."""
+
+    op: Literal["add"]
+    name: SiteName
+    address: WebUrl
+    note: SiteNote = ""
+
+
+SiteOperation = Annotated[
+    RenameSite | SetSiteAddress | SetSiteNote | ReorderSites | DeleteSite | AddSite,
+    Field(discriminator="op"),
+]
+
+
+class FavoriteSitesEdit(BaseModel):
+    """An editor's batch of changes to the Favorite Sites at `version`, applied in the order sent,
+    in one write. The list only has to hold together once they are all applied.
+    """
+
+    version: RecipeVersion
+    operations: Annotated[list[SiteOperation], Field(min_length=1)]
+
+
 class Duplicate(BaseModel):
     """A 409: the Source is already a recipe in the Collection, or already a Queued Ingest. With
     neither id, its guard was there a moment ago and isn't now, so the editor can try again.
@@ -300,12 +379,14 @@ def get_collection(
         return _redirect(_collection_path(current))
     # Read after the counter, so the cards are never older than the version they're cached as.
     response.headers["Cache-Control"] = IMMUTABLE
+    cards = store.cards()
     return Collection(
         collection_version=current,
-        cards=store.cards(),
+        cards=cards,
         canonical_ingredients=store.canonical_ingredients(),
         wordings=store.wordings(),
         kitchen_settings=store.kitchen_settings(),
+        favorite_sites=_counted_sites(store.favorite_sites(), cards),
     )
 
 
@@ -898,6 +979,94 @@ def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
 def get_queued_ingests(store: StoreDep) -> list[QueuedIngest]:
     """The Sources waiting for a fallback or for an editor to paste the page, oldest first."""
     return store.queued_ingests()
+
+
+@router.patch(
+    "/favorite-sites",
+    response_model=CountedSites,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        409: {"description": "The Favorite Sites changed since the editor read them"},
+        422: {
+            "description": "Not a valid edit, an operation names a site that isn't there, or the "
+            "list would hold two sites on one host or too many sites"
+        },
+    },
+)
+def patch_favorite_sites(body: FavoriteSitesEdit, store: StoreDep) -> CountedSites:
+    """Apply an editor's batch to the Favorite Sites at `body.version`, in one write."""
+    current = store.favorite_sites()
+    if current.version != body.version:
+        raise VersionConflict(body.version)
+    sites = _edited_sites(current.sites, body.operations)
+    if len(sites) > MAX_FAVORITE_SITES:
+        raise HTTPException(422, f"The list holds at most {MAX_FAVORITE_SITES} sites")
+    hosts = [_site_host(site.address) for site in sites]
+    if len(set(hosts)) < len(hosts):
+        raise HTTPException(422, "Two sites are on the same host")
+    saved = store.save_favorite_sites(current.model_copy(update={"sites": sites}))
+    return _counted_sites(saved, store.cards())
+
+
+def _edited_sites(
+    current: list[FavoriteSite],
+    operations: list[SiteOperation],
+) -> list[FavoriteSite]:
+    sites = list(current)
+    for operation in operations:
+        match operation:
+            case RenameSite():
+                _change_site(sites, operation.id, name=operation.name)
+            case SetSiteAddress():
+                _change_site(sites, operation.id, address=operation.address)
+            case SetSiteNote():
+                _change_site(sites, operation.id, note=operation.note)
+            case ReorderSites():
+                if sorted(operation.ids) != sorted(site.id for site in sites):
+                    raise HTTPException(422, "A reorder names each site once")
+                by_id = {site.id: site for site in sites}
+                sites = [by_id[site_id] for site_id in operation.ids]
+            case DeleteSite():
+                del sites[_site_index(sites, operation.id)]
+            case AddSite():
+                sites.append(
+                    FavoriteSite(
+                        id=new_ulid(),
+                        name=operation.name,
+                        address=operation.address,
+                        note=operation.note,
+                    )
+                )
+    return sites
+
+
+def _change_site(sites: list[FavoriteSite], site_id: str, **changes: str) -> None:
+    index = _site_index(sites, site_id)
+    sites[index] = sites[index].model_copy(update=changes)
+
+
+def _site_index(sites: list[FavoriteSite], site_id: str) -> int:
+    for index, site in enumerate(sites):
+        if site.id == site_id:
+            return index
+    raise HTTPException(422, f"There is no site {site_id}")
+
+
+def _site_host(address: str) -> str:
+    """The host a Favorite Site matches cards on: any path in its address is ignored."""
+    return site_host(_dedupe_key(address))
+
+
+def _counted_sites(favorite_sites: FavoriteSites, cards: list[Card]) -> CountedSites:
+    recipes = Counter(card.host for card in cards)
+    return CountedSites(
+        version=favorite_sites.version,
+        sites=[
+            CountedSite(**site.model_dump(), recipe_count=recipes[_site_host(site.address)])
+            for site in favorite_sites.sites
+        ],
+    )
 
 
 def _dedupe_key(url: str) -> str:

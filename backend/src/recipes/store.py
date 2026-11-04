@@ -1,5 +1,5 @@
 """The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Canonical
-Ingredients, the Wording Cache, Kitchen settings and meta items.
+Ingredients, the Wording Cache, Kitchen settings, Favorite Sites and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
 in the same transaction, and versioned items are written only if their version hasn't changed.
@@ -21,6 +21,7 @@ from recipes.models import (
     CanonicalIngredient,
     Card,
     CollectionMeta,
+    FavoriteSites,
     KitchenSettings,
     QueuedIngest,
     Recipe,
@@ -44,6 +45,7 @@ type Item = dict[str, Any]
 COLLECTION_KEY: Item = {"PK": {"S": "META#collection"}, "SK": {"S": "META"}}
 SCHEMA_KEY: Item = {"PK": {"S": "META#schema"}, "SK": {"S": "META"}}
 KITCHEN_KEY: Item = {"PK": {"S": "SETTINGS#kitchen"}, "SK": {"S": "SETTINGS"}}
+FAVORITE_SITES_KEY: Item = {"PK": {"S": "SETTINGS#favorite-sites"}, "SK": {"S": "SETTINGS"}}
 
 # The Store Categories a new stack starts with, in Grocery List order.
 STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy", "Frozen", "Bakery"]
@@ -182,7 +184,8 @@ class Store:
     # Bootstrap and schema
 
     def bootstrap(self) -> None:
-        """Bootstrap a new stack, or check an existing one is at this code's schema version.
+        """Bootstrap a new stack, or check an existing one is at this code's schema version and
+        give it any item it lacks.
 
         Raises SchemaMismatch if it isn't, so the API refuses to start.
         """
@@ -193,6 +196,7 @@ class Store:
         if stored != SCHEMA_VERSION:
             msg = f"The table is at schema version {stored}, but this API handles {SCHEMA_VERSION}"
             raise SchemaMismatch(msg)
+        self._ensure_favorite_sites()
 
     def schema_version(self) -> int | None:
         item = self._get(SCHEMA_KEY, consistent=True)
@@ -215,6 +219,7 @@ class Store:
                     self._create(SchemaMeta(schema_version=SCHEMA_VERSION), SCHEMA_KEY),
                     self._create(collection, COLLECTION_KEY),
                     self._create(settings, KITCHEN_KEY),
+                    self._create_favorite_sites(),
                 ]
             )
         except VersionConflict:
@@ -222,6 +227,24 @@ class Store:
         except _Cancelled as cancelled:
             # Another start bootstrapped the stack first, or is doing so now.
             if not cancelled.reasons <= {"ConditionalCheckFailed", "TransactionConflict"}:
+                raise
+
+    def _create_favorite_sites(self) -> TransactWriteItemTypeDef:
+        sites = FavoriteSites(schema_version=SCHEMA_VERSION, version=1, sites=[])
+        return self._create(sites, FAVORITE_SITES_KEY)
+
+    def _ensure_favorite_sites(self) -> None:
+        """Add the empty item to a stack bootstrapped before it, moving phones and CloudFront off
+        the cached bundle without it. If another start added it first, nothing changes. Retries
+        spent raise VersionConflict, so the API never starts with every bundle read failing.
+        """
+        if self._get(FAVORITE_SITES_KEY, consistent=True) is not None:
+            return
+        created = self._create_favorite_sites()
+        try:
+            self._transact([created, self._bump_collection()])
+        except _Cancelled as cancelled:
+            if not cancelled.failed(created):
                 raise
 
     def _await_schema_version(self) -> int:
@@ -438,9 +461,18 @@ class Store:
         """Write the settings if the stored ones are still at `settings.version`."""
         return self._save_versioned(settings, KITCHEN_KEY, shared=True)
 
+    # Favorite Sites
+
+    def favorite_sites(self) -> FavoriteSites:
+        return _from_item(FavoriteSites, self._get_bootstrapped(FAVORITE_SITES_KEY))
+
+    def save_favorite_sites(self, sites: FavoriteSites) -> FavoriteSites:
+        """Write the sites if the stored ones are still at `sites.version`."""
+        return self._save_versioned(sites, FAVORITE_SITES_KEY, shared=True)
+
     # Building blocks
 
-    def _save_versioned[M: Recipe | KitchenSettings](
+    def _save_versioned[M: Recipe | KitchenSettings | FavoriteSites](
         self,
         model: M,
         key: Item,

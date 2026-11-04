@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from recipes.models import (
     MAX_ORIGINAL_BYTES,
+    Card,
     Original,
     Recipe,
     SourceGuard,
@@ -10,6 +11,7 @@ from recipes.models import (
     Step,
     SubstitutionsFact,
     WebsiteSource,
+    card_for,
     new_ulid,
     normalize_wording,
     written_as,
@@ -136,3 +138,22 @@ def test_a_substitution_ratio_out_of_bounds_is_refused(ratio: float) -> None:
 def test_a_substitutions_fact_has_at_least_one_item() -> None:
     with pytest.raises(ValidationError):
         substitutions()
+
+
+def test_a_website_recipes_card_holds_its_host() -> None:
+    website = RECIPES[0].model_copy(update={"dedupe_key": "https://example.com:8443/soup?serves=4"})
+
+    assert card_for(website).host == "example.com:8443"
+    assert card_for(RECIPES[0]).host == "example.com"
+
+
+def test_a_spreadsheet_recipes_card_has_no_host() -> None:
+    spreadsheet = next(r for r in RECIPES if isinstance(r.source, SpreadsheetSource))
+
+    assert card_for(spreadsheet).host is None
+
+
+def test_a_stored_card_without_a_host_still_loads() -> None:
+    stored = card_for(RECIPES[0]).model_dump(mode="json", exclude={"host"})
+
+    assert Card.model_validate(stored).host is None

@@ -40,7 +40,7 @@ _Avoid_: Library, cookbook
 One dish in the collection, together with everything the household has recorded about it.
 
 **Card**:
-A recipe's summary in the collection grid: its title, source site, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty (or else the Suggested Difficulty, labelled as one), tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
+A recipe's summary in the collection grid: its title, source site, the host of a website Source, a single total time taken from the Stated Times (the stated total, or else prep plus cook), Difficulty (or else the Suggested Difficulty, labelled as one), tags, Enrichment Status, Preview Photo (or the Empty Plate) and its counts for Needs Review. A card is always derived from its recipe and changes whenever the recipe does.
 _Avoid_: Tile, summary, listing
 
 **Candidate Photo**:
@@ -170,11 +170,11 @@ A label an editor makes up and attaches to recipes so they can be filtered by it
 _Avoid_: Category (that word belongs to store categories), label
 
 **Draft**:
-An editor's unsaved changes while editing a saved recipe, such as its Difficulty, Tags and Preview Photo. It is held only in the recipe page, never stored or sent until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe.
+An editor's unsaved changes while editing a saved recipe, such as its Difficulty, Tags and Preview Photo, or the Favorite Sites on the Sites tab. It is held only in that page, never stored or sent until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe.
 _Avoid_: Pending changes (*Pending* is an Enrichment Status), unsaved edit
 
 **Favorite Site**:
-A recipe website the household trusts and returns to when looking for new recipes.
+A recipe website the household trusts and returns to when looking for new recipes. It has a name, an address and a note, and the household sets the order of the list. Its recipe count is derived, never stored: the cards whose host is exactly its address's host, lowercased and without `www.`, so a path in the address is ignored and a subdomain is another host. Two Favorite Sites can't share a host.
 _Avoid_: Bookmark, source (a source is where particular recipes came from)
 
 ### Cooking and shopping
