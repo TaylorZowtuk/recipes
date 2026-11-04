@@ -70,6 +70,24 @@ def test_sync_reports_the_watched_weeks_to_an_editor(
     assert response.json()["weeks"] == {MONDAY: 2, NEXT_MONDAY: 0}
 
 
+def test_the_version_sync_reports_is_the_one_a_week_write_is_checked_against(
+    editor_client: TestClient, store: Store
+) -> None:
+    plan(editor_client, store, MONDAY, writes=2)
+    recipe = store.add_recipe(RECIPES[0])
+    version = editor_client.get("/api/sync", params=watching(MONDAY), headers=EDITOR).json()[
+        "weeks"
+    ][MONDAY]
+
+    def write_at(version: int) -> int:
+        operation = {"op": "place", "day": 1, "recipe_id": recipe.id}
+        body = {"version": version, "operations": [operation]}
+        return editor_client.patch(f"/api/weeks/{MONDAY}", json=body, headers=EDITOR).status_code
+
+    assert write_at(version - 1) == 409
+    assert write_at(version) == 200
+
+
 def test_sync_reads_the_watched_weeks_in_one_batch(
     editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
