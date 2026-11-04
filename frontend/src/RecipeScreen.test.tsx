@@ -38,6 +38,7 @@ vi.mock("./session", () => ({
 vi.mock("./online", () => ({ useOnline: () => !shown.offline }));
 // The account menu reads the browser's session, which a server render has none of.
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
+vi.mock("./weeks", () => ({}));
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",

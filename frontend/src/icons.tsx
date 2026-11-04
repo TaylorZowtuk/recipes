@@ -61,6 +61,12 @@ export const BackIcon = () => (
   </Icon>
 );
 
+export const ForwardIcon = () => (
+  <Icon>
+    <path d="M9.5 5.5 16 12l-6.5 6.5" />
+  </Icon>
+);
+
 export const ClockIcon = () => (
   <Icon>
     <circle cx="12" cy="12" r="8.75" />

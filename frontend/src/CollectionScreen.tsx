@@ -10,6 +10,7 @@ import {
   toggleTag,
 } from "./cardFilters";
 import { useCollection } from "./collection";
+import { DaySheet, useDaySheet } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { FiltersSheet } from "./FiltersSheet";
 import { SearchIcon } from "./icons";
@@ -22,10 +23,14 @@ import { recipePath } from "./slug";
 import { formatStatedTime } from "./statedTime";
 import { TagChip, TagList } from "./TagList";
 import { byTitle, titleMatches } from "./titleSearch";
+import { mondayOf } from "./weekDates";
+import { plannedLabel } from "./weekPlan";
+import { useToday, useWeek } from "./weeks";
 
 // The Recipes tab: every card in the Collection, by title, narrowed by a title search, a tap on a
 // Tag chip and the Filters sheet. The chips and the sheet share one set of chosen Tags. An editor's
 // Needs Review chip narrows the grid further, to the cards with unchecked items in review order.
+// An editor's cards also plan the recipe, and show the days it's on in this calendar week.
 export function CollectionScreen() {
   const collection = useCollection();
   const editor = useIsEditor();
@@ -43,6 +48,9 @@ export function CollectionScreen() {
   const shown = review ? reviewQueue(filtered) : filtered;
   const active = activeFilterCount(filters) + Number(review);
   const status = useRef<HTMLParagraphElement>(null);
+  const today = useToday();
+  const { plan } = useWeek(editor ? mondayOf(today) : null);
+  const daySheet = useDaySheet();
 
   return (
     <Screen title="Collection">
@@ -98,11 +106,17 @@ export function CollectionScreen() {
         <ul className="card-grid" aria-label="Recipes">
           {shown.map((card) => (
             <li key={card.id}>
-              <RecipeCard card={card} review={review} />
+              <RecipeCard
+                card={card}
+                review={review}
+                planned={plannedLabel(plan, card.id)}
+                onWeek={editor ? (button) => daySheet.open(card, button) : undefined}
+              />
             </li>
           ))}
         </ul>
       )}
+      {editor && <DaySheet recipe={daySheet.recipe} onClose={daySheet.close} />}
     </Screen>
   );
 }
@@ -118,22 +132,48 @@ function resultCount(total: number, shown: number, query: string, filtering: boo
 }
 
 // A card in the grid. It shows up to four Tags, so cards stay close to one height. Under Needs
-// Review it also shows its Enrichment Status and how many items are flagged and to check.
-export function RecipeCard({ card, review = false }: { card: Card; review?: boolean }) {
+// Review it also shows its Enrichment Status and how many items are flagged and to check. With
+// `onWeek`, an editor's button sits beside the link, since a button can't nest in one: + Week, or
+// the days the recipe is `planned` for.
+export function RecipeCard({
+  card,
+  review = false,
+  planned,
+  onWeek,
+}: {
+  card: Card;
+  review?: boolean;
+  planned?: string;
+  onWeek?: (button: HTMLElement) => void;
+}) {
   const time = formatStatedTime(card.stated_seconds);
+  const week = planned ?? "+ Week";
   return (
-    <Link to={recipePath(card)} className="card">
-      <Plate title={card.title} size="card" preview={card.preview} />
-      <span className="card-title">{card.title}</span>
-      {card.site_name && <span className="card-meta">{card.site_name}</span>}
-      {time && <span className="card-meta">{time}</span>}
-      <DifficultyMeters difficulty={card.difficulty} suggested={card.difficulty_suggested} />
-      <TagList tags={card.tags} limit={4} />
-      {card.status === "pending" && <span className="badge">Enrichment pending</span>}
-      {review && card.status === "awaiting_review" && (
-        <span className="badge badge-review">Awaiting Review</span>
+    <div className="card">
+      <Link to={recipePath(card)} className="card-link">
+        <Plate title={card.title} size="card" preview={card.preview} />
+        <span className="card-title">{card.title}</span>
+        {card.site_name && <span className="card-meta">{card.site_name}</span>}
+        {time && <span className="card-meta">{time}</span>}
+        <DifficultyMeters difficulty={card.difficulty} suggested={card.difficulty_suggested} />
+        <TagList tags={card.tags} limit={4} />
+        {card.status === "pending" && <span className="badge">Enrichment pending</span>}
+        {review && card.status === "awaiting_review" && (
+          <span className="badge badge-review">Awaiting Review</span>
+        )}
+        {review && <span className="card-review">{reviewCounts(card.needs_review)}</span>}
+      </Link>
+      {onWeek && (
+        <button
+          type="button"
+          className={`chip card-week${planned ? " card-week-planned" : ""}`}
+          aria-label={`${week}: ${card.title}`}
+          aria-haspopup="dialog"
+          onClick={(event) => onWeek(event.currentTarget)}
+        >
+          {week}
+        </button>
       )}
-      {review && <span className="card-review">{reviewCounts(card.needs_review)}</span>}
-    </Link>
+    </div>
   );
 }

@@ -19,7 +19,7 @@ export function Toast({
   disabled?: boolean;
   // Why Undo is off, when it's off for a reason beyond a write in flight.
   why?: string;
-  onUndo: (batch: string) => void;
+  onUndo?: (batch: string) => void;
   onDone: () => void;
 }) {
   // The timer waits while the toast has focus or the pointer, so Undo can't vanish mid-reach,
@@ -64,7 +64,7 @@ export function Toast({
               type="button"
               className="text-button toast-undo"
               disabled={disabled}
-              onClick={() => toast.undo && onUndo(toast.undo)}
+              onClick={() => toast.undo && onUndo?.(toast.undo)}
             >
               Undo
             </button>

@@ -18,6 +18,10 @@ export type Duplicate = components["schemas"]["Duplicate"];
 export type Image = components["schemas"]["Image"];
 export type Preview = components["schemas"]["Preview"];
 export type RecipeOperation = components["schemas"]["RecipeEdit"]["operations"][number];
+export type WeekPlan = components["schemas"]["WeekPlan"];
+export type WeekPlanEntry = components["schemas"]["WeekPlanEntry"];
+export type WeekOperation = components["schemas"]["WeekPlanEdit"]["operations"][number];
+export type Factor = components["schemas"]["ScaleAmount"]["factor"];
 
 // CloudFront signs requests to the Lambda function URL with OAC, which needs the viewer to send
 // the SHA-256 of the body. Every write sends it, even without a body (which hashes the empty
