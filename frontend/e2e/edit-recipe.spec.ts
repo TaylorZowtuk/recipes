@@ -89,7 +89,7 @@ const tagsField = (page: Page) => page.getByRole("textbox", { name: "Tags" });
 const ONE_ONE_ONE = "Difficulty: Prep 1 of 3, Cook 1 of 3, Cleanup 1 of 3, total 3 of 9";
 
 async function expectUnchanged(page: Page) {
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(tagsField(page)).toHaveCount(0);
   await expect(difficulty(hero(page))).toHaveAttribute("aria-label", ONE_ONE_ONE);
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["weeknight"]);
@@ -99,7 +99,7 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   page,
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-saves");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   // The Edit button that had focus is gone, so focus moves to the form's heading.
   await expect(page.getByRole("heading", { name: "Edit recipe" })).toBeFocused();
   const save = page.getByRole("button", { name: /^Save \d+ changes?$/ });
@@ -112,7 +112,7 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   await expect(save).toHaveText("Save 2 changes");
   await save.click();
 
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(tagsField(page)).toHaveCount(0);
   await expect(difficulty(hero(page))).toHaveAttribute(
     "aria-label",
@@ -136,7 +136,7 @@ test("a save whose Collection reload fails keeps the recipe on screen and says t
   page,
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-reload-fails");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("weeknight, rice");
   await page.route("**/api/v/collection/**", (route) => route.abort());
   await page.getByRole("button", { name: "Save 1 change" }).click();
@@ -145,26 +145,26 @@ test("a save whose Collection reload fails keeps the recipe on screen and says t
     "Saved, but couldn’t refresh. Reload to see the latest.",
   );
   await expect(page.getByRole("alert")).toBeFocused();
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: recipe.original.title })).toBeVisible();
 });
 
 test("Cancel discards the draft", async ({ page }, testInfo) => {
   await editorOpens(page, testInfo, "edit-cancels");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await rate(page, "Prep", "2");
   await tagsField(page).fill("soup");
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expectUnchanged(page);
 
   // Edit opens afresh from the recipe, not the discarded draft.
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await expect(tagsField(page)).toHaveValue("weeknight");
 });
 
 test("leaving the page discards the draft", async ({ page }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-leaves");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("soup");
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("list", { name: "Recipes" })).toBeVisible();
@@ -178,7 +178,7 @@ test("leaving the page discards the draft", async ({ page }, testInfo) => {
 
 test("a save that lost a race shows the newer recipe and says so", async ({ page }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-conflicts");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("soup");
 
   // Another device saves first.
@@ -200,7 +200,7 @@ test("a save that lost a race, then couldn't reload, says to reload", async ({
   page,
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-conflict-reload-fails");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("soup");
 
   const elsewhere = await page.request.patch(`/api/recipes/${recipe.id}`, {
@@ -219,7 +219,7 @@ test("a save that lost a race, then couldn't reload, says to reload", async ({
 
 test("a delete that lost a race shows the newer recipe and says so", async ({ page }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-delete-conflicts");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
 
   // Another device saves first.
   const elsewhere = await page.request.patch(`/api/recipes/${recipe.id}`, {
@@ -242,7 +242,7 @@ test("a save after another device deleted the recipe says it's gone", async ({
   page,
 }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-deleted-elsewhere");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("soup");
 
   const elsewhere = await page.request.delete(`/api/recipes/${recipe.id}`, {
@@ -261,7 +261,7 @@ test("a save after another device deleted the recipe says it's gone", async ({
 
 test("an editor deletes a recipe and it leaves the Collection", async ({ page }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-deletes");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete recipe" }).click();
   // A delete rewrites the Collection, which on the run's one busy local API can take seconds.
@@ -273,7 +273,7 @@ test("an editor deletes a recipe and it leaves the Collection", async ({ page },
 
 test("Delete asks first, and keeps the recipe when declined", async ({ page }, testInfo) => {
   await editorOpens(page, testInfo, "edit-keeps");
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("button", { name: "Delete recipe" }).click();
   await expect(page.getByRole("button", { name: "Save 0 changes" })).toBeVisible();
@@ -282,12 +282,12 @@ test("Delete asks first, and keeps the recipe when declined", async ({ page }, t
 test("Edit is off while offline", async ({ page, context }, testInfo) => {
   await editorOpens(page, testInfo, "edit-offline");
   await context.setOffline(true);
-  await expect(page.getByRole("button", { name: "Edit" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
   await expect(page.getByRole("main")).toContainText(
     "You’re offline. Edit the recipe once you’re back online.",
   );
   await context.setOffline(false);
-  await expect(page.getByRole("button", { name: "Edit" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeEnabled();
 });
 
 test("a visitor sees Difficulty and Tags with no Edit", async ({ page, request }, testInfo) => {
@@ -298,7 +298,7 @@ test("a visitor sees Difficulty and Tags with no Edit", async ({ page, request }
   await openRecipe(page, recipe);
   await expect(difficulty(hero(page))).toHaveAttribute("aria-label", ONE_ONE_ONE);
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["weeknight"]);
-  await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
 });
 
 test("an editor changes the Preview Photo and Focal Point, and the header and card show them", async ({
@@ -314,7 +314,7 @@ test("an editor changes the Preview Photo and Focal Point, and the header and ca
   await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
   const before = await header.getAttribute("src");
 
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
   const picker = page.getByRole("group", { name: "Photo" });
   await expect(picker.getByRole("radio", { name: "Photo 1" })).toBeChecked();
   const save = page.getByRole("button", { name: /^Save \d+ changes?$/ });
@@ -331,7 +331,7 @@ test("an editor changes the Preview Photo and Focal Point, and the header and ca
   await expect(save).toHaveText("Save 1 change");
   await save.click();
 
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
   await expect(header).not.toHaveAttribute("src", before ?? "");
   await expect(header).toHaveAttribute("src", /^\/images\/[0-9a-f]+\.webp$/);
   const position = await objectPositionOf(header);
