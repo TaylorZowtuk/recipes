@@ -8,5 +8,5 @@ Sign out deletes the cookie, but a `GET` answered after that `DELETE` could set 
 
 ## Consequences
 
-- [Editor sign-in](2026-09-29-editor-sign-in.md) still holds: the cookie is re-issued at most once a day and expires a year after last use. Every page load reads the session, so a page load is what counts as use. An app left open for a year without a reload would expire.
+- This narrows [editor sign-in](2026-09-29-editor-sign-in.md): the cookie is still re-issued at most once a day and expires a year after last use, but only a page load now counts as use, because every page load reads the session. An app left open for a year without a reload would expire.
 - A route that checks for an editor can no longer re-issue the cookie, so that is no longer a reason to keep the check away from `/api/v/`. The rule in [versioned reads](2026-10-26-path-versioned-reads-cached-at-cloudfront.md) stands, because no cookie reaches those routes.

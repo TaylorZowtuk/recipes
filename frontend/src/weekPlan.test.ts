@@ -337,6 +337,15 @@ describe("the week store", () => {
     expect(await store.write(MONDAY, [place])).toEqual({ kind: "gone", refreshed: false });
   });
 
+  it("takes a 404 for an entry as a conflict, as the recipe may well still exist", async () => {
+    const { store, GET, PATCH, onGone } = await loaded(plan(4));
+    PATCH.mockResolvedValueOnce(refused(404));
+    GET.mockResolvedValueOnce(ok(plan(5)));
+    const remove = { op: "remove", entry_id: "e" } as const;
+    expect(await store.write(MONDAY, [remove])).toEqual({ kind: "conflict", refreshed: true });
+    expect(onGone).not.toHaveBeenCalled();
+  });
+
   it("takes a 404 with no API body as a failure, not a missing recipe", async () => {
     const { store, PATCH, onGone } = await loaded(plan(4));
     PATCH.mockResolvedValueOnce({ response: new Response(null, { status: 404 }) });

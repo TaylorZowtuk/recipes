@@ -91,12 +91,14 @@ export async function noticedWrite(
   if (toast) show(toast);
 }
 
-// A stale version is a 409, so a 404 from the API means the write named a recipe or entry that
-// doesn't exist at the current version.
-function weekRefusal(answer: Answer<WeekPlan>): { kind: "gone" } | WriteRefusal {
-  return answer.response.status === 404 && apiError(answer.error)
-    ? { kind: "gone" }
-    : writeRefusal(answer);
+// A stale version is a 409, so a 404 from the API means the write named something that doesn't
+// exist at the current version: for a placement the recipe, otherwise an entry another device took.
+function weekRefusal(
+  answer: Answer<WeekPlan>,
+  operations: WeekOperation[],
+): { kind: "gone" } | WriteRefusal {
+  if (answer.response.status !== 404 || !apiError(answer.error)) return writeRefusal(answer);
+  return operations.some(({ op }) => op === "place") ? { kind: "gone" } : { kind: "conflict" };
 }
 
 const newer = (held: WeekPlan | undefined, plan: WeekPlan) =>
@@ -173,7 +175,7 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
       }, SETTLE_MS);
       return { kind: "saved" };
     }
-    const refusal = answer ? weekRefusal(answer) : ({ kind: "failed" } as const);
+    const refusal = answer ? weekRefusal(answer, operations) : ({ kind: "failed" } as const);
     if (refusal.kind === "gone") onGone();
     const outcome: WeekWrite =
       refusal.kind === "conflict" || refusal.kind === "gone"
