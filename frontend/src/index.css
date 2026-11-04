@@ -1018,6 +1018,87 @@ h1:focus {
   font-size: var(--text-small);
 }
 
+/* The Sites tab: each Favorite Site as a card, or in Edit its fields. */
+.sites {
+  max-width: 640px;
+  padding-bottom: calc(var(--space) * 6);
+}
+
+.sites .sites-edit-open {
+  align-items: flex-start;
+  margin: 0 0 calc(var(--space) * 3);
+}
+
+/* Beside the list it swaps for, not centred like a recipe's form. */
+.sites.review-form {
+  margin: 0;
+}
+
+.site-address {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap);
+  overflow-wrap: anywhere;
+}
+
+.site-note {
+  margin: 0 0 var(--space);
+}
+
+.site-add,
+.site-add-new {
+  margin-top: calc(var(--space) * 3);
+}
+
+.site-fields {
+  width: 100%;
+}
+
+/* The fieldset around every site greys it out already. */
+.review-form .site-fields:disabled {
+  opacity: 1;
+}
+
+.site-fields legend {
+  padding: 0;
+  font-weight: 700;
+}
+
+.site-fields .queued-meta {
+  margin: 0;
+}
+
+.review-form .site-fields label[for] {
+  margin: calc(var(--space) * 3) 0 var(--space);
+}
+
+.site-fields .field-hint {
+  margin: var(--space) 0 0;
+}
+
+.site-note-input {
+  display: block;
+  padding-block: calc(var(--space) * 3);
+  resize: vertical;
+}
+
+.site-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  margin-top: calc(var(--space) * 3);
+}
+
+.site-actions .button {
+  padding: 0 calc(var(--space) * 3);
+}
+
+.site-actions .text-button {
+  margin-left: auto;
+  padding: 0 calc(var(--space) * 2);
+}
+
 .badge-attention {
   background: var(--accent-soft);
   color: var(--accent-soft-text);

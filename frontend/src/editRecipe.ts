@@ -19,7 +19,7 @@ export const SAVED_READY =
 export const CHANGED_NOT_REFRESHED =
   "This recipe changed on another device, but couldn’t refresh. Reload to see the newer version.";
 const NOT_AN_EDITOR = "Only the household’s editors can edit recipes. Sign in again.";
-const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
+export const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 
 export function draftOf(recipe: Recipe): Draft {
   return {
