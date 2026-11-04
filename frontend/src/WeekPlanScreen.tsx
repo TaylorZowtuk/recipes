@@ -45,7 +45,7 @@ function WeekPlanner() {
   const [offset, setOffset] = useState(0);
   const monday = addDays(mondayOf(today), offset * 7);
   const { plan, failed, writing, retry } = useWeek(monday);
-  const { edit, toast, dismiss } = useWeekEdit(monday);
+  const { edit, busy, toast, dismiss } = useWeekEdit(monday);
   const collection = useCollection();
   const blocked = useEditBlock();
   const status = useRef<HTMLParagraphElement>(null);
@@ -81,6 +81,7 @@ function WeekPlanner() {
             off={!!blocked}
             writing={writing}
             gone={gone}
+            onBusy={busy}
             onAdd={(button) => {
               opener.current = button;
               setPicking(day);
@@ -158,6 +159,7 @@ function Day({
   off,
   writing,
   gone,
+  onBusy,
   onAdd,
   onScale,
   onRemove,
@@ -169,6 +171,7 @@ function Day({
   off: boolean;
   writing: boolean;
   gone: (recipeId: string) => boolean;
+  onBusy: () => void;
   onAdd: (button: HTMLElement) => void;
   onScale: (entry: WeekPlanEntry, button: HTMLElement) => void;
   onRemove: (entry: WeekPlanEntry) => void;
@@ -200,7 +203,7 @@ function Day({
           aria-haspopup="dialog"
           disabled={off}
           aria-disabled={writing}
-          onClick={(event) => !writing && onAdd(event.currentTarget)}
+          onClick={(event) => (writing ? onBusy() : onAdd(event.currentTarget))}
         >
           + Add
         </button>
@@ -226,7 +229,7 @@ function Day({
                 aria-haspopup="dialog"
                 disabled={off}
                 aria-disabled={writing}
-                onClick={(event) => !writing && onScale(entry, event.currentTarget)}
+                onClick={(event) => (writing ? onBusy() : onScale(entry, event.currentTarget))}
               >
                 {scaleLabel(entry.amount.factor)}
               </button>
@@ -237,7 +240,7 @@ function Day({
                 disabled={off}
                 aria-disabled={writing}
                 onClick={() => {
-                  if (writing) return;
+                  if (writing) return onBusy();
                   // The button goes with its entry, so focus moves on first.
                   add.current?.focus();
                   onRemove(entry);

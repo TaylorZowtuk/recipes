@@ -2088,8 +2088,8 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   font-size: 22px;
 }
 
-/* Off while offline or paused, as every edit that isn't queued is; waiting on a write only shows
-   in the cursor, since a dim on each tap would flash the whole week. */
+/* Off while offline or paused, as every edit that isn't queued is. Waiting on a write dims less, and
+   only after a moment, so a quick save doesn't flash the whole week. */
 .week-scale:disabled,
 .week-remove:disabled,
 .day-option:disabled {
@@ -2101,7 +2101,9 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 .week-scale[aria-disabled="true"],
 .week-remove[aria-disabled="true"],
 .day-option[aria-disabled="true"] {
+  opacity: 0.7;
   cursor: progress;
+  transition: opacity var(--motion) 150ms;
 }
 
 .sheet-eyebrow {

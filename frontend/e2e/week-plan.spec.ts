@@ -12,7 +12,7 @@ const NOODLES_ID = "01K7SEED000000000000000002";
 
 // Each test has a slot here, and each project, retry and repeat a block of them, so nothing shares
 // a week on the run's one API. A slot is four weeks wide, for ‹ and › to reach the weeks around it.
-const SLOTS = 16;
+const SLOTS = 17;
 const FIRST_MONDAY = Date.UTC(2030, 0, 7);
 const DAY = 86_400_000;
 
@@ -73,6 +73,37 @@ async function expectNoSidewaysScroll(page: Page) {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
+}
+
+// Answers every PATCH only once `release` is called, so a second tap really lands mid-write.
+async function holdWrites(page: Page) {
+  const writes: string[] = [];
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/weeks/*", async (route) => {
+    if (route.request().method() === "PATCH") {
+      writes.push(route.request().postData() ?? "");
+      await released;
+    }
+    await route.continue();
+  });
+  return { writes, release };
+}
+
+// Two presses of the mouse where the first one was, as a person's double-click lands, wherever the
+// rows have moved to by the second.
+async function doubleClick(page: Page, target: Locator) {
+  await target.click({ trial: true });
+  const box = await target.boundingBox();
+  if (!box) throw new Error("nothing to double-click");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  await page.mouse.down({ clickCount: 2 });
+  await page.mouse.up({ clickCount: 2 });
 }
 
 async function pick(page: Page, target: Locator, title = NOODLES) {
@@ -381,6 +412,85 @@ test("a second tap while a write is in flight sends nothing", async ({ page }, t
   await dayRow(sheet, "Fri").click();
   await expect(dayRow(sheet, "Fri")).toContainText("✓ Remove");
   expect(writes.map((body) => JSON.parse(body).version)).toEqual([0, 1]);
+});
+
+test("a tap refused mid-write in the day sheet says so, and the notice outlasts the write", async ({
+  page,
+}, testInfo) => {
+  await plan(page, testInfo, 14);
+  const { writes, release } = await holdWrites(page);
+  await page.goto("/recipes");
+  await cardButton(page).click();
+  const sheet = daySheet(page);
+  await expect(dayRow(sheet, "Thu")).toContainText("Add");
+  await dayRow(sheet, "Thu").click();
+  await expect.poll(() => writes.length).toBe(1);
+  await dayRow(sheet, "Fri").click({ force: true });
+  const notice = sheet.getByText("Still saving. Tap again in a moment.");
+  await expect(notice).toBeVisible();
+  await expect(dayRow(sheet, "Fri")).toHaveCSS("opacity", "0.7");
+
+  release();
+  await expect(dayRow(sheet, "Thu")).toContainText("✓ Remove");
+  await expect(notice).toBeVisible();
+  await expect(dayRow(sheet, "Fri")).toContainText("Add");
+  expect(writes).toHaveLength(1);
+  await expect(notice).toBeHidden();
+});
+
+test("× twice, + Add and a scale chip mid-write change one entry and say so", async ({
+  page,
+}, testInfo) => {
+  const monday = await plan(page, testInfo, 15);
+  await placeElsewhere(page, monday, 3);
+  await placeElsewhere(page, monday, 3);
+  const { writes, release } = await holdWrites(page);
+  await page.goto("/week");
+  const thursday = day(page, "Thu");
+  await expect(remove(thursday)).toHaveCount(2);
+
+  await remove(thursday).first().click();
+  await expect.poll(() => writes.length).toBe(1);
+  const notice = page.getByText("Still saving. Tap again in a moment.");
+  await remove(thursday).first().click({ force: true });
+  await expect(notice).toBeVisible();
+  await add(thursday).click({ force: true });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await scale(thursday).first().click({ force: true });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  release();
+  await expect(remove(thursday)).toHaveCount(1);
+  await expect(notice).toBeVisible();
+  expect(writes).toHaveLength(1);
+});
+
+test("a double-click changes one thing, even when the write answers between the clicks", async ({
+  page,
+}, testInfo) => {
+  const monday = await plan(page, testInfo, 16);
+  for (let i = 0; i < 3; i++) await placeElsewhere(page, monday, 3);
+  const url = `/api/weeks/${monday}`;
+  const onThursday = async () => (await (await page.request.get(url)).json()).days[3].length;
+  await page.goto("/week");
+  const thursday = day(page, "Thu");
+  await expect(remove(thursday)).toHaveCount(3);
+
+  await doubleClick(page, remove(thursday).first());
+  await expect(remove(thursday)).toHaveCount(2);
+  await page.waitForTimeout(500);
+  await expect(remove(thursday)).toHaveCount(2);
+  expect(await onThursday()).toBe(2);
+
+  // In the day sheet the row stays put, so the second click would take back what the first placed.
+  await page.goto("/recipes");
+  await cardButton(page).click();
+  const sheet = daySheet(page);
+  await expect(dayRow(sheet, "Fri")).toContainText("Add");
+  await doubleClick(page, dayRow(sheet, "Fri"));
+  await expect(dayRow(sheet, "Fri")).toContainText("✓ Remove");
+  await page.waitForTimeout(500);
+  await expect(dayRow(sheet, "Fri")).toContainText("✓ Remove");
 });
 
 test("coming back to the window shows what changed elsewhere", async ({ page }, testInfo) => {

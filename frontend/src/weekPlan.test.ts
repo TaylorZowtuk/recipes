@@ -1,13 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { createApi, WeekPlan, WeekPlanEntry } from "./api/client";
 import {
   CHANGED_ELSEWHERE,
   CHANGED_NOT_REFRESHED,
   createWeekStore,
   dayOperations,
+  noticedWrite,
   plannedLabel,
+  STILL_SAVING,
   scaleLabel,
+  type WeekWrite,
   writeNotice,
+  writeToast,
 } from "./weekPlan";
 
 const MONDAY = "2026-11-02";
@@ -122,9 +126,55 @@ describe("writeNotice", () => {
     expect(writeNotice({ kind: "not-an-editor" })).toMatch(/Sign in again/);
     expect(writeNotice({ kind: "failed" })).toMatch(/Try again/);
   });
+
+  it("tells an editor whose tap was refused to tap again, briefly", () => {
+    expect(writeNotice({ kind: "busy" })).toBe(STILL_SAVING);
+    expect(writeToast({ kind: "busy" })).toEqual({ text: STILL_SAVING, brief: true });
+    expect(writeToast({ kind: "failed" })?.brief).toBe(false);
+    expect(writeToast({ kind: "saved" })).toBeNull();
+  });
+});
+
+describe("noticedWrite", () => {
+  const shown = () => {
+    const show = vi.fn();
+    return { show, last: () => show.mock.lastCall?.[0] };
+  };
+
+  it("keeps the notice of a refused tap when the write before it succeeds", async () => {
+    const { show, last } = shown();
+    const first = later<WeekWrite>();
+    const writing = noticedWrite(() => first.promise, show);
+    await noticedWrite(async () => ({ kind: "busy" }), show);
+    expect(last()?.text).toBe(STILL_SAVING);
+    first.settle({ kind: "saved" });
+    await writing;
+    expect(last()?.text).toBe(STILL_SAVING);
+  });
+
+  it("replaces that notice when the write before it fails", async () => {
+    const { show, last } = shown();
+    const first = later<WeekWrite>();
+    const writing = noticedWrite(() => first.promise, show);
+    await noticedWrite(async () => ({ kind: "busy" }), show);
+    first.settle({ kind: "failed" });
+    await writing;
+    expect(last()?.text).toMatch(/Try again/);
+  });
+
+  it("clears an earlier notice as the next tap lands", async () => {
+    const { show, last } = shown();
+    await noticedWrite(async () => ({ kind: "failed" }), show);
+    await noticedWrite(async () => ({ kind: "saved" }), show);
+    expect(last()).toBeNull();
+  });
 });
 
 describe("the week store", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("has nothing before a load, and the plan after it", async () => {
     const { GET, api } = fakeApi();
     const store = createWeekStore(api);
@@ -184,26 +234,49 @@ describe("the week store", () => {
   });
 
   it("writes at the version it last read and adopts the plan the API returns", async () => {
+    vi.useFakeTimers();
     const { store, PATCH } = await loaded(plan(4));
     PATCH.mockResolvedValueOnce(ok(plan(5, { 2: [entry("a")] })));
     expect(await store.write(MONDAY, [place])).toEqual({ kind: "saved" });
     expect(PATCH.mock.calls[0]?.[1].body).toEqual({ version: 4, operations: [place] });
     expect(store.week(MONDAY).plan?.version).toBe(5);
+    vi.runAllTimers();
     PATCH.mockResolvedValueOnce(ok(plan(6)));
     await store.write(MONDAY, [{ op: "remove", entry_id: "a-entry" }]);
     expect(PATCH.mock.calls[1]?.[1].body).toMatchObject({ version: 5 });
   });
 
-  it("sends no second write while one is in flight, so none goes out at a stale version", async () => {
+  it("refuses a second write while one is in flight, so none goes out at a stale version", async () => {
+    vi.useFakeTimers();
     const { store, PATCH } = await loaded(plan(4));
     const answer = later<Answer>();
     PATCH.mockReturnValueOnce(answer.promise);
     const first = store.write(MONDAY, [place]);
     expect(store.week(MONDAY).writing).toBe(true);
-    expect(await store.write(MONDAY, [place])).toEqual({ kind: "skipped" });
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "busy" });
     expect(PATCH).toHaveBeenCalledTimes(1);
     answer.settle(ok(plan(5)));
     await first;
+    vi.runAllTimers();
+    expect(store.week(MONDAY).writing).toBe(false);
+  });
+
+  it("stays busy just after a save, so the second tap of a double-tap can't hit what moved", async () => {
+    vi.useFakeTimers();
+    const { store, PATCH } = await loaded(plan(4));
+    PATCH.mockResolvedValueOnce(ok(plan(5)));
+    await store.write(MONDAY, [place]);
+    expect(store.week(MONDAY)).toMatchObject({ writing: true, plan: { version: 5 } });
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "busy" });
+    expect(PATCH).toHaveBeenCalledTimes(1);
+    vi.runAllTimers();
+    expect(store.week(MONDAY).writing).toBe(false);
+  });
+
+  it("doesn't stay busy after a refused write, so a retry goes straight out", async () => {
+    const { store, PATCH } = await loaded(plan(4));
+    PATCH.mockRejectedValueOnce(new TypeError("offline"));
+    await store.write(MONDAY, [place]);
     expect(store.week(MONDAY).writing).toBe(false);
   });
 
@@ -243,7 +316,7 @@ describe("the week store", () => {
     GET.mockReturnValueOnce(reload.promise);
     const first = store.write(MONDAY, [place]);
     await vi.waitFor(() => expect(GET).toHaveBeenCalledTimes(2));
-    expect(await store.write(MONDAY, [place])).toEqual({ kind: "skipped" });
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "busy" });
     reload.settle(ok(plan(5)));
     await first;
   });
@@ -319,6 +392,16 @@ describe("the week store", () => {
       answer.settle(ok(plan(5)));
       expect(await writing).toEqual({ kind: "skipped" });
       expect(store.week(MONDAY).plan).toBeUndefined();
+    });
+
+    it("can't bring a week back from the pause after a save", async () => {
+      vi.useFakeTimers();
+      const { store, PATCH } = await loaded(plan(4));
+      PATCH.mockResolvedValueOnce(ok(plan(5)));
+      await store.write(MONDAY, [place]);
+      store.clear();
+      vi.runAllTimers();
+      expect(store.week(MONDAY)).toEqual({ failed: false, writing: false });
     });
 
     it("loads afresh afterwards, not joining a dropped load", async () => {

@@ -3,7 +3,7 @@ import { api, type WeekOperation } from "./api/client";
 import { session } from "./session";
 import type { ToastMessage } from "./Toast";
 import { isoDate } from "./weekDates";
-import { createWeekStore, writeNotice } from "./weekPlan";
+import { createWeekStore, noticedWrite, writeToast } from "./weekPlan";
 
 // The app's one week store. Week Plans are private to the household's editors, so nothing read
 // here outlives the session.
@@ -40,13 +40,13 @@ export function useWeek(monday: string | null) {
   return { ...week, retry };
 }
 
-// Writes to a week, with the toast saying what went wrong, if anything.
+// Writes to a week, with the toast saying what went wrong, if anything. `busy` says so for a tap
+// that never got as far as a write.
 export function useWeekEdit(monday: string) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const edit = async (operations: WeekOperation[]) => {
-    const text = writeNotice(await weeks.write(monday, operations));
-    setToast(text ? { text } : null);
-  };
+  const edit = (operations: WeekOperation[]) =>
+    noticedWrite(() => weeks.write(monday, operations), setToast);
+  const busy = useCallback(() => setToast(writeToast({ kind: "busy" })), []);
   const dismiss = useCallback(() => setToast(null), []);
-  return { edit, toast, dismiss };
+  return { edit, busy, toast, dismiss };
 }
