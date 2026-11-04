@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { BackIcon, ForwardIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { PAUSED, useEditBlock } from "./RecipeFields";
@@ -13,7 +13,7 @@ import {
   weekLabel,
   weekSubtitle,
 } from "./weekDates";
-import { dayOperations, onDay } from "./weekPlan";
+import { dayOperations, dayRowName, onDay } from "./weekPlan";
 import { useToday, useWeek, useWeekEdit } from "./weeks";
 
 export const OFFLINE = "You’re offline. Plan the week once you’re back online.";
@@ -96,12 +96,12 @@ export function DaySheet({
       }
       onClose={onClose}
     >
-      {recipe && <DayRows key={recipe.id} recipeId={recipe.id} onDone={onClose} />}
+      {recipe && <DayRows key={recipe.id} recipe={recipe} onDone={onClose} />}
     </Sheet>
   );
 }
 
-function DayRows({ recipeId, onDone }: { recipeId: string; onDone: () => void }) {
+function DayRows({ recipe, onDone }: { recipe: PlannedRecipe; onDone: () => void }) {
   const today = useToday();
   const [offset, setOffset] = useState(0);
   const monday = addDays(mondayOf(today), offset * 7);
@@ -109,6 +109,7 @@ function DayRows({ recipeId, onDone }: { recipeId: string; onDone: () => void })
   const { edit, toast, dismiss } = useWeekEdit(monday);
   const blocked = useEditBlock();
   const status = useRef<HTMLParagraphElement>(null);
+  const entriesId = useId();
 
   return (
     <>
@@ -121,7 +122,7 @@ function DayRows({ recipeId, onDone }: { recipeId: string; onDone: () => void })
       {plan && (
         <ul className="day-options">
           {DAY_NAMES.map((name, day) => {
-            const on = onDay(plan, day, recipeId);
+            const on = onDay(plan, day, recipe.id);
             const past = isPast(addDays(monday, day), today);
             const titles = plan.days[day]?.map((entry) => entry.recipe_title).join(", ");
             return (
@@ -131,10 +132,14 @@ function DayRows({ recipeId, onDone }: { recipeId: string; onDone: () => void })
                   className={`day-option${on ? " day-option-on" : ""}${past ? " day-option-past" : ""}`}
                   disabled={!!blocked}
                   aria-disabled={writing}
-                  onClick={() => void edit(dayOperations(plan, day, recipeId))}
+                  aria-label={dayRowName(recipe.title, dayLabel(monday, day), { on, past })}
+                  aria-describedby={`${entriesId}-${day}`}
+                  onClick={() => void edit(dayOperations(plan, day, recipe.id))}
                 >
                   <span className="day-option-day">{dayLabel(monday, day)}</span>{" "}
-                  <span className="day-option-entries">{titles || "Free"}</span>{" "}
+                  <span id={`${entriesId}-${day}`} className="day-option-entries">
+                    {titles || "Free"}
+                  </span>{" "}
                   <span className="day-option-action">
                     {on ? "✓ Remove" : past ? "Log" : "Add"}
                   </span>

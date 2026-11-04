@@ -20,6 +20,7 @@ import {
 const reloadCollection = vi.fn(async () => true);
 const rememberRecipe = vi.fn();
 vi.mock("./collection", () => ({
+  forgetCollection: () => {},
   reloadCollection: () => reloadCollection(),
   rememberRecipe: (recipe: Recipe) => rememberRecipe(recipe),
 }));

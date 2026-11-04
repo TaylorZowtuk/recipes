@@ -58,7 +58,7 @@ const remove = (scope: Locator, title = NOODLES) =>
   scope.getByRole("button", { name: new RegExp(`^Remove ${title}`) });
 const daySheet = (page: Page) => page.getByRole("dialog", { name: /^Add to a day/ });
 const dayRow = (sheet: Locator, name: string) =>
-  sheet.getByRole("button", { name: new RegExp(`^${name} \\d+`) });
+  sheet.getByRole("button", { name: new RegExp(` ${name} \\d+$`) });
 const cardButton = (page: Page, title = NOODLES) =>
   page.getByRole("list", { name: "Recipes" }).getByRole("button", { name: new RegExp(title) });
 
@@ -259,6 +259,14 @@ test("+ Week on a card plans days from one sheet and the card shows them", async
   await dayRow(sheet, "Fri").click();
   await expect(dayRow(sheet, "Fri")).toContainText("✓ Remove");
   await expect(dayRow(sheet, "Fri")).toContainText(NOODLES);
+  await expect(dayRow(sheet, "Fri")).toHaveAccessibleName(
+    new RegExp(`^Remove ${NOODLES} from Fri \\d+$`),
+  );
+  await expect(dayRow(sheet, "Fri")).toHaveAccessibleDescription(NOODLES);
+  await expect(dayRow(sheet, "Sun")).toHaveAccessibleName(
+    new RegExp(`^Add ${NOODLES} to Sun \\d+$`),
+  );
+  await expect(dayRow(sheet, "Sun")).toHaveAccessibleDescription("Free");
 
   // Next week's rows are another week's, and placing there doesn't count as this week.
   await sheet.getByRole("button", { name: "Next week" }).click();

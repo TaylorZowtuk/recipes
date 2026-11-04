@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { api, type WeekOperation } from "./api/client";
+import { forgetCollection } from "./collection";
 import { session } from "./session";
 import type { ToastMessage } from "./Toast";
 import { isoDate } from "./weekDates";
 import { createWeekStore, noticedWrite, writeToast } from "./weekPlan";
 
 // The app's one week store. Week Plans are private to the household's editors, so nothing read
-// here outlives the session.
-const weeks = createWeekStore(api);
+// here outlives the session. A write that names a missing recipe means this device's Collection is
+// out of date, so it's forgotten and the picker drops the recipe.
+const weeks = createWeekStore(api, forgetCollection);
 session.subscribe(() => {
   if (!session.getSnapshot().isEditor) weeks.clear();
 });

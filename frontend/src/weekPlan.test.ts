@@ -5,8 +5,11 @@ import {
   CHANGED_NOT_REFRESHED,
   createWeekStore,
   dayOperations,
+  dayRowName,
   noticedWrite,
   plannedLabel,
+  RECIPE_GONE,
+  RECIPE_GONE_NOT_REFRESHED,
   STILL_SAVING,
   scaleLabel,
   type WeekWrite,
@@ -56,10 +59,11 @@ function fakeApi() {
 
 async function loaded(week: WeekPlan) {
   const fake = fakeApi();
-  const store = createWeekStore(fake.api);
+  const onGone = vi.fn();
+  const store = createWeekStore(fake.api, onGone);
   fake.GET.mockResolvedValueOnce(ok(week));
   await store.load(MONDAY);
-  return { ...fake, store };
+  return { ...fake, store, onGone };
 }
 
 const place = { op: "place", day: 2, recipe_id: "a" } as const;
@@ -111,6 +115,20 @@ describe("dayOperations", () => {
   });
 });
 
+describe("dayRowName", () => {
+  it("states what a tap does to the recipe on that day", () => {
+    expect(dayRowName("Synthetic Soup", "Wed 4", { on: false, past: false })).toBe(
+      "Add Synthetic Soup to Wed 4",
+    );
+    expect(dayRowName("Synthetic Soup", "Mon 2", { on: false, past: true })).toBe(
+      "Log Synthetic Soup on Mon 2",
+    );
+    expect(dayRowName("Synthetic Soup", "Mon 2", { on: true, past: true })).toBe(
+      "Remove Synthetic Soup from Mon 2",
+    );
+  });
+});
+
 describe("writeNotice", () => {
   it("says nothing of a write that went through or was held back", () => {
     expect(writeNotice({ kind: "saved" })).toBeUndefined();
@@ -120,6 +138,11 @@ describe("writeNotice", () => {
   it("says the week changed, and whether the newer one is showing", () => {
     expect(writeNotice({ kind: "conflict", refreshed: true })).toBe(CHANGED_ELSEWHERE);
     expect(writeNotice({ kind: "conflict", refreshed: false })).toBe(CHANGED_NOT_REFRESHED);
+  });
+
+  it("says the recipe is gone, and whether the latest plan is showing", () => {
+    expect(writeNotice({ kind: "gone", refreshed: true })).toBe(RECIPE_GONE);
+    expect(writeNotice({ kind: "gone", refreshed: false })).toBe(RECIPE_GONE_NOT_REFRESHED);
   });
 
   it("tells someone no longer an editor to sign in, and anyone else to try again", () => {
@@ -177,7 +200,7 @@ describe("the week store", () => {
 
   it("has nothing before a load, and the plan after it", async () => {
     const { GET, api } = fakeApi();
-    const store = createWeekStore(api);
+    const store = createWeekStore(api, () => {});
     expect(store.week(MONDAY).plan).toBeUndefined();
     GET.mockResolvedValueOnce(ok(plan(0)));
     await store.load(MONDAY);
@@ -186,7 +209,7 @@ describe("the week store", () => {
 
   it("says a load failed, on a refusal or with no network, and a later one clears it", async () => {
     const { GET, api } = fakeApi();
-    const store = createWeekStore(api);
+    const store = createWeekStore(api, () => {});
     GET.mockResolvedValueOnce(refused(403));
     await store.load(MONDAY);
     expect(store.week(MONDAY).failed).toBe(true);
@@ -207,7 +230,7 @@ describe("the week store", () => {
 
   it("shares one load in flight between its callers", async () => {
     const { GET, api } = fakeApi();
-    const store = createWeekStore(api);
+    const store = createWeekStore(api, () => {});
     GET.mockResolvedValue(ok(plan(1)));
     await Promise.all([store.load(MONDAY), store.load(MONDAY)]);
     expect(GET).toHaveBeenCalledTimes(1);
@@ -215,7 +238,7 @@ describe("the week store", () => {
 
   it("tells its listeners, and stops once they leave", async () => {
     const { GET, api } = fakeApi();
-    const store = createWeekStore(api);
+    const store = createWeekStore(api, () => {});
     const listener = vi.fn();
     const leave = store.subscribe(listener);
     GET.mockResolvedValue(ok(plan(1)));
@@ -282,7 +305,9 @@ describe("the week store", () => {
 
   it("writes nothing before the week has loaded", async () => {
     const { PATCH, api } = fakeApi();
-    expect(await createWeekStore(api).write(MONDAY, [place])).toEqual({ kind: "skipped" });
+    expect(await createWeekStore(api, () => {}).write(MONDAY, [place])).toEqual({
+      kind: "skipped",
+    });
     expect(PATCH).not.toHaveBeenCalled();
   });
 
@@ -295,11 +320,28 @@ describe("the week store", () => {
     expect(PATCH).toHaveBeenCalledTimes(1);
   });
 
-  it("takes a 404 as a conflict too: another device removed the entry", async () => {
+  it("on a 404 reloads the week, says the recipe is gone, and forgets the Collection", async () => {
+    const { store, GET, PATCH, onGone } = await loaded(plan(4));
+    PATCH.mockResolvedValueOnce(refused(404));
+    GET.mockResolvedValueOnce(ok(plan(4, { 1: [entry("b")] })));
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "gone", refreshed: true });
+    expect(onGone).toHaveBeenCalledTimes(1);
+    expect(store.week(MONDAY).writing).toBe(false);
+    expect(store.week(MONDAY).plan?.days[1]).toHaveLength(1);
+  });
+
+  it("says when the reload after a 404 failed", async () => {
     const { store, GET, PATCH } = await loaded(plan(4));
     PATCH.mockResolvedValueOnce(refused(404));
-    GET.mockResolvedValueOnce(ok(plan(5)));
-    expect(await store.write(MONDAY, [place])).toEqual({ kind: "conflict", refreshed: true });
+    GET.mockRejectedValueOnce(new TypeError("offline"));
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "gone", refreshed: false });
+  });
+
+  it("takes a 404 with no API body as a failure, not a missing recipe", async () => {
+    const { store, PATCH, onGone } = await loaded(plan(4));
+    PATCH.mockResolvedValueOnce({ response: new Response(null, { status: 404 }) });
+    expect(await store.write(MONDAY, [place])).toEqual({ kind: "failed" });
+    expect(onGone).not.toHaveBeenCalled();
   });
 
   it("says when the reload after a conflict failed", async () => {
@@ -342,6 +384,18 @@ describe("the week store", () => {
     expect(store.week(MONDAY).plan?.version).toBe(5);
   });
 
+  it("keeps a newer plan a read brought while the write was in flight", async () => {
+    const { store, GET, PATCH } = await loaded(plan(4));
+    const write = later<Answer>();
+    PATCH.mockReturnValueOnce(write.promise);
+    const writing = store.write(MONDAY, [place]);
+    GET.mockResolvedValueOnce(ok(plan(6)));
+    await store.load(MONDAY);
+    write.settle(ok(plan(5)));
+    expect(await writing).toEqual({ kind: "saved" });
+    expect(store.week(MONDAY).plan?.version).toBe(6);
+  });
+
   it("keeps each week's plan and its writes apart", async () => {
     const { store, GET, PATCH } = await loaded(plan(4));
     const answer = later<Answer>();
@@ -373,7 +427,7 @@ describe("the week store", () => {
 
     it("drops a load in flight, so its answer can't bring the week back", async () => {
       const { GET, api } = fakeApi();
-      const store = createWeekStore(api);
+      const store = createWeekStore(api, () => {});
       const read = later<Answer>();
       GET.mockReturnValueOnce(read.promise);
       const reading = store.load(MONDAY);
@@ -406,7 +460,7 @@ describe("the week store", () => {
 
     it("loads afresh afterwards, not joining a dropped load", async () => {
       const { GET, api } = fakeApi();
-      const store = createWeekStore(api);
+      const store = createWeekStore(api, () => {});
       const read = later<Answer>();
       GET.mockReturnValueOnce(read.promise);
       void store.load(MONDAY);
