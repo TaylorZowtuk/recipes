@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 
-type Tab = { label: string; panel: ReactNode };
+// `count`, when above 0, shows as a red badge after the label: what is left to check on that tab.
+type Tab = { label: string; count?: number; panel: ReactNode };
 
 // A tab list with one panel showing. Only the selected tab is in the Tab order; the arrow keys,
 // Home and End move between tabs and select them.
@@ -42,10 +43,14 @@ export function Tabs({ label, tabs }: { label: string; tabs: Tab[] }) {
             aria-selected={index === selected}
             aria-controls={`${id}-panel-${index}`}
             tabIndex={index === selected ? 0 : -1}
+            // Named whole, as the hidden text around an inline-block badge was heard with a space
+            // before its comma: "Ingredients , 3 to check".
+            aria-label={tab.count ? `${tab.label}, ${tab.count} to check` : undefined}
             className="tab"
             onClick={() => setSelected(index)}
           >
             {tab.label}
+            {!!tab.count && <span className="tab-count">{tab.count}</span>}
           </button>
         ))}
       </div>

@@ -1,0 +1,66 @@
+{
+  "about": "Review Items, shared by the API's review_items and needs_review (test_enrichment_review.py) and the PWA's reviewItems and reviewOf (review.test.tsx). facts maps each fact the recipe has to whether it is Confirmed; editor_difficulty is whether the editor set the recipe's own Difficulty; open_issues are the fact ids of its open Enrichment Issues; items are the expected Review Items' fact ids by item id; unconfirmed is how many items are left to check: with a fact not yet Confirmed or an open issue; flagged is how many of those carry an open issue.",
+  "cases": [
+    {
+      "name": "lines, substitutions, steps and the suggested Difficulty",
+      "facts": {
+        "i1.parse": false,
+        "i1.match": true,
+        "i1.conversion": false,
+        "i2.parse": true,
+        "i2.substitutions": false,
+        "s1.segments": true,
+        "s1.uses": true,
+        "s2.uses": false,
+        "difficulty": false
+      },
+      "editor_difficulty": false,
+      "open_issues": [],
+      "items": {
+        "i1": ["i1.parse", "i1.match", "i1.conversion"],
+        "i2": ["i2.parse"],
+        "i2.substitutions": ["i2.substitutions"],
+        "s1": ["s1.segments", "s1.uses"],
+        "s2": ["s2.uses"],
+        "difficulty": ["difficulty"]
+      },
+      "unconfirmed": 4,
+      "flagged": 0
+    },
+    {
+      "name": "the editor's own Difficulty leaves the suggestion out",
+      "facts": { "i1.parse": true, "difficulty": false },
+      "editor_difficulty": true,
+      "open_issues": [],
+      "items": { "i1": ["i1.parse"] },
+      "unconfirmed": 0,
+      "flagged": 0
+    },
+    {
+      "name": "an open issue joins its line's item, made for a line with no facts",
+      "facts": { "i1.match": false, "i3.parse": true },
+      "editor_difficulty": false,
+      "open_issues": ["i1.match", "i3.match", "i5.match"],
+      "items": {
+        "i1": ["i1.match"],
+        "i3": ["i3.parse", "i3.match"],
+        "i5": ["i5.match"]
+      },
+      "unconfirmed": 3,
+      "flagged": 3
+    },
+    {
+      "name": "an open issue on missing substitutions, and on a Difficulty the editor overrode",
+      "facts": { "i2.parse": true, "difficulty": true },
+      "editor_difficulty": true,
+      "open_issues": ["i2.substitutions", "difficulty"],
+      "items": {
+        "i2": ["i2.parse"],
+        "i2.substitutions": ["i2.substitutions"],
+        "difficulty": ["difficulty"]
+      },
+      "unconfirmed": 2,
+      "flagged": 2
+    }
+  ]
+}

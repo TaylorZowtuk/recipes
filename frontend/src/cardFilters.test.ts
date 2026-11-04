@@ -19,7 +19,7 @@ const card = (title: string, fields: Partial<Card> = {}): Card => ({
   difficulty: null,
   difficulty_suggested: false,
   tags: [],
-  needs_review: { open_issues: 0, unconfirmed: 0 },
+  needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   schema_version: 1,
   ...fields,

@@ -27,6 +27,7 @@ from recipes.ingest import (
     website_dedupe_key,
 )
 from recipes.models import (
+    MAX_LINES,
     MAX_RECIPE_BYTES,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
@@ -40,6 +41,8 @@ from recipes.models import (
     IngredientFacts,
     IngredientSegment,
     KitchenSettings,
+    Label,
+    MatchFact,
     Original,
     Preview,
     QueuedIngest,
@@ -53,6 +56,9 @@ from recipes.models import (
     WebsiteSource,
     WebUrl,
     Wording,
+    fact_at,
+    fact_paths,
+    needs_review,
     new_ulid,
     normalize_wording,
     written_as,
@@ -207,6 +213,29 @@ class RecipeEdit(BaseModel):
             msg = "Each operation is in an edit once"
             raise ValueError(msg)
         return self
+
+
+# Every fact path a recipe can hold: four per line, two per step and its Difficulty.
+MAX_FACT_IDS = 6 * MAX_LINES + 1
+
+
+class ConfirmFacts(BaseModel):
+    """An editor confirming facts of the recipe at `version` as one Confirm Batch, by path. Each
+    open Enrichment Issue on a listed path is resolved with them, which accepts its correction.
+    """
+
+    version: RecipeVersion
+    fact_ids: Annotated[list[Label], Field(min_length=1, max_length=MAX_FACT_IDS)]
+
+
+class ConfirmedBatch(BaseModel):
+    """The recipe after a confirm, the Confirm Batch that undoes it, and whether the batch moved
+    the recipe from Awaiting Review to Ready.
+    """
+
+    recipe: Recipe
+    confirm_batch: Ulid
+    ready: bool
 
 
 class Duplicate(BaseModel):
@@ -481,7 +510,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     duration or temperature segment is one code finds in its step's text, a step with segments has
     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-    with no confirm batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
+    with no Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
     and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
     one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
     wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
@@ -533,7 +562,8 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
 )
 def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: StoreDep) -> Recipe:
     """Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
-    `body.version`, with its card, in one write.
+    `body.version`, with its card, in one write. A recipe Awaiting Review with nothing left to
+    review is Ready.
     """
     recipe = _recipe(store, recipe_id)
     changes: dict[str, object] = {"version": body.version}
@@ -548,7 +578,12 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
                 if preview and preview.image_id not in {image.id for image in recipe.images}:
                     raise HTTPException(422, "The preview shows one of the recipe's images")
                 changes["preview"] = preview
-    return store.update_recipe(recipe.model_copy(update=changes))
+    edited = recipe.model_copy(update=changes)
+    # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
+    # review: the recipe is then Ready, though no Confirm Batch made it so.
+    if edited.status == "awaiting_review" and needs_review(edited).unconfirmed == 0:
+        edited = edited.model_copy(update={"status": "ready"})
+    return store.update_recipe(edited)
 
 
 @router.delete(
@@ -573,6 +608,152 @@ def delete_recipe(
     return Response(status_code=204)
 
 
+# Who confirmed a fact, as recipes record it: never the editor's email, because recipes are public
+# and cached for good.
+CONFIRMED_BY = "editor"
+
+
+@router.post(
+    "/recipes/{recipe_id}/confirm",
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_RECIPE,
+        409: {
+            "description": "The recipe, or a Canonical Ingredient or wording it confirms, changed"
+        },
+        422: {
+            "description": "A path is neither one of the recipe's facts nor named by an open "
+            "Enrichment Issue, every listed fact is already Confirmed with no open issue, or it "
+            "confirms more Canonical Ingredients and wordings than one write holds"
+        },
+    },
+)
+def confirm_facts(
+    recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
+) -> ConfirmedBatch:
+    """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
+    resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
+
+    Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
+    wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+    """
+    recipe = _recipe(store, recipe_id)
+    if recipe.version != body.version:
+        raise VersionConflict(recipe.id)
+    facts = recipe.facts.model_copy(deep=True)
+    listed = set(body.fact_ids)
+    open_on = {issue.fact_id for issue in recipe.issues if issue.status == "open"}
+    if unknown := sorted(p for p in listed - open_on if fact_at(facts, p) is None):
+        raise HTTPException(422, f"The recipe has no fact {', '.join(unknown)}")
+    batch, now = new_ulid(), datetime.now(UTC)
+    confirming = sorted(p for p in listed if (f := fact_at(facts, p)) and not f.confirmed)
+    if not confirming and not listed & open_on:
+        raise HTTPException(422, "Every listed fact is already Confirmed")
+    for path in confirming:
+        fact = cast("Fact", fact_at(facts, path))
+        fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
+        fact.confirm_batch = batch
+    issues = [
+        issue.model_copy(update={"status": "resolved", "confirm_batch": batch})
+        if issue.status == "open" and issue.fact_id in listed
+        else issue
+        for issue in recipe.issues
+    ]
+    canonicals, wordings = _confirm_matches(store, facts, confirming, batch)
+    if len(canonicals) + len(wordings) > MAX_LEARNED:
+        raise HTTPException(422, "Confirm fewer matches at once")
+    reviewed = recipe.model_copy(update={"facts": facts, "issues": issues})
+    ready = recipe.status == "awaiting_review" and needs_review(reviewed).unconfirmed == 0
+    if ready:
+        reviewed = reviewed.model_copy(update={"status": "ready", "ready_batch": batch})
+    saved = store.review_recipe(reviewed, canonicals, wordings)
+    return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
+
+
+def _confirm_matches(
+    store: Store, facts: RecipeFacts, confirming: list[str], batch: str
+) -> tuple[list[CanonicalIngredient], list[Wording]]:
+    """The unconfirmed Canonical Ingredients of the matches being confirmed, now Confirmed in
+    `batch`, and their lines' wordings, Confirmed unless an editor already confirmed them.
+    """
+    canonicals: dict[str, CanonicalIngredient] = {}
+    wordings: dict[str, Wording] = {}
+    for path in confirming:
+        line_id, _, kind = path.partition(".")
+        line = facts.ingredients.get(line_id)
+        if kind != "match" or line is None or line.match is None:
+            continue
+        canonical_id = line.match.canonical_id
+        canonical = store.canonical_ingredient(canonical_id)
+        if canonical and not canonical.confirmed:
+            canonicals[canonical_id] = canonical.model_copy(
+                update={"confirmed": True, "confirm_batch": batch}
+            )
+        wording = normalize_wording(line.parse.name) if line.parse else ""
+        cached = store.wording(wording) if wording else None
+        if wording and not (cached and cached.confirmed):
+            wordings[wording] = Wording(
+                wording=wording,
+                canonical_id=canonical_id,
+                confirmed=True,
+                schema_version=SCHEMA_VERSION,
+            )
+    return list(canonicals.values()), list(wordings.values())
+
+
+@router.post(
+    "/recipes/{recipe_id}/confirm-batches/{batch}/undo",
+    response_model=Recipe,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "No such recipe, or nothing on it is in the Confirm Batch"},
+        409: {"description": "The recipe or a Canonical Ingredient changed meanwhile"},
+    },
+)
+def undo_confirm_batch(
+    recipe_id: Annotated[Ulid, Path()], batch: Annotated[Ulid, Path()], store: StoreDep
+) -> Recipe:
+    """Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
+    Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
+    unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+    """
+    recipe = _recipe(store, recipe_id)
+    facts = recipe.facts.model_copy(deep=True)
+    paths = fact_paths(facts)
+    undone = [p for p in paths if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
+    if not undone and all(issue.confirm_batch != batch for issue in recipe.issues):
+        raise HTTPException(404, "Nothing on the recipe is in that Confirm Batch")
+    canonicals: dict[str, CanonicalIngredient] = {}
+    for path in undone:
+        fact = cast("Fact", fact_at(facts, path))
+        fact.confirmed, fact.confirmed_by, fact.confirmed_at, fact.confirm_batch = (
+            False,
+            None,
+            None,
+            None,
+        )
+        if isinstance(fact, MatchFact):
+            canonical = store.canonical_ingredient(fact.canonical_id)
+            if canonical and canonical.confirm_batch == batch:
+                canonicals[canonical.id] = canonical.model_copy(
+                    update={"confirmed": False, "confirm_batch": None}
+                )
+    changes: dict[str, object] = {
+        "facts": facts,
+        "issues": [
+            issue.model_copy(update={"status": "open", "confirm_batch": None})
+            if issue.confirm_batch == batch
+            else issue
+            for issue in recipe.issues
+        ],
+    }
+    if recipe.ready_batch == batch:
+        changes |= {"status": "awaiting_review", "ready_batch": None}
+    return store.review_recipe(recipe.model_copy(update=changes), canonicals.values(), [])
+
+
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     """Refuse a fact for a line the recipe doesn't have, an Enrichment Issue on no line or step
     fact or not open, and a wording that isn't a parsed line's name.
@@ -590,7 +771,7 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment.
     if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
-        raise HTTPException(422, "An Enrichment Issue arrives open, in no confirm batch")
+        raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
     names = {
         normalize_wording(facts.parse.name)
         for facts in body.facts.ingredients.values()

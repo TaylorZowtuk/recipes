@@ -128,12 +128,20 @@ The pinned copy of USDA FoodData Central's Foundation Foods and SR Legacy kept i
 _Avoid_: Nutrition database, USDA API
 
 **Needs Review**:
-The list of open enrichment issues and unconfirmed facts, across all recipes.
+What editors still have to check, across all recipes: each recipe's Review Items left to check, counted on its card as "M to check, incl. N flagged", where N is those of the M that carry an open Enrichment Issue.
 _Avoid_: Inbox, queue
+
+**Review Item**:
+What an editor checks and confirms as one, in one tap, when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty, unless the editor set the recipe's own Difficulty. It is unconfirmed while any of its facts is. An open Enrichment Issue belongs to the item of the line, step or suggestion its fact is on, flags it, and that item exists for it even when the recipe lacks the fact. An item is left to check while it is unconfirmed or flagged, and Needs Review counts those items, not facts or issues. A recipe Awaiting Review becomes Ready once it has no Review Item left to check.
+_Avoid_: Review row, fact group
 
 **Confirmed**:
 Describes an enriched fact that an editor has accepted or corrected. Confirmed facts are never changed when enrichment runs again.
 _Avoid_: Approved, verified
+
+**Confirm Batch**:
+The Review Items an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe Ready, undo moves it back to Awaiting Review.
+_Avoid_: Approval, transaction
 
 **Original**:
 The recipe exactly as captured from its source. It never changes after ingest, except through a manual re-ingest that an editor has reviewed.

@@ -1,8 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Card } from "./api/client";
-import { RecipeCard } from "./CollectionScreen";
+import { CollectionScreen, RecipeCard } from "./CollectionScreen";
+
+// The Collection the screen shows, and whether this device's person is an editor.
+const shown: { cards: Card[]; editor: boolean } = { cards: [], editor: false };
+vi.mock("./collection", () => ({
+  useCollection: () => ({ state: "ready", value: { cards: shown.cards } }),
+}));
+vi.mock("./session", () => ({
+  useIsEditor: () => shown.editor,
+  EditorOnly: ({ children }: { children: React.ReactNode }) => (shown.editor ? children : null),
+}));
+vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 
 const card = (fields: Partial<Card>): Card => ({
   id: "01K7TEST000000000000000001",
@@ -14,16 +25,23 @@ const card = (fields: Partial<Card>): Card => ({
   difficulty: null,
   difficulty_suggested: false,
   tags: [],
-  needs_review: { open_issues: 0, unconfirmed: 0 },
+  needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   schema_version: 1,
   ...fields,
 });
 
-const render = (c: Card) =>
+const render = (c: Card, review = false) =>
   renderToStaticMarkup(
     <MemoryRouter>
-      <RecipeCard card={c} />
+      <RecipeCard card={c} review={review} />
+    </MemoryRouter>,
+  );
+
+const renderScreen = () =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <CollectionScreen />
     </MemoryRouter>,
   );
 
@@ -57,5 +75,73 @@ describe("RecipeCard", () => {
     const markup = render(card({}));
     expect(markup).not.toContain("difficulty");
     expect(markup).not.toContain("tag");
+  });
+});
+
+describe("RecipeCard under Needs Review", () => {
+  it("shows its status and how many items are flagged and to check", () => {
+    const markup = render(
+      card({
+        status: "awaiting_review",
+        needs_review: { open_issues: 1, unconfirmed: 3, flagged: 1 },
+      }),
+      true,
+    );
+    expect(markup).toContain(">Awaiting Review</span>");
+    expect(markup).toContain(">3 to check, incl. 1 flagged</span>");
+  });
+
+  it("leaves out the counts outside Needs Review", () => {
+    const markup = render(
+      card({
+        status: "awaiting_review",
+        needs_review: { open_issues: 1, unconfirmed: 3, flagged: 1 },
+      }),
+    );
+    expect(markup).not.toContain("flagged");
+    expect(markup).not.toContain("Awaiting Review");
+  });
+});
+
+describe("the Needs Review chip", () => {
+  beforeEach(() => {
+    shown.cards = [
+      card({
+        id: "a",
+        title: "Synthetic Beans",
+        needs_review: { open_issues: 1, unconfirmed: 1, flagged: 1 },
+      }),
+      card({
+        id: "b",
+        title: "Synthetic Dal",
+        needs_review: { open_issues: 0, unconfirmed: 2, flagged: 0 },
+      }),
+      card({ id: "c", title: "Synthetic Eggs" }),
+    ];
+  });
+
+  it("starts the chip row for an editor, counting the cards with unchecked items", () => {
+    shown.editor = true;
+    const markup = renderScreen();
+    expect(markup).toMatch(
+      /<ul class="chips chips-row" aria-label="Filter by Tag"><li><button type="button" class="chip chip-review" aria-pressed="false">Needs Review · 2<\/button>/,
+    );
+  });
+
+  it("shows even when the Collection has no Tags", () => {
+    shown.editor = true;
+    expect(shown.cards.every((c) => c.tags.length === 0)).toBe(true);
+    expect(renderScreen()).toContain("Needs Review · 2");
+  });
+
+  it("isn't shown when nothing needs review", () => {
+    shown.editor = true;
+    shown.cards = [card({})];
+    expect(renderScreen()).not.toContain("Needs Review");
+  });
+
+  it("isn't shown to a visitor", () => {
+    shown.editor = false;
+    expect(renderScreen()).not.toContain("Needs Review");
   });
 });

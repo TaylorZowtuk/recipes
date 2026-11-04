@@ -1,7 +1,7 @@
 import { type Dispatch, type FormEvent, useState } from "react";
 import { useNavigate } from "react-router";
 import { api, type Recipe } from "./api/client";
-import { forgetCollection, loadCollection, rememberRecipe } from "./collection";
+import { forgetCollection, reloadCollection, rememberRecipe } from "./collection";
 import {
   changeCount,
   type DeleteOutcome,
@@ -55,16 +55,6 @@ export function focusEditHeading() {
   document.getElementById(EDIT_HEADING)?.focus({ preventScroll: true });
 }
 
-// Loads the Collection this device just changed, so the page shows the newer recipe at once.
-// Says whether it loaded; if not, the page still shows the old one.
-async function reloadCollection(): Promise<boolean> {
-  forgetCollection();
-  return loadCollection().then(
-    () => true,
-    () => false,
-  );
-}
-
 // Edit: the draft's Difficulty, Tags and Preview Photo, saved together in one PATCH at the
 // recipe's version. Delete removes the recipe after a confirm. A conflict on either reloads the
 // Collection and leaves Edit, showing the newer recipe.
@@ -94,7 +84,11 @@ export function RecipeEditor({
       outcome.kind === "saved" || outcome.kind === "conflict" ? await reloadCollection() : true;
     if (!mounted.current) return;
     setBusy(undefined);
-    dispatch({ type: "settled", outcome, refreshed });
+    const nowReady =
+      outcome.kind === "saved" &&
+      recipe.status === "awaiting_review" &&
+      outcome.recipe.status === "ready";
+    dispatch({ type: "settled", outcome, refreshed, nowReady });
   };
 
   const save = async (event: FormEvent) => {

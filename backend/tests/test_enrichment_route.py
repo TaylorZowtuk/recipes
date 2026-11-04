@@ -124,7 +124,8 @@ def test_the_card_shows_the_new_status(editor_client: TestClient, api_store: Sto
     card = next(card for card in cards if card["id"] == recipe.id)
     assert card["status"] == "awaiting_review"
     assert card["recipe_version"] == recipe.version + 1
-    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 0}
+    # Its two parsed lines are each a Review Item.
+    assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 2, "flagged": 0}
 
 
 def test_a_recipe_that_is_not_pending_is_refused(
@@ -303,7 +304,7 @@ def test_a_match_writes_its_new_canonical_ingredient_and_wording_with_the_recipe
     collection = bundle(editor_client)
     assert collection["collection_version"] == before + 1
     assert collection["canonical_ingredients"] == [
-        {**BEEF, "pantry_staple": False, "confirmed": False}
+        {**BEEF, "pantry_staple": False, "confirmed": False, "confirm_batch": None}
     ]
     assert collection["wordings"] == [
         {
@@ -327,7 +328,9 @@ def test_a_match_may_name_an_existing_canonical_ingredient(
     assert len(bundle(editor_client)["canonical_ingredients"]) == 1
 
 
-def test_the_card_counts_the_open_issues(editor_client: TestClient, api_store: Store) -> None:
+def test_the_card_counts_the_open_issues_and_the_one_item_they_flag(
+    editor_client: TestClient, api_store: Store
+) -> None:
     issues = [
         EnrichmentIssue.model_validate(issue(n, status))
         for n, status in enumerate(["open", "resolved", "open"], 1)
@@ -335,7 +338,8 @@ def test_the_card_counts_the_open_issues(editor_client: TestClient, api_store: S
     recipe = api_store.enrich_recipe(add(api_store).model_copy(update={"issues": issues}), [], [])
 
     card = next(card for card in bundle(editor_client)["cards"] if card["id"] == recipe.id)
-    assert card["needs_review"] == {"open_issues": 2, "unconfirmed": 0}
+    # Both open issues are on i1.match, which the recipe lacks: one item, left to check.
+    assert card["needs_review"] == {"open_issues": 2, "unconfirmed": 1, "flagged": 1}
 
 
 def assert_nothing_written(editor_client: TestClient, recipe: Recipe) -> None:
@@ -801,11 +805,11 @@ CONFIRMED_AT = "2026-10-01T12:00:00Z"
         (suggesting(difficulty={"confirmed": True}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"confirm_batch": "batch-1"}), [BEEF, CHUCK], UNVOUCHED),
         (
-            suggesting(substitutions={"confirmed_by": "editor@example.com"}),
+            suggesting(substitutions={"confirmed_by": "editor"}),
             [BEEF, CHUCK],
             UNVOUCHED,
         ),
-        (suggesting(difficulty={"confirmed_by": "editor@example.com"}), [BEEF, CHUCK], UNVOUCHED),
+        (suggesting(difficulty={"confirmed_by": "editor"}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"confirmed_at": CONFIRMED_AT}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(substitutions={"provenance": "fdc"}), [BEEF, CHUCK], UNVOUCHED),
         (suggesting(difficulty={"provenance": "editor"}), [BEEF, CHUCK], UNVOUCHED),
@@ -821,7 +825,7 @@ CONFIRMED_AT = "2026-10-01T12:00:00Z"
     ids=[
         "confirmed substitutions",
         "confirmed difficulty",
-        "difficulty in a confirm batch",
+        "difficulty in a Confirm Batch",
         "substitutions confirmed by an editor",
         "difficulty confirmed by an editor",
         "difficulty confirmed at a time",

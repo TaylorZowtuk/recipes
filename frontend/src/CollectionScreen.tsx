@@ -14,26 +14,34 @@ import { DifficultyMeters } from "./DifficultyMeters";
 import { FiltersSheet } from "./FiltersSheet";
 import { SearchIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
+import { needsReview, reviewCounts, reviewQueue } from "./needsReview";
 import { Plate } from "./Plate";
 import { Screen } from "./Screen";
+import { useIsEditor } from "./session";
 import { recipePath } from "./slug";
 import { formatStatedTime } from "./statedTime";
 import { TagChip, TagList } from "./TagList";
 import { byTitle, titleMatches } from "./titleSearch";
 
 // The Recipes tab: every card in the Collection, by title, narrowed by a title search, a tap on a
-// Tag chip and the Filters sheet. The chips and the sheet share one set of chosen Tags.
+// Tag chip and the Filters sheet. The chips and the sheet share one set of chosen Tags. An editor's
+// Needs Review chip narrows the grid further, to the cards with unchecked items in review order.
 export function CollectionScreen() {
   const collection = useCollection();
+  const editor = useIsEditor();
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState(noFilters);
+  const [reviewing, setReviewing] = useState(false);
   const cards = useMemo(
     () => (collection.state === "ready" ? [...collection.value.cards].sort(byTitle) : []),
     [collection],
   );
   const tags = useMemo(() => collectionTags(cards), [cards]);
-  const shown = filterCards(cards, filters).filter((card) => titleMatches(card.title, query));
-  const active = activeFilterCount(filters);
+  const toReview = editor ? cards.filter(needsReview).length : 0;
+  const review = editor && reviewing;
+  const filtered = filterCards(cards, filters).filter((card) => titleMatches(card.title, query));
+  const shown = review ? reviewQueue(filtered) : filtered;
+  const active = activeFilterCount(filters) + Number(review);
   const status = useRef<HTMLParagraphElement>(null);
 
   return (
@@ -52,8 +60,21 @@ export function CollectionScreen() {
         <FiltersSheet tags={tags} filters={filters} shown={shown.length} onChange={setFilters} />
       </div>
       {/* One row of chips that scrolls sideways rather than wrapping. */}
-      {tags.length > 0 && (
+      {/* The Needs Review chip stays while pressed, so it can be let go of after the last review. */}
+      {(tags.length > 0 || toReview > 0 || review) && (
         <ul className="chips chips-row" aria-label="Filter by Tag">
+          {(toReview > 0 || review) && (
+            <li>
+              <button
+                type="button"
+                className="chip chip-review"
+                aria-pressed={review}
+                onClick={() => setReviewing(!review)}
+              >
+                {`Needs Review · ${toReview}`}
+              </button>
+            </li>
+          )}
           {tags.map((tag) => (
             <li key={tag}>
               <TagChip
@@ -77,7 +98,7 @@ export function CollectionScreen() {
         <ul className="card-grid" aria-label="Recipes">
           {shown.map((card) => (
             <li key={card.id}>
-              <RecipeCard card={card} />
+              <RecipeCard card={card} review={review} />
             </li>
           ))}
         </ul>
@@ -96,8 +117,9 @@ function resultCount(total: number, shown: number, query: string, filtering: boo
   return shown === 1 ? "1 recipe" : `${shown} recipes`;
 }
 
-// A card in the grid. It shows up to four Tags, so cards stay close to one height.
-export function RecipeCard({ card }: { card: Card }) {
+// A card in the grid. It shows up to four Tags, so cards stay close to one height. Under Needs
+// Review it also shows its Enrichment Status and how many items are flagged and to check.
+export function RecipeCard({ card, review = false }: { card: Card; review?: boolean }) {
   const time = formatStatedTime(card.stated_seconds);
   return (
     <Link to={recipePath(card)} className="card">
@@ -108,6 +130,10 @@ export function RecipeCard({ card }: { card: Card }) {
       <DifficultyMeters difficulty={card.difficulty} suggested={card.difficulty_suggested} />
       <TagList tags={card.tags} limit={4} />
       {card.status === "pending" && <span className="badge">Enrichment pending</span>}
+      {review && card.status === "awaiting_review" && (
+        <span className="badge badge-review">Awaiting Review</span>
+      )}
+      {review && <span className="card-review">{reviewCounts(card.needs_review)}</span>}
     </Link>
   );
 }

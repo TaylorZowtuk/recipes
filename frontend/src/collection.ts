@@ -55,6 +55,16 @@ export function forgetCollection() {
   for (const listener of forgotten) listener();
 }
 
+// Loads the Collection this device just changed, so the page shows the newer recipe at once.
+// Says whether it loaded; if not, the page still shows the old one.
+export async function reloadCollection(): Promise<boolean> {
+  forgetCollection();
+  return loadCollection().then(
+    () => true,
+    () => false,
+  );
+}
+
 // The sync poll: undefined until it answers, null when it failed. It loads again after this device
 // changes the Collection, and when the network comes back, which asks again only after a failure.
 export function useSync(): Sync | null | undefined {
@@ -99,7 +109,8 @@ export async function loadRecipe(card: Card): Promise<Recipe> {
 export type Loaded<T> =
   | { state: "loading" }
   | { state: "failed"; notFound: boolean; retry: () => void }
-  | { state: "ready"; value: T };
+  // `newerLoading`: what shows is an older version, kept on screen while the newer one loads.
+  | { state: "ready"; value: T; newerLoading?: boolean };
 
 // Runs `load` whenever `key` changes, or on a retry, and reports how it went. `cached` is shown at
 // once, with no loading state, when the value is already in memory. With no `load` yet, it waits.
@@ -152,8 +163,23 @@ export function rememberRecipe(recipe: Recipe) {
   recipes.set(recipeKey(recipe.id, recipe.version), recipe);
 }
 
-// Waits while there is no card, so a screen can call it before the Collection has loaded.
+// The newest version of the recipe in memory, if any.
+function newestOf(id: string): Recipe | undefined {
+  let newest: Recipe | undefined;
+  for (const recipe of recipes.values())
+    if (recipe.id === id && (!newest || recipe.version > newest.version)) newest = recipe;
+  return newest;
+}
+
+// Waits while there is no card, so a screen can call it before the Collection has loaded. When
+// the card moves on to a version not yet loaded, as after a conflict, the newest version in memory
+// stays on screen meanwhile, so the page keeps its state (selected tab, toast) instead of remounting,
+// and says so, so the page can hold off writing at that old version.
 export function useRecipe(card: Card | undefined): Loaded<Recipe> {
   const key = card ? recipeKey(card.id, card.recipe_version) : "";
-  return useLoaded(key, card && (() => loadRecipe(card)), recipes.get(key));
+  const cached = card && (recipes.get(key) ?? newestOf(card.id));
+  const loaded = useLoaded(key, card && (() => loadRecipe(card)), cached);
+  return loaded.state === "ready" && card && loaded.value.version !== card.recipe_version
+    ? { ...loaded, newerLoading: true }
+    : loaded;
 }

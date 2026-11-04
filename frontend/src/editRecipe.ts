@@ -13,6 +13,9 @@ export const CHANGED_ELSEWHERE =
 export const DELETED_ELSEWHERE = "This recipe was deleted on another device.";
 // When the Collection reload after a write fails, the page still shows the old recipe.
 export const SAVED_NOT_REFRESHED = "Saved, but couldn’t refresh. Reload to see the latest.";
+// Setting the recipe's own Difficulty can leave nothing to review, so the save makes it Ready.
+export const SAVED_READY =
+  "Saved. This recipe is now Ready, so it joins the Grocery List and fridge matching.";
 export const CHANGED_NOT_REFRESHED =
   "This recipe changed on another device, but couldn’t refresh. Reload to see the newer version.";
 const NOT_AN_EDITOR = "Only the household’s editors can edit recipes. Sign in again.";
@@ -92,7 +95,12 @@ export type EditAction =
   | { type: "change"; change: Partial<Draft> }
   | { type: "cancel" }
   | { type: "incomplete" }
-  | { type: "settled"; outcome: EditOutcome | DeleteOutcome; refreshed: boolean };
+  | {
+      type: "settled";
+      outcome: EditOutcome | DeleteOutcome;
+      refreshed: boolean;
+      nowReady?: boolean;
+    };
 
 export function editing(state: EditState, action: EditAction): EditState {
   switch (action.type) {
@@ -107,7 +115,8 @@ export function editing(state: EditState, action: EditAction): EditState {
     case "settled":
       switch (action.outcome.kind) {
         case "saved":
-          return action.refreshed ? { draft: null } : { draft: null, notice: SAVED_NOT_REFRESHED };
+          if (!action.refreshed) return { draft: null, notice: SAVED_NOT_REFRESHED };
+          return action.nowReady ? { draft: null, notice: SAVED_READY } : { draft: null };
         case "deleted":
           return { draft: null };
         case "conflict":
