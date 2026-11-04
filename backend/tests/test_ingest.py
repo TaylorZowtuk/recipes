@@ -84,6 +84,7 @@ def test_a_website_dedupe_key_is_the_normalised_url(url: str, key: str) -> None:
         "https://x.test:99999/",
         f"https://{'a' * 64}.test/x",
         "https://a..test/x",
+        "https://[x",
     ],
 )
 def test_only_an_http_url_with_a_host_has_a_dedupe_key(url: str) -> None:

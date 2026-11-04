@@ -92,12 +92,12 @@ def website_dedupe_key(url: str) -> str:
     """The normalised URL: https, lower-case host without `www.`, no default port, fragment,
     trailing slash or tracking parameters, and the other parameters sorted. Path case is kept.
     """
-    parts = urlsplit(url.strip())
-    scheme = parts.scheme.lower()
     try:
+        parts = urlsplit(url.strip())
         port = parts.port
     except ValueError:
         raise InvalidUrl(url) from None
+    scheme = parts.scheme.lower()
     if scheme not in DEFAULT_PORTS or not parts.hostname:
         raise InvalidUrl(url)
     try:

@@ -6,7 +6,14 @@ from fastapi.testclient import TestClient
 
 from recipes.api import create_app
 from recipes.models import SCHEMA_VERSION
-from recipes.store import FAVORITE_SITES_KEY, SchemaMismatch, SchemaMissing, Store, VersionConflict
+from recipes.store import (
+    ATTEMPTS,
+    FAVORITE_SITES_KEY,
+    SchemaMismatch,
+    SchemaMissing,
+    Store,
+    VersionConflict,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -166,6 +173,23 @@ def test_a_start_that_cant_add_the_sites_fails_rather_than_serve_without_them(
     monkeypatch.setattr(store.client, "transact_write_items", conflicting)
 
     with pytest.raises(VersionConflict):
+        store.bootstrap()
+
+    assert len(sleeps) == ATTEMPTS - 1
+
+
+def test_a_start_cancelled_for_another_reason_fails(
+    table: str, monkeypatch: pytest.MonkeyPatch, cancellation: Callable[..., ClientError]
+) -> None:
+    store = lacking_favorite_sites(table)
+    invalid = cancellation("ValidationError", "None")
+
+    def refused(**_kwargs: Any) -> Any:
+        raise invalid
+
+    monkeypatch.setattr(store.client, "transact_write_items", refused)
+
+    with pytest.raises(Exception, match="ValidationError"):
         store.bootstrap()
 
 

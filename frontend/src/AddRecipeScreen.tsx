@@ -75,7 +75,7 @@ function AddRecipe({ fromSite }: { fromSite?: string }) {
     <div className="add-recipe">
       {fromSite && (
         <p className="screen-note">
-          Adding a recipe from {fromSite}. Find one in the new tab, then paste its address here.
+          Adding a recipe from {fromSite}. Find one at that site, then paste its address here.
         </p>
       )}
       <UrlForm onIngested={setReview} onQueued={queued.reload} />

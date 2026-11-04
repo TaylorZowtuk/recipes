@@ -20,11 +20,13 @@ const render = (state?: unknown) =>
 describe("AddRecipeScreen", () => {
   it("names the Favorite Site it was opened from and leaves the address empty", () => {
     const html = render({ fromSite: "Synthetic Kitchen" });
-    expect(html).toContain("from Synthetic Kitchen");
+    expect(html).toContain(
+      "Adding a recipe from Synthetic Kitchen. Find one at that site, then paste its address here.",
+    );
     expect(html).toMatch(/<input[^>]*id="recipe-url"[^>]*value=""/);
   });
 
   it("shows no hint otherwise", () => {
-    expect(render()).not.toContain("Find a recipe");
+    expect(render()).not.toContain("Adding a recipe from");
   });
 });

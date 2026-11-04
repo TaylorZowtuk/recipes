@@ -277,7 +277,7 @@ function SitesEditor({
   );
 }
 
-function SiteRow({
+export function SiteRow({
   site,
   count,
   legend,
@@ -296,6 +296,7 @@ function SiteRow({
   const change = (fields: Partial<DraftSite>) => dispatch({ type: "change", key, fields });
   const up = useRef<HTMLButtonElement>(null);
   const down = useRef<HTMLButtonElement>(null);
+  const siteName = <span className="visually-hidden"> {site.name.trim() || legend}</span>;
 
   // Moving the row drops focus, and its button may now be off at the end of the list. So this
   // renders at once, then puts focus back on a move button that still works.
@@ -354,6 +355,7 @@ function SiteRow({
             onClick={() => move(-1, up)}
           >
             Move up
+            {siteName}
           </button>
           <button
             ref={down}
@@ -363,9 +365,11 @@ function SiteRow({
             onClick={() => move(1, down)}
           >
             Move down
+            {siteName}
           </button>
           <button type="button" className="text-button text-button-danger" onClick={remove}>
             Delete
+            {siteName}
           </button>
         </div>
       </fieldset>

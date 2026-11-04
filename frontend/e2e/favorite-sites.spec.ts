@@ -292,6 +292,66 @@ test("a save the API refuses keeps the Draft and shows why", async ({ page }) =>
   await expect(saveButton(page)).toHaveText("Save 1 change");
 });
 
+test("a save that can't reach the API keeps the Draft and says so", async ({ page }) => {
+  await editorEdits(page, [KITCHEN, BAKES]);
+  await field(page, KITCHEN.name, "Name").fill("Mine");
+  await page.route("**/api/favorite-sites", (route) => route.abort());
+  await saveButton(page).click();
+
+  await expect(page.getByRole("alert")).toHaveText("Couldn’t reach Plateful. Try again.");
+  await expect(field(page, KITCHEN.name, "Name")).toHaveValue("Mine");
+  await expect(saveButton(page)).toHaveText("Save 1 change");
+});
+
+test("a save whose Collection reload fails leaves Edit and says to reload", async ({ page }) => {
+  const stub = await editorEdits(page, [KITCHEN, BAKES]);
+  await field(page, KITCHEN.name, "Name").fill("Mine");
+  await page.route("**/api/v/collection/*", (route) => route.abort());
+  await saveButton(page).click();
+
+  await expect(page.getByRole("alert")).toHaveText(
+    "Saved, but couldn’t refresh. Reload to see the latest.",
+  );
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(saveButton(page)).toHaveCount(0);
+  expect(stub.edits).toHaveLength(1);
+});
+
+test("a save that lost a race, then couldn't reload, says to reload", async ({ page }) => {
+  const stub = await editorEdits(page, [KITCHEN, BAKES]);
+  await field(page, KITCHEN.name, "Name").fill("Mine");
+  stub.refuse = { status: 409, detail: "Version conflict: reload and try again" };
+  await page.route("**/api/v/collection/*", (route) => route.abort());
+  await saveButton(page).click();
+
+  await expect(page.getByRole("alert")).toHaveText(
+    "The Favorite Sites changed on another device, but couldn’t refresh. Reload to see the newer version.",
+  );
+  await expect(page.getByRole("alert")).toBeFocused();
+  await expect(saveButton(page)).toHaveCount(0);
+});
+
+test("submitting again while a save is in flight sends nothing more", async ({ page }) => {
+  const stub = await editorEdits(page, [KITCHEN, BAKES]);
+  await field(page, KITCHEN.name, "Name").fill("Mine");
+  let answer = () => {};
+  const answered = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  await page.route("**/api/favorite-sites", async (route) => {
+    await answered;
+    await route.fallback();
+  });
+  await saveButton(page).click();
+  await expect(button(page, "Saving…")).toBeVisible();
+
+  await field(page, KITCHEN.name, "Name").press("Enter");
+  answer();
+
+  await expect(button(page, "Edit")).toBeVisible();
+  expect(stub.edits).toHaveLength(1);
+});
+
 test("a site with no name or address isn't sent", async ({ page }) => {
   const stub = await editorEdits(page, [KITCHEN]);
   await button(page, "Add a site").click();
@@ -356,7 +416,9 @@ test("Add a recipe from this site opens the site and goes to an empty Add a reci
   await tab.close();
 
   await expect(page).toHaveURL(/\/add$/);
-  await expect(page.getByRole("main")).toContainText(`from ${KITCHEN.name}`);
+  await expect(page.getByRole("main")).toContainText(
+    `Adding a recipe from ${KITCHEN.name}. Find one at that site, then paste its address here.`,
+  );
   await expect(page.getByRole("textbox", { name: "Recipe web address" })).toHaveValue("");
 
   // Opened any other way, it shows no hint. Going to /add from /add would be a reload, which keeps
@@ -364,7 +426,7 @@ test("Add a recipe from this site opens the site and goes to an empty Add a reci
   await page.goto("/recipes");
   await page.goto("/add");
   await expect(page.getByRole("textbox", { name: "Recipe web address" })).toBeVisible();
-  await expect(page.getByRole("main")).not.toContainText(`from ${KITCHEN.name}`);
+  await expect(page.getByRole("main")).not.toContainText("Adding a recipe from");
 });
 
 test("a Draft has no Add a recipe from this site", async ({ page }) => {

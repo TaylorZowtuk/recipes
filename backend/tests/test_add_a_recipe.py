@@ -140,6 +140,7 @@ def test_a_page_whose_site_name_is_past_its_limit_is_named_by_its_first_200_char
         "https://:443/x",
         "https://x.test:99999/",
         f"https://{'a' * 64}.test/x",
+        "https://[x",
         pytest.param("https://plateful.test/" + "a" * 2000, id="a key past 2000 bytes"),
         pytest.param(LONG_URL, id="a url past 2000 characters with a short key"),
     ],

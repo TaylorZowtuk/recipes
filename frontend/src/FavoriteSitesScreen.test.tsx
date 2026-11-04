@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CountedSite } from "./api/client";
-import { FavoriteSitesScreen } from "./FavoriteSitesScreen";
+import { FavoriteSitesScreen, SiteRow } from "./FavoriteSitesScreen";
 
 // The Favorite Sites the screen shows, and whether this device's person is an editor.
 const shown: {
@@ -93,5 +93,36 @@ describe("FavoriteSitesScreen", () => {
     const html = render();
     expect(html.match(/<button[^>]*disabled/g)).toHaveLength(3);
     expect(html).toContain("You’re offline. Edit the Favorite Sites once you’re back online.");
+  });
+
+  describe("a Draft's row", () => {
+    const row = (name: string) =>
+      renderToStaticMarkup(
+        <SiteRow
+          site={{ key: KITCHEN.id, name, address: KITCHEN.address, note: "" }}
+          count={undefined}
+          legend={KITCHEN.name}
+          canMoveUp
+          canMoveDown
+          dispatch={() => {}}
+        />,
+      );
+    const buttons = (html: string) =>
+      [...html.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map(([, label]) =>
+        label?.replace(/<[^>]*>/g, ""),
+      );
+
+    it("names the site in its buttons, as the Draft has it", () => {
+      expect(buttons(row("Mine"))).toEqual(["Move up Mine", "Move down Mine", "Delete Mine"]);
+    });
+
+    it("falls back to the legend while the name is blank", () => {
+      const named = KITCHEN.name;
+      expect(buttons(row("  "))).toEqual([
+        `Move up ${named}`,
+        `Move down ${named}`,
+        `Delete ${named}`,
+      ]);
+    });
   });
 });

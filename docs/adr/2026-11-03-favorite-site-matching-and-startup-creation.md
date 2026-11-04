@@ -25,5 +25,6 @@ A Favorite Site's host is the host of its address's dedupe key, normalised as a 
 - The create is conditional on the item not existing, so of two cold starts racing, one writes and bumps and the other changes nothing.
 - A start that runs out of retries fails rather than serve without the item. Lambda starts it again on the next request.
 - A stack that already has the item pays one extra consistent read on each cold start, and writes nothing.
+- A bundle built by older code can stay cached at the current version if the old API serves it after the bump. `make smoke` fails on a bundle without the field, and any Collection write heals it by moving to a new version.
 
 A new stack gets the empty item in the transaction that creates it.

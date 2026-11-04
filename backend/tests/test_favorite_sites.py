@@ -351,6 +351,7 @@ def test_a_subdomain_is_another_host(editor_client: TestClient, store: Store) ->
         "https://",
         "https://exa mple.com/",
         "https://example.com:port/",
+        "https://[x",
     ],
 )
 def test_an_invalid_address_is_refused(
@@ -466,9 +467,12 @@ def test_a_full_list_can_swap_a_site_in_one_batch(editor_client: TestClient, sto
     full = sites(100)
     saved = seeded(store, *full)
 
-    response = edit(editor_client, saved, {"op": "delete", "id": full[0].id}, add_site())
+    response = edit(editor_client, saved, add_site(), {"op": "delete", "id": full[0].id})
 
+    stored = store.favorite_sites().sites
     assert response.status_code == 200
+    assert len(stored) == 100
+    assert "New Site" in [site.name for site in stored]
 
 
 def test_an_empty_batch_is_refused(editor_client: TestClient, store: Store) -> None:
