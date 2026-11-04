@@ -360,7 +360,7 @@ def get_current_collection(store: StoreDep) -> RedirectResponse:
 
 
 # Everything under /api/v/ is cached by CloudFront for whoever asks, so no route there may
-# check for an editor: that answer depends on the cookie, and may re-issue it.
+# check for an editor: that answer depends on the cookie.
 @router.get(
     "/v/collection/{collection_version}",
     response_model=Collection,

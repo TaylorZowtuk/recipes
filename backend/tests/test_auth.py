@@ -44,6 +44,7 @@ SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = "editor@example.com"
 T0 = datetime(2026, 10, 1, 12, tzinfo=UTC)
 ONE_YEAR = 365 * 24 * 60 * 60
+MONDAY = "2026-11-02"
 
 
 @dataclass
@@ -283,6 +284,27 @@ def test_a_cookie_more_than_a_day_old_is_reissued_for_another_year(
     clock.advance(days=364)
     assert session(client, first).json()["editor"] is False
     assert session(client, second).json()["editor"] is True
+
+
+def test_only_reading_the_session_reissues_the_cookie(
+    client: TestClient, clock: Clock, table: str
+) -> None:
+    recipe = Store(table).add_recipe(RECIPES[0])
+    value = cookie_value(sign_in(client))
+    clock.advance(hours=24, minutes=1)
+    headers = with_cookie(value)
+    place = {"op": "place", "day": 0, "recipe_id": recipe.id}
+
+    for response in (
+        client.get("/api/sync", headers=headers),
+        client.get(f"/api/weeks/{MONDAY}", headers=headers),
+        client.patch(
+            f"/api/weeks/{MONDAY}", json={"version": 0, "operations": [place]}, headers=headers
+        ),
+    ):
+        assert response.status_code == 200, response.url
+        assert "set-cookie" not in response.headers, response.url
+    assert set_cookie(session(client, value)) is not None, "old enough to be re-issued"
 
 
 def test_a_cookie_issued_more_than_five_minutes_ahead_of_the_clock_is_a_visitor(
