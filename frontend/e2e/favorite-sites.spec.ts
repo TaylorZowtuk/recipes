@@ -1,8 +1,4 @@
-import { type APIRequestContext, expect as baseExpect, type Page, test } from "@playwright/test";
-
-// Every test here waits on the Collection bundle, which the run's one busy local API can take
-// seconds to build.
-const expect = baseExpect.configure({ timeout: 15_000 });
+import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
 
 // The local API's fake sign-in isn't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in");
