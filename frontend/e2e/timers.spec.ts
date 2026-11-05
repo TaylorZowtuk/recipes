@@ -238,12 +238,14 @@ test("the status region stays in the accessibility tree while empty, taking no r
 
 test("the dock leaves the foot of the page clear", async ({ page }) => {
   await startRange(page);
-  const clearance = await page.evaluate(() => {
-    window.scrollTo(0, document.documentElement.scrollHeight);
-    const last = document.querySelector(".sync-status")?.getBoundingClientRect().bottom ?? 0;
-    return (document.querySelector(".timer-dock-panel")?.getBoundingClientRect().top ?? 0) - last;
-  });
-  expect(clearance).toBeGreaterThanOrEqual(0);
+  // --dock-height follows the dock a frame later, from its ResizeObserver, so this waits for it.
+  const clearance = () =>
+    page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      const last = document.querySelector(".sync-status")?.getBoundingClientRect().bottom ?? 0;
+      return (document.querySelector(".timer-dock-panel")?.getBoundingClientRect().top ?? 0) - last;
+    });
+  await expect.poll(clearance).toBeGreaterThanOrEqual(0);
 });
 
 test("a timer jumps to its step from another tab, another screen and on a repeat", async ({
