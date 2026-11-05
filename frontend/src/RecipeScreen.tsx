@@ -57,14 +57,16 @@ function RecipePage() {
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
   // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
-  // step in the address has shown itself and taken focus by then, and keeps it, to match the view.
+  // step in the address has shown itself and taken focus by then: it keeps focus, to match the
+  // view, unless there's a notice, which then scrolls into view.
   const notice = useRef<HTMLParagraphElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
     if (!wasEditing.current && draft) focusEditHeading();
-    if (wasEditing.current && !draft && !hashTookFocus(hash)) {
-      if (notice.current) notice.current.focus({ preventScroll: true });
-      else focusTitle();
+    if (wasEditing.current && !draft) {
+      const stepShown = hashTookFocus(hash);
+      if (notice.current) notice.current.focus({ preventScroll: !stepShown });
+      else if (!stepShown) focusTitle();
     }
     wasEditing.current = !!draft;
   }, [draft, hash]);

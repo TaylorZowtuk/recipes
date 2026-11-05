@@ -312,6 +312,7 @@ test("Forward to a jump shows the step again, whichever tab is open", async ({ p
 
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`${NOODLES_PATH}$`));
+  await expect(page.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "Ingredients" }).click();
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`${NOODLES_PATH}#step-s3$`));
@@ -337,4 +338,29 @@ test("leaving Edit with a step in the address keeps focus and the view on the st
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(step).toBeFocused();
   await expect(step).toBeInViewport();
+});
+
+test("leaving Edit with a step in the address still shows why Edit closed", async ({ page }) => {
+  const signedIn = await page.request.post("/api/session", {
+    data: { credential: "fake:editor@example.com" },
+  });
+  expect(signedIn.ok(), "fake sign-in").toBe(true);
+  await startRange(page);
+  await jump(page).click();
+  await expect(page.locator("#step-s3")).toBeFocused();
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("textbox", { name: "Tags" }).fill("soup");
+  // Another device saved first. Stubbed, as this server's seed recipes are shared between tests.
+  await page.route("**/api/recipes/*", (route) =>
+    route.request().method() === "PATCH"
+      ? route.fulfill({ status: 409, json: {} })
+      : route.continue(),
+  );
+  await page.getByRole("button", { name: "Save 1 change" }).click();
+
+  const notice = page.getByRole("alert");
+  await expect(notice).toContainText("changed on another device");
+  await expect(notice).toBeFocused();
+  await expect(notice).toBeInViewport();
 });
