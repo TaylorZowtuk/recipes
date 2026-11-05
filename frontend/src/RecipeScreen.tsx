@@ -22,7 +22,7 @@ import {
   tabCounts,
   undoBatch,
 } from "./review";
-import { focusTitle, Screen } from "./Screen";
+import { focusTitle, hashTookFocus, Screen } from "./Screen";
 import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
@@ -56,17 +56,18 @@ function RecipePage() {
   const ready = card && recipe.state === "ready" ? recipe.value : undefined;
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
-  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title.
+  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
+  // step in the address has shown itself and taken focus by then, and keeps it, to match the view.
   const notice = useRef<HTMLParagraphElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
     if (!wasEditing.current && draft) focusEditHeading();
-    if (wasEditing.current && !draft) {
+    if (wasEditing.current && !draft && !hashTookFocus(hash)) {
       if (notice.current) notice.current.focus({ preventScroll: true });
       else focusTitle();
     }
     wasEditing.current = !!draft;
-  }, [draft]);
+  }, [draft, hash]);
 
   useEffect(() => {
     if (card && shownSlug !== slug(card.title))

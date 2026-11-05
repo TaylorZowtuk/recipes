@@ -317,3 +317,22 @@ test("Forward to a jump shows the step again, whichever tab is open", async ({ p
   await expect(page.locator("#step-s3")).toBeFocused();
   await expect(page.locator("#step-s3")).toBeInViewport();
 });
+
+test("leaving Edit with a step in the address keeps focus and the view on the step", async ({
+  page,
+}) => {
+  const signedIn = await page.request.post("/api/session", {
+    data: { credential: "fake:editor@example.com" },
+  });
+  expect(signedIn.ok(), "fake sign-in").toBe(true);
+  await startRange(page);
+  await jump(page).click();
+  const step = page.locator("#step-s3");
+  await expect(step).toBeFocused();
+
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("heading", { name: /^Edit/ })).toBeFocused();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(step).toBeFocused();
+  await expect(step).toBeInViewport();
+});
