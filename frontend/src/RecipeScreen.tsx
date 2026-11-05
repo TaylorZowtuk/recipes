@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { formatAmount } from "./amount";
 import type { Collection, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
@@ -30,6 +30,8 @@ import { stepText } from "./stepText";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
+import { unlockSound } from "./timerSound";
+import { type TimerStart, timers } from "./timers";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
@@ -44,6 +46,7 @@ export function RecipeScreen() {
 function RecipePage() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   const collection = useCollection();
   const card =
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
@@ -67,8 +70,9 @@ function RecipePage() {
   }, [draft]);
 
   useEffect(() => {
-    if (card && shownSlug !== slug(card.title)) navigate(recipePath(card), { replace: true });
-  }, [card, shownSlug, navigate]);
+    if (card && shownSlug !== slug(card.title))
+      navigate({ pathname: recipePath(card), hash }, { replace: true });
+  }, [card, shownSlug, hash, navigate]);
 
   const missing = collection.state === "ready" && !card;
   const loading = collection.state === "loading" || (card && recipe.state === "loading");
@@ -173,6 +177,7 @@ const focusSelectedTab = () =>
 
 const BLOCKED_REVIEW = "You’re offline. Review the recipe once you’re back online.";
 const UNDO_OFFLINE = "You’re offline. Undo once you’re back online.";
+const STEPS_TAB = 1;
 
 // The Ingredients, Steps and About tabs. To an editor, each tab counts what is left to check on
 // it, its Review Items are marked buttons that open their sheet, and a review bar confirms the
@@ -193,6 +198,8 @@ function RecipeTabs({
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
+  const location = useLocation();
+  const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
   const items = isEditor ? reviewOf(recipe) : undefined;
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
@@ -205,6 +212,16 @@ function RecipeTabs({
       setOpenId(id);
     },
   };
+
+  // A jump to a step, on every navigation to it, even a repeat of the same address: Tabs has shown
+  // the step by now, and focus goes with the view so the next Tab press carries on from there.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key tells one jump from the next.
+  useEffect(() => {
+    const step = jump && document.getElementById(jump);
+    if (!step) return;
+    step.focus({ preventScroll: true });
+    step.scrollIntoView({ block: "center" });
+  }, [jump, location.key]);
 
   // A review write disables the control that started it, which drops its focus, and can remove
   // it (Confirm N on this tab once nothing is left unchecked, Undo once undone), even when the
@@ -249,6 +266,7 @@ function RecipeTabs({
     <>
       <Tabs
         label="Recipe"
+        reveal={jump ? { tab: STEPS_TAB, key: location.key } : undefined}
         tabs={[
           {
             label: "Ingredients",
@@ -265,7 +283,12 @@ function RecipeTabs({
             count: counts?.steps,
             panel: (
               <>
-                <Steps original={recipe.original} facts={recipe.facts} review={review} />
+                <Steps
+                  recipeId={recipe.id}
+                  original={recipe.original}
+                  facts={recipe.facts}
+                  review={review}
+                />
                 {bar("steps")}
               </>
             ),
@@ -421,12 +444,16 @@ function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolea
 }
 
 // The steps, numbered through the whole recipe across its Components. Where a step names an
-// ingredient line, it shows the amount that step uses, marked so it can be told apart.
+// ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
+// is a button that starts its Timer, except in a Review Item, which is a button already, and on a
+// captured recipe that has no `recipeId` yet.
 export function Steps({
+  recipeId,
   original,
   facts,
   review,
 }: {
+  recipeId?: string;
   original: Original;
   facts?: RecipeFacts;
   review?: ReviewTarget;
@@ -435,20 +462,37 @@ export function Steps({
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ol className="steps" start={part.start}>
-        {part.lines.map((step) => {
-          const shown = stepText(step, facts, 1).map((piece, n) =>
-            typeof piece === "string" ? (
-              piece
-            ) : (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
-              <Fragment key={n}>
-                <span className="step-amount">{piece.amount}</span> {piece.name}
-              </Fragment>
-            ),
-          );
+        {part.lines.map((step, index) => {
           const item = review?.items.get(step.id);
+          const shown = stepText(step, facts, 1).map((piece, n) => {
+            if (typeof piece === "string") return piece;
+            if (!("t" in piece))
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
+                <Fragment key={n}>
+                  <span className="step-amount">{piece.amount}</span> {piece.name}
+                </Fragment>
+              );
+            if (item || !recipeId) return piece.written;
+            return (
+              <TimerButton
+                // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
+                key={n}
+                start={{
+                  recipeId,
+                  recipeTitle: original.title,
+                  stepId: step.id,
+                  stepNumber: part.start + index,
+                  position: n,
+                  written: piece.written,
+                  lowS: piece.low_s,
+                  highS: piece.high_s,
+                }}
+              />
+            );
+          });
           return (
-            <li key={step.id}>
+            <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
               {item && review ? (
                 <ReviewButton item={item} review={review}>
                   {shown}
@@ -462,6 +506,23 @@ export function Steps({
       </ol>
     </section>
   ));
+}
+
+// The tap must wake the audio itself, as iOS won't let a later chime or alarm do it.
+function TimerButton({ start }: { start: TimerStart }) {
+  return (
+    <button
+      type="button"
+      className="step-timer"
+      aria-label={`Start a timer for ${start.written}`}
+      onClick={() => {
+        unlockSound();
+        timers.start(start);
+      }}
+    >
+      {start.written}
+    </button>
+  );
 }
 
 // The Stated Times (an ISO duration humanized, other text as written) and the yield as written.

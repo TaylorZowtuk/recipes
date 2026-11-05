@@ -4,9 +4,23 @@ import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "rea
 type Tab = { label: string; count?: number; panel: ReactNode };
 
 // A tab list with one panel showing. Only the selected tab is in the Tab order; the arrow keys,
-// Home and End move between tabs and select them.
-export function Tabs({ label, tabs }: { label: string; tabs: Tab[] }) {
-  const [selected, setSelected] = useState(0);
+// Home and End move between tabs and select them. `reveal` selects its tab whenever its `key` is
+// new, and does so while rendering, so the panel is showing when the caller's effects run.
+export function Tabs({
+  label,
+  tabs,
+  reveal,
+}: {
+  label: string;
+  tabs: Tab[];
+  reveal?: { tab: number; key: string };
+}) {
+  const [selected, setSelected] = useState(reveal?.tab ?? 0);
+  const [revealed, setRevealed] = useState(reveal?.key);
+  if (reveal && reveal.key !== revealed) {
+    setRevealed(reveal.key);
+    setSelected(reveal.tab);
+  }
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const id = useId();
 

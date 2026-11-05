@@ -317,8 +317,70 @@ describe("Steps", () => {
     );
     expect(markup).toContain('<span class="step-amount">2 cloves</span> garlic');
     expect(
-      [...markup.matchAll(/<li>(.*?)<\/li>/g)].map(([, li = ""]) => li.replace(/<[^>]+>/g, "")),
+      [...markup.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map(([, li = ""]) =>
+        li.replace(/<[^>]+>/g, ""),
+      ),
     ).toEqual(["Add 2 cloves garlic.", "Add the rest of the garlic."]);
+  });
+
+  describe("a duration", () => {
+    const fact = { provenance: "llm", confidence: 0.8, estimated: false } as const;
+    const confirmation = {
+      confirmed: false,
+      confirmed_by: null,
+      confirmed_at: null,
+      confirm_batch: null,
+    };
+    const fry = {
+      ...original(),
+      steps: [{ id: "s1", component: null, text: "Fry for 8-10 minutes." }],
+    };
+    const facts = {
+      ingredients: {},
+      difficulty: null,
+      steps: {
+        s1: {
+          segments: {
+            ...fact,
+            ...confirmation,
+            segments: [
+              { t: "text" as const, v: "Fry for " },
+              { t: "duration" as const, low_s: 480, high_s: 600, written: "8-10 minutes" },
+              { t: "text" as const, v: "." },
+            ],
+          },
+          uses: { ...fact, ...confirmation, uses: [] },
+        },
+      },
+    };
+    const item = {
+      id: "s1",
+      tab: "steps" as const,
+      factIds: ["s1.segments"],
+      mark: "confirmed" as const,
+      issues: [],
+    };
+
+    it("is a button that starts a timer, in a step with an id to jump to", () => {
+      const markup = renderToStaticMarkup(<Steps recipeId="r1" original={fry} facts={facts} />);
+      expect(markup).toContain('<li id="step-s1" tabindex="-1">');
+      expect(markup).toContain(
+        'Fry for <button type="button" class="step-timer" aria-label="Start a timer for 8-10 minutes">8-10 minutes</button>.',
+      );
+    });
+
+    it("stays plain text in a Review Item, which is itself a button", () => {
+      const markup = renderToStaticMarkup(
+        <Steps
+          recipeId="r1"
+          original={fry}
+          facts={facts}
+          review={{ items: new Map([["s1", item]]), open: () => {}, newCanonicals: new Set() }}
+        />,
+      );
+      expect(markup).toContain("Fry for 8-10 minutes.");
+      expect(markup).not.toContain("step-timer");
+    });
   });
 });
 
@@ -471,6 +533,25 @@ describe("RecipeScreen review", () => {
       ([, attrs = "", t = ""]) =>
         attrs.match(/aria-label="([^"]*)"/)?.[1] ?? t.replace(/<[^>]+>/g, ""),
     );
+
+  it("opens on the Steps tab at a step's address", () => {
+    const selected = (path: string) => {
+      shown.cards = [card];
+      shown.recipe = recipe("ready");
+      const markup = renderToStaticMarkup(
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      shown.recipe = undefined;
+      return markup.match(/aria-selected="true"[^>]*>([^<]*)/)?.[1];
+    };
+    const path = `/recipes/${card.id}/synthetic-test-beans`;
+    expect(selected(path)).toBe("Ingredients");
+    expect(selected(`${path}#step-s1`)).toBe("Steps");
+  });
 
   it("shows an editor each tab's count of unchecked Review Items", () => {
     const markup = render(true, "awaiting_review");

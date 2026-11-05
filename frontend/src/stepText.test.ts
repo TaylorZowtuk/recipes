@@ -141,7 +141,7 @@ describe("stepText", () => {
     expect(stepText(step, facts({}, halfTheGarlic(1)), 1)[1]).toBe("half the garlic");
   });
 
-  it("keeps durations and temperatures as written", () => {
+  it("gives a duration as its segment, and keeps a temperature as written", () => {
     const roast = stepFacts(
       [
         "Roast ",
@@ -154,7 +154,7 @@ describe("stepText", () => {
     );
     expect(stepText(step, facts({}, roast), 1)).toEqual([
       "Roast ",
-      "70-80 minutes",
+      { t: "duration", low_s: 4200, high_s: 4800, written: "70-80 minutes" },
       " at ",
       "425°F",
       ".",
