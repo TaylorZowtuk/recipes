@@ -34,8 +34,9 @@ import { Tabs } from "./Tabs";
 
 // Add a recipe from a website: paste its address, review what was captured, then save it. Keyed
 // by the navigation, so it opens with a fresh form every time, even from Add a recipe itself.
+// Opened from a Favorite Site, the navigation's state names it, and the address stays empty.
 export function AddRecipeScreen() {
-  const { key } = useLocation();
+  const { key, state } = useLocation();
   return (
     <Screen title="Add a recipe" pushed>
       <EditorOnly
@@ -48,13 +49,13 @@ export function AddRecipeScreen() {
           </div>
         }
       >
-        <AddRecipe key={key} />
+        <AddRecipe key={key} fromSite={state?.fromSite} />
       </EditorOnly>
     </Screen>
   );
 }
 
-function AddRecipe() {
+function AddRecipe({ fromSite }: { fromSite?: string }) {
   const [review, setReview] = useState<Ingested>();
   const online = useOnline();
   const queued = useQueuedIngests(online);
@@ -72,6 +73,11 @@ function AddRecipe() {
   }
   return (
     <div className="add-recipe">
+      {fromSite && (
+        <p className="screen-note">
+          Adding a recipe from {fromSite}. Find one at that site, then paste its address here.
+        </p>
+      )}
       <UrlForm onIngested={setReview} onQueued={queued.reload} />
       <QueuedIngests loaded={queued.loaded} online={online} retry={queued.reload} />
     </div>

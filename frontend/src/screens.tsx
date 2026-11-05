@@ -1,7 +1,6 @@
 import { Screen } from "./Screen";
 
 export const FridgeScreen = () => <Screen title="Fridge" />;
-export const FavoriteSitesScreen = () => <Screen title="Favorite Sites" />;
 
 export const KitchenSettingsScreen = () => (
   <Screen title="Kitchen settings" pushed>

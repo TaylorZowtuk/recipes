@@ -5,7 +5,8 @@ giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
 "sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
 enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Canonical Ingredient,
-a conversion and an open Enrichment Issue.
+a conversion and an open Enrichment Issue. Its Favorite Sites are on reserved domains, and the
+first is on example.com, so it counts the website recipes.
 """
 
 import io
@@ -22,6 +23,7 @@ from recipes.models import (
     DifficultyFact,
     DurationSegment,
     EnrichmentIssue,
+    FavoriteSite,
     IngredientFacts,
     IngredientLine,
     IngredientSegment,
@@ -538,6 +540,22 @@ PHOTOS = {
 }
 
 
+FAVORITE_SITES = [
+    FavoriteSite(
+        id="01K7SEED0000000000000000F1",
+        name="Example Kitchen",
+        address="https://www.example.com/",
+        note="Weeknight dinners that hold up.",
+    ),
+    FavoriteSite(
+        id="01K7SEED0000000000000000F2",
+        name="Example Bakes",
+        address="https://example.org/bread",
+        note="",
+    ),
+]
+
+
 def placeholder_photo(
     colour: str, focal: tuple[float, float] = (0.5, 0.5), width: int = 1200, height: int = 800
 ) -> bytes:
@@ -557,6 +575,7 @@ def load(store: Store, images: ImageStore) -> None:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
         if added.id == REVIEW_RECIPE_ID:
             store.enrich_recipe(added, [BUTTER], [BUTTER_WORDING])
+    store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))
 
 
 def _with_photo(recipe: Recipe, images: ImageStore) -> Recipe:

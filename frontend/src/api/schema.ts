@@ -24,6 +24,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/favorite-sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Favorite Sites
+         * @description Apply an editor's batch to the Favorite Sites at `body.version`, in one write.
+         */
+        patch: operations["patch_favorite_sites_api_favorite_sites_patch"];
+        trace?: never;
+    };
     "/api/images": {
         parameters: {
             query?: never;
@@ -330,6 +350,26 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AddSite
+         * @description Add a site at the end of the list. The API mints its id.
+         */
+        AddSite: {
+            /** Address */
+            address: string;
+            /** Name */
+            name: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "add";
+        };
+        /**
          * CanonicalIngredient
          * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
          */
@@ -400,6 +440,8 @@ export interface components {
              * @default false
              */
             difficulty_suggested: boolean;
+            /** Host */
+            host: string | null;
             /** Id */
             id: string;
             needs_review: components["schemas"]["NeedsReview"];
@@ -433,6 +475,7 @@ export interface components {
             cards: components["schemas"]["Card"][];
             /** Collection Version */
             collection_version: number;
+            favorite_sites: components["schemas"]["CountedSites"];
             kitchen_settings: components["schemas"]["KitchenSettings"];
             /** Wordings */
             wordings: components["schemas"]["Wording-Output"][];
@@ -547,6 +590,39 @@ export interface components {
             refused: string | null;
             /** Release */
             release: string;
+        };
+        /** CountedSite */
+        CountedSite: {
+            /** Address */
+            address: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Note */
+            note: string;
+            /** Recipe Count */
+            recipe_count: number;
+        };
+        /**
+         * CountedSites
+         * @description The Favorite Sites as phones see them, at the `version` an Edit of them sends back.
+         */
+        CountedSites: {
+            /** Sites */
+            sites: components["schemas"]["CountedSite"][];
+            /** Version */
+            version: number;
+        };
+        /** DeleteSite */
+        DeleteSite: {
+            /** Id */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "delete";
         };
         /** Difficulty */
         Difficulty: {
@@ -748,6 +824,17 @@ export interface components {
             status: "open" | "resolved";
         };
         /**
+         * FavoriteSitesEdit
+         * @description An editor's batch of changes to the Favorite Sites at `version`, applied in the order sent,
+         *     in one write. The list only has to hold together once they are all applied.
+         */
+        FavoriteSitesEdit: {
+            /** Operations */
+            operations: (components["schemas"]["RenameSite"] | components["schemas"]["SetSiteAddress"] | components["schemas"]["SetSiteNote"] | components["schemas"]["ReorderSites"] | components["schemas"]["DeleteSite"] | components["schemas"]["AddSite"])[];
+            /** Version */
+            version: number;
+        };
+        /**
          * FdcNumbers
          * @description The FDC Snapshot's numbers for a food, copied in: a density for a volume, the grams in one
          *     count unit for a count, or the reason it doesn't convert, and its nutrition.
@@ -943,7 +1030,10 @@ export interface components {
         };
         /** NeedsReview */
         NeedsReview: {
-            /** Flagged */
+            /**
+             * Flagged
+             * @default 0
+             */
             flagged: number;
             /** Open Issues */
             open_issues: number;
@@ -1321,6 +1411,31 @@ export interface components {
              */
             op: "remove";
         };
+        /** RenameSite */
+        RenameSite: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "rename";
+        };
+        /**
+         * ReorderSites
+         * @description Put the sites in this order, naming each site present at that point in the batch once.
+         */
+        ReorderSites: {
+            /** Ids */
+            ids: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "reorder";
+        };
         /** ScaleAmount */
         ScaleAmount: {
             /**
@@ -1434,6 +1549,30 @@ export interface components {
              */
             op: "set_preview";
             preview: components["schemas"]["Preview"] | null;
+        };
+        /** SetSiteAddress */
+        SetSiteAddress: {
+            /** Address */
+            address: string;
+            /** Id */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_address";
+        };
+        /** SetSiteNote */
+        SetSiteNote: {
+            /** Id */
+            id: string;
+            /** Note */
+            note: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_note";
         };
         /** SetTags */
         SetTags: {
@@ -1898,6 +2037,51 @@ export interface operations {
         responses: {
             /** @description Redirects to the current version */
             307: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_favorite_sites_api_favorite_sites_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FavoriteSitesEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CountedSites"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Favorite Sites changed since the editor read them */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a valid edit, an operation names a site that isn't there, or the list would hold two sites on one host or too many sites */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
