@@ -2083,8 +2083,13 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   pointer-events: none;
 }
 
+/* Many timers scroll inside the panel, under a notice that stays put, so the screen keeps its
+   room. */
 .timer-dock-panel {
+  display: flex;
+  flex-direction: column;
   max-width: 560px;
+  max-height: 40dvh;
   margin: 0 auto;
   border-radius: var(--radius-card);
   background: var(--surface);
@@ -2094,6 +2099,7 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 }
 
 .timer-notice {
+  flex: none;
   margin: 0;
   padding: calc(var(--space) * 2) calc(var(--space) * 4);
   background: var(--accent-soft);
@@ -2106,11 +2112,11 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   padding-block: 0;
 }
 
-/* Many timers scroll inside the dock, so the screen keeps its room. */
+/* The padding keeps the first and last rows' focus rings inside the scrolling box. */
 .timer-list {
-  max-height: 40dvh;
+  min-height: 0;
   margin: 0;
-  padding: 0;
+  padding: var(--space) 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   list-style: none;
