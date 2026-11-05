@@ -8,6 +8,7 @@ import string
 from datetime import UTC, date, datetime
 from itertools import chain
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     AfterValidator,
@@ -29,6 +30,9 @@ MAX_KEY_BYTES = 2000
 # A Source's link: http(s) in any case, since it's rendered as a link. The string is kept exactly,
 # and no longer than a key, so tracking parameters dropped from the key can't swell the item.
 WebUrl = Annotated[str, StringConstraints(pattern=r"(?i)^https?://\S+$", max_length=MAX_KEY_BYTES)]
+# A Favorite Site's limits, and the list's, so the one item stays far below DynamoDB's 400 KB.
+MAX_FAVORITE_SITES = 100
+MAX_SITE_NOTE = 500
 # An Original's limits, so a save past them is a 422 rather than an item past DynamoDB's 400 KB:
 # each field's, and its whole size as JSON, which leaves the rest of the item room.
 MAX_LABEL = 200
@@ -541,7 +545,9 @@ def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
 class NeedsReview(Model):
     open_issues: int
     unconfirmed: int  # Review Items left to check: a fact not yet Confirmed, or an open issue
-    flagged: int  # the Review Items left to check that carry an open Enrichment Issue
+    # The Review Items left to check that carry an open Enrichment Issue. Cards stored before this
+    # count have none, and gain it on their next write.
+    flagged: int = 0
 
 
 def needs_review(recipe: Recipe) -> NeedsReview:
@@ -587,6 +593,7 @@ class Card(Model):
     preview: Preview | None
     needs_review: NeedsReview
     recipe_version: int
+    host: str | None = None  # a website recipe's; a card written before there were hosts has none
 
 
 def stated_seconds(times: StatedTimes) -> int | None:
@@ -598,11 +605,19 @@ def stated_seconds(times: StatedTimes) -> int | None:
     return None if prep is None or cook is None else prep + cook
 
 
+def site_host(dedupe_key: str) -> str:
+    """The host of a website's dedupe key: lower-case, without `www.`, with any non-default port.
+    It names a website whose page gives no name, so it's cut to a Label's length like a page's own.
+    """
+    return urlsplit(dedupe_key).netloc[:MAX_LABEL]
+
+
 def card_for(recipe: Recipe) -> Card:
     """Card upkeep: the card is derived from its recipe and nothing else. It shows the editor's
     Difficulty, or else enrichment's, as a suggestion until it is confirmed.
     """
     difficulty, suggested = effective_difficulty(recipe)
+    website = isinstance(recipe.source, WebsiteSource)
     return Card(
         id=recipe.id,
         schema_version=recipe.schema_version,
@@ -616,6 +631,7 @@ def card_for(recipe: Recipe) -> Card:
         preview=recipe.preview,
         needs_review=needs_review(recipe),
         recipe_version=recipe.version,
+        host=site_host(recipe.dedupe_key) if website else None,
     )
 
 
@@ -628,6 +644,21 @@ class KitchenSettings(Model):
     schema_version: int
     version: int
     store_categories: list[StoreCategory]  # in the order the Grocery List shows them
+
+
+class FavoriteSite(Model):
+    id: Ulid
+    name: Label
+    address: WebUrl  # kept as written: only its host is matched
+    note: str  # empty when there is none
+
+
+class FavoriteSites(Model):
+    """`SETTINGS#favorite-sites`: every Favorite Site, in one item."""
+
+    schema_version: int
+    version: int
+    sites: list[FavoriteSite]  # in the order the Sites tab shows them
 
 
 def _is_a_monday(value: str) -> str:

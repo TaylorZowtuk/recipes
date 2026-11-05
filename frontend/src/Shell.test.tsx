@@ -28,6 +28,7 @@ const card = (fields: Partial<Card>): Card => ({
   tags: [],
   needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
+  host: null,
   schema_version: 1,
   ...fields,
 });

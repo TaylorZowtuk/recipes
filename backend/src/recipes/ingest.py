@@ -92,12 +92,12 @@ def website_dedupe_key(url: str) -> str:
     """The normalised URL: https, lower-case host without `www.`, no default port, fragment,
     trailing slash or tracking parameters, and the other parameters sorted. Path case is kept.
     """
-    parts = urlsplit(url.strip())
-    scheme = parts.scheme.lower()
     try:
+        parts = urlsplit(url.strip())
         port = parts.port
     except ValueError:
         raise InvalidUrl(url) from None
+    scheme = parts.scheme.lower()
     if scheme not in DEFAULT_PORTS or not parts.hostname:
         raise InvalidUrl(url)
     try:
@@ -121,13 +121,6 @@ def dedupe_key(source: Source) -> str:
     if isinstance(source, WebsiteSource):
         return website_dedupe_key(source.url)
     return f"{source.sheet_id}/{source.entry_name}"
-
-
-def site_host(dedupe_key: str) -> str:
-    """A website's name when its page doesn't give one: the host of its dedupe key, cut to a
-    Label's length like a page's own name.
-    """
-    return urlsplit(dedupe_key).netloc[:MAX_LABEL]
 
 
 # Fetching

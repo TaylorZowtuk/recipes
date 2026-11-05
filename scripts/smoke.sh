@@ -81,7 +81,7 @@ check /api/sync 200 application/json '"collection_version"'
 # Each attempt follows the 307 from the uncached /api/collection, so a version that moves between
 # attempts re-points the check.
 check -r /api/collection 200 application/json
-check -r -c immutable -x 'X-Cache: Hit from cloudfront' /api/collection 200 application/json
+check -r -c immutable -x 'X-Cache: Hit from cloudfront' /api/collection 200 application/json '"favorite_sites"'
 # A visitor's session, which reads the stack's SSM parameters (with KMS decryption) on a cold start.
 check -c no-store /api/session 200 application/json '"google_client_id"'
 # OAC signs a write to the function URL only with the body's SHA-256 in x-amz-content-sha256 (here the

@@ -449,6 +449,7 @@ describe("RecipeScreen", () => {
     tags: [],
     needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
     recipe_version: 1,
+    host: null,
     schema_version: 1,
   };
   const render = (c: Card) => {
@@ -556,6 +557,7 @@ describe("RecipeScreen review", () => {
     tags: [],
     needs_review: { open_issues: 0, unconfirmed: 3, flagged: 0 },
     recipe_version: 2,
+    host: null,
     schema_version: 1,
   };
   const render = (
