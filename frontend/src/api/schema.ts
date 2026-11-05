@@ -1030,7 +1030,10 @@ export interface components {
         };
         /** NeedsReview */
         NeedsReview: {
-            /** Flagged */
+            /**
+             * Flagged
+             * @default 0
+             */
             flagged: number;
             /** Open Issues */
             open_issues: number;
