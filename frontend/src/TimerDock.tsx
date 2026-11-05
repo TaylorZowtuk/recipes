@@ -50,8 +50,7 @@ function reveal(row: HTMLElement | null) {
 }
 
 function TimerRow({ timer }: { timer: TimerView }) {
-  const { id, recipeId, recipeTitle, stepId, stepNumber, written, phase, paused } = timer;
-  const named = `${written}, step ${stepNumber} of ${recipeTitle}`;
+  const { id, recipeId, recipeTitle, stepId, stepNumber, written, named, phase, paused } = timer;
   const alarming = phase === "alarming";
   const row = useRef<HTMLLIElement>(null);
   const addMinute = useRef<HTMLButtonElement>(null);

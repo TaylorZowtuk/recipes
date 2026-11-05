@@ -86,7 +86,11 @@ describe("the timer store", () => {
 
   it("chimes once at the low end, then counts to the high end", () => {
     store.start(fry);
-    expect(shown()).toMatchObject({ phase: "counting", countdown: "Check in 8:00" });
+    expect(shown()).toMatchObject({
+      phase: "counting",
+      countdown: "Check in 8:00",
+      named: "8-10 minutes, step 3 of Synthetic Test Noodles",
+    });
     run(8 * MINUTE - 1000);
     expect(sounds).toEqual([]);
     run(1000);

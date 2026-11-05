@@ -20,6 +20,7 @@ const view = (fields: Partial<TimerView>): TimerView => ({
   phase: "counting",
   paused: false,
   countdown: "Check in 7:59",
+  named: "8-10 minutes, step 3 of Synthetic Test Noodles",
   ...fields,
 });
 
@@ -55,7 +56,10 @@ describe("TimerDock", () => {
   });
 
   it("names each control for its timer", () => {
-    const markup = render([view({}), view({ id: "r1/s3/3", written: "10 minutes" })]);
+    const markup = render([
+      view({}),
+      view({ id: "r1/s3/3", named: "10 minutes, step 3 of Synthetic Test Noodles" }),
+    ]);
     expect(names(markup)).toEqual([
       "Timers",
       "Pause 8-10 minutes, step 3 of Synthetic Test Noodles",

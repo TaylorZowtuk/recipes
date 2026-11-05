@@ -28,6 +28,7 @@ export type TimerView = TimerStart & {
   phase: Phase;
   paused: boolean;
   countdown: string;
+  named: string;
 };
 
 // The thresholds are wall-clock times, so a throttled page catches up on its next tick. A single
@@ -46,6 +47,9 @@ function phaseAt(timer: Timer, now: number): Phase {
   if (at >= timer.alarmAt) return "alarming";
   return timer.chimeAt !== null && at >= timer.chimeAt ? "chimed" : "counting";
 }
+
+const describeTimer = (timer: TimerStart) =>
+  `${timer.written}, step ${timer.stepNumber} of ${timer.recipeTitle}`;
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -73,6 +77,7 @@ function viewAt(timer: Timer, now: number): TimerView {
     phase: phaseAt(timer, now),
     paused: pausedAt !== null,
     countdown: countdownAt(timer, now),
+    named: describeTimer(timer),
   };
 }
 
@@ -100,9 +105,6 @@ function resumed(timer: Timer, now: number): Timer {
     chimeAt: timer.chimeAt === null ? null : timer.chimeAt + paused,
   };
 }
-
-const describeTimer = (timer: Timer) =>
-  `${timer.written}, step ${timer.stepNumber} of ${timer.recipeTitle}`;
 
 /**
  * The running timers, in memory only, and the dock's latest notice. `now` is the wall clock. Every
