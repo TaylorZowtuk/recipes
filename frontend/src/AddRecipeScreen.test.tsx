@@ -9,6 +9,7 @@ vi.mock("./session", () => ({
 }));
 vi.mock("./online", () => ({ useOnline: () => true }));
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
+vi.mock("./weeks", () => ({}));
 
 const render = (state?: unknown) =>
   renderToStaticMarkup(

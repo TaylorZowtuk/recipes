@@ -14,6 +14,10 @@ vi.mock("./session", () => ({
   EditorOnly: ({ children }: { children: React.ReactNode }) => (shown.editor ? children : null),
 }));
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
+vi.mock("./weeks", () => ({
+  useToday: () => "2026-11-04",
+  useWeek: () => ({ failed: false, writing: false, retry: () => {} }),
+}));
 
 const card = (fields: Partial<Card>): Card => ({
   id: "01K7TEST000000000000000001",
@@ -76,6 +80,32 @@ describe("RecipeCard", () => {
     const markup = render(card({}));
     expect(markup).not.toContain("difficulty");
     expect(markup).not.toContain("tag");
+  });
+});
+
+describe("RecipeCard's week button", () => {
+  const renderWeek = (planned?: string) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <RecipeCard card={card({})} planned={planned} onWeek={() => {}} />
+      </MemoryRouter>,
+    );
+
+  it("isn't there unless the card is given one, as for a visitor", () => {
+    expect(render(card({}))).not.toContain("<button");
+  });
+
+  it("sits beside the link, since a button can't nest in one", () => {
+    const markup = renderWeek();
+    expect(markup).toMatch(/<\/a><button[^>]*>\+ Week<\/button>/);
+    expect(markup).toContain('aria-label="+ Week: Synthetic Test Noodles"');
+  });
+
+  it("shows the days the recipe is planned for in place of + Week", () => {
+    const markup = renderWeek("✓ Wed, Fri");
+    expect(markup).toContain(">✓ Wed, Fri</button>");
+    expect(markup).toContain('aria-label="✓ Wed, Fri: Synthetic Test Noodles"');
+    expect(markup).not.toContain("+ Week");
   });
 });
 
@@ -144,5 +174,21 @@ describe("the Needs Review chip", () => {
   it("isn't shown to a visitor", () => {
     shown.editor = false;
     expect(renderScreen()).not.toContain("Needs Review");
+  });
+});
+
+describe("the week buttons on the Collection", () => {
+  beforeEach(() => {
+    shown.cards = [card({})];
+  });
+
+  it("show to an editor", () => {
+    shown.editor = true;
+    expect(renderScreen()).toContain("+ Week");
+  });
+
+  it("are hidden from a visitor", () => {
+    shown.editor = false;
+    expect(renderScreen()).not.toContain("+ Week");
   });
 });

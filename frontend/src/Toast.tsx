@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
 const SHOWN_MS = 10_000;
+const BRIEF_MS = 3_000;
 
-// What a toast says, and the Confirm Batch its Undo reverses, if any.
-export type ToastMessage = { text: string; undo?: string };
+// What a toast says, and the Confirm Batch its Undo reverses, if any. `brief` is for a message that
+// soon stops being true.
+export type ToastMessage = { text: string; undo?: string; brief?: boolean };
 
 // A short message at the foot of the screen, with Undo when there's a Confirm Batch to reverse.
 // The status region stays mounted so screen readers announce each new message; it goes after a
@@ -19,7 +21,7 @@ export function Toast({
   disabled?: boolean;
   // Why Undo is off, when it's off for a reason beyond a write in flight.
   why?: string;
-  onUndo: (batch: string) => void;
+  onUndo?: (batch: string) => void;
   onDone: () => void;
 }) {
   // The timer waits while the toast has focus or the pointer, so Undo can't vanish mid-reach,
@@ -36,7 +38,7 @@ export function Toast({
   }, [toast]);
   useEffect(() => {
     if (!toast || held) return;
-    const timer = setTimeout(onDone, SHOWN_MS);
+    const timer = setTimeout(onDone, toast.brief ? BRIEF_MS : SHOWN_MS);
     return () => clearTimeout(timer);
   }, [toast, held, onDone]);
 
@@ -64,7 +66,7 @@ export function Toast({
               type="button"
               className="text-button toast-undo"
               disabled={disabled}
-              onClick={() => toast.undo && onUndo(toast.undo)}
+              onClick={() => toast.undo && onUndo?.(toast.undo)}
             >
               Undo
             </button>

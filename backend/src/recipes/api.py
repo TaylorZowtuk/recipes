@@ -10,9 +10,17 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Path, Query, Req
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, BeforeValidator, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
-from recipes.auth import Auth, require_editor
+from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
@@ -39,6 +47,7 @@ from recipes.models import (
     Difficulty,
     DurationSegment,
     Enrichment,
+    EntryAmount,
     Fact,
     FavoriteSite,
     FavoriteSites,
@@ -49,18 +58,22 @@ from recipes.models import (
     Label,
     MatchFact,
     Model,
+    Monday,
     Original,
     Preview,
     QueuedIngest,
     QueuedIngestState,
     Recipe,
     RecipeFacts,
+    ScaleAmount,
     StepFacts,
     Substitution,
     TemperatureSegment,
     Ulid,
     WebsiteSource,
     WebUrl,
+    WeekPlan,
+    WeekPlanEntry,
     Wording,
     fact_at,
     fact_paths,
@@ -234,6 +247,42 @@ class RecipeEdit(BaseModel):
         return self
 
 
+class PlaceEntry(BaseModel):
+    """Add a recipe to the end of a day, 0 for Monday to 6 for Sunday."""
+
+    op: Literal["place"]
+    day: Annotated[int, Field(ge=0, le=6)]
+    recipe_id: Ulid
+    # A factory, not a default, so the schema leaves it optional for clients that send none.
+    amount: Annotated[
+        EntryAmount, Field(default_factory=lambda: ScaleAmount(kind="scale", factor=1))
+    ]
+
+
+class RemoveEntry(BaseModel):
+    op: Literal["remove"]
+    entry_id: Ulid
+
+
+class SetAmount(BaseModel):
+    op: Literal["set_amount"]
+    entry_id: Ulid
+    amount: EntryAmount
+
+
+WeekOperation = Annotated[PlaceEntry | RemoveEntry | SetAmount, Field(discriminator="op")]
+MAX_WEEK_OPERATIONS = 100
+
+
+class WeekPlanEdit(BaseModel):
+    """An editor's batch of changes to the week at `version`, applied in order in one write.
+    Version 0 is a week with no plan yet, which only a placement creates.
+    """
+
+    version: Annotated[int, Field(ge=0, le=2**53)]
+    operations: Annotated[list[WeekOperation], Field(min_length=1, max_length=MAX_WEEK_OPERATIONS)]
+
+
 # Every fact path a recipe can hold: four per line, two per step and its Difficulty.
 MAX_FACT_IDS = 6 * MAX_LINES + 1
 
@@ -346,15 +395,41 @@ EDITORS_ONLY = [Depends(require_editor)]
 router = APIRouter(prefix="/api")
 
 
-@router.get("/sync")
-def get_sync(store: StoreDep, response: Response) -> Sync:
+# More than the phones watch, which is the current and next weeks.
+MAX_WATCHED_WEEKS = 8
+WATCHED_WEEKS: TypeAdapter[list[str]] = TypeAdapter(
+    Annotated[list[Monday], Field(max_length=MAX_WATCHED_WEEKS)]
+)
+
+
+@router.get(
+    "/sync",
+    responses={422: {"description": f"An editor named a non-Monday or over {MAX_WATCHED_WEEKS}"}},
+)
+def get_sync(
+    store: StoreDep,
+    editor: CurrentEditor,
+    response: Response,
+    weeks: Annotated[list[str], Query(default_factory=list)],
+) -> Sync:
+    """What a phone polls. `weeks` are the Mondays an editor watches, and only an editor's are
+    read or checked, so a visitor's answer is the same whatever it asks.
+    """
     response.headers.update(NO_STORE)
     return Sync(
         collection_version=store.collection_version(),
         schema_version=SCHEMA_VERSION,
         read_only=None,
-        weeks=None,
+        weeks=None if editor is None else store.week_versions(_watched(weeks)),
     )
+
+
+def _watched(weeks: list[str]) -> list[str]:
+    try:
+        return WATCHED_WEEKS.validate_python(weeks)
+    except ValidationError:
+        msg = f"Watch at most {MAX_WATCHED_WEEKS} weeks, each named by its Monday"
+        raise HTTPException(422, msg) from None
 
 
 @router.get("/collection", status_code=307, response_class=RedirectResponse, responses=TO_CURRENT)
@@ -364,7 +439,7 @@ def get_current_collection(store: StoreDep) -> RedirectResponse:
 
 
 # Everything under /api/v/ is cached by CloudFront for whoever asks, so no route there may
-# check for an editor: that answer depends on the cookie, and may re-issue it.
+# check for an editor: that answer depends on the cookie.
 @router.get(
     "/v/collection/{collection_version}",
     response_model=Collection,
@@ -687,6 +762,68 @@ def delete_recipe(
     recipe = _recipe(store, recipe_id)
     store.delete_recipe(recipe.model_copy(update={"version": version}))
     return Response(status_code=204)
+
+
+NOT_A_MONDAY: dict[int | str, dict[str, Any]] = {422: {"description": "Not a real Monday"}}
+
+
+@router.get(
+    "/weeks/{monday}",
+    dependencies=EDITORS_ONLY,
+    responses={403: DUPLICATE[403], **NOT_A_MONDAY},
+)
+def get_week_plan(monday: Annotated[Monday, Path()], store: StoreDep) -> WeekPlan:
+    """The week's plan, or an empty one at version 0 if nothing has been placed in it."""
+    return store.week_plan(monday)
+
+
+@router.patch(
+    "/weeks/{monday}",
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "No such recipe to place, or no such entry"},
+        409: {"description": "The Week Plan changed since the editor read it"},
+        422: {"description": "Not a real Monday, or not a valid edit"},
+    },
+)
+def patch_week_plan(
+    monday: Annotated[Monday, Path()], body: WeekPlanEdit, store: StoreDep
+) -> WeekPlan:
+    """Apply an editor's placements, removals and new amounts to the week at `body.version`, in
+    one write. The first placement creates the plan, and removing every entry keeps it.
+    """
+    plan = store.week_plan(monday)
+    if plan.version != body.version:
+        raise VersionConflict(monday)
+    days = [list(day) for day in plan.days]
+    for operation in body.operations:
+        match operation:
+            case PlaceEntry():
+                recipe = _recipe(store, operation.recipe_id)
+                entry = WeekPlanEntry(
+                    entry_id=new_ulid(),
+                    recipe_id=recipe.id,
+                    recipe_title=recipe.original.title,
+                    amount=operation.amount,
+                )
+                days[operation.day].append(entry)
+            case RemoveEntry():
+                day, index = _entry_at(days, operation.entry_id)
+                del day[index]
+            case SetAmount():
+                day, index = _entry_at(days, operation.entry_id)
+                day[index] = day[index].model_copy(update={"amount": operation.amount})
+    return store.save_week_plan(plan.model_copy(update={"days": days}))
+
+
+def _entry_at(days: list[list[WeekPlanEntry]], entry_id: str) -> tuple[list[WeekPlanEntry], int]:
+    """The day holding the entry, and where in that day it is."""
+    for day in days:
+        for index, entry in enumerate(day):
+            if entry.entry_id == entry_id:
+                return day, index
+    raise HTTPException(404, "No such entry")
 
 
 # Who confirmed a fact, as recipes record it: never the editor's email, because recipes are public

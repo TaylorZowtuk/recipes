@@ -5,7 +5,8 @@ import { FavoriteSitesScreen } from "./FavoriteSitesScreen";
 import { RecipeScreen } from "./RecipeScreen";
 import { Shell } from "./Shell";
 import { SignInScreen } from "./SignInScreen";
-import { FridgeScreen, KitchenSettingsScreen, WeekPlanScreen } from "./screens";
+import { FridgeScreen, KitchenSettingsScreen } from "./screens";
+import { WeekPlanScreen } from "./WeekPlanScreen";
 
 export function App() {
   return (

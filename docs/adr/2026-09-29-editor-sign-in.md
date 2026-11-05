@@ -1,5 +1,7 @@
 # Editors sign in with Google directly, into a stateless session cookie; visitors see a Demo instead of household plans
 
+Superseded in part by [The session cookie is re-issued only when reading the session](2026-11-04-session-cookie-reissued-only-when-reading-the-session.md): only a page load now counts as use of a session.
+
 Editors sign in with **Sign in with Google**, verified by the API itself, and get a signed session cookie. Local CLIs use one permanent **service token** per stack. **Cognito isn't used**, even though its Essentials plan is free for two users: it adds a user pool, a hosted login and token handling, and it can't give the rolling one-year session the household wants, because its refresh tokens expire on a fixed date even with rotation. Every mechanism below costs $0 and adds no billable service. Emailed one-time codes were rejected because they need SES, which isn't in ca-west-1 and is metered. Sign in with Apple was rejected because it needs the $99/yr Apple Developer Program. This replaces the "one Cognito user pool per stack" noted when the hosting platform was chosen.
 
 ## Sign-in

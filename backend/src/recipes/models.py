@@ -5,7 +5,7 @@ Our Version joins these models when the feature that writes it arrives.
 
 import secrets
 import string
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from itertools import chain
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -657,6 +657,68 @@ class FavoriteSites(Model):
     schema_version: int
     version: int
     sites: list[FavoriteSite]  # in the order the Sites tab shows them
+
+
+def _is_a_monday(value: str) -> str:
+    if date.fromisoformat(value).weekday() != 0:
+        msg = "A week is named by its Monday"
+        raise ValueError(msg)
+    return value
+
+
+# A week's Monday as YYYY-MM-DD, the one spelling, since it names the week's item.
+Monday = Annotated[
+    str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"), AfterValidator(_is_a_monday)
+]
+
+# The steps an entry's scale moves in. Strict, so true and "1" aren't taken for 1.
+SCALE_FACTORS = (0.5, 1, 1.5, 2, 3)
+
+
+def _is_a_step(value: float) -> float:
+    if value not in SCALE_FACTORS:
+        msg = f"A factor is one of {SCALE_FACTORS}"
+        raise ValueError(msg)
+    return value
+
+
+ScaleFactor = Annotated[
+    float,
+    Field(strict=True, json_schema_extra={"enum": list(SCALE_FACTORS)}),
+    AfterValidator(_is_a_step),
+]
+
+
+class ScaleAmount(Model):
+    kind: Literal["scale"]
+    factor: ScaleFactor
+
+
+# How much of a recipe an entry makes.
+EntryAmount = Annotated[ScaleAmount, Field(discriminator="kind")]
+
+
+class WeekPlanEntry(Model):
+    """One recipe on one day. `recipe_title` is a copy, so history survives a deleted recipe, and
+    `entry_id` stays the same for the entry's life, because grocery tick keys use it.
+    """
+
+    entry_id: Ulid
+    recipe_id: Ulid
+    recipe_title: str
+    amount: EntryAmount
+
+
+class WeekPlan(Model):
+    """A Monday-to-Sunday week, one list of entries per day. `version` counts plan writes, from 0
+    for a week with no item. Grocery ticks change without moving it.
+    """
+
+    schema_version: int
+    week_start: Monday
+    days: Annotated[list[list[WeekPlanEntry]], Field(min_length=7, max_length=7)]
+    grocery_ticks: list[str] = []  # the item has no such attribute until something is ticked
+    version: Annotated[int, Field(ge=0)]
 
 
 class CollectionMeta(Model):

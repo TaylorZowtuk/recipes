@@ -269,7 +269,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Sync */
+        /**
+         * Get Sync
+         * @description What a phone polls. `weeks` are the Mondays an editor watches, and only an editor's are
+         *     read or checked, so a visitor's answer is the same whatever it asks.
+         */
         get: operations["get_sync_api_sync_get"];
         put?: never;
         post?: never;
@@ -314,6 +318,31 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/weeks/{monday}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Week Plan
+         * @description The week's plan, or an empty one at version 0 if nothing has been placed in it.
+         */
+        get: operations["get_week_plan_api_weeks__monday__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Week Plan
+         * @description Apply an editor's placements, removals and new amounts to the week at `body.version`, in
+         *     one write. The first placement creates the plan, and removing every entry keeps it.
+         */
+        patch: operations["patch_week_plan_api_weeks__monday__patch"];
         trace?: never;
     };
 }
@@ -1178,6 +1207,23 @@ export interface components {
             url: string;
         };
         /**
+         * PlaceEntry
+         * @description Add a recipe to the end of a day, 0 for Monday to 6 for Sunday.
+         */
+        PlaceEntry: {
+            /** Amount */
+            amount?: components["schemas"]["ScaleAmount"];
+            /** Day */
+            day: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "place";
+            /** Recipe Id */
+            recipe_id: string;
+        };
+        /**
          * Preview
          * @description A recipe's Preview Photo, cropped round about its Focal Point.
          */
@@ -1352,6 +1398,16 @@ export interface components {
             /** Unit */
             unit: string | null;
         };
+        /** RemoveEntry */
+        RemoveEntry: {
+            /** Entry Id */
+            entry_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "remove";
+        };
         /** RenameSite */
         RenameSite: {
             /** Id */
@@ -1376,6 +1432,19 @@ export interface components {
              * @enum {string}
              */
             op: "reorder";
+        };
+        /** ScaleAmount */
+        ScaleAmount: {
+            /**
+             * Factor
+             * @enum {number}
+             */
+            factor: 0.5 | 1 | 1.5 | 2 | 3;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "scale";
         };
         /**
          * SegmentsFact
@@ -1444,6 +1513,18 @@ export interface components {
             email: string | null;
             /** Google Client Id */
             google_client_id: string | null;
+        };
+        /** SetAmount */
+        SetAmount: {
+            /** Amount */
+            amount: components["schemas"]["ScaleAmount"];
+            /** Entry Id */
+            entry_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_amount";
         };
         /** SetDifficulty */
         SetDifficulty: {
@@ -1850,6 +1931,52 @@ export interface components {
             site_name: string;
             /** Url */
             url: string;
+        };
+        /**
+         * WeekPlan
+         * @description A Monday-to-Sunday week, one list of entries per day. `version` counts plan writes, from 0
+         *     for a week with no item. Grocery ticks change without moving it.
+         */
+        WeekPlan: {
+            /** Days */
+            days: components["schemas"]["WeekPlanEntry"][][];
+            /**
+             * Grocery Ticks
+             * @default []
+             */
+            grocery_ticks: string[];
+            /** Schema Version */
+            schema_version: number;
+            /** Version */
+            version: number;
+            /** Week Start */
+            week_start: string;
+        };
+        /**
+         * WeekPlanEdit
+         * @description An editor's batch of changes to the week at `version`, applied in order in one write.
+         *     Version 0 is a week with no plan yet, which only a placement creates.
+         */
+        WeekPlanEdit: {
+            /** Operations */
+            operations: (components["schemas"]["PlaceEntry"] | components["schemas"]["RemoveEntry"] | components["schemas"]["SetAmount"])[];
+            /** Version */
+            version: number;
+        };
+        /**
+         * WeekPlanEntry
+         * @description One recipe on one day. `recipe_title` is a copy, so history survives a deleted recipe, and
+         *     `entry_id` stays the same for the entry's life, because grocery tick keys use it.
+         */
+        WeekPlanEntry: {
+            /** Amount */
+            amount: components["schemas"]["ScaleAmount"];
+            /** Entry Id */
+            entry_id: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Title */
+            recipe_title: string;
         };
         /**
          * Wording
@@ -2545,7 +2672,9 @@ export interface operations {
     };
     get_sync_api_sync_get: {
         parameters: {
-            query?: never;
+            query?: {
+                weeks?: string[];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2560,6 +2689,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Sync"];
                 };
+            };
+            /** @description An editor named a non-Monday or over 8 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2645,6 +2781,96 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_week_plan_api_weeks__monday__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monday: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeekPlan"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a real Monday */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_week_plan_api_weeks__monday__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monday: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WeekPlanEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeekPlan"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe to place, or no such entry */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Week Plan changed since the editor read it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a real Monday, or not a valid edit */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
