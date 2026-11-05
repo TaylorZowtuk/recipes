@@ -26,7 +26,7 @@ import { focusTitle, Screen } from "./Screen";
 import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
-import { stepText } from "./stepText";
+import { type DurationPiece, stepText } from "./stepText";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
@@ -445,8 +445,8 @@ function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolea
 
 // The steps, numbered through the whole recipe across its Components. Where a step names an
 // ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
-// is a button that starts its Timer, except in a Review Item, which is a button already, and on a
-// captured recipe that has no `recipeId` yet.
+// is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
+// buttons follow in a row. A captured recipe has no `recipeId` yet, so no Timers.
 export function Steps({
   recipeId,
   original,
@@ -464,19 +464,9 @@ export function Steps({
       <ol className="steps" start={part.start}>
         {part.lines.map((step, index) => {
           const item = review?.items.get(step.id);
-          const shown = stepText(step, facts, 1).map((piece, n) => {
-            if (typeof piece === "string") return piece;
-            if (!("t" in piece))
-              return (
-                // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
-                <Fragment key={n}>
-                  <span className="step-amount">{piece.amount}</span> {piece.name}
-                </Fragment>
-              );
-            if (item || !recipeId) return piece.written;
-            return (
+          const timer = (piece: DurationPiece, n: number) =>
+            recipeId && (
               <TimerButton
-                // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
                 key={n}
                 start={{
                   recipeId,
@@ -490,13 +480,34 @@ export function Steps({
                 }}
               />
             );
+          const pieces = stepText(step, facts, 1);
+          const shown = pieces.map((piece, n) => {
+            if (typeof piece === "string") return piece;
+            if ("t" in piece) return (!item && timer(piece, n)) || piece.written;
+            return (
+              // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
+              <Fragment key={n}>
+                <span className="step-amount">{piece.amount}</span> {piece.name}
+              </Fragment>
+            );
           });
+          const timerRow = pieces.flatMap((piece, n) =>
+            typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
+          );
           return (
             <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
               {item && review ? (
-                <ReviewButton item={item} review={review}>
-                  {shown}
-                </ReviewButton>
+                <>
+                  <ReviewButton item={item} review={review}>
+                    {shown}
+                  </ReviewButton>
+                  {timerRow.length > 0 && (
+                    <div className="step-timers">
+                      <ClockIcon />
+                      {timerRow}
+                    </div>
+                  )}
+                </>
               ) : (
                 shown
               )}

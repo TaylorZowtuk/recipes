@@ -1974,6 +1974,23 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   inset: -12px 0;
 }
 
+/* A Review Item is a button already, so its step's timers follow it in a row, in line with the
+   step's text: past the item's padding, the mark and the gap. */
+.step-timers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  padding: var(--space) var(--space) calc(var(--space) * 2) calc(var(--space) * 7);
+  color: var(--text-secondary);
+}
+
+.step-timers > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
 /* Running timers float above the tab bar, or at the foot of the screen beside the rail. Its box
    includes the gap below the panel, so --dock-height clears both. */
 .timer-dock {

@@ -3,11 +3,10 @@ import type { RecipeFacts, Step, StepFacts } from "./api/client";
 
 type Segment = NonNullable<StepFacts["segments"]>["segments"][number];
 
+export type DurationPiece = Extract<Segment, { t: "duration" }>;
+
 // A run of a step's text, an ingredient's amount and the name it goes before, or a duration.
-export type StepPiece =
-  | string
-  | { amount: string; name: string }
-  | Extract<Segment, { t: "duration" }>;
+export type StepPiece = string | { amount: string; name: string } | DurationPiece;
 
 // A step's text for display at a scale. Where it names an ingredient line with an amount, it shows
 // that line's amount × the portion that mention uses × the scale, then the line's short name. A

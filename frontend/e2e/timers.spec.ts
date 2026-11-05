@@ -3,6 +3,9 @@ import { expect, type Page, test } from "@playwright/test";
 // page.clock drives the local build's timers; what's tested here is the app, not a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "timers are page logic, covered by a local build");
 
+// As in the other signed-in specs, nothing here goes through a service worker.
+test.use({ serviceWorkers: "block" });
+
 // One WebKit and one Chromium project cover both engines, both schemes and both layouts.
 const PROJECTS = ["iphone-light", "desktop-dark"];
 
@@ -51,6 +54,17 @@ test("a range timer chimes at the low end and alarms at the high end", async ({ 
     .getByRole("button", { name: /^Cancel/ })
     .click();
   await expect(dock(page)).toBeHidden();
+});
+
+test("an editor starts a timer from the row after a Review Item", async ({ page }) => {
+  const signedIn = await page.request.post("/api/session", {
+    data: { credential: "fake:editor@example.com" },
+  });
+  expect(signedIn.ok(), "fake sign-in").toBe(true);
+  await startRange(page);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator("#step-s3 .review-item .step-timer")).toHaveCount(0);
+  await expect(page.locator("#step-s3 > .step-timers .step-timer")).toBeInViewport();
 });
 
 test("a second start is refused, leaving the timer running", async ({ page }) => {

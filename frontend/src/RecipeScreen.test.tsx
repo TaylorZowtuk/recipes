@@ -1,8 +1,10 @@
+import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { Card, Original, ParseFact, Recipe } from "./api/client";
 import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
+import { timers } from "./timers";
 
 // The Collection the recipe page reads its card from, with the recipe itself loading until a test
 // gives it one, and whether this device's person is an editor.
@@ -39,6 +41,8 @@ vi.mock("./online", () => ({ useOnline: () => !shown.offline }));
 // The account menu reads the browser's session, which a server render has none of.
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 vi.mock("./weeks", () => ({}));
+// A tap wakes the audio, which a server render has none of.
+vi.mock("./timerSound", () => ({ unlockSound: () => {}, ring: () => {} }));
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",
@@ -86,6 +90,19 @@ function lines(markup: string): (string | [string, string])[][] {
       ? parts.map(([, cls = "", text = ""]): [string, string] => [cls, text])
       : [inner];
   });
+}
+
+type Tree = ReactElement<{ children?: unknown; onClick: () => void; className?: string }>;
+
+// The <button> elements of what a component renders, opening the hook-free components inside it,
+// since there's no DOM here to tap in.
+function buttons(node: unknown): Tree[] {
+  if (Array.isArray(node)) return node.flatMap(buttons);
+  if (!isValidElement(node)) return [];
+  const element = node as Tree;
+  if (typeof element.type === "function")
+    return buttons((element.type as (props: unknown) => unknown)(element.props));
+  return [...(element.type === "button" ? [element] : []), ...buttons(element.props.children)];
 }
 
 describe("Ingredients", () => {
@@ -369,17 +386,52 @@ describe("Steps", () => {
       );
     });
 
-    it("stays plain text in a Review Item, which is itself a button", () => {
-      const markup = renderToStaticMarkup(
-        <Steps
-          recipeId="r1"
-          original={fry}
-          facts={facts}
-          review={{ items: new Map([["s1", item]]), open: () => {}, newCanonicals: new Set() }}
-        />,
-      );
+    describe("in a Review Item", () => {
+      const open = vi.fn();
+      const props = {
+        recipeId: "r1",
+        original: fry,
+        facts,
+        review: { items: new Map([["s1", item]]), open, newCanonicals: new Set<string>() },
+      };
+
+      it("stays plain text there, with its timer button in a row after the item", () => {
+        const markup = renderToStaticMarkup(<Steps {...props} />);
+        const reviewItem = markup.match(/<button[^>]*review-item.*?<\/button>/)?.[0] ?? "";
+        expect(reviewItem.replace(/<[^>]+>/g, "")).toContain("Fry for 8-10 minutes.");
+        expect(reviewItem).not.toContain("step-timer");
+        expect(markup.slice(markup.indexOf(reviewItem) + reviewItem.length)).toMatch(
+          /^<div class="step-timers">.*aria-label="Start a timer for 8-10 minutes">8-10 minutes<\/button><\/div><\/li>/,
+        );
+      });
+
+      it("never nests a button in a button", () => {
+        const markup = renderToStaticMarkup(<Steps {...props} />);
+        let depth = 0;
+        for (const [tag] of markup.matchAll(/<\/?button/g)) {
+          depth += tag === "<button" ? 1 : -1;
+          expect(depth).toBeLessThanOrEqual(1);
+        }
+      });
+
+      it("starts the timer on a tap, without opening the review sheet", () => {
+        const start = vi.spyOn(timers, "start").mockImplementation(() => {});
+        const button = buttons(Steps(props)).find(
+          ({ props: { className } }) => className === "step-timer",
+        );
+        button?.props.onClick();
+        expect(start).toHaveBeenCalledWith(
+          expect.objectContaining({ recipeId: "r1", stepId: "s1", position: 1, lowS: 480 }),
+        );
+        expect(open).not.toHaveBeenCalled();
+        start.mockRestore();
+      });
+    });
+
+    it("stays plain text on a captured recipe, with no recipe id yet", () => {
+      const markup = renderToStaticMarkup(<Steps original={fry} facts={facts} />);
       expect(markup).toContain("Fry for 8-10 minutes.");
-      expect(markup).not.toContain("step-timer");
+      expect(markup).not.toContain("<button");
     });
   });
 });

@@ -176,6 +176,16 @@ const pages: Shot[] = [
     shows: "Step 3 · 8-10 minutes",
   },
   {
+    name: "recipe-steps-timer-editor",
+    path: "/recipes/01K7SEED000000000000000001/lemon-herb-roast-chicken",
+    ready: "Lemon Herb Roast Chicken",
+    loaded: "Lemon Herb Roast Chicken",
+    editor: true,
+    tab: "Steps",
+    click: "Start a timer for 70-80 minutes",
+    shows: "Step 4 · 70-80 minutes",
+  },
+  {
     name: "recipe-steps-timer-alarm",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
     ready: "Sesame Noodles with Crispy Tofu",
