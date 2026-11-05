@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createTimerStore, type TimerStart } from "./timers";
 
 const MINUTE = 60_000;
@@ -18,7 +18,7 @@ const rest: TimerStart = { ...fry, position: 3, written: "10 minutes", lowS: 600
 describe("the timer store", () => {
   let clock: number;
   let sounds: string[];
-  let unlock: ReturnType<typeof vi.fn>;
+  let unlock: Mock<() => void>;
   let store: ReturnType<typeof createTimerStore>;
 
   // The wall clock moves by `ms`, and the page's ticker gets one go at it, however long that was.
