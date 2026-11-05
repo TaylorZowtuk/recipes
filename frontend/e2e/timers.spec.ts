@@ -69,6 +69,7 @@ test("a range timer chimes at the low end and alarms at the high end", async ({ 
     .getByRole("button", { name: /^Cancel/ })
     .click();
   await expect(dock(page)).toBeHidden();
+  await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeFocused();
 });
 
 test("an editor starts a timer from the row after a Review Item", async ({ page }) => {
@@ -115,6 +116,13 @@ test("two durations in one step run as separate timers, each with its own contro
     .click();
   await expect(row(page)).toHaveCount(1);
   await expect(row(page)).toContainText("Step 4 · 10 minutes");
+
+  await dock(page)
+    .getByRole("button", { name: /^Resume 10 minutes/ })
+    .click();
+  await expect(row(page)).not.toContainText("Paused");
+  await page.clock.fastForward("01:00");
+  await expect(row(page)).toContainText(/Done in (8:\d\d|9:00)/);
 });
 
 test("focus moves from Pause to +1 minute when the alarm takes Pause away", async ({ page }) => {

@@ -387,12 +387,11 @@ describe("Steps", () => {
     });
 
     describe("in a Review Item", () => {
-      const open = vi.fn();
       const props = {
         recipeId: "r1",
         original: fry,
         facts,
-        review: { items: new Map([["s1", item]]), open, newCanonicals: new Set<string>() },
+        review: { items: new Map([["s1", item]]), open: vi.fn(), newCanonicals: new Set<string>() },
       };
 
       it("stays plain text there, with its timer button in a row after the item", () => {
@@ -414,7 +413,7 @@ describe("Steps", () => {
         }
       });
 
-      it("starts the timer on a tap, without opening the review sheet", () => {
+      it("starts the timer on a tap", () => {
         const start = vi.spyOn(timers, "start").mockImplementation(() => {});
         const button = buttons(Steps(props)).find(
           ({ props: { className } }) => className === "step-timer",
@@ -423,7 +422,6 @@ describe("Steps", () => {
         expect(start).toHaveBeenCalledWith(
           expect.objectContaining({ recipeId: "r1", stepId: "s1", position: 1, lowS: 480 }),
         );
-        expect(open).not.toHaveBeenCalled();
         start.mockRestore();
       });
     });

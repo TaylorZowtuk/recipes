@@ -78,8 +78,8 @@ describe("the timer store", () => {
     run(10 * MINUTE);
     expect(sounds).toEqual(["chime", "alarm"]);
     expect(shown()).toMatchObject({ phase: "alarming", countdown: "Time’s up" });
-    run(MINUTE);
-    expect(sounds.filter((sound) => sound === "alarm").length).toBeGreaterThan(5);
+    run(30_000);
+    expect(sounds.filter((sound) => sound === "alarm")).toHaveLength(11);
     store.cancel(shown().id);
     const rung = sounds.length;
     clock += MINUTE;
@@ -104,12 +104,21 @@ describe("the timer store", () => {
     store.pause(shown().id);
     expect(shown()).toMatchObject({ paused: true, countdown: "Check in 7:00" });
     clock += 30 * MINUTE;
-    expect(store.snapshot().timers[0]?.countdown).toBe("Check in 7:00");
     store.resume(shown().id);
     expect(shown()).toMatchObject({ paused: false, countdown: "Check in 7:00" });
     expect(sounds).toEqual([]);
     run(7 * MINUTE);
     expect(sounds).toEqual(["chime"]);
+  });
+
+  it("keeps a paused timer frozen while another runs past its ends", () => {
+    store.start(fry);
+    store.start(rest);
+    run(MINUTE);
+    store.pause(shown().id);
+    run(20 * MINUTE);
+    expect(shown()).toMatchObject({ paused: true, phase: "counting", countdown: "Check in 7:00" });
+    expect(shown(1).phase).toBe("alarming");
   });
 
   it("doesn't pause a timer that is alarming", () => {
@@ -132,13 +141,13 @@ describe("the timer store", () => {
 
   it("adds a minute to the high end after the chime, without repeating it", () => {
     store.start(fry);
-    run(9 * MINUTE);
-    expect(shown().countdown).toBe("Done in 1:00");
+    run(8 * MINUTE + 30_000);
+    expect(shown().countdown).toBe("Done in 1:30");
     store.addMinute(shown().id);
-    expect(shown()).toMatchObject({ phase: "chimed", countdown: "Done in 2:00" });
-    run(MINUTE);
+    expect(shown()).toMatchObject({ phase: "chimed", countdown: "Done in 2:30" });
+    run(2 * MINUTE);
     expect(sounds).toEqual(["chime"]);
-    run(MINUTE);
+    run(30_000);
     expect(sounds).toEqual(["chime", "alarm"]);
   });
 
@@ -158,10 +167,14 @@ describe("the timer store", () => {
     const rung = sounds.length;
     run(MINUTE - 1000);
     expect(sounds).toHaveLength(rung);
+    expect(store.snapshot().notice).toBeNull();
     run(1000);
     expect(sounds).toHaveLength(rung + 1);
     expect(sounds.at(-1)).toBe("alarm");
     expect(shown().phase).toBe("alarming");
+    expect(store.snapshot().notice).toBe(
+      "Time’s up for the 8-10 minutes, step 3 of Synthetic Test Noodles.",
+    );
   });
 
   it("refuses a duplicate start, leaving the timer as it was and saying so", () => {
@@ -171,6 +184,13 @@ describe("the timer store", () => {
     expect(store.snapshot().timers).toHaveLength(1);
     expect(shown().countdown).toBe("Check in 7:00");
     expect(store.snapshot().notice).toBe("The 8-10 minutes timer is already running.");
+  });
+
+  it("starts the same step of another recipe, as step ids repeat across recipes", () => {
+    store.start(fry);
+    store.start({ ...fry, recipeId: "01K7TEST000000000000000002" });
+    expect(store.snapshot().timers).toHaveLength(2);
+    expect(store.snapshot().notice).toBeNull();
   });
 
   it("refuses a duplicate of a paused or alarming timer, as it's still in the dock", () => {
@@ -189,6 +209,18 @@ describe("the timer store", () => {
     store.start(fry);
     expect(store.snapshot().notice).not.toBeNull();
     vi.advanceTimersByTime(3000);
+    expect(store.snapshot().notice).toBeNull();
+  });
+
+  it("gives a later notice its full time", () => {
+    store.start(fry);
+    store.start(rest);
+    store.start(fry);
+    vi.advanceTimersByTime(2000);
+    store.start(rest);
+    vi.advanceTimersByTime(2999);
+    expect(store.snapshot().notice).not.toBeNull();
+    vi.advanceTimersByTime(1);
     expect(store.snapshot().notice).toBeNull();
   });
 
