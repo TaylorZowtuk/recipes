@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { Link } from "react-router";
 import { CloseIcon, PauseIcon, PlayIcon } from "./icons";
 import { focusTitle } from "./Screen";
@@ -38,11 +38,38 @@ export function TimerDock() {
   );
 }
 
+// Scrolls the list alone: the dock is fixed, so the page has no part in showing a row. WebKit
+// truncates scrollTop, so a scroll down rounds up to clear the row's last fraction of a pixel.
+function reveal(row: HTMLElement | null) {
+  const list = row?.parentElement;
+  if (!row || !list) return;
+  const { top, bottom } = row.getBoundingClientRect();
+  const shown = list.getBoundingClientRect();
+  list.scrollTop +=
+    top < shown.top ? top - shown.top : Math.max(0, Math.ceil(bottom - shown.bottom));
+}
+
 function TimerRow({ timer }: { timer: TimerView }) {
   const { id, recipeId, recipeTitle, stepId, stepNumber, written, phase, paused } = timer;
   const named = `${written}, step ${stepNumber} of ${recipeTitle}`;
+  const alarming = phase === "alarming";
+  const row = useRef<HTMLLIElement>(null);
+  const addMinute = useRef<HTMLButtonElement>(null);
+  const pauseFocused = useRef(false);
+
+  useLayoutEffect(() => reveal(row.current), []);
+
+  // Pause goes when the alarm starts. React sees no blur from a removed control, so the flag still
+  // holds, and focus goes on to +1 minute in place of dropping to the page.
+  useLayoutEffect(() => {
+    if (!alarming) return;
+    reveal(row.current);
+    if (pauseFocused.current) addMinute.current?.focus();
+    pauseFocused.current = false;
+  }, [alarming]);
+
   return (
-    <li className={`timer-row${PHASE_CLASS[phase]}`}>
+    <li ref={row} className={`timer-row${PHASE_CLASS[phase]}`}>
       <Link
         className="timer-jump"
         to={{ pathname: recipePath({ id: recipeId, title: recipeTitle }), hash: `step-${stepId}` }}
@@ -59,17 +86,24 @@ function TimerRow({ timer }: { timer: TimerView }) {
           {timer.countdown}
         </span>
       </Link>
-      {phase !== "alarming" && (
+      {!alarming && (
         <button
           type="button"
           className="icon-button"
           aria-label={`${paused ? "Resume" : "Pause"} ${named}`}
           onClick={() => (paused ? timers.resume(id) : timers.pause(id))}
+          onFocus={() => {
+            pauseFocused.current = true;
+          }}
+          onBlur={() => {
+            pauseFocused.current = false;
+          }}
         >
           {paused ? <PlayIcon /> : <PauseIcon />}
         </button>
       )}
       <button
+        ref={addMinute}
         type="button"
         className="icon-button timer-add"
         aria-label={`+1 minute on ${named}`}

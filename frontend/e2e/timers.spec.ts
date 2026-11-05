@@ -27,6 +27,21 @@ async function startRange(page: Page) {
   await expect(row(page)).toContainText("Step 3 · 8-10 minutes");
 }
 
+// The seed's two durations in one step, in a list too short to show both rows.
+async function startInShortList(page: Page) {
+  await page.clock.install();
+  await page.goto("/recipes/01K7SEED000000000000000001/lemon-herb-roast-chicken");
+  await page.getByRole("tab", { name: "Steps" }).click();
+  await page.addStyleTag({ content: ".timer-list { max-height: 100px; }" });
+  await page.getByRole("button", { name: "Start a timer for 70-80 minutes" }).click();
+  await expect(row(page)).toHaveCount(1);
+}
+
+const list = (page: Page) => dock(page).getByRole("list");
+const scrollListTo = (page: Page, top: number) =>
+  list(page).evaluate((element, to) => element.scrollTo(0, to), top);
+const pageScroll = (page: Page) => page.evaluate(() => window.scrollY);
+
 test.beforeEach(({ browserName: _ }, testInfo) => {
   test.skip(!PROJECTS.includes(testInfo.project.name), "the two projects cover it");
 });
@@ -100,6 +115,89 @@ test("two durations in one step run as separate timers, each with its own contro
     .click();
   await expect(row(page)).toHaveCount(1);
   await expect(row(page)).toContainText("Step 4 · 10 minutes");
+});
+
+test("focus moves from Pause to +1 minute when the alarm takes Pause away", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/recipes/01K7SEED000000000000000007/garlic-butter-green-beans");
+  await page.getByRole("tab", { name: "Steps" }).click();
+  await page.getByRole("button", { name: "Start a timer for 1 minute" }).click();
+  await dock(page)
+    .getByRole("button", { name: /^Pause/ })
+    .focus();
+
+  await page.clock.fastForward("01:00");
+  await expect(row(page)).toHaveClass(/timer-alarming/);
+  await expect(dock(page).getByRole("button", { name: /^\+1 minute on/ })).toBeFocused();
+});
+
+test("the alarm leaves focus alone when Pause didn't have it", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/recipes/01K7SEED000000000000000007/garlic-butter-green-beans");
+  await page.getByRole("tab", { name: "Steps" }).click();
+  await page.getByRole("button", { name: "Start a timer for 1 minute" }).click();
+  const pause = dock(page).getByRole("button", { name: /^Pause/ });
+  const cancel = dock(page).getByRole("button", { name: /^Cancel/ });
+  await pause.focus();
+  await cancel.focus();
+
+  await page.clock.fastForward("01:00");
+  await expect(row(page)).toHaveClass(/timer-alarming/);
+  await expect(cancel).toBeFocused();
+
+  // A Pause that went with focus leaves nothing behind for the next alarm.
+  const addMinute = dock(page).getByRole("button", { name: /^\+1 minute on/ });
+  await addMinute.click();
+  await pause.focus();
+  await page.clock.fastForward("01:00");
+  await expect(addMinute).toBeFocused();
+  await addMinute.click();
+  await cancel.focus();
+  await page.clock.fastForward("01:00");
+  await expect(row(page)).toHaveClass(/timer-alarming/);
+  await expect(cancel).toBeFocused();
+});
+
+test("a new timer scrolls into view inside the list, not the page", async ({ page }) => {
+  await startInShortList(page);
+  const before = await pageScroll(page);
+  await page.getByRole("button", { name: "Start a timer for 10 minutes" }).dispatchEvent("click");
+  await expect(row(page)).toHaveCount(2);
+  await expect(row(page).nth(1)).toBeInViewport({ ratio: 1 });
+  expect(await pageScroll(page)).toBe(before);
+});
+
+test("an alarming row scrolls into view inside the list, in its place", async ({ page }) => {
+  await startInShortList(page);
+  await page.getByRole("button", { name: "Start a timer for 10 minutes" }).dispatchEvent("click");
+  await expect(row(page)).toHaveCount(2);
+  const before = await pageScroll(page);
+
+  await scrollListTo(page, 0);
+  await page.clock.fastForward("10:00");
+  await expect(row(page).nth(1)).toHaveClass(/timer-alarming/);
+  await expect(row(page).nth(1)).toContainText("10 minutes");
+  await expect(row(page).nth(1)).toBeInViewport({ ratio: 1 });
+
+  // The first row's alarm scrolls the other way. A chime is no reason to scroll.
+  await scrollListTo(page, 1000);
+  await page.clock.fastForward("01:00:00");
+  await expect(row(page).nth(0)).toHaveClass(/timer-chimed/);
+  await expect(row(page).nth(1)).toBeInViewport({ ratio: 1 });
+  await page.clock.fastForward("10:00");
+  await expect(row(page).nth(0)).toHaveClass(/timer-alarming/);
+  await expect(row(page).nth(0)).toBeInViewport({ ratio: 1 });
+  expect(await pageScroll(page)).toBe(before);
+});
+
+test("the status region stays in the accessibility tree while empty, taking no room", async ({
+  page,
+}) => {
+  await startRange(page);
+  const status = dock(page).getByRole("status");
+  await expect(status).toHaveCount(1);
+  await expect(status).toBeEmpty();
+  expect(await status.evaluate((element) => element.getBoundingClientRect().height)).toBe(0);
 });
 
 test("the dock leaves the foot of the page clear", async ({ page }) => {

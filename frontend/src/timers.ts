@@ -121,9 +121,10 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
     for (const listener of listeners) listener();
   }
 
+  // What arrives while a notice shows joins it, so neither is lost, and a repeat adds nothing.
   function say(text: string) {
     clearTimeout(noticeGone);
-    notice = text;
+    if (!notice?.includes(text)) notice = notice ? `${notice} ${text}` : text;
     noticeGone = setTimeout(() => {
       notice = null;
       publish();

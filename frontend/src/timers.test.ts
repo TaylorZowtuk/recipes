@@ -231,6 +231,27 @@ describe("the timer store", () => {
     );
   });
 
+  it("says both when two timers come due on one tick, for as long as one", () => {
+    store.start(rest);
+    store.start({ ...rest, position: 5, written: "ten minutes" });
+    run(10 * MINUTE);
+    expect(store.snapshot().notice).toBe(
+      "Time’s up for the 10 minutes, step 3 of Synthetic Test Noodles. " +
+        "Time’s up for the ten minutes, step 3 of Synthetic Test Noodles.",
+    );
+    store.cancel(shown().id);
+    store.cancel(shown().id);
+    vi.advanceTimersByTime(3000);
+    expect(store.snapshot().notice).toBeNull();
+  });
+
+  it("says a repeat once", () => {
+    store.start(fry);
+    store.start(fry);
+    store.start(fry);
+    expect(store.snapshot().notice).toBe("The 8-10 minutes timer is already running.");
+  });
+
   it("keeps its snapshot until what it shows changes", () => {
     const listener = vi.fn();
     store.subscribe(listener);

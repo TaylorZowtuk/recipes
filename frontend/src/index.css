@@ -2101,8 +2101,9 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   font-size: var(--text-small);
 }
 
+/* Empty, it takes no room but stays in the accessibility tree, so screen readers announce it. */
 .timer-notice:empty {
-  display: none;
+  padding-block: 0;
 }
 
 /* Many timers scroll inside the dock, so the screen keeps its room. */
