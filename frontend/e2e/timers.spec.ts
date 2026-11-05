@@ -301,3 +301,19 @@ test("a jump to a step that's gone focuses the title", async ({ page }) => {
   });
   await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeFocused();
 });
+
+test("Forward to a jump shows the step again, whichever tab is open", async ({ page }) => {
+  await startRange(page);
+  await page.getByRole("tab", { name: "About" }).click();
+  await jump(page).click();
+  await expect(page.locator("#step-s3")).toBeFocused();
+
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`${NOODLES_PATH}$`));
+  await page.getByRole("tab", { name: "Ingredients" }).click();
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`${NOODLES_PATH}#step-s3$`));
+  await expect(page.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#step-s3")).toBeFocused();
+  await expect(page.locator("#step-s3")).toBeInViewport();
+});

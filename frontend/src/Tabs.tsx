@@ -17,9 +17,9 @@ export function Tabs({
 }) {
   const [selected, setSelected] = useState(reveal?.tab ?? 0);
   const [revealed, setRevealed] = useState(reveal?.key);
-  if (reveal && reveal.key !== revealed) {
-    setRevealed(reveal.key);
-    setSelected(reveal.tab);
+  if (reveal?.key !== revealed) {
+    setRevealed(reveal?.key);
+    if (reveal) setSelected(reveal.tab);
   }
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
   const id = useId();
