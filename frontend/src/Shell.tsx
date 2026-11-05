@@ -5,7 +5,7 @@ import { useCollection, useSync } from "./collection";
 import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
 import { needsReview } from "./needsReview";
 import { useOnline } from "./online";
-import { focusTitle } from "./Screen";
+import { focusTitle, hashTookFocus } from "./Screen";
 import { EditorOnly } from "./session";
 import { syncStatus } from "./syncStatus";
 import { TimerDock } from "./TimerDock";
@@ -30,11 +30,11 @@ export function Shell() {
   // After each navigation, focus moves to the new screen's title, without scrolling the window, so
   // screen readers announce it. The first screen opened, and a navigation that replaces the screen
   // (the redirect from / or a tap on the current place), leave focus where it was, as does one to
-  // a step, which the recipe focuses itself.
+  // a step that took focus, which the recipe's effect has done by now.
   useEffect(() => {
     if (shownKey.current === key) return;
     shownKey.current = key;
-    if (navigationType === "REPLACE" || hash) return;
+    if (navigationType === "REPLACE" || hashTookFocus(hash)) return;
     focusTitle();
   }, [key, hash, navigationType]);
 

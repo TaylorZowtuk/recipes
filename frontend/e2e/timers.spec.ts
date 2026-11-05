@@ -281,3 +281,23 @@ test("a step's address keeps its hash through a stale slug", async ({ page }) =>
   await expect(page.getByRole("tab", { name: "Steps" })).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#step-s3")).toBeFocused();
 });
+
+test("a step's address opened cold ends with focus on the step", async ({ page }) => {
+  await page.goto(`${NOODLES_PATH}#step-s3`);
+  await expect(page.locator("#step-s3")).toBeFocused();
+});
+
+// Setting the hash goes through the router as a navigation, which a timer can do after its step
+// has gone. An opened-from-the-list recipe, so the first address isn't the one being returned to.
+test("a jump to a step that's gone focuses the title", async ({ page }) => {
+  await page.goto("/recipes");
+  await page.getByRole("link", { name: NOODLES }).click();
+  const steps = page.getByRole("tab", { name: "Steps" });
+  await steps.click();
+  await expect(steps).toBeFocused();
+
+  await page.evaluate(() => {
+    window.location.hash = "#step-gone";
+  });
+  await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeFocused();
+});
