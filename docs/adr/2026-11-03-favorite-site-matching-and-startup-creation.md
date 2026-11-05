@@ -28,3 +28,7 @@ A Favorite Site's host is the host of its address's dedupe key, normalised as a 
 - A bundle built by older code can stay cached at the current version if the old API serves it after the bump. `make smoke` fails on a bundle without the field, and any Collection write heals it by moving to a new version.
 
 A new stack gets the empty item in the transaction that creates it.
+
+## A field added to a stored card takes a default
+
+A card is read back through its model, so a required field added later fails every bundle rebuild on the cards stored before it. A cached bundle hides that until the counter moves: `NeedsReview.flagged` passed staging's deploy, then every bundle read there was a 500 once the counter moved. A new field on a stored card therefore takes a default, and the card gains the real value on its next write.

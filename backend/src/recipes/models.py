@@ -545,7 +545,9 @@ def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
 class NeedsReview(Model):
     open_issues: int
     unconfirmed: int  # Review Items left to check: a fact not yet Confirmed, or an open issue
-    flagged: int  # the Review Items left to check that carry an open Enrichment Issue
+    # The Review Items left to check that carry an open Enrichment Issue. Cards stored before this
+    # count have none, and gain it on their next write.
+    flagged: int = 0
 
 
 def needs_review(recipe: Recipe) -> NeedsReview:

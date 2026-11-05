@@ -157,3 +157,9 @@ def test_a_stored_card_without_a_host_still_loads() -> None:
     stored = card_for(RECIPES[0]).model_dump(mode="json", exclude={"host"})
 
     assert Card.model_validate(stored).host is None
+
+
+def test_a_stored_card_without_a_flagged_count_still_loads() -> None:
+    stored = card_for(RECIPES[0]).model_dump(mode="json", exclude={"needs_review": {"flagged"}})
+
+    assert Card.model_validate(stored).needs_review.flagged == 0
