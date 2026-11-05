@@ -249,11 +249,9 @@ class Auth:
         """The deployed stack's: settings from SSM under SSM_PREFIX, checked with Google."""
         return cls(settings=ssm_settings(os.environ["SSM_PREFIX"]), verifier=GoogleVerifier())
 
-    def editor(
-        self, cookie: str | None, service_token: str | None, response: Response
-    ) -> Editor | None:
-        """The editor the request's cookie or service token names, or None for a visitor. A session
-        more than a day old is re-issued on `response`, so it lasts a year after last use.
+    def editor(self, cookie: str | None, service_token: str | None) -> Editor | None:
+        """The editor the request's cookie or service token names, or None for a visitor. Never
+        sets a cookie, so a request answered after a sign-out can't undo it: see `renew`.
         """
         if not cookie and not service_token:
             return None  # a visitor, without reading the settings
@@ -265,10 +263,22 @@ class Auth:
         session = self._read_session(cookie, settings)
         if session is None:
             return None
+        email, _ = session
+        return Editor(name=email, email=email)
+
+    def renew(self, cookie: str | None, response: Response) -> None:
+        """Re-issue a valid session more than a day old on `response`, so it lasts a year after
+        last use. Only reading the session does this, which sign-out waits for.
+        """
+        if not cookie:
+            return
+        settings = self.settings()
+        session = self._read_session(cookie, settings)
+        if session is None:
+            return
         email, issued_at = session
         if self.clock() - issued_at > REISSUE_AFTER:
             self._set_session(response, email, settings)
-        return Editor(name=email, email=email)
 
     def sign_in(self, credential: str, response: Response) -> Editor:
         settings = self.settings()
@@ -363,15 +373,16 @@ def _auth(request: Request) -> Auth:
 AuthDep = Annotated[Auth, Depends(_auth)]
 
 
-def current_editor(request: Request, response: Response, auth: AuthDep) -> Editor | None:
+def current_editor(request: Request, auth: AuthDep) -> Editor | None:
     return auth.editor(
-        request.cookies.get(SESSION_COOKIE), request.headers.get(SERVICE_TOKEN_HEADER), response
+        request.cookies.get(SESSION_COOKIE), request.headers.get(SERVICE_TOKEN_HEADER)
     )
 
 
 CurrentEditor = Annotated[Editor | None, Depends(current_editor)]
 """The editor making the request, or None for a visitor. The answer depends on the request's
-cookie and may re-issue it, so a route using it must not set a cacheable Cache-Control."""
+cookie, so a route using it must not set a cacheable Cache-Control. It never re-issues the
+cookie."""
 
 
 def require_editor(editor: CurrentEditor) -> Editor:
@@ -388,7 +399,10 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/session")
-def get_session(editor: CurrentEditor, auth: AuthDep) -> Session:
+def get_session(
+    request: Request, response: Response, editor: CurrentEditor, auth: AuthDep
+) -> Session:
+    auth.renew(request.cookies.get(SESSION_COOKIE), response)
     return Session(
         editor=editor is not None,
         email=None if editor is None else editor.email,

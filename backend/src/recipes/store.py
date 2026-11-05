@@ -1,8 +1,9 @@
 """The single DynamoDB table: recipes, their cards, Source guards, Queued Ingests, Canonical
-Ingredients, the Wording Cache, Kitchen settings and meta items.
+Ingredients, the Wording Cache, Kitchen settings, Week Plans and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
 in the same transaction, and versioned items are written only if their version hasn't changed.
+Week Plans are private to the household, so they aren't shared collection data.
 """
 
 import json
@@ -27,16 +28,21 @@ from recipes.models import (
     SchemaMeta,
     SourceGuard,
     StoreCategory,
+    WeekPlan,
     Wording,
     card_for,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from pydantic import BaseModel
     from types_boto3_dynamodb import DynamoDBClient
-    from types_boto3_dynamodb.type_defs import QueryInputTypeDef, TransactWriteItemTypeDef
+    from types_boto3_dynamodb.type_defs import (
+        KeysAndAttributesUnionTypeDef,
+        QueryInputTypeDef,
+        TransactWriteItemTypeDef,
+    )
 
 # An item in DynamoDB's attribute-value form, e.g. {"PK": {"S": "CARD"}}.
 type Item = dict[str, Any]
@@ -106,6 +112,10 @@ def canonical_key(canonical_id: str) -> Item:
 
 def wording_key(wording: str) -> Item:
     return {"PK": {"S": "WORDING"}, "SK": {"S": wording}}
+
+
+def week_key(monday: str) -> Item:
+    return {"PK": {"S": f"WEEK#{monday}"}, "SK": {"S": "WEEK"}}
 
 
 _serializer = TypeSerializer()
@@ -437,6 +447,86 @@ class Store:
     def save_kitchen_settings(self, settings: KitchenSettings) -> KitchenSettings:
         """Write the settings if the stored ones are still at `settings.version`."""
         return self._save_versioned(settings, KITCHEN_KEY, shared=True)
+
+    # Week Plans
+
+    def week_plan(self, monday: str) -> WeekPlan:
+        """The week's plan, or an empty one at version 0 if nothing has been placed in it."""
+        item = self._get(week_key(monday), consistent=True)
+        if item is not None:
+            return _from_item(WeekPlan, item)
+        return WeekPlan(
+            schema_version=SCHEMA_VERSION, week_start=monday, days=[[] for _ in range(7)], version=0
+        )
+
+    def week_versions(self, mondays: Sequence[str]) -> dict[str, int]:
+        """Each week's plan version, 0 for a week with no item, in one read of them all."""
+        versions = dict.fromkeys(mondays, 0)
+        if not versions:
+            return versions
+        wanted: dict[str, KeysAndAttributesUnionTypeDef] = {
+            self.table: {
+                "Keys": [week_key(monday) for monday in versions],
+                "ProjectionExpression": "PK, #version",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ConsistentRead": True,
+            }
+        }
+        for attempt in range(ATTEMPTS):
+            response = self.client.batch_get_item(RequestItems=wanted)
+            for item in response.get("Responses", {}).get(self.table, []):
+                monday = str(_deserializer.deserialize(item["PK"])).removeprefix("WEEK#")
+                versions[monday] = int(_deserializer.deserialize(item["version"]))
+            wanted = dict(response.get("UnprocessedKeys", {}))
+            if not wanted:
+                return versions
+            self.sleep(_backoff(attempt))
+        msg = "DynamoDB kept leaving weeks unprocessed"
+        raise RuntimeError(msg)
+
+    def save_week_plan(self, plan: WeekPlan) -> WeekPlan:
+        """Write the plan's days at its next version if the stored plan is still at `plan.version`,
+        creating the item from version 0. Only the days and the version are written, because
+        grocery ticks and Extras change on the same item without moving its version.
+
+        Raises VersionConflict otherwise.
+        """
+        saved = plan.model_copy(update={"version": plan.version + 1})
+        key = week_key(plan.week_start)
+        item = _to_item(saved, key)
+        write: TransactWriteItemTypeDef
+        if plan.version == 0:
+            # No grocery_ticks yet: DynamoDB has no empty set, and the first tick's ADD makes one.
+            created = {name: value for name, value in item.items() if name != "grocery_ticks"}
+            write = {
+                "Put": {
+                    "TableName": self.table,
+                    "Item": created,
+                    "ConditionExpression": "attribute_not_exists(PK)",
+                }
+            }
+        else:
+            write = {
+                "Update": {
+                    "TableName": self.table,
+                    "Key": key,
+                    "UpdateExpression": "SET #days = :days, #version = :version",
+                    "ConditionExpression": "#version = :expected",
+                    "ExpressionAttributeNames": {"#days": "days", "#version": "version"},
+                    "ExpressionAttributeValues": {
+                        ":days": item["days"],
+                        ":version": item["version"],
+                        ":expected": {"N": str(plan.version)},
+                    },
+                }
+            }
+        try:
+            self._transact([write])
+        except _Cancelled as cancelled:
+            if cancelled.failed(write):
+                raise VersionConflict(key["PK"]["S"]) from None
+            raise
+        return saved
 
     # Building blocks
 

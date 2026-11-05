@@ -144,7 +144,7 @@ export function createSessionStore({
 
     /** False when the API couldn't be reached: its cookie is HttpOnly, so this stays signed in. */
     async signOut(): Promise<boolean> {
-      // A GET answered after the DELETE would set the cookie again (it re-issues an old one).
+      // That load answered after the DELETE would set the cookie again: only it re-issues an old one.
       // Waits at most 30 s for it, so a request that never settles can't keep someone signed in.
       await Promise.race([
         inFlight?.catch(() => {}),

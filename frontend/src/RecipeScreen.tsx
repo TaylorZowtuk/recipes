@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { formatAmount } from "./amount";
 import type { Collection, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
+import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { ClockIcon } from "./icons";
@@ -114,7 +115,10 @@ function RecipePage() {
                       <TagList tags={card.tags} />
                       {ready && (
                         <EditorOnly>
-                          <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
+                          <div className="hero-actions">
+                            <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
+                            <AddToDayButton recipe={card} />
+                          </div>
                         </EditorOnly>
                       )}
                     </>

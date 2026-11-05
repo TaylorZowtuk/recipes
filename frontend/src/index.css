@@ -550,20 +550,43 @@ h1:focus {
   object-fit: cover;
 }
 
+/* The card's surface, holding its link and, for an editor, the week button beneath it. */
 .card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
   height: 100%;
-  padding: calc(var(--space) * 4) calc(var(--space) * 3);
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--elevation-card);
+  transition: transform var(--motion) var(--spring);
+}
+
+.card-link {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  padding: calc(var(--space) * 4) calc(var(--space) * 3);
+  border-radius: var(--radius-card);
   color: var(--text);
   text-align: center;
   text-decoration: none;
-  transition: transform var(--motion) var(--spring);
+}
+
+/* A long run of days wraps inside the card rather than widening it. */
+.card-week {
+  justify-content: center;
+  max-width: calc(100% - var(--space) * 6);
+  margin-bottom: calc(var(--space) * 3);
+  white-space: normal;
+}
+
+.card-week-planned {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 @media (hover: hover) {
@@ -1479,6 +1502,7 @@ h1:focus {
 
 /* The Filters sheet: a sheet up from the bottom on phones, a centred card on desktop. */
 .sheet {
+  text-align: left;
   inset: auto 0 0;
   width: 100%;
   max-width: 100%;
@@ -1921,4 +1945,269 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
     bottom: calc(var(--space) * 26);
   }
+}
+
+/* The recipe page's Edit and Add to a day, side by side under the hero's Tags. */
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: calc(var(--space) * 2);
+  margin-top: calc(var(--space) * 4);
+}
+
+.hero-actions .edit-open {
+  margin-top: 0;
+}
+
+/* Week Plan */
+
+.week-plan {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-bottom: calc(var(--space) * 6);
+}
+
+/* The week's label between ‹ and ›, on the Week tab and in the day sheet. */
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  margin-bottom: calc(var(--space) * 2);
+}
+
+.week-label {
+  flex: 1;
+  margin: 0;
+  text-align: center;
+}
+
+.week-label strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-weight: 600;
+}
+
+.week-label span {
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.week-day {
+  margin-bottom: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 4);
+  border-radius: var(--radius-button);
+  background: var(--surface);
+  box-shadow: var(--elevation-card);
+}
+
+.week-day-today {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* A past day recedes into the page, by colour rather than opacity, so its text stays readable. */
+.week-day-past {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--divider);
+  color: var(--text-secondary);
+}
+
+.week-day-past .week-entry-title {
+  color: var(--text-secondary);
+}
+
+.week-day-head {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+}
+
+.week-day-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-body);
+  font-weight: 600;
+}
+
+.week-today {
+  color: var(--accent-soft-text);
+  font-family: var(--font-body);
+  font-size: var(--text-tiny);
+  font-weight: 700;
+}
+
+.week-free {
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.week-add {
+  margin-left: auto;
+  padding: 0 var(--space);
+}
+
+.week-entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.week-entries li {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+  padding: var(--space) 0;
+  border-top: 1px solid var(--divider);
+}
+
+.week-entry-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.week-scale {
+  flex: none;
+  min-width: var(--tap);
+  padding: 0 calc(var(--space) * 2);
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Today's card is the chip's own colour, so the chip takes the surface's. */
+.week-day-today .week-scale {
+  background: var(--surface);
+}
+
+.week-remove {
+  margin-right: calc(var(--space) * -3);
+  font-size: 22px;
+}
+
+/* Off while offline or paused, as every edit that isn't queued is. Waiting on a write dims less, and
+   only after a moment, so a quick save doesn't flash the whole week. */
+.week-scale:disabled,
+.week-remove:disabled,
+.day-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.week-add[aria-disabled="true"],
+.week-scale[aria-disabled="true"],
+.week-remove[aria-disabled="true"],
+.day-option[aria-disabled="true"] {
+  opacity: 0.7;
+  cursor: progress;
+  transition: opacity var(--motion) 150ms;
+}
+
+.sheet-eyebrow {
+  display: block;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+/* The day sheet's rows: the day, what's on it, and what a tap does. */
+.day-options {
+  display: grid;
+  gap: var(--space);
+  margin: calc(var(--space) * 2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.day-option {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space) calc(var(--space) * 3);
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--divider);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.day-option-on {
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent-soft-text);
+}
+
+.day-option-past:not(.day-option-on) {
+  color: var(--text-secondary);
+}
+
+.day-option-day {
+  flex: none;
+  width: 3.5em;
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.day-option-entries {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-small);
+}
+
+.day-option-action {
+  flex: none;
+  color: var(--accent-text);
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.day-option-on .day-option-action {
+  color: inherit;
+}
+
+@media (hover: hover) {
+  .day-option:hover,
+  .picker-row:hover {
+    background: var(--accent-soft);
+  }
+}
+
+.picker-search {
+  margin-bottom: calc(var(--space) * 2);
+  box-shadow: inset 0 0 0 1px var(--field-border);
+}
+
+.picker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space);
+  border: none;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-row .plate {
+  width: 40px;
 }

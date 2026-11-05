@@ -4,12 +4,8 @@ import { CollectionScreen } from "./CollectionScreen";
 import { RecipeScreen } from "./RecipeScreen";
 import { Shell } from "./Shell";
 import { SignInScreen } from "./SignInScreen";
-import {
-  FavoriteSitesScreen,
-  FridgeScreen,
-  KitchenSettingsScreen,
-  WeekPlanScreen,
-} from "./screens";
+import { FavoriteSitesScreen, FridgeScreen, KitchenSettingsScreen } from "./screens";
+import { WeekPlanScreen } from "./WeekPlanScreen";
 
 export function App() {
   return (

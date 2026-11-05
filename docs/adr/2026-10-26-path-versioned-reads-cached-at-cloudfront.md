@@ -1,5 +1,7 @@
 # Versioned reads put every part of their key in the path, under `/api/v/`, and CloudFront caches them there
 
+Superseded in part by [The session cookie is re-issued only when reading the session](2026-11-04-session-cookie-reissued-only-when-reading-the-session.md): a route that checks for an editor no longer re-issues the cookie. The rule that no route under `/api/v/` checks for an editor stands, because no cookie reaches one.
+
 Versioned reads live under one prefix, with every part of the cache key in the path: `GET /api/v/collection/<collection_version>` and `GET /api/v/recipes/<recipe_id>/<recipe_version>/<schema_version>`. One CloudFront behaviour, `/api/v/*`, caches them on the managed **`CachingOptimized`** policy. This replaces the `/api/collection?v=<n>` URL in the [offline cache and sync ADR](2026-10-01-offline-cache-and-sync.md), and the recipe reads' `v` and `s` query parameters; the rest of that decision stands.
 
 ## Why not a query string

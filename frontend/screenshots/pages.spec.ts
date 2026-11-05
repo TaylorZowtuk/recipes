@@ -7,7 +7,8 @@ import { expect, test } from "@playwright/test";
 // that path on the local API's fake web in Add a recipe, made unique to the project. `click` presses
 // the button with that name last, such as Edit, without saving anything, and `shows` is text that
 // shows once it has. `stubConfirm` answers a review confirm as if it made the recipe Ready, writing
-// nothing, since every project shares the seeded recipe.
+// nothing, since every project shares the seeded recipe. `stubWeek` answers every week with a
+// fixed plan and stops the clock on a Wednesday, since every project shares the weeks too.
 type Shot = {
   name: string;
   path: string;
@@ -20,8 +21,34 @@ type Shot = {
   click?: string | RegExp;
   shows?: string;
   stubConfirm?: boolean;
+  stubWeek?: boolean;
 };
 const REVIEW_RECIPE = "/recipes/01K7SEED000000000000000007/garlic-butter-green-beans";
+const planned = (entry: string, recipe_id: string, recipe_title: string, factor = 1) => ({
+  entry_id: `01K7SHOT0000000000000000${entry}`,
+  recipe_id,
+  recipe_title,
+  amount: { kind: "scale", factor },
+});
+const NOODLES = "Sesame Noodles with Crispy Tofu";
+const WEEK_PLAN = {
+  schema_version: 1,
+  week_start: "2026-11-02",
+  grocery_ticks: [],
+  version: 3,
+  days: [
+    [planned("E1", "01K7SEED000000000000000002", NOODLES)],
+    [],
+    [
+      planned("E2", "01K7SEED000000000000000002", NOODLES, 1.5),
+      planned("E3", "01K7SEED000000000000000007", "Garlic Butter Green Beans", 0.5),
+    ],
+    [],
+    [planned("E4", "01K7SEED000000000000000002", NOODLES, 2)],
+    [planned("E5", "01K7GONE000000000000000000", "A Recipe No Longer in the Collection")],
+    [],
+  ],
+};
 const pages: Shot[] = [
   {
     name: "recipes",
@@ -37,6 +64,68 @@ const pages: Shot[] = [
     click: "Filters",
   },
   { name: "week", path: "/week", ready: "Week Plan" },
+  {
+    name: "week-editor",
+    path: "/week",
+    ready: "Week Plan",
+    loaded: "Garlic Butter Green Beans",
+    editor: true,
+    stubWeek: true,
+  },
+  {
+    name: "week-empty-editor",
+    path: "/week",
+    ready: "Week Plan",
+    loaded: "This week",
+    editor: true,
+    click: "Next week",
+    shows: "Next week",
+  },
+  {
+    name: "week-picker",
+    path: "/week",
+    ready: "Week Plan",
+    loaded: "Garlic Butter Green Beans",
+    editor: true,
+    stubWeek: true,
+    click: /^\+ Add to Thu/,
+    shows: "Overnight Oats",
+  },
+  {
+    name: "week-scale",
+    path: "/week",
+    ready: "Week Plan",
+    loaded: "Garlic Butter Green Beans",
+    editor: true,
+    stubWeek: true,
+    click: /^Scale Garlic Butter Green Beans/,
+    shows: "½×",
+  },
+  {
+    name: "recipes-editor",
+    path: "/recipes",
+    ready: "Collection",
+    loaded: "✓ Mon, Wed, Fri",
+    editor: true,
+    stubWeek: true,
+  },
+  {
+    name: "recipes-day-sheet",
+    path: "/recipes",
+    ready: "Collection",
+    loaded: "✓ Mon, Wed, Fri",
+    editor: true,
+    stubWeek: true,
+    click: new RegExp(`^✓ Mon, Wed, Fri: ${NOODLES}`),
+    shows: "✓ Remove",
+  },
+  {
+    name: "recipe-editor",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: NOODLES,
+    loaded: "For the sauce",
+    editor: true,
+  },
   { name: "fridge", path: "/fridge", ready: "Fridge" },
   { name: "sites", path: "/sites", ready: "Favorite Sites" },
   { name: "sign-in", path: "/sign-in", ready: "Editor sign-in" },
@@ -161,6 +250,10 @@ for (const shot of pages) {
         });
       });
     }
+    if (shot.stubWeek) {
+      await page.clock.setFixedTime(new Date(2026, 10, 4, 12));
+      await page.route("**/api/weeks/*", (route) => route.fulfill({ json: WEEK_PLAN }));
+    }
     if (editor) {
       const signedIn = await page.request.post("/api/session", {
         data: { credential: "fake:editor@example.com" },
@@ -237,7 +330,11 @@ for (const shot of pages) {
       }
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     }
-    // Photos load after the data that names them.
+    // Photos load after the data that names them. A full-page shot shows those below the fold too,
+    // which WebKit otherwise leaves unloaded.
+    await page.evaluate(() => {
+      for (const image of document.images) image.loading = "eager";
+    });
     await page.waitForFunction(() => Array.from(document.images).every((image) => image.complete));
     expect(errors, "uncaught errors").toEqual([]);
     await page.screenshot({
