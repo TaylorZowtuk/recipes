@@ -1,6 +1,7 @@
 export type Sound = "chime" | "alarm";
 
 let audio: AudioContext | undefined;
+let waiting: Sound | undefined;
 
 /** Wakes the audio. Call it in a tap: iOS keeps an AudioContext silent until one starts it. */
 export function unlockSound() {
@@ -19,14 +20,28 @@ function tone(context: AudioContext, type: OscillatorType, hertz: number, at: nu
 }
 
 // A chime is two soft rising notes; an alarm is three hard beeps, which the timer store repeats.
-export function ring(sound: Sound) {
-  if (!audio) return;
-  void audio.resume();
-  const now = audio.currentTime;
+function play(context: AudioContext, sound: Sound) {
+  const now = context.currentTime;
   if (sound === "chime") {
-    tone(audio, "sine", 660, now, 0.5);
-    tone(audio, "sine", 880, now + 0.25, 0.8);
+    tone(context, "sine", 660, now, 0.5);
+    tone(context, "sine", 880, now + 0.25, 0.8);
   } else {
-    for (const beep of [0, 0.3, 0.6]) tone(audio, "square", 880, now + beep, 0.2);
+    for (const beep of [0, 0.3, 0.6]) tone(context, "square", 880, now + beep, 0.2);
   }
+}
+
+// Time stands still in audio that isn't running, so a ring waits for it to wake. Only the latest
+// waits: repeats of an alarm would otherwise all play at the same instant.
+export function ring(sound: Sound) {
+  const context = audio;
+  if (!context) return;
+  if (context.state === "running") {
+    play(context, sound);
+    return;
+  }
+  waiting = sound;
+  void context.resume().then(() => {
+    if (waiting) play(context, waiting);
+    waiting = undefined;
+  });
 }

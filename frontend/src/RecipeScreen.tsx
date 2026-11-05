@@ -30,7 +30,6 @@ import { type DurationPiece, stepText } from "./stepText";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
-import { unlockSound } from "./timerSound";
 import { type TimerStart, timers } from "./timers";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
@@ -519,17 +518,13 @@ export function Steps({
   ));
 }
 
-// The tap must wake the audio itself, as iOS won't let a later chime or alarm do it.
 function TimerButton({ start }: { start: TimerStart }) {
   return (
     <button
       type="button"
       className="step-timer"
       aria-label={`Start a timer for ${start.written}`}
-      onClick={() => {
-        unlockSound();
-        timers.start(start);
-      }}
+      onClick={() => timers.start(start)}
     >
       {start.written}
     </button>

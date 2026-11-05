@@ -72,6 +72,34 @@ test("a range timer chimes at the low end and alarms at the high end", async ({ 
   await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeFocused();
 });
 
+test("a chime sounds two notes and an alarm three beeps, through real audio nodes", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const Real = OscillatorNode;
+    const counted = window as unknown as { oscillators: number };
+    counted.oscillators = 0;
+    window.OscillatorNode = class extends Real {
+      constructor(...args: ConstructorParameters<typeof Real>) {
+        super(...args);
+        counted.oscillators += 1;
+      }
+    };
+  });
+  const oscillators = () =>
+    page.evaluate(() => (window as unknown as { oscillators: number }).oscillators);
+
+  await startRange(page);
+  expect(await oscillators()).toBe(0);
+  await page.clock.fastForward("08:00");
+  await expect(row(page)).toHaveClass(/timer-chimed/);
+  await expect.poll(oscillators).toBe(2);
+  await page.clock.fastForward("02:00");
+  await expect(row(page)).toHaveClass(/timer-alarming/);
+  // The alarm repeats on the running clock, so this first one may not be the last.
+  await expect.poll(oscillators).toBeGreaterThanOrEqual(5);
+});
+
 test("an editor starts a timer from the row after a Review Item", async ({ page }) => {
   const signedIn = await page.request.post("/api/session", {
     data: { credential: "fake:editor@example.com" },

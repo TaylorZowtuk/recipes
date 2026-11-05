@@ -18,6 +18,7 @@ const rest: TimerStart = { ...fry, position: 3, written: "10 minutes", lowS: 600
 describe("the timer store", () => {
   let clock: number;
   let sounds: string[];
+  let unlock: ReturnType<typeof vi.fn>;
   let store: ReturnType<typeof createTimerStore>;
 
   // The wall clock moves by `ms`, and the page's ticker gets one go at it, however long that was.
@@ -39,14 +40,36 @@ describe("the timer store", () => {
     vi.useFakeTimers();
     clock = 1_000_000;
     sounds = [];
-    store = createTimerStore(
-      () => clock,
-      (sound) => sounds.push(sound),
-    );
+    unlock = vi.fn();
+    store = createTimerStore(() => clock, { unlock, ring: (sound) => sounds.push(sound) });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("wakes the audio on every command, as each runs in a tap", () => {
+    const commands = [
+      () => store.start(fry),
+      () => store.start(fry),
+      () => store.pause(shown().id),
+      () => store.resume(shown().id),
+      () => store.addMinute(shown().id),
+      () => store.cancel(shown().id),
+    ];
+    commands.forEach((command, done) => {
+      expect(unlock).toHaveBeenCalledTimes(done);
+      command();
+    });
+    expect(unlock).toHaveBeenCalledTimes(commands.length);
+  });
+
+  it("leaves the audio alone when only the clock moves", () => {
+    store.start(rest);
+    unlock.mockClear();
+    run(11 * MINUTE);
+    expect(sounds).not.toEqual([]);
+    expect(unlock).not.toHaveBeenCalled();
   });
 
   it("runs several timers at once, two in one step apart", () => {

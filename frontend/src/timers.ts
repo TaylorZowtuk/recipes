@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { ring, type Sound } from "./timerSound";
+import { ring, type Sound, unlockSound } from "./timerSound";
 
 const TICK_MS = 250;
 const ALARM_EVERY_MS = 3_000;
@@ -104,8 +104,14 @@ function resumed(timer: Timer, now: number): Timer {
 const describeTimer = (timer: Timer) =>
   `${timer.written}, step ${timer.stepNumber} of ${timer.recipeTitle}`;
 
-/** The running timers, in memory only, and the dock's latest notice. `now` is the wall clock. */
-export function createTimerStore(now: () => number, sound: (sound: Sound) => void) {
+/**
+ * The running timers, in memory only, and the dock's latest notice. `now` is the wall clock. Every
+ * command runs in a tap, the only thing that can wake the audio on iOS, so each one unlocks it.
+ */
+export function createTimerStore(
+  now: () => number,
+  sound: { unlock: () => void; ring: (sound: Sound) => void },
+) {
   let timers: Timer[] = [];
   let notice: string | null = null;
   let noticeGone: ReturnType<typeof setTimeout> | undefined;
@@ -138,12 +144,12 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
     if (phase === "alarming") {
       const { alarmRungAt } = timer;
       if (alarmRungAt !== null && at - alarmRungAt < ALARM_EVERY_MS) return timer;
-      sound("alarm");
+      sound.ring("alarm");
       if (alarmRungAt === null) say(`Time’s up for the ${describeTimer(timer)}.`);
       return { ...timer, chimeRung: true, alarmRungAt: at };
     }
     if (phase === "chimed" && !timer.chimeRung) {
-      sound("chime");
+      sound.ring("chime");
       say(`Check the ${describeTimer(timer)}.`);
       return { ...timer, chimeRung: true };
     }
@@ -163,6 +169,7 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
   }
 
   function change(id: string, changed: (timer: Timer, at: number) => Timer) {
+    sound.unlock();
     const at = now();
     timers = timers.map((timer) => (timer.id === id ? changed(timer, at) : timer));
     settle();
@@ -170,6 +177,7 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
 
   return {
     start(start: TimerStart) {
+      sound.unlock();
       const id = `${start.recipeId}/${start.stepId}/${start.position}`;
       if (timers.some((timer) => timer.id === id)) {
         say(`The ${start.written} timer is already running.`);
@@ -200,6 +208,7 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
     resume: (id: string) => change(id, resumed),
     addMinute: (id: string) => change(id, addMinuteTo),
     cancel(id: string) {
+      sound.unlock();
       timers = timers.filter((timer) => timer.id !== id);
       settle();
     },
@@ -213,7 +222,7 @@ export function createTimerStore(now: () => number, sound: (sound: Sound) => voi
   };
 }
 
-export const timers = createTimerStore(Date.now, ring);
+export const timers = createTimerStore(Date.now, { unlock: unlockSound, ring });
 
 /** The dock's timers and notice. */
 export const useTimers = () =>
