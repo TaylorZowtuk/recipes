@@ -6,6 +6,7 @@ tests/test_browser.py runs the real one.
 import io
 import json
 import re
+import socket
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,7 @@ from recipes.fallback import (
     Extracted,
     NeedsLlm,
     NeedsPage,
+    StillWaiting,
     apply,
     capture,
     main,
@@ -38,6 +40,7 @@ from recipes.ingest import (
     FetchRefused,
     IngestFailed,
     PageNotFound,
+    PoliteFetcher,
     RenderedPage,
     website_dedupe_key,
 )
@@ -51,6 +54,7 @@ if TYPE_CHECKING:
 
     from recipes.enrich import Send
     from recipes.ingest import Fetcher
+    from recipes.models import QueuedIngestReason
     from recipes.store import Store
 
 SITE = "https://plateful.test"
@@ -204,9 +208,7 @@ def test_a_page_with_no_text_at_all_needs_its_page() -> None:
     [
         (FetchRefused(reason="robots"), "robots"),
         (FetchRefused(reason="blocked"), "blocked"),
-        (IngestFailed(reason="unreachable"), "unreachable"),
-        (IngestFailed(reason="rate_limited"), "rate_limited"),
-        (IngestFailed(reason="server_error"), "server_error"),
+        (IngestFailed(reason="blocked"), "blocked"),
         (PageNotFound("gone"), "unreachable"),
     ],
 )
@@ -214,6 +216,15 @@ def test_a_page_the_browser_cannot_load_needs_its_page(failure: Exception, reaso
     outcome = capture(f"{SITE}/start", fake_browser({f"{SITE}/start": failure}))
 
     assert outcome == NeedsPage(reason=reason)  # pyright: ignore[reportArgumentType]
+
+
+@pytest.mark.parametrize("reason", ["rate_limited", "server_error", "unreachable"])
+def test_a_temporary_failure_stays_waiting(reason: QueuedIngestReason) -> None:
+    failure = IngestFailed(reason=reason)
+
+    outcome = capture(f"{SITE}/start", fake_browser({f"{SITE}/start": failure}))
+
+    assert outcome == StillWaiting(reason=reason)
 
 
 def test_the_browser_comes_first_and_scrapers_before_the_llm(
@@ -384,6 +395,68 @@ def test_a_failure_on_one_source_never_stops_the_others(
     assert "the browser went away" in printed
     assert "Server trouble" in printed
     assert "Saved 1, 0 for the LLM, 0 need their page, 2 failed" in printed
+
+
+def test_a_temporary_failure_writes_nothing_and_the_next_run_retries_it(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    limited = queue(api_store, "limited")
+    erroring = queue(api_store, "erroring")
+    offline = queue(api_store, "offline")
+    fine = queue(api_store, "fine")
+    pages: dict[str, RenderedPage | Exception] = {
+        f"{SITE}/limited": IngestFailed(reason="rate_limited"),
+        f"{SITE}/erroring": IngestFailed(reason="server_error"),
+        f"{SITE}/offline": IngestFailed(reason="unreachable"),
+        f"{SITE}/fine": rendered(RECIPE),
+    }
+
+    failed = run(BASE_URL, send, fake_browser(pages))
+
+    assert failed == 0
+    assert only_recipe(editor_client)["source"]["url"] == fine.source.url  # pyright: ignore[reportAttributeAccessIssue]
+    assert queue_state(editor_client) == {
+        limited.id: ("waiting", "no_recipe"),
+        erroring.id: ("waiting", "no_recipe"),
+        offline.id: ("waiting", "no_recipe"),
+    }
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["items"] == []
+    assert f"{SITE}/limited → still waiting (rate_limited)" in printed.err
+    assert "Saved 1, 0 for the LLM, 0 need their page, 0 failed, 3 still waiting" in printed.err
+
+    pages[f"{SITE}/limited"] = rendered(NO_RECIPE)
+
+    assert run(BASE_URL, send, fake_browser(pages)) == 0
+
+    assert [item["id"] for item in json.loads(capsys.readouterr().out)["items"]] == [limited.id]
+
+
+def test_a_whole_queue_hitting_dns_failure_writes_nothing(
+    api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    queued = [queue(api_store, f"page-{n}", site=f"https://site-{n}.test") for n in range(3)]
+    written: list[str] = []
+
+    def nothing_resolves(_host: str) -> list[str]:
+        raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+    def fetch(url: str) -> RenderedPage:
+        PoliteFetcher(resolve=nothing_resolves).refuse_unless_public(url)
+        raise AssertionError(url)
+
+    def recording(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if method != "GET":
+            written.append(url)
+        return send(method, url, body)
+
+    assert run(BASE_URL, recording, fetch) == 0
+
+    assert written == []
+    assert api_store.queued_ingests() == queued
+    printed = capsys.readouterr()
+    assert json.loads(printed.out)["items"] == []
+    assert "Saved 0, 0 for the LLM, 0 need their page, 0 failed, 3 still waiting" in printed.err
 
 
 def test_run_says_so_when_the_queue_cannot_be_listed(capsys: pytest.CaptureFixture[str]) -> None:

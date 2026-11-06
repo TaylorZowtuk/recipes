@@ -1229,6 +1229,26 @@ def post_queued_ingest_pasted_page(
     return Ingested(source=source, original=original, candidate_photos=captured.candidate_photos)
 
 
+@router.delete(
+    "/queued-ingests/{ingest_id}",
+    status_code=204,
+    response_class=Response,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_QUEUED_INGEST,
+        409: {"description": "The Queued Ingest no longer reserves its Source"},
+    },
+)
+def delete_queued_ingest(ingest_id: Annotated[Ulid, Path()], store: StoreDep) -> Response:
+    """Discard a Queued Ingest, waiting or needing its page, with its Source guard, so its Source
+    can be ingested again.
+    """
+    if not store.discard_queued_ingest(_queued_ingest(store, ingest_id)):
+        raise _no_such_queued_ingest()
+    return Response(status_code=204)
+
+
 def _queued_ingest(store: Store, ingest_id: str) -> QueuedIngest:
     queued = store.queued_ingest(ingest_id)
     if queued is None:

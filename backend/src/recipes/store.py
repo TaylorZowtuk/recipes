@@ -508,6 +508,38 @@ class Store:
             raise
         return added
 
+    def discard_queued_ingest(self, queued: QueuedIngest) -> bool:
+        """Delete the Queued Ingest and the Source guard that reserves its Source, in one
+        transaction, so the Source can be ingested again. `META#collection` stays as it is.
+
+        False means the Queued Ingest has gone. Raises VersionConflict if it no longer holds the
+        guard, so a guard that a recipe took over is never deleted.
+        """
+        deleted: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": queued_ingest_key(queued.id),
+                "ConditionExpression": "attribute_exists(PK)",
+            }
+        }
+        guard: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": source_key(queued.dedupe_key),
+                "ConditionExpression": "queued_ingest_id = :id",
+                "ExpressionAttributeValues": {":id": {"S": queued.id}},
+            }
+        }
+        try:
+            self._transact([deleted, guard])
+        except _Cancelled as cancelled:
+            if cancelled.failed(deleted):
+                return False
+            if cancelled.failed(guard):
+                raise VersionConflict(queued.id) from None
+            raise
+        return True
+
     def mark_needs_page(self, ingest_id: str, reason: QueuedIngestReason) -> QueuedIngest | None:
         """Move a waiting Queued Ingest to `needs_page` for `reason`, and return it as it now is.
         One that already needs its page keeps its reason, and None means there's no such item.

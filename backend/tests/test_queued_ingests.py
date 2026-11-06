@@ -1,5 +1,5 @@
-"""A Queued Ingest's way out: saved as a recipe, marked as needing its page, or finished from a
-pasted page.
+"""A Queued Ingest's way out: saved as a recipe, marked as needing its page, finished from a
+pasted page, or discarded.
 """
 
 import logging
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import boto3
 import pytest
 from conftest import EDITOR
-from fake_web import FakeWeb, page
+from fake_web import FakeWeb, Served, page
 
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.ingest import MAX_PAGE_BYTES, parse
@@ -75,6 +75,14 @@ def paste(editor_client: TestClient, html: object, ingest_id: str = INGEST_ID) -
     return editor_client.post(
         f"/api/queued-ingests/{ingest_id}/pasted-page", json={"html": html}, headers=EDITOR
     )
+
+
+def ingest(editor_client: TestClient) -> Response:
+    return editor_client.post("/api/ingest", json={"url": URL}, headers=EDITOR)
+
+
+def discard(editor_client: TestClient, ingest_id: str = INGEST_ID) -> Response:
+    return editor_client.delete(f"/api/queued-ingests/{ingest_id}", headers=EDITOR)
 
 
 def raw_items(table: str) -> str:
@@ -485,6 +493,148 @@ def test_a_queued_spreadsheet_row_has_no_website_page_to_paste(
     assert paste(editor_client, page("json-ld-recipe.html")).status_code == 422
 
 
+# Discarding a Queued Ingest
+
+
+@pytest.mark.parametrize("state", ["waiting", "needs_page"])
+def test_discarding_a_queued_ingest_frees_its_source(
+    editor_client: TestClient, store: Store, state: str
+) -> None:
+    store.queue_ingest(queued_ingest(state=state))
+    version = store.collection_version()
+
+    response = discard(editor_client)
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert store.queued_ingests() == []
+    assert store.source_guard(URL) is None
+    assert store.collection_version() == version
+
+
+def test_a_discarded_source_can_be_ingested_again(
+    editor_client: TestClient, store: Store, web: FakeWeb
+) -> None:
+    web.pages[URL] = Served(403, "")
+    assert ingest(editor_client).status_code == 202
+    ingest_id = store.queued_ingests()[0].id
+    assert ingest(editor_client).status_code == 409
+    assert discard(editor_client, ingest_id).status_code == 204
+
+    web.pages[URL] = Served(200, page("json-ld-recipe.html"))
+    response = ingest(editor_client)
+
+    assert response.status_code == 200
+    assert response.json()["source"]["url"] == URL
+
+
+def test_discarding_an_unknown_queued_ingest_is_not_found(
+    editor_client: TestClient, store: Store
+) -> None:
+    store.queue_ingest(queued_ingest())
+
+    assert discard(editor_client, MISSING_ID).status_code == 404
+
+    assert store.queued_ingests() == [queued_ingest()]
+
+
+def test_discarding_twice_is_not_found(editor_client: TestClient, store: Store) -> None:
+    store.queue_ingest(queued_ingest())
+    assert discard(editor_client).status_code == 204
+
+    assert discard(editor_client).status_code == 404
+
+
+def test_a_discard_that_lands_after_a_save_keeps_the_recipes_guard(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api_store.queue_ingest(queued_ingest())
+    read = api_store.queued_ingest
+    saves: list[Response] = []
+
+    def the_save_lands_after_this_read(ingest_id: str) -> QueuedIngest | None:
+        found = read(ingest_id)
+        monkeypatch.setattr(api_store, "queued_ingest", read)
+        saves.append(save(editor_client, new_recipe()))
+        return found
+
+    monkeypatch.setattr(api_store, "queued_ingest", the_save_lands_after_this_read)
+
+    loser = discard(editor_client)
+
+    assert saves[0].status_code == 201
+    assert loser.status_code == 404
+    assert [card.id for card in api_store.cards()] == [saves[0].json()["id"]]
+    guard = api_store.source_guard(URL)
+    assert guard is not None
+    assert guard.recipe_id == saves[0].json()["id"]
+
+
+def test_a_save_that_lands_after_a_discard_writes_nothing(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api_store.queue_ingest(queued_ingest())
+    read = api_store.queued_ingest
+    discards: list[Response] = []
+
+    def the_discard_lands_after_this_read(ingest_id: str) -> QueuedIngest | None:
+        found = read(ingest_id)
+        monkeypatch.setattr(api_store, "queued_ingest", read)
+        discards.append(discard(editor_client))
+        return found
+
+    monkeypatch.setattr(api_store, "queued_ingest", the_discard_lands_after_this_read)
+
+    loser = save(editor_client, new_recipe())
+
+    assert discards[0].status_code == 204
+    assert loser.status_code == 409
+    assert api_store.cards() == []
+    assert api_store.source_guard(URL) is None
+
+
+def test_a_guard_that_no_longer_points_at_the_queued_ingest_stops_the_discard(
+    editor_client: TestClient, store: Store
+) -> None:
+    store.queue_ingest(queued_ingest())
+    store.client.update_item(
+        TableName=store.table,
+        Key=source_key(URL),
+        UpdateExpression="SET queued_ingest_id = :other",
+        ExpressionAttributeValues={":other": {"S": OTHER_INGEST_ID}},
+    )
+
+    response = discard(editor_client)
+
+    assert response.status_code == 409
+    assert store.queued_ingests() == [queued_ingest()]
+    guard = store.source_guard(URL)
+    assert guard is not None
+    assert guard.queued_ingest_id == OTHER_INGEST_ID
+
+
+def test_a_discard_that_keeps_conflicting_is_a_conflict(
+    store: Store,
+    editor_client: TestClient,
+    api_store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+    cancellation: Callable[..., Exception],
+) -> None:
+    store.queue_ingest(queued_ingest())
+    conflict = cancellation("TransactionConflict", "None")
+
+    def conflicting(**_kwargs: Any) -> None:
+        raise conflict
+
+    def no_wait(_seconds: float) -> None:
+        pass
+
+    monkeypatch.setattr(api_store, "sleep", no_wait)
+    monkeypatch.setattr(api_store.client, "transact_write_items", conflicting)
+
+    assert discard(editor_client).status_code == 409
+
+
 # Who can do it
 
 
@@ -509,3 +659,14 @@ def test_a_visitor_cannot_finish_a_queued_ingest(
         assert response.status_code == 403
     assert store.queued_ingests() == [queued_ingest()]
     assert store.cards() == []
+
+
+def test_a_visitor_cannot_discard_a_queued_ingest(editor_client: TestClient, store: Store) -> None:
+    store.queue_ingest(queued_ingest())
+
+    for headers in ({}, {SERVICE_TOKEN_HEADER: "wrong-token"}):
+        response = editor_client.delete(f"/api/queued-ingests/{INGEST_ID}", headers=headers)
+
+        assert response.status_code == 403
+    assert store.queued_ingests() == [queued_ingest()]
+    assert store.source_guard(URL) is not None
