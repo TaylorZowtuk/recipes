@@ -6,9 +6,10 @@ Deleting a Store Category moves its Canonical Ingredients to another one. A cate
 
 An Edit of the Store Categories resolves its deletes first, so if one delete moves A to B and a later one moves B to C, A's ingredients go straight to C.
 
+A delete's target must already be saved, because the API mints a new category's id, so a client can't name it in the batch that adds it.
+
 - **Up to 98 moves:** one transaction holds the moves, the Kitchen settings and the `META#collection` bump.
 - **More than that:** the moves go first, in chunks of 98. Each chunk also holds a condition check on the Kitchen settings version, so a stale editor stops early, and a `META#collection` bump. The ingredients are read again after the chunks, and any that arrived meanwhile are moved in the last transaction, which writes the Kitchen settings.
-- **A category added in the same batch** is written first, on its own, if chunks move ingredients into it. Its id is minted for this one request, so if the edit then failed, ingredients moved into it would be in a category that was never saved, and a retry would mint another id. Such an edit advances the Kitchen settings version twice.
 
 ## A move is conditional on the category, not the version
 
@@ -23,12 +24,11 @@ Setting one Canonical Ingredient's Store Category carries a condition check on t
 ## Consequences
 
 - A delete past the limit isn't atomic. A conflict or a crash part way leaves some ingredients moved, with the category they left still in place, so nothing is orphaned. The phones see that state, because each chunk bumps `META#collection`.
-- The editor's Kitchen settings version is still current after such a failure, so saving the same Edit again re-reads the ingredients and moves the rest. An Edit that had to write a new category first is stale after a failure: the editor reloads, sees the new category and deletes again.
+- The editor's Kitchen settings version is still current after such a failure, so saving the same Edit again re-reads the ingredients and moves the rest.
 - An ingredient given the category in the moment between the last read and the Kitchen settings write is left with a Store Category that's gone. The condition check doesn't catch this, because the Kitchen settings version moves only with that final write. Enrichment creating a Canonical Ingredient has the same gap, with no check at all. The Edit reads the ingredients as late as it can, and with one or two editors the gap is small enough to accept.
 
 ## Considered options
 
 - **Write the Kitchen settings first and the moves after:** a crash would leave ingredients in a category that no longer exists, with no way to finish the job.
 - **Mark the category as being deleted, then move, then remove it:** closes the gap above, but adds a state that every reader of the Kitchen settings has to understand, for a race between two editors.
-- **Refuse a batch that moves more ingredients than fit into a new category:** simpler, but it refuses the likely way to replace a large category: add the new one and delete the old one in one save.
 - **Move with the ingredient's version as the condition:** a Pantry Staple change during a long delete would fail the delete for an unrelated reason.

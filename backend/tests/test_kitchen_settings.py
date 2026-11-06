@@ -27,7 +27,6 @@ type Write = list[dict[str, Any]]
 
 MOST_IN_ONE_WRITE = MAX_TRANSACTION_ITEMS - 2  # beside the Kitchen settings and META#collection
 MISSING_ID = "01K7KTC0000000000000000ZZZ"
-ADDED_ID = "01K7KTC0000000000000000N3W"
 ULID = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}")
 SEED_IDS = ["household", "produce", "meat", "aisles", "spices", "dairy", "frozen", "bakery"]
 
@@ -282,23 +281,6 @@ def test_a_name_freed_by_a_delete_can_be_used_in_the_same_batch(
     assert names(store)[-1] == "dairy"
 
 
-def test_a_batch_can_add_a_category_and_move_a_deleted_ones_ingredients_into_it(
-    editor_client: TestClient, store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seeded(store, canonical(1, "dairy"))
-    monkeypatch.setattr("recipes.api.new_ulid", lambda: ADDED_ID)
-
-    response = edit(
-        editor_client,
-        store.kitchen_settings(),
-        {"op": "add", "name": "Deli"},
-        delete("dairy", ADDED_ID),
-    )
-
-    assert response.status_code == 200
-    assert placed(store) == {ADDED_ID: 1}
-
-
 # Moving ingredients
 
 
@@ -460,66 +442,6 @@ def test_an_ingredient_that_lands_in_the_category_during_the_chunks_still_moves(
 
     assert response.status_code == 200
     assert placed(store) == {"frozen": total + 1}
-
-
-def test_a_category_added_in_the_batch_exists_before_chunks_move_into_it(
-    editor_client: TestClient,
-    store: Store,
-    api_store: Store,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    total = MOST_IN_ONE_WRITE + 10
-    seeded(store, *many(total, "dairy"))
-    monkeypatch.setattr("recipes.api.new_ulid", lambda: ADDED_ID)
-    bystander = canonical(total - 1, "dairy")
-
-    def move_one_under_the_edit() -> None:
-        seeded(store, bystander.model_copy(update={"store_category_id": "meat", "version": 2}))
-
-    # The first write creates the category, the second moves a chunk and the third fails.
-    before_write(api_store, monkeypatch, 3, move_one_under_the_edit)
-
-    response = edit(
-        editor_client,
-        store.kitchen_settings(),
-        {"op": "add", "name": "Deli"},
-        delete("dairy", ADDED_ID),
-    )
-
-    assert response.status_code == 409
-    assert set(placed(store)) <= set(ids(store))
-    assert ids(store) == [*SEED_IDS, ADDED_ID]
-
-
-def test_the_whole_batch_lands_when_a_new_category_takes_more_than_fits(
-    editor_client: TestClient, store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    total = MOST_IN_ONE_WRITE + 10
-    seeded(store, *many(total, "dairy"))
-    monkeypatch.setattr("recipes.api.new_ulid", lambda: ADDED_ID)
-    saved = store.kitchen_settings()
-
-    response = edit(
-        editor_client,
-        saved,
-        {"op": "rename", "id": "meat", "name": "Butcher"},
-        {"op": "add", "name": "Deli"},
-        delete("dairy", ADDED_ID),
-    )
-
-    assert response.status_code == 200
-    assert placed(store) == {ADDED_ID: total}
-    assert names(store) == [
-        "Household",
-        "Produce",
-        "Butcher",
-        "Aisles",
-        "Spices",
-        "Frozen",
-        "Bakery",
-        "Deli",
-    ]
-    assert response.json()["version"] == store.kitchen_settings().version
 
 
 # Refused edits

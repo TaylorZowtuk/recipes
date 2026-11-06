@@ -504,8 +504,6 @@ class Store:
         again after the chunks move with the settings. Raises VersionConflict if anything changed.
         """
         waiting = self._in_categories(moves)
-        if len(waiting) > MAX_MOVES:
-            settings = self._add_move_targets(settings, moves)
         while len(waiting) > MAX_MOVES:
             for chunk in batched(waiting, MAX_MOVES, strict=False):
                 self._move_chunk(chunk, moves, settings.version)
@@ -522,23 +520,6 @@ class Store:
         if not moves:
             return []
         return [c for c in self.canonical_ingredients() if c.store_category_id in moves]
-
-    def _add_move_targets(
-        self, settings: KitchenSettings, moves: Mapping[str, str]
-    ) -> KitchenSettings:
-        """Save the categories chunks will move into that aren't stored yet, as an id minted for
-        an edit that then fails would leave its ingredients in no category. Returns `settings`
-        at the version that write made.
-        """
-        stored = self.kitchen_settings().store_categories
-        ids = {category.id for category in stored}
-        targets = set(moves.values()) - ids
-        added = [category for category in settings.store_categories if category.id in targets]
-        if not added:
-            return settings
-        interim = settings.model_copy(update={"store_categories": [*stored, *added]})
-        saved = self.save_kitchen_settings(interim)
-        return settings.model_copy(update={"version": saved.version})
 
     def _move_chunk(
         self,
