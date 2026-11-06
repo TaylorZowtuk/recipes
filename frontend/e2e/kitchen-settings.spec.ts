@@ -699,6 +699,7 @@ test("editing and toggling are off while offline, with the Draft kept", async ({
   await context.setOffline(true);
   await expect(editButton(page)).toBeDisabled();
   await expect(staple(page, RYE.name)).toBeDisabled();
+  await expect(staple(page, RYE.name)).toHaveCSS("cursor", "not-allowed");
   const note = "You’re offline. Change the Kitchen settings once you’re back online.";
   await expect(page.getByRole("main")).toContainText(note);
   await context.setOffline(false);
