@@ -156,7 +156,7 @@ class Preview(Model):
 
 EnrichmentStatus = Literal["pending", "awaiting_review", "ready"]
 # How a recipe came into the Collection: "add_a_recipe" is an editor adding it from a website, and
-# "bulk_import" skips Awaiting Review once enriched.
+# "bulk_import" skips Awaiting Review once enriched, unless an LLM extracted its Original.
 IngestChannel = Literal["add_a_recipe", "bulk_import"]
 
 

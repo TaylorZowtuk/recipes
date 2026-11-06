@@ -25,6 +25,7 @@ from recipes.models import (
     FavoriteSites,
     KitchenSettings,
     QueuedIngest,
+    QueuedIngestReason,
     Recipe,
     SchemaMeta,
     SourceGuard,
@@ -461,6 +462,76 @@ class Store:
     def queued_ingests(self, page_size: int | None = None) -> list[QueuedIngest]:
         """Every Queued Ingest, oldest first. `page_size` lets tests force several pages."""
         return self._partition(QueuedIngest, "INGEST", page_size)
+
+    def queued_ingest(self, ingest_id: str) -> QueuedIngest | None:
+        item = self._get(queued_ingest_key(ingest_id), consistent=True)
+        return None if item is None else _from_item(QueuedIngest, item)
+
+    def recipe_from_queued_ingest(self, recipe: Recipe, queued: QueuedIngest) -> Recipe:
+        """Add a new recipe at version 1 with its card, delete the Queued Ingest and repoint its
+        Source guard at the recipe, in one transaction, so of two saves only the first writes.
+
+        Raises VersionConflict if the Queued Ingest has gone or no longer holds the guard.
+        """
+        added = recipe.model_copy(update={"version": 1})
+        deleted: TransactWriteItemTypeDef = {
+            "Delete": {
+                "TableName": self.table,
+                "Key": queued_ingest_key(queued.id),
+                "ConditionExpression": "attribute_exists(PK)",
+            }
+        }
+        guard: TransactWriteItemTypeDef = {
+            "Put": {
+                "TableName": self.table,
+                "Item": _to_item(
+                    SourceGuard(schema_version=added.schema_version, recipe_id=added.id),
+                    source_key(queued.dedupe_key),
+                ),
+                "ConditionExpression": "queued_ingest_id = :id",
+                "ExpressionAttributeValues": {":id": {"S": queued.id}},
+            }
+        }
+        try:
+            self._transact(
+                [
+                    deleted,
+                    guard,
+                    self._create(added, recipe_key(added.id)),
+                    self._put_card(added),
+                    self._bump_collection(),
+                ]
+            )
+        except _Cancelled as cancelled:
+            if cancelled.failed(deleted) or cancelled.failed(guard):
+                raise VersionConflict(queued.id) from None
+            raise
+        return added
+
+    def mark_needs_page(self, ingest_id: str, reason: QueuedIngestReason) -> QueuedIngest | None:
+        """Move a waiting Queued Ingest to `needs_page` for `reason`, and return it as it now is.
+        One that already needs its page keeps its reason, and None means there's no such item.
+        """
+        marked: TransactWriteItemTypeDef = {
+            "Update": {
+                "TableName": self.table,
+                "Key": queued_ingest_key(ingest_id),
+                "UpdateExpression": "SET #state = :needs_page, #reason = :reason",
+                "ConditionExpression": "#state = :waiting",
+                "ExpressionAttributeNames": {"#state": "state", "#reason": "reason"},
+                "ExpressionAttributeValues": {
+                    ":needs_page": {"S": "needs_page"},
+                    ":reason": {"S": reason},
+                    ":waiting": {"S": "waiting"},
+                },
+            }
+        }
+        try:
+            self._transact([marked])
+        except _Cancelled as cancelled:
+            if not cancelled.failed(marked):
+                raise
+        return self.queued_ingest(ingest_id)
 
     # Kitchen settings
 

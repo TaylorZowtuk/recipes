@@ -37,7 +37,11 @@ if TYPE_CHECKING:
 
     from recipes.models import Source
 
+# What captured an Original: a plain fetch, a page an editor pasted, the CLI's browser, or its LLM.
 EXTRACTOR = "recipe-scrapers"
+PASTED_EXTRACTOR = "pasted-page"
+BROWSER_EXTRACTOR = "playwright+recipe-scrapers"
+LLM_EXTRACTOR = "llm"
 ROBOTS_AGENT = "Plateful"
 USER_AGENT = f"{ROBOTS_AGENT}/1 (+https://github.com/TaylorZowtuk/recipes)"
 # Per request, and a deadline for the whole fetch, bodies included, so robots.txt, a page and its

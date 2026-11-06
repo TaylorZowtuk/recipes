@@ -24,6 +24,9 @@ from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
+    LLM_EXTRACTOR,
+    MAX_PAGE_BYTES,
+    PASTED_EXTRACTOR,
     Fetcher,
     FetchRefused,
     IngestFailed,
@@ -47,6 +50,7 @@ from recipes.models import (
     Difficulty,
     DurationSegment,
     Enrichment,
+    EnrichmentStatus,
     EntryAmount,
     Fact,
     FavoriteSite,
@@ -62,6 +66,7 @@ from recipes.models import (
     Original,
     Preview,
     QueuedIngest,
+    QueuedIngestReason,
     QueuedIngestState,
     Recipe,
     RecipeFacts,
@@ -177,6 +182,14 @@ class Ingested(BaseModel):
 
 class PhotoUrl(BaseModel):
     url: WebUrl
+
+
+class NeedsPage(BaseModel):
+    reason: QueuedIngestReason
+
+
+class PastedPage(BaseModel):
+    html: str  # at most MAX_PAGE_BYTES as UTF-8; read once, and never stored, logged or echoed
 
 
 # A recipe's Tags, before `_tags` strips them, drops empty ones and spells each once.
@@ -611,9 +624,18 @@ def post_image(body: PhotoUrl, fetcher: FetcherDep, images: ImagesDep) -> Image:
 def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe | Response:
     """Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard."""
     key = _dedupe_key(body.source.url)
+    recipe = _new_recipe(body, key, store, images)
+    try:
+        return store.add_recipe(recipe)
+    except DuplicateSource:
+        return _claimed(store, key)
+
+
+def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> Recipe:
+    """The recipe `body` describes, Pending enrichment, once each of its images is stored."""
     if not all(images.exists(image.id) for image in body.images):
         raise HTTPException(422, "Store each image with POST /api/images first")
-    recipe = Recipe(
+    return Recipe(
         id=new_ulid(),
         schema_version=SCHEMA_VERSION,
         version=1,
@@ -627,10 +649,6 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
         status="pending",
         ingest_channel="add_a_recipe",
     )
-    try:
-        return store.add_recipe(recipe)
-    except DuplicateSource:
-        return _claimed(store, key)
 
 
 @router.put(
@@ -658,8 +676,8 @@ def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe |
 )
 def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep) -> Recipe:
     """Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
-    create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
-    in Awaiting Review for an editor to check it.
+    create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
+    any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
 
     Refused unless every fact is for one of the recipe's lines or steps, every step's segments
     are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
@@ -692,7 +710,7 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
             "enrichment_version": body.enrichment_version,
             "fdc_release": body.fdc_release,
             "issues": body.issues,
-            "status": "ready" if recipe.ingest_channel == "bulk_import" else "awaiting_review",
+            "status": _enriched_status(recipe),
         }
     )
     if len(enriched.model_dump_json().encode()) > MAX_RECIPE_BYTES:
@@ -703,6 +721,13 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
         raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
     except WordingConfirmed:
         raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
+    skips_review = (
+        recipe.ingest_channel == "bulk_import" and recipe.original.extractor != LLM_EXTRACTOR
+    )
+    return "ready" if skips_review else "awaiting_review"
 
 
 @router.patch(
@@ -1116,6 +1141,103 @@ def _check_canonical_ingredients(body: Enrichment, store: Store) -> None:
 def get_queued_ingests(store: StoreDep) -> list[QueuedIngest]:
     """The Sources waiting for a fallback or for an editor to paste the page, oldest first."""
     return store.queued_ingests()
+
+
+NO_SUCH_QUEUED_INGEST: dict[int | str, dict[str, Any]] = {
+    404: {"description": "No such Queued Ingest"}
+}
+
+
+@router.post(
+    "/queued-ingests/{ingest_id}/recipe",
+    response_model=Recipe,
+    status_code=201,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_QUEUED_INGEST,
+        409: {"description": "Another save of this Queued Ingest got there first"},
+        422: {"description": "Not a valid recipe, not its Source, or an image isn't stored"},
+    },
+)
+def post_queued_ingest_recipe(
+    ingest_id: Annotated[Ulid, Path()], body: NewRecipe, store: StoreDep, images: ImagesDep
+) -> Recipe:
+    """Turn a Queued Ingest into the recipe a fallback captured, Pending enrichment: its Source
+    guard moves to the recipe, and the Queued Ingest goes, all at once.
+    """
+    queued = _queued_ingest(store, ingest_id)
+    key = _dedupe_key(body.source.url)
+    if key != queued.dedupe_key:
+        raise HTTPException(422, "That isn't the Queued Ingest's Source")
+    return store.recipe_from_queued_ingest(_new_recipe(body, key, store, images), queued)
+
+
+@router.post(
+    "/queued-ingests/{ingest_id}/needs-page",
+    dependencies=EDITORS_ONLY,
+    responses={403: DUPLICATE[403], **NO_SUCH_QUEUED_INGEST},
+)
+def post_queued_ingest_needs_page(
+    ingest_id: Annotated[Ulid, Path()], body: NeedsPage, store: StoreDep
+) -> QueuedIngest:
+    """Leave a waiting Queued Ingest for an editor to paste its page, every fallback having
+    failed for `reason`. One that already needs its page stays as it is.
+    """
+    queued = store.mark_needs_page(ingest_id, body.reason)
+    if queued is None:
+        raise _no_such_queued_ingest()
+    return queued
+
+
+@router.post(
+    "/queued-ingests/{ingest_id}/pasted-page",
+    response_model=Ingested,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_QUEUED_INGEST,
+        413: {"description": f"The page is more than {MAX_PAGE_BYTES} bytes"},
+        422: {"description": "No recipe in the page, or its Source isn't a website"},
+    },
+)
+def post_queued_ingest_pasted_page(
+    ingest_id: Annotated[Ulid, Path()], body: PastedPage, store: StoreDep
+) -> Ingested:
+    """Capture a recipe from the page an editor pasted for a Queued Ingest, for review, storing
+    nothing. Scraped as the site the Source is on. Saving it finishes the Queued Ingest.
+    """
+    queued = _queued_ingest(store, ingest_id)
+    if not isinstance(queued.source, WebsiteSource):
+        raise HTTPException(422, "Only a website's Queued Ingest has a page to paste")
+    try:
+        size = len(body.html.encode())
+    except UnicodeEncodeError:  # JSON can spell a lone surrogate, which isn't text
+        raise HTTPException(422, "That page isn't valid text") from None
+    if size > MAX_PAGE_BYTES:
+        raise HTTPException(413, f"A page is at most {MAX_PAGE_BYTES} bytes")
+    try:
+        captured = parse(body.html, queued.source.url)
+    except IngestFailed:
+        raise HTTPException(422, "No recipe found in that page") from None
+    source = WebsiteSource(
+        url=queued.source.url,
+        site_name=captured.site_name or site_host(queued.dedupe_key),
+        captured_at=datetime.now(UTC),
+    )
+    original = captured.original.model_copy(update={"extractor": PASTED_EXTRACTOR})
+    return Ingested(source=source, original=original, candidate_photos=captured.candidate_photos)
+
+
+def _queued_ingest(store: Store, ingest_id: str) -> QueuedIngest:
+    queued = store.queued_ingest(ingest_id)
+    if queued is None:
+        raise _no_such_queued_ingest()
+    return queued
+
+
+def _no_such_queued_ingest() -> HTTPException:
+    return HTTPException(404, "No such Queued Ingest")
 
 
 @router.patch(
