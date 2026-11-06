@@ -37,6 +37,8 @@ import { type TimerStart, timers } from "./timers";
 // status note stays mounted through every state, so focus can rest on it after a retry. The hero
 // shows the Difficulty and every Tag above the tabs, and to an editor an Edit button that swaps the
 // tabs for the Edit form. Keyed by the recipe, so a Draft never carries over to another one.
+const FINISH_EDITING = "Finish editing to see this step.";
+
 export function RecipeScreen() {
   const { id } = useParams();
   return <RecipePage key={id} />;
@@ -45,7 +47,7 @@ export function RecipeScreen() {
 function RecipePage() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
-  const { hash } = useLocation();
+  const { hash, key } = useLocation();
   const collection = useCollection();
   const card =
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
@@ -70,6 +72,15 @@ function RecipePage() {
     }
     wasEditing.current = !!draft;
   }, [draft, hash]);
+
+  // Edit keeps the Draft on screen, so a jump tapped during it can't show its step yet. Only a new
+  // navigation says so: a step jumped to before Edit opened is still in the address.
+  const shownKey = useRef(key);
+  useEffect(() => {
+    if (shownKey.current === key) return;
+    shownKey.current = key;
+    if (draft && hash.startsWith("#step-")) timers.notify(FINISH_EDITING);
+  }, [key, draft, hash]);
 
   useEffect(() => {
     if (card && shownSlug !== slug(card.title))

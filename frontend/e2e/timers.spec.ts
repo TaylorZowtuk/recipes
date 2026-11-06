@@ -335,9 +335,33 @@ test("leaving Edit with a step in the address keeps focus and the view on the st
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: /^Edit/ })).toBeFocused();
+  // Only a tap during Edit says to finish: this step was jumped to before it opened. One reading,
+  // as a retrying assertion would wait out a wrong notice and pass.
+  await page.waitForTimeout(250);
+  expect(await dock(page).getByRole("status").textContent()).toBe("");
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(step).toBeFocused();
   await expect(step).toBeInViewport();
+});
+
+test("a timer tapped during Edit says to finish editing, and keeps the Draft", async ({ page }) => {
+  const signedIn = await page.request.post("/api/session", {
+    data: { credential: "fake:editor@example.com" },
+  });
+  expect(signedIn.ok(), "fake sign-in").toBe(true);
+  await startRange(page);
+  await page.getByRole("button", { name: "Edit" }).click();
+  const tags = page.getByRole("textbox", { name: "Tags" });
+  await tags.fill("soup");
+
+  await jump(page).click();
+  await expect(dock(page).getByRole("status")).toHaveText("Finish editing to see this step.");
+  await expect(tags).toHaveValue("soup");
+
+  // A repeat tap says so again, once the notice has gone.
+  await expect(dock(page).getByRole("status")).toBeEmpty();
+  await jump(page).click();
+  await expect(dock(page).getByRole("status")).toHaveText("Finish editing to see this step.");
 });
 
 test("leaving Edit with a step in the address still shows why Edit closed", async ({ page }) => {

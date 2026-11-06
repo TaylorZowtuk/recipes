@@ -214,6 +214,11 @@ export function createTimerStore(
       timers = timers.filter((timer) => timer.id !== id);
       settle();
     },
+    // For what only a screen knows, shown where the cook is looking.
+    notify(text: string) {
+      say(text);
+      publish();
+    },
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => {

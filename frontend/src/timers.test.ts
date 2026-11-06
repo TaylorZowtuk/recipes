@@ -304,6 +304,14 @@ describe("the timer store", () => {
     expect(store.snapshot().notice).toBeNull();
   });
 
+  it("shows a notice from outside the store, then lets it go", () => {
+    store.start(fry);
+    store.notify("Finish editing to see this step.");
+    expect(store.snapshot().notice).toBe("Finish editing to see this step.");
+    run(MINUTE);
+    expect(store.snapshot().notice).toBeNull();
+  });
+
   it("says a repeat once", () => {
     store.start(fry);
     store.start(fry);
