@@ -106,6 +106,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/queued-ingests/{ingest_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Queued Ingest
+         * @description Discard a Queued Ingest, waiting or needing its page, with its Source guard, so its Source
+         *     can be ingested again.
+         */
+        delete: operations["delete_queued_ingest_api_queued_ingests__ingest_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queued-ingests/{ingest_id}/needs-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Queued Ingest Needs Page
+         * @description Leave a waiting Queued Ingest for an editor to paste its page, every fallback having
+         *     failed for `reason`. One that already needs its page stays as it is.
+         */
+        post: operations["post_queued_ingest_needs_page_api_queued_ingests__ingest_id__needs_page_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queued-ingests/{ingest_id}/pasted-page": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Queued Ingest Pasted Page
+         * @description Capture a recipe from the page an editor pasted for a Queued Ingest, for review, storing
+         *     nothing. Scraped as the site the Source is on. Saving it finishes the Queued Ingest.
+         */
+        post: operations["post_queued_ingest_pasted_page_api_queued_ingests__ingest_id__pasted_page_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/queued-ingests/{ingest_id}/recipe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Queued Ingest Recipe
+         * @description Turn a Queued Ingest into the recipe a fallback captured, Pending enrichment: its Source
+         *     guard moves to the recipe, and the Queued Ingest goes, all at once.
+         */
+        post: operations["post_queued_ingest_recipe_api_queued_ingests__ingest_id__recipe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipes": {
         parameters: {
             query?: never;
@@ -214,8 +298,8 @@ export interface paths {
         /**
          * Put Enrichment
          * @description Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
-         *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other waits
-         *     in Awaiting Review for an editor to check it.
+         *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
+         *     any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
          *
          *     Refused unless every fact is for one of the recipe's lines or steps, every step's segments
          *     are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
@@ -1028,6 +1112,14 @@ export interface components {
              */
             provenance: "source" | "parser" | "fdc" | "llm" | "editor";
         };
+        /** NeedsPage */
+        NeedsPage: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "robots" | "blocked" | "rate_limited" | "server_error" | "unreachable" | "no_recipe";
+        };
         /** NeedsReview */
         NeedsReview: {
             /**
@@ -1187,6 +1279,11 @@ export interface components {
             unit: string | null;
             /** Unit Kind */
             unit_kind: ("mass" | "volume" | "count") | null;
+        };
+        /** PastedPage */
+        PastedPage: {
+            /** Html */
+            html: string;
         };
         /**
          * Per100g
@@ -2224,6 +2321,213 @@ export interface operations {
             };
             /** @description Only an editor can do that */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_queued_ingest_api_queued_ingests__ingest_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ingest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Queued Ingest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Queued Ingest no longer reserves its Source */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_queued_ingest_needs_page_api_queued_ingests__ingest_id__needs_page_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ingest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NeedsPage"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedIngest"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Queued Ingest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_queued_ingest_pasted_page_api_queued_ingests__ingest_id__pasted_page_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ingest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PastedPage"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Ingested"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Queued Ingest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The page is more than 2097152 bytes */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No recipe in the page, or its Source isn't a website */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_queued_ingest_recipe_api_queued_ingests__ingest_id__recipe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ingest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewRecipe"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Queued Ingest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Another save of this Queued Ingest got there first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a valid recipe, not its Source, or an image isn't stored */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

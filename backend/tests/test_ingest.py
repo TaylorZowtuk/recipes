@@ -16,11 +16,14 @@ import requests
 from fake_web import PUBLIC_ADDRESS, FakeWeb, Redirect, Served, page, photo
 
 from recipes.ingest import (
+    BROWSER_EXTRACTOR,
     EXTRACTOR,
+    LLM_EXTRACTOR,
     MAX_CANDIDATE_PHOTOS,
     MAX_PAGE_BYTES,
     MAX_PHOTO_BYTES,
     MAX_ROBOTS_BYTES,
+    PASTED_EXTRACTOR,
     USER_AGENT,
     FetchRefused,
     IngestFailed,
@@ -139,6 +142,11 @@ def test_parsing_captures_the_original_as_written() -> None:
     assert original.description == "A quick miso soup with tofu and greens."
     assert original.author == "Test Kitchen Cook"
     assert original.extractor == EXTRACTOR == "recipe-scrapers"
+    assert (LLM_EXTRACTOR, PASTED_EXTRACTOR, BROWSER_EXTRACTOR) == (
+        "llm",
+        "pasted-page",
+        "playwright+recipe-scrapers",
+    )
     assert [(i.id, i.text) for i in original.ingredients] == [
         ("i1", "4 cups dashi"),
         ("i2", "3 tbsp white miso"),
