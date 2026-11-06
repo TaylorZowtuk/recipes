@@ -161,6 +161,8 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
             "the enrich group stays out of the zip for now: the Our Version ticket decides "
             "whether the API parses lines on save"
         )
+    for fallback_only in ("playwright", "greenlet"):
+        assert fallback_only not in top_level, "the browser runs only in the local fallback CLI"
     assert not any("__pycache__" in name for name in infos)
 
 
