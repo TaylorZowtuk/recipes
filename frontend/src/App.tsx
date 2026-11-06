@@ -2,10 +2,11 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AddRecipeScreen } from "./AddRecipeScreen";
 import { CollectionScreen } from "./CollectionScreen";
 import { FavoriteSitesScreen } from "./FavoriteSitesScreen";
+import { KitchenSettingsScreen } from "./KitchenSettingsScreen";
 import { RecipeScreen } from "./RecipeScreen";
 import { Shell } from "./Shell";
 import { SignInScreen } from "./SignInScreen";
-import { FridgeScreen, KitchenSettingsScreen } from "./screens";
+import { FridgeScreen } from "./screens";
 import { WeekPlanScreen } from "./WeekPlanScreen";
 
 export function App() {

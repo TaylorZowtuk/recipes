@@ -5,7 +5,8 @@ giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
 "sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
 enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Canonical Ingredient,
-a conversion and an open Enrichment Issue. Its Favorite Sites are on reserved domains, and the
+a conversion and an open Enrichment Issue. PANTRY holds Canonical Ingredients no recipe uses, for
+Kitchen settings' tests to change freely. Its Favorite Sites are on reserved domains, and the
 first is on example.com, so it counts the website recipes.
 """
 
@@ -72,6 +73,23 @@ BUTTER = CanonicalIngredient(
     schema_version=SCHEMA_VERSION,
 )
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
+PANTRY = [
+    CanonicalIngredient(
+        id=f"01K7SEED0000000000000000C{n}",
+        name=name,
+        family=family,
+        store_category_id=category,
+        pantry_staple=staple,
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+    for n, name, family, category, staple in [
+        (2, "carrot", "carrot", "produce", False),
+        (3, "frozen peas", "pea", "frozen", False),
+        (4, "olive oil", "oil", "aisles", True),
+        (5, "sea salt", "salt", "spices", True),
+    ]
+]
 
 
 def _ingredients(*lines: str, component: str | None = None, start: int = 1) -> list[IngredientLine]:
@@ -574,7 +592,7 @@ def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
         if added.id == REVIEW_RECIPE_ID:
-            store.enrich_recipe(added, [BUTTER], [BUTTER_WORDING])
+            store.enrich_recipe(added, [BUTTER, *PANTRY], [BUTTER_WORDING])
     store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))
 
 

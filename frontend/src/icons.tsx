@@ -80,3 +80,10 @@ export const SearchIcon = () => (
     <path d="m15.5 15.5 5 5" />
   </Icon>
 );
+
+// Two columns of dots, the handle a row is dragged by.
+export const GripIcon = () => (
+  <Icon>
+    <path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
+  </Icon>
+);

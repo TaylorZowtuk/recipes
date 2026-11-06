@@ -28,6 +28,22 @@ export function versionedRefusal(answer: Answer<unknown>): WriteRefusal {
     : writeRefusal(answer);
 }
 
+// How a batched list edit went.
+export type BatchOutcome = { kind: "saved" } | { kind: "invalid"; message: string } | WriteRefusal;
+
+// What a 422 says: an HTTPException's detail, or the first of a validation error's.
+function refusalMessage(error: unknown): string | undefined {
+  const detail = (apiError(error) as { detail?: string | { msg: string }[] } | undefined)?.detail;
+  return Array.isArray(detail) ? detail[0]?.msg : detail;
+}
+
+// What the API answered a PATCH of a whole list, such as the Favorite Sites.
+export function batchOutcome(answer: Answer<unknown>): BatchOutcome {
+  if (answer.response.status === 200 && answer.data) return { kind: "saved" };
+  const message = answer.response.status === 422 && refusalMessage(answer.error);
+  return message ? { kind: "invalid", message } : writeRefusal(answer);
+}
+
 // Writes are never queued, so they're off offline and in the read-only modes, which behave like
 // offline. Null while they're open, including before the first sync poll answers.
 export function editBlock(
