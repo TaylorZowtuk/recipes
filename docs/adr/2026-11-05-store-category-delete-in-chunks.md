@@ -19,12 +19,13 @@ An ingredient whose category changed under the move fails that condition, and th
 
 ## Choosing an ingredient's Store Category
 
-Setting one Canonical Ingredient's Store Category carries a condition check on the Kitchen settings version, so it can't land in a category a saved Edit just deleted. A Pantry Staple change doesn't depend on the Kitchen settings, so it never conflicts with an Edit of them.
+Setting one Canonical Ingredient's Store Category carries a condition check on the Kitchen settings version, so it can't land in a category a saved Edit just deleted. A Pantry Staple change doesn't depend on the Kitchen settings, so it carries no such check. It still answers 409 if a move landed after the client read the ingredient, because the move bumped the version.
 
 ## Consequences
 
 - A delete past the limit isn't atomic. A conflict or a crash part way leaves some ingredients moved, with the category they left still in place, so nothing is orphaned. The phones see that state, because each chunk bumps `META#collection`.
-- The editor's Kitchen settings version is still current after such a failure, so saving the same Edit again re-reads the ingredients and moves the rest.
+- After a 409 the app discards the Draft, so some ingredients have moved, the category is still there and the rest of the Draft is gone. The editor reopens Edit and repeats the delete, which re-reads the ingredients and moves the rest.
+- Only a 5xx or a network failure keeps the Draft. The Kitchen settings version is still current then, so Save can retry directly.
 - An ingredient given the category in the moment between the last read and the Kitchen settings write is left with a Store Category that's gone. The condition check doesn't catch this, because the Kitchen settings version moves only with that final write. Enrichment creating a Canonical Ingredient has the same gap, with no check at all. The Edit reads the ingredients as late as it can, and with one or two editors the gap is small enough to accept.
 
 ## Considered options

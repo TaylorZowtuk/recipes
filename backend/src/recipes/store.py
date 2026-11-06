@@ -2,7 +2,8 @@
 Ingredients, the Wording Cache, Kitchen settings, Favorite Sites, Week Plans and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
-in the same transaction, and versioned items are written only if their version hasn't changed.
+in the same transaction, and versioned items are written only if their version hasn't changed,
+except a Store Category delete's moves, which are conditional on the ingredient's category.
 Week Plans are private to the household, so they aren't shared collection data.
 """
 
