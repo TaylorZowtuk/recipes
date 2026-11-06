@@ -76,11 +76,11 @@ test("an editor pastes a page, reviews what was captured and saves it", async ({
   const waiting = `https://plateful.test/blocked/pasted-waiting-${testInfo.project.name}-r${testInfo.retry}-e${testInfo.repeatEachIndex}`;
   await openWithNeedsPage(page, url);
 
-  // One still waiting for the fallback offers nothing.
+  // One still waiting for the fallback can be pasted too.
   await page.getByRole("textbox", { name: "Recipe web address" }).fill(waiting);
   await page.getByRole("button", { name: "Fetch" }).click();
   await expect(queuedItem(page, waiting).locator(".badge")).toHaveText("Waiting for the fallback");
-  await expect(queuedItem(page, waiting).getByRole("button")).toHaveCount(0);
+  await expect(pasteButton(page, waiting)).toBeVisible();
 
   await pasteButton(page, url).click();
   await expect(page.getByRole("heading", { level: 2, name: "Paste the page" })).toBeFocused();
@@ -177,6 +177,36 @@ test("a Queued Ingest finished elsewhere says so, on reading and on saving", asy
   await expect(page.getByRole("alert")).toContainText(GONE);
   await page.getByRole("button", { name: "Start over" }).click();
   await expect(queuedItem(page, whileReviewing)).toHaveCount(0);
+});
+
+test("a waiting Queued Ingest is pasted and saved, and the CLI finishing it first says so", async ({
+  page,
+}, testInfo) => {
+  const blocked = (slug: string) =>
+    `https://plateful.test/blocked/${slug}-${testInfo.project.name}-r${testInfo.retry}-e${testInfo.repeatEachIndex}`;
+  const pasted = blocked("pasted-waiting-saved");
+  const finished = blocked("pasted-waiting-finished");
+  await openWithNeedsPage(page, robotsDenied("pasted-waiting-first", testInfo));
+  for (const url of [pasted, finished]) {
+    await page.getByRole("textbox", { name: "Recipe web address" }).fill(url);
+    await page.getByRole("button", { name: "Fetch" }).click();
+    await expect(queuedItem(page, url).locator(".badge")).toHaveText("Waiting for the fallback");
+  }
+
+  await pasteButton(page, pasted).click();
+  await pasteField(page).fill(recipePage(titleFor(pasted)));
+  await readPage(page);
+  await expect(page.getByRole("heading", { level: 2, name: titleFor(pasted) })).toBeFocused();
+  await page.getByRole("button", { name: "Start over" }).click();
+
+  // The CLI saves it while the editor is pasting.
+  await pasteButton(page, finished).click();
+  await pasteField(page).fill(recipePage(titleFor(finished)));
+  await finishElsewhere(page, finished);
+  await readPage(page);
+  await expect(page.getByRole("alert")).toContainText(GONE);
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await expect(queuedItem(page, finished)).toHaveCount(0);
 });
 
 test("pasting is off while offline, and the paste stays", async ({ page, context }, testInfo) => {

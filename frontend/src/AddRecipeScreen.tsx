@@ -4,6 +4,8 @@ import {
   type Candidate,
   chosenDifficulty,
   type DifficultyChoice,
+  type DiscardOutcome,
+  discardOutcome,
   type IngestOutcome,
   ingestOutcome,
   type PasteOutcome,
@@ -96,6 +98,7 @@ function AddRecipe({ fromSite }: { fromSite?: string }) {
         online={online}
         retry={queued.reload}
         onPaste={setPasting}
+        onGone={queued.drop}
       />
     </div>
   );
@@ -106,8 +109,8 @@ type Message = { alert: boolean; body: ReactNode };
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 const NOT_AN_EDITOR = "Only the household’s editors can add recipes. Sign in again.";
 const CONFLICT = "Something changed in the meantime. Try again.";
-const GONE =
-  "This recipe isn’t waiting any more, so someone may have finished it. Go back to the list, or look for it in the Collection.";
+const NOT_WAITING = "This recipe isn’t waiting any more, so someone may have finished it.";
+const GONE = `${NOT_WAITING} Go back to the list, or look for it in the Collection.`;
 
 function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): Message {
   switch (outcome.kind) {
@@ -256,7 +259,17 @@ function useQueuedIngests(online: boolean) {
     };
   }, [attempt, online]);
 
-  return { loaded, reload };
+  const drop = useCallback(
+    (id: string) =>
+      setLoaded((list) =>
+        list.state === "ready"
+          ? { state: "ready", value: list.value.filter((item) => item.id !== id) }
+          : list,
+      ),
+    [],
+  );
+
+  return { loaded, reload, drop };
 }
 
 const reasons: Record<QueuedIngest["reason"], string> = {
@@ -270,19 +283,65 @@ const reasons: Record<QueuedIngest["reason"], string> = {
 
 const since = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
+function discardProblem(outcome: Exclude<DiscardOutcome, { kind: "discarded" }>): string {
+  switch (outcome.kind) {
+    case "gone":
+      return `${NOT_WAITING} Look for it in the Collection.`;
+    case "not-an-editor":
+      return NOT_AN_EDITOR;
+    case "conflict":
+      return CONFLICT;
+    case "failed":
+      return UNREACHABLE;
+  }
+}
+
 function QueuedIngests({
   loaded,
   online,
   retry,
   onPaste,
+  onGone,
 }: {
   loaded: QueuedLoad;
   online: boolean;
   retry: () => void;
   onPaste: (item: QueuedIngest) => void;
+  onGone: (id: string) => void;
 }) {
   const blocked = useEditBlock();
   const unavailable = !online && loaded.state !== "ready";
+  const [discarding, setDiscarding] = useState<string>();
+  const [problem, setProblem] = useState<string>();
+  const mounted = useMounted();
+
+  // Asks first, as deleting a recipe does. One that's gone leaves the list as a discarded one does,
+  // and focus goes to the title, since the button pressed goes with it.
+  const discard = async (item: QueuedIngest) => {
+    const asked = `Discard ${item.source.url}? It leaves the list, and you can add it again later.`;
+    if (discarding || !window.confirm(asked)) return;
+    setProblem(undefined);
+    setDiscarding(item.id);
+    let outcome: DiscardOutcome;
+    try {
+      outcome = discardOutcome(
+        await api.DELETE("/api/queued-ingests/{ingest_id}", {
+          params: { path: { ingest_id: item.id } },
+        }),
+      );
+    } catch {
+      outcome = { kind: "failed" };
+    }
+    if (!mounted.current) return;
+    setDiscarding(undefined);
+    if (outcome.kind === "gone") forgetCollection();
+    if (outcome.kind === "discarded" || outcome.kind === "gone") {
+      onGone(item.id);
+      focusTitle();
+    }
+    if (outcome.kind !== "discarded") setProblem(discardProblem(outcome));
+  };
+
   return (
     <section className="queued" aria-labelledby="queued-heading">
       <h2 id="queued-heading">Waiting to be added</h2>
@@ -290,7 +349,13 @@ function QueuedIngests({
         {unavailable && "The list isn’t available offline."}
         {!unavailable && loaded.state === "loading" && "Loading…"}
         {loaded.state === "ready" && loaded.value.length === 0 && "Nothing is waiting."}
+        {discarding && "Discarding…"}
       </p>
+      {problem && (
+        <p role="alert" className="form-problem">
+          {problem}
+        </p>
+      )}
       {!unavailable && loaded.state === "failed" && (
         <div className="screen-note">
           <p role="alert">The list couldn’t be loaded.</p>
@@ -302,7 +367,14 @@ function QueuedIngests({
       {loaded.state === "ready" && loaded.value.length > 0 && (
         <ul className="queued-list" aria-labelledby="queued-heading">
           {loaded.value.map((item) => (
-            <QueuedItem key={item.id} item={item} blocked={blocked} onPaste={onPaste} />
+            <QueuedItem
+              key={item.id}
+              item={item}
+              blocked={blocked}
+              discarding={discarding === item.id}
+              onPaste={onPaste}
+              onDiscard={discard}
+            />
           ))}
         </ul>
       )}
@@ -325,11 +397,15 @@ function SourceLink({ item }: { item: QueuedIngest }) {
 export function QueuedItem({
   item,
   blocked,
+  discarding,
   onPaste,
+  onDiscard,
 }: {
   item: QueuedIngest;
   blocked: ReturnType<typeof useEditBlock>;
+  discarding: boolean;
   onPaste: (item: QueuedIngest) => void;
+  onDiscard: (item: QueuedIngest) => void;
 }) {
   return (
     <li>
@@ -342,17 +418,27 @@ export function QueuedItem({
       <span className={item.state === "needs_page" ? "badge badge-attention" : "badge"}>
         {item.state === "needs_page" ? "Needs the page pasted in" : "Waiting for the fallback"}
       </span>
-      {item.state === "needs_page" && (
+      <div className="queued-actions">
         <button
           type="button"
-          className="button button-secondary queued-paste"
+          className="button button-secondary"
           disabled={!!blocked}
           onClick={() => onPaste(item)}
         >
           Paste its page
           <span className="visually-hidden"> for {item.source.url}</span>
         </button>
-      )}
+        <button
+          type="button"
+          className="text-button text-button-danger"
+          disabled={!!blocked}
+          aria-disabled={discarding}
+          onClick={() => onDiscard(item)}
+        >
+          Discard
+          <span className="visually-hidden"> for {item.source.url}</span>
+        </button>
+      </div>
     </li>
   );
 }
@@ -384,7 +470,7 @@ function useOpeningHeading() {
   return heading;
 }
 
-// Finishes a Queued Ingest that needs its page: the editor pastes the page's source, and what it
+// Finishes a Queued Ingest, waiting or needing its page: the editor pastes the page's source, and what it
 // captures goes to the review. The paste lives only in this component's state, and stays in the
 // field through every failure. The field doesn't wrap or spell-check, so a huge paste stays quick.
 export function PastePage({

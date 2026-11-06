@@ -291,6 +291,78 @@ test("a page that can't be fetched waits for the fallback", async ({ page }, tes
   await expect(queuedItem(page, blocked)).toHaveCount(1);
 });
 
+const discardButton = (page: Page, url: string) =>
+  queuedItem(page, url).getByRole("button", { name: /^Discard/ });
+
+test("discarding asks first, and frees the Source to be added again", async ({
+  page,
+}, testInfo) => {
+  const blocked = pageUrl("blocked/discarded", testInfo);
+  const robots = pageUrl("robots-denied/discarded", testInfo);
+  await openAddRecipe(page);
+  await fetchRecipe(page, blocked);
+  await expect(queuedItem(page, blocked).locator(".badge")).toHaveText("Waiting for the fallback");
+  await fetchRecipe(page, robots);
+  await expect(queuedItem(page, robots).locator(".badge")).toHaveText("Needs the page pasted in");
+
+  // Declined, it stays.
+  let asked = "";
+  page.once("dialog", (dialog) => {
+    asked = dialog.message();
+    return dialog.dismiss();
+  });
+  await discardButton(page, blocked).click();
+  expect(asked).toContain(blocked);
+  await expect(queuedItem(page, blocked)).toBeVisible();
+
+  // Accepted, whichever state it's in, it leaves the list and stays gone on the next visit.
+  for (const url of [blocked, robots]) {
+    page.once("dialog", (dialog) => dialog.accept());
+    await discardButton(page, url).click();
+    await expect(queuedItem(page, url)).toHaveCount(0);
+  }
+  await page.reload();
+  await expect(urlField(page)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Loading" })).toHaveCount(0);
+  await expect(queuedItem(page, blocked)).toHaveCount(0);
+  await expect(queuedItem(page, robots)).toHaveCount(0);
+
+  // Its Source is free, so it can be added again.
+  await fetchRecipe(page, blocked);
+  await expect(queuedItem(page, blocked).locator(".badge")).toHaveText("Waiting for the fallback");
+});
+
+test("discarding one that has already gone says so, and it leaves the list", async ({
+  page,
+}, testInfo) => {
+  const url = pageUrl("blocked/discard-gone", testInfo);
+  await openAddRecipe(page);
+  await fetchRecipe(page, url);
+  await expect(queuedItem(page, url)).toBeVisible();
+
+  // It goes from another device, as far as this page load knows.
+  const list = await (await page.request.get("/api/queued-ingests")).json();
+  const { id } = list.find((item: { source: { url: string } }) => item.source.url === url);
+  expect((await page.request.delete(`/api/queued-ingests/${id}`)).status(), "discard").toBe(204);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await discardButton(page, url).click();
+  await expect(page.getByRole("alert")).toContainText("This recipe isn’t waiting any more");
+  await expect(queuedItem(page, url)).toHaveCount(0);
+});
+
+test("discarding is off while offline", async ({ page, context }, testInfo) => {
+  const url = pageUrl("blocked/discard-offline", testInfo);
+  await openAddRecipe(page);
+  await fetchRecipe(page, url);
+  await expect(discardButton(page, url)).toBeEnabled();
+
+  await context.setOffline(true);
+  await expect(discardButton(page, url)).toBeDisabled();
+  await context.setOffline(false);
+  await expect(discardButton(page, url)).toBeEnabled();
+});
+
 test("a missing page or an invalid address is an inline error", async ({ page }, testInfo) => {
   await openAddRecipe(page);
   await fetchRecipe(page, pageUrl("missing/gone", testInfo));

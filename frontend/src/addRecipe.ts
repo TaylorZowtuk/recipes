@@ -18,6 +18,8 @@ export type PasteOutcome =
   | { kind: "no-recipe" | "too-large" | "gone" }
   | WriteRefusal;
 
+export type DiscardOutcome = { kind: "discarded" | "gone" } | WriteRefusal;
+
 // A 409 that names a recipe or a Queued Ingest is a duplicate; anything else is a write refusal.
 export function refusal(answer: Answer<unknown>): Refusal {
   const duplicate =
@@ -53,6 +55,12 @@ export function pasteOutcome(answer: Answer<Ingested>): PasteOutcome {
   if (response.status === 413) return { kind: "too-large" };
   if (response.status === 422) return { kind: "no-recipe" };
   return writeRefusal(answer);
+}
+
+// What `DELETE /api/queued-ingests/{id}` answered: discarded (204), or why not.
+export function discardOutcome(answer: Answer<unknown>): DiscardOutcome {
+  if (answer.response.status === 204) return { kind: "discarded" };
+  return isGone(answer) ? { kind: "gone" } : writeRefusal(answer);
 }
 
 // What saving a recipe answered, from `POST /api/recipes` or from finishing a Queued Ingest:

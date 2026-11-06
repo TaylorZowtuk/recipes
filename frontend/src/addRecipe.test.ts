@@ -3,6 +3,7 @@ import {
   type Candidate,
   chosenDifficulty,
   defaultPreview,
+  discardOutcome,
   ingestOutcome,
   parseTags,
   pasteOutcome,
@@ -108,6 +109,37 @@ describe("pasteOutcome", () => {
       kind: "failed",
     });
     expect(pasteOutcome({ response: response(503) })).toEqual({ kind: "failed" });
+  });
+});
+
+describe("discardOutcome", () => {
+  it("is discarded on a 204", () => {
+    expect(discardOutcome({ response: response(204) })).toEqual({ kind: "discarded" });
+  });
+
+  it("is gone when the API can't find the Queued Ingest", () => {
+    expect(discardOutcome({ error: { detail: "No" }, response: response(404) })).toEqual({
+      kind: "gone",
+    });
+  });
+
+  it("isn't gone when something other than the API answers the 404", () => {
+    expect(discardOutcome({ error: "<html>", response: response(404) })).toEqual({
+      kind: "failed",
+    });
+  });
+
+  it("is a conflict, not gone, when the Queued Ingest no longer reserves its Source", () => {
+    expect(discardOutcome({ error: { detail: "No" }, response: response(409) })).toEqual({
+      kind: "conflict",
+    });
+  });
+
+  it("tells a refused editor from a failure", () => {
+    expect(discardOutcome({ error: { detail: "No" }, response: response(403) })).toEqual({
+      kind: "not-an-editor",
+    });
+    expect(discardOutcome({ response: response(503) })).toEqual({ kind: "failed" });
   });
 });
 

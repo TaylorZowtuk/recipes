@@ -54,23 +54,42 @@ describe("AddRecipeScreen", () => {
 });
 
 describe("QueuedItem", () => {
-  const item = (queued: QueuedIngest, blocked: "offline" | "paused" | null = null) =>
-    renderToStaticMarkup(<QueuedItem item={queued} blocked={blocked} onPaste={() => {}} />);
+  const item = (
+    queued: QueuedIngest,
+    blocked: "offline" | "paused" | null = null,
+    discarding = false,
+  ) =>
+    renderToStaticMarkup(
+      <QueuedItem
+        item={queued}
+        blocked={blocked}
+        discarding={discarding}
+        onPaste={() => {}}
+        onDiscard={() => {}}
+      />,
+    );
+  const waiting: QueuedIngest = { ...needsPage, state: "waiting" };
 
-  it("offers to paste the page of one that needs it, naming which", () => {
-    const html = item(needsPage);
+  it.each([
+    ["needing its page", needsPage],
+    ["waiting", waiting],
+  ])("offers paste and discard on one %s, naming which", (_state, queued) => {
+    const html = item(queued);
     expect(html).toContain("Paste its page");
-    expect(html).toContain("> for https://kitchen.example.com/stew<");
+    expect(html).toContain("Discard");
+    expect(html.match(/> for https:\/\/kitchen\.example\.com\/stew</g)).toHaveLength(2);
   });
 
-  it("offers nothing on one still waiting", () => {
-    expect(item({ ...needsPage, state: "waiting" })).not.toContain("Paste its page");
+  it("turns both offers off while offline or paused", () => {
+    expect(item(needsPage)).not.toMatch(/<button[^>]*disabled=""/);
+    for (const blocked of ["offline", "paused"] as const) {
+      expect(item(waiting, blocked).match(/<button[^>]*disabled=""/g)).toHaveLength(2);
+    }
   });
 
-  it("turns the offer off while offline or paused", () => {
-    expect(item(needsPage)).not.toMatch(/<button[^>]*disabled/);
-    expect(item(needsPage, "offline")).toMatch(/<button[^>]*disabled/);
-    expect(item(needsPage, "paused")).toMatch(/<button[^>]*disabled/);
+  it("marks the discard as busy while it's on its way", () => {
+    expect(item(needsPage)).toMatch(/<button[^>]*aria-disabled="false"/);
+    expect(item(needsPage, null, true)).toMatch(/<button[^>]*aria-disabled="true"/);
   });
 });
 
