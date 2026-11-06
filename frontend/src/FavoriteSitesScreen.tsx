@@ -22,13 +22,12 @@ import {
   isComplete,
   recipeCountOf,
   type SitesAction,
-  type SitesOutcome,
-  sitesOutcome,
 } from "./favoriteSites";
 import { LoadFailed } from "./LoadFailed";
 import { PAUSED, useEditBlock, useMounted } from "./RecipeFields";
 import { focusTitle, Screen } from "./Screen";
 import { EditorOnly } from "./session";
+import { type BatchOutcome, batchOutcome } from "./writeOutcome";
 
 const EDIT_HEADING = "edit-sites-heading";
 
@@ -198,9 +197,9 @@ function SitesEditor({
     if (busy || count === 0) return;
     if (!isComplete(draft)) return dispatch({ type: "incomplete" });
     setBusy(true);
-    let outcome: SitesOutcome;
+    let outcome: BatchOutcome;
     try {
-      outcome = sitesOutcome(
+      outcome = batchOutcome(
         await api.PATCH("/api/favorite-sites", {
           body: { version: saved.version, operations: draftOperations(saved.sites, draft) },
         }),

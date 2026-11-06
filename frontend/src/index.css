@@ -1000,6 +1000,7 @@ h1:focus {
 }
 
 .queued h2,
+.kitchen :where(section) > h2,
 .difficulty-field > legend,
 .photo-picker > legend {
   margin: calc(var(--space) * 6) 0 calc(var(--space) * 2);
@@ -1066,6 +1067,109 @@ h1:focus {
 
 .site-note {
   margin: 0 0 var(--space);
+}
+
+/* Kitchen settings: the Store Categories and the Pantry Staples, one under the other. */
+.kitchen {
+  max-width: 640px;
+  padding-bottom: calc(var(--space) * 6);
+}
+
+.kitchen .kitchen-edit-open {
+  align-items: flex-start;
+  margin: 0 0 calc(var(--space) * 3);
+}
+
+/* As wide as the list it searches. */
+.kitchen .search {
+  max-width: none;
+}
+
+.category-rows li {
+  align-items: stretch;
+}
+
+/* While a row is dragged the others slide out of its way; the dragged one follows the pointer. */
+.is-dragging li {
+  transition: transform calc(var(--motion) / 2) ease-out;
+}
+
+.category-rows li.is-dragged {
+  position: relative;
+  z-index: 1;
+  box-shadow: var(--elevation-float);
+  transition: none;
+}
+
+.category-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+
+/* The row's grip takes the gesture, so a drag on it never scrolls the page. */
+.category-grip {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: var(--tap);
+  margin-left: calc(var(--space) * -2);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.is-dragged .category-grip {
+  cursor: grabbing;
+}
+
+.category-grip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.category-rows .field-hint {
+  margin: var(--space) 0 0;
+}
+
+.staple-rows {
+  margin-top: calc(var(--space) * 3);
+}
+
+.staple-rows li {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--space) * 3);
+}
+
+.staple-rows .badge {
+  flex: none;
+  margin: 0;
+}
+
+.staple-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.staple-rows .chip[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.staple-rows .chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .site-add,
@@ -1152,6 +1256,11 @@ h1:focus {
 .review-form {
   max-width: 640px;
   margin: 0 auto;
+}
+
+/* Beside the list it swaps for, not centred like a recipe's form. */
+.kitchen .review-form {
+  margin: 0;
 }
 
 .review-form .difficulty-field {
@@ -1628,6 +1737,10 @@ h1:focus {
 
 .sheet-title:focus {
   outline: none;
+}
+
+.sheet-lead {
+  margin: 0;
 }
 
 .sheet-section {

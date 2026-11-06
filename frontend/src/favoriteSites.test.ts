@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CountedSite, CountedSites } from "./api/client";
+import type { CountedSite } from "./api/client";
 import {
   CHANGED_ELSEWHERE,
   CHANGED_NOT_REFRESHED,
@@ -14,9 +14,8 @@ import {
   isComplete,
   recipeCountOf,
   type SitesAction,
-  type SitesOutcome,
-  sitesOutcome,
 } from "./favoriteSites";
+import type { BatchOutcome } from "./writeOutcome";
 
 const site = (id: string, fields: Partial<CountedSite> = {}): CountedSite => ({
   id,
@@ -191,48 +190,9 @@ describe("isComplete", () => {
   });
 });
 
-const answer = (status: number, body: { data?: CountedSites; error?: unknown }) => ({
-  ...body,
-  response: new Response(null, { status }),
-});
-
-describe("sitesOutcome", () => {
-  it("is saved on a 200", () => {
-    expect(sitesOutcome(answer(200, { data: { version: 2, sites: [] } })).kind).toBe("saved");
-  });
-
-  it("is a conflict on the API's 409", () => {
-    expect(sitesOutcome(answer(409, { error: { detail: "stale" } })).kind).toBe("conflict");
-  });
-
-  it("is not-an-editor on the API's 403, and failed on the WAF's", () => {
-    expect(sitesOutcome(answer(403, { error: { detail: "no" } })).kind).toBe("not-an-editor");
-    expect(sitesOutcome(answer(403, { error: "<html>" })).kind).toBe("failed");
-  });
-
-  it("carries the server's message on a 422", () => {
-    expect(
-      sitesOutcome(answer(422, { error: { detail: "Two sites are on the same host" } })),
-    ).toEqual({
-      kind: "invalid",
-      message: "Two sites are on the same host",
-    });
-  });
-
-  it("carries the first message of a validation 422", () => {
-    expect(
-      sitesOutcome(answer(422, { error: { detail: [{ msg: "Too long" }, { msg: "Other" }] } })),
-    ).toEqual({ kind: "invalid", message: "Too long" });
-  });
-
-  it("is failed on a 422 with no message", () => {
-    expect(sitesOutcome(answer(422, { error: "<html>" })).kind).toBe("failed");
-  });
-});
-
 describe("editingSites", () => {
   const editing = () => ({ draft: draftAfter(change("a", { name: "New" })) });
-  const settled = (outcome: SitesOutcome, refreshed = true) =>
+  const settled = (outcome: BatchOutcome, refreshed = true) =>
     editingSites(editing(), { type: "settled", outcome, refreshed });
 
   it("opens from the saved sites, dropping any old notice", () => {
