@@ -541,7 +541,7 @@ describe("the recipe view, for an editor", () => {
       />,
     );
     expect([...markup.matchAll(/review-mark-unchecked/g)]).toHaveLength(1);
-    expect(markup).toContain("<li>Serve.</li>");
+    expect(markup).toMatch(/<li [^>]*>Serve\.<\/li>/);
   });
 
   it("offers Confirm N on this tab, skipping flagged items, and nothing when none are left", () => {
