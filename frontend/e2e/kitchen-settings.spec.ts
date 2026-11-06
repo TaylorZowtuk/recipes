@@ -1,4 +1,4 @@
-import { type APIRequestContext, expect, type Page, test } from "@playwright/test";
+import { type APIRequestContext, expect, type Locator, type Page, test } from "@playwright/test";
 
 // The local API's fake sign-in isn't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in");
@@ -194,6 +194,27 @@ async function dragRows(page: Page, category: string, rows: number) {
   await page.mouse.up();
 }
 
+// A pointer Playwright's one mouse can't be: a second one, or one the browser gives up on. It has
+// no real pointer behind it to capture, so the grip it presses gets a stubbed capture.
+const fakeCapture = (handle: Locator) =>
+  handle.evaluate((element) => {
+    element.setPointerCapture = () => {};
+  });
+const pointer = (handle: Locator, type: string, pointerId: number, clientY = 0) =>
+  handle.dispatchEvent(type, { pointerId, clientY });
+
+// Where a row's grip is, and how far apart its list's rows sit.
+async function gripAt(page: Page, category: string) {
+  const handle = grip(page, category);
+  await handle.scrollIntoViewIfNeeded();
+  const box = await handle.boundingBox();
+  const [first, second] = await page
+    .locator(".category-rows > li")
+    .evaluateAll((rows) => rows.slice(0, 2).map((row) => row.getBoundingClientRect().top));
+  if (!box || first === undefined || second === undefined) throw new Error("no rows");
+  return { handle, x: box.x + box.width / 2, y: box.y + box.height / 2, stride: second - first };
+}
+
 test("a visitor sees the list and which are Pantry Staples, read-only", async ({ page }) => {
   await stubKitchen(page, [AISLES, BAKERY]);
   await page.goto("/kitchen-settings");
@@ -333,6 +354,103 @@ test("a touch drag on the grip reorders the Draft, and doesn't scroll the page",
 
   await expect.poll(() => draftNames(page)).toEqual(["Bakery", "Aisles", "Chilled"]);
   expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+});
+
+for (const ending of ["pointercancel", "lostpointercapture"]) {
+  test(`a ${ending} mid-drag leaves the order as it was`, async ({ page }) => {
+    await editorEdits(page, [AISLES, BAKERY, CHILLED]);
+    const { handle, y, stride } = await gripAt(page, AISLES.name);
+    await fakeCapture(handle);
+
+    await pointer(handle, "pointerdown", 7, y);
+    await pointer(handle, "pointermove", 7, y + 2 * stride);
+    await expect(page.locator(".is-dragged")).toHaveCount(1);
+    await pointer(handle, ending, 7);
+    await expect(page.locator(".is-dragged")).toHaveCount(0);
+    await pointer(handle, "pointerup", 7, y + 2 * stride);
+
+    await expect(saveButton(page)).toHaveText("Save 0 changes");
+    expect(await draftNames(page)).toEqual(["Aisles", "Bakery", "Chilled"]);
+  });
+}
+
+test("a right press on the grip doesn't start a drag", async ({ page }) => {
+  await editorEdits(page, [AISLES, BAKERY, CHILLED]);
+  const { x, y, stride } = await gripAt(page, AISLES.name);
+
+  await page.mouse.move(x, y);
+  await page.mouse.down({ button: "right" });
+  await page.mouse.move(x, y + 2 * stride, { steps: 4 });
+  await expect(page.locator(".is-dragged")).toHaveCount(0);
+  await page.mouse.up({ button: "right" });
+
+  await expect(saveButton(page)).toHaveText("Save 0 changes");
+});
+
+test("a second pointer neither starts a drag nor takes over the one under way", async ({
+  page,
+}) => {
+  await editorEdits(page, [AISLES, BAKERY, CHILLED, DELI]);
+  const { handle: held, y, stride } = await gripAt(page, AISLES.name);
+  const { handle: other } = await gripAt(page, CHILLED.name);
+  await fakeCapture(held);
+  await fakeCapture(other);
+
+  await pointer(held, "pointerdown", 7, y);
+  await pointer(held, "pointermove", 7, y + stride);
+
+  await pointer(other, "pointerdown", 8, y);
+  await pointer(other, "pointermove", 8, y + stride);
+  await pointer(other, "pointerup", 8, y + stride);
+  for (const type of ["pointermove", "pointerup", "pointercancel", "lostpointercapture"]) {
+    await pointer(held, type, 8, y + 3 * stride);
+  }
+  await expect(draftRow(page, AISLES.name)).toHaveClass("is-dragged");
+  await expect(saveButton(page)).toHaveText("Save 0 changes");
+
+  await pointer(held, "pointerup", 7, y + stride);
+  await expect.poll(() => draftNames(page)).toEqual(["Bakery", "Aisles", "Chilled", "Deli"]);
+});
+
+test("a row held at the window's edge keeps scrolling the page, and stays under the pointer", async ({
+  page,
+}) => {
+  const names = Array.from({ length: 10 }, (_, n) => `Aisle ${n}`);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("no viewport");
+  await page.setViewportSize({ width: viewport.width, height: 480 });
+  await editorEdits(
+    page,
+    names.map((name) => ({ id: name.toLowerCase().replace(" ", "-"), name })),
+  );
+  // Far enough down that the page has already scrolled when the press lands.
+  const from = 3;
+  const dragged = names[from] as string;
+  const { x, y, stride } = await gripAt(page, dragged);
+  const row = draftRow(page, dragged);
+  const top = (await row.boundingBox())?.y ?? 0;
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(0);
+
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  const edge = 460;
+  await page.mouse.move(x, edge, { steps: 4 });
+  // No more moves: the pointer is only held.
+  await page.waitForFunction((target) => window.scrollY > target, before + 2 * stride);
+  const held = (await row.boundingBox())?.y ?? 0;
+  expect(Math.abs(held - (top + edge - y))).toBeLessThan(stride / 2);
+
+  // Out of the edge the scroll stops, so the index is exact.
+  const middle = 240;
+  await page.mouse.move(x, middle);
+  const scrolled = await page.evaluate(() => window.scrollY);
+  await page.mouse.up();
+
+  const index = from + Math.round((middle + scrolled - (y + before)) / stride);
+  expect(index).toBeGreaterThan(from);
+  expect(index).toBeLessThan(names.length - 1);
+  await expect.poll(async () => (await draftNames(page)).indexOf(dragged)).toBe(index);
 });
 
 test("an unsaved category stays at the foot until it's saved", async ({ page }) => {

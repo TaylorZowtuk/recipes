@@ -3,6 +3,7 @@ import {
   type Dispatch,
   type DOMAttributes,
   type FormEvent,
+  type PointerEvent,
   type RefObject,
   useCallback,
   useEffect,
@@ -45,9 +46,9 @@ import { type BatchOutcome, batchOutcome, versionedRefusal } from "./writeOutcom
 
 const EDIT_HEADING = "edit-categories-heading";
 const NEW_CATEGORY = "New category";
-// How near the window's edges a drag scrolls it, and how far each pointer move does.
+// How near the window's edges a drag scrolls it, and how far it does each frame.
 const DRAG_EDGE = 96;
-const DRAG_SCROLL = 16;
+const DRAG_SCROLL = 8;
 
 const focusEditHeading = () =>
   document.getElementById(EDIT_HEADING)?.focus({ preventScroll: true });
@@ -158,20 +159,52 @@ function CategoryList({ settings, onEdit }: { settings: KitchenSettings; onEdit:
 
 type Grip = Pick<
   DOMAttributes<HTMLButtonElement>,
-  "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel"
+  "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onLostPointerCapture"
 >;
-type Drag = DragShift & { key: string; startY: number; count: number };
+type Drag = DragShift & { key: string; pointerId: number; startY: number; count: number };
+
+const follow = (drag: Drag, pageY: number): Drag => {
+  const dy = pageY - drag.startY;
+  return { ...drag, dy, to: dropIndex(drag.from, dy, drag.stride, drag.count) };
+};
+
+const edgeScroll = (clientY: number) => {
+  if (clientY < DRAG_EDGE) return -DRAG_SCROLL;
+  return clientY > window.innerHeight - DRAG_EDGE ? DRAG_SCROLL : 0;
+};
 
 // A pointer drag on a row's grip, for touch and mouse alike. The rows stay where they are in the
 // page while it lasts, drawn shifted, and the Draft changes once, on the drop: moving a row's
-// element mid-drag would drop the grip's pointer capture.
+// element mid-drag would drop the grip's pointer capture. Only the pointer that started it counts.
 function useCategoryDrag(draft: Draft, dispatch: Dispatch<CategoriesAction>) {
   const rows = useRef<HTMLUListElement>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const movedTo = useRef<number | null>(null);
+  const dragging = !!drag;
+
+  // The list can be taller than a phone's screen, and the grip holds off the page's own scroll, so
+  // a pointer moved to a window edge scrolls the page each frame for as long as it stays there.
+  useEffect(() => {
+    if (!dragging) return;
+    let frame = requestAnimationFrame(function scroll() {
+      const y = movedTo.current;
+      const step = y === null ? 0 : edgeScroll(y);
+      if (y !== null && step) {
+        window.scrollBy(0, step);
+        setDrag((held) => held && follow(held, y + window.scrollY));
+      }
+      frame = requestAnimationFrame(scroll);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [dragging]);
+
+  const end = (event: PointerEvent) => {
+    if (event.pointerId === drag?.pointerId) setDrag(null);
+  };
 
   const grip = (key: string): Grip => ({
     onPointerDown(event) {
-      if (event.currentTarget.matches(":disabled")) return;
+      if (drag || event.button !== 0 || event.currentTarget.matches(":disabled")) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
       const saved = draft.categories.filter((category) => !category.added);
@@ -179,8 +212,10 @@ function useCategoryDrag(draft: Draft, dispatch: Dispatch<CategoriesAction>) {
         row.getBoundingClientRect(),
       );
       const from = saved.findIndex((category) => category.key === key);
+      movedTo.current = null;
       setDrag({
         key,
+        pointerId: event.pointerId,
         from,
         to: from,
         dy: 0,
@@ -190,21 +225,17 @@ function useCategoryDrag(draft: Draft, dispatch: Dispatch<CategoriesAction>) {
       });
     },
     onPointerMove(event) {
-      if (drag?.key !== key) return;
-      // The list can be taller than a phone's screen, and the grip holds off the page's own scroll.
-      if (event.clientY < DRAG_EDGE) window.scrollBy(0, -DRAG_SCROLL);
-      if (event.clientY > window.innerHeight - DRAG_EDGE) window.scrollBy(0, DRAG_SCROLL);
-      const dy = event.pageY - drag.startY;
-      setDrag({ ...drag, dy, to: dropIndex(drag.from, dy, drag.stride, drag.count) });
+      if (event.pointerId !== drag?.pointerId) return;
+      movedTo.current = event.clientY;
+      setDrag(follow(drag, event.pageY));
     },
-    onPointerUp() {
-      if (drag?.key !== key) return;
+    onPointerUp(event) {
+      if (event.pointerId !== drag?.pointerId) return;
       dispatch({ type: "place", key, index: drag.to });
       setDrag(null);
     },
-    onPointerCancel() {
-      setDrag(null);
-    },
+    onPointerCancel: end,
+    onLostPointerCapture: end,
   });
 
   return { rows, drag, grip };
