@@ -168,6 +168,26 @@ const pages: Shot[] = [
       "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
   },
   {
+    name: "add-recipe-needs-page",
+    path: "/add",
+    ready: "Add a recipe",
+    editor: true,
+    ingest: "robots-denied/screenshot-listed-stew",
+    loaded:
+      "This site doesn’t allow automated fetching, so the recipe needs its page pasted in. It’s in the list below.",
+  },
+  {
+    name: "add-recipe-paste",
+    path: "/add",
+    ready: "Add a recipe",
+    editor: true,
+    ingest: "robots-denied/screenshot-stew",
+    loaded:
+      "This site doesn’t allow automated fetching, so the recipe needs its page pasted in. It’s in the list below.",
+    click: /^Paste its page/,
+    shows: "The page’s source (HTML)",
+  },
+  {
     name: "recipe",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
     ready: "Sesame Noodles with Crispy Tofu",

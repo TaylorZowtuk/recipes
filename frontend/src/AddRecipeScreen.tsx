@@ -6,8 +6,10 @@ import {
   type DifficultyChoice,
   type IngestOutcome,
   ingestOutcome,
+  type PasteOutcome,
   type PhotoChoice,
   parseTags,
+  pasteOutcome,
   previewPhoto,
   type SaveOutcome,
   saveOutcome,
@@ -15,7 +17,13 @@ import {
   storeCandidates,
   storedImages,
 } from "./addRecipe";
-import { api, type Duplicate, type Ingested, type QueuedIngest } from "./api/client";
+import {
+  api,
+  type Duplicate,
+  type Ingested,
+  type NewRecipe,
+  type QueuedIngest,
+} from "./api/client";
 import { forgetCollection } from "./collection";
 import { useOnline } from "./online";
 import { Plate } from "./Plate";
@@ -56,20 +64,24 @@ export function AddRecipeScreen() {
 }
 
 function AddRecipe({ fromSite }: { fromSite?: string }) {
+  const [pasting, setPasting] = useState<QueuedIngest>();
   const [review, setReview] = useState<Ingested>();
   const online = useOnline();
   const queued = useQueuedIngests(online);
 
+  // The Queued Ingest may have gone meanwhile, so the list loads afresh.
+  const backToList = () => {
+    setReview(undefined);
+    setPasting(undefined);
+    queued.reload();
+    focusTitle();
+  };
+
   if (review) {
-    return (
-      <Review
-        ingested={review}
-        onCancel={() => {
-          setReview(undefined);
-          focusTitle();
-        }}
-      />
-    );
+    return <Review ingested={review} queuedIngestId={pasting?.id} onCancel={backToList} />;
+  }
+  if (pasting) {
+    return <PastePage item={pasting} onIngested={setReview} onBack={backToList} />;
   }
   return (
     <div className="add-recipe">
@@ -79,7 +91,12 @@ function AddRecipe({ fromSite }: { fromSite?: string }) {
         </p>
       )}
       <UrlForm onIngested={setReview} onQueued={queued.reload} />
-      <QueuedIngests loaded={queued.loaded} online={online} retry={queued.reload} />
+      <QueuedIngests
+        loaded={queued.loaded}
+        online={online}
+        retry={queued.reload}
+        onPaste={setPasting}
+      />
     </div>
   );
 }
@@ -89,6 +106,8 @@ type Message = { alert: boolean; body: ReactNode };
 const UNREACHABLE = "Couldn’t reach Plateful. Try again.";
 const NOT_AN_EDITOR = "Only the household’s editors can add recipes. Sign in again.";
 const CONFLICT = "Something changed in the meantime. Try again.";
+const GONE =
+  "This recipe isn’t waiting any more, so someone may have finished it. Go back to the list, or look for it in the Collection.";
 
 function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): Message {
   switch (outcome.kind) {
@@ -97,7 +116,7 @@ function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): 
         alert: false,
         body:
           outcome.queuedIngest.state === "needs_page"
-            ? "This site doesn’t allow automated fetching, so the recipe needs its page pasted in later. It’s in the list below."
+            ? "This site doesn’t allow automated fetching, so the recipe needs its page pasted in. It’s in the list below."
             : "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
       };
     case "duplicate":
@@ -121,7 +140,7 @@ function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): 
 // What a duplicate Source already is: a recipe, with a link to it, or a Queued Ingest.
 function DuplicateNote({ duplicate }: { duplicate: Duplicate }) {
   if (duplicate.queued_ingest_id) {
-    return <>This recipe is already waiting for the fallback, in the list below.</>;
+    return <>This recipe is already waiting to be added, in the list below.</>;
   }
   return (
     <>
@@ -255,15 +274,18 @@ function QueuedIngests({
   loaded,
   online,
   retry,
+  onPaste,
 }: {
   loaded: QueuedLoad;
   online: boolean;
   retry: () => void;
+  onPaste: (item: QueuedIngest) => void;
 }) {
+  const blocked = useEditBlock();
   const unavailable = !online && loaded.state !== "ready";
   return (
     <section className="queued" aria-labelledby="queued-heading">
-      <h2 id="queued-heading">Waiting for the fallback</h2>
+      <h2 id="queued-heading">Waiting to be added</h2>
       <p role="status" className="screen-note">
         {unavailable && "The list isn’t available offline."}
         {!unavailable && loaded.state === "loading" && "Loading…"}
@@ -280,7 +302,7 @@ function QueuedIngests({
       {loaded.state === "ready" && loaded.value.length > 0 && (
         <ul className="queued-list" aria-labelledby="queued-heading">
           {loaded.value.map((item) => (
-            <QueuedItem key={item.id} item={item} />
+            <QueuedItem key={item.id} item={item} blocked={blocked} onPaste={onPaste} />
           ))}
         </ul>
       )}
@@ -288,16 +310,31 @@ function QueuedIngests({
   );
 }
 
-function QueuedItem({ item }: { item: QueuedIngest }) {
-  const { source } = item;
-  const name = source.kind === "website" ? source.site_name : source.entry_name;
+const sourceName = ({ source }: QueuedIngest) =>
+  source.kind === "website" ? source.site_name : source.entry_name;
+
+function SourceLink({ item }: { item: QueuedIngest }) {
+  return (
+    <a href={item.source.url} target="_blank" rel="noopener noreferrer" className="queued-url">
+      {item.source.url}
+      <span className="visually-hidden"> (opens in a new tab)</span>
+    </a>
+  );
+}
+
+export function QueuedItem({
+  item,
+  blocked,
+  onPaste,
+}: {
+  item: QueuedIngest;
+  blocked: ReturnType<typeof useEditBlock>;
+  onPaste: (item: QueuedIngest) => void;
+}) {
   return (
     <li>
-      <span className="queued-site">{name}</span>
-      <a href={source.url} target="_blank" rel="noopener noreferrer" className="queued-url">
-        {source.url}
-        <span className="visually-hidden"> (opens in a new tab)</span>
-      </a>
+      <span className="queued-site">{sourceName(item)}</span>
+      <SourceLink item={item} />
       <span className="queued-meta">
         {reasons[item.reason]} · since{" "}
         <time dateTime={item.queued_at}>{since.format(new Date(item.queued_at))}</time>
@@ -305,7 +342,143 @@ function QueuedItem({ item }: { item: QueuedIngest }) {
       <span className={item.state === "needs_page" ? "badge badge-attention" : "badge"}>
         {item.state === "needs_page" ? "Needs the page pasted in" : "Waiting for the fallback"}
       </span>
+      {item.state === "needs_page" && (
+        <button
+          type="button"
+          className="button button-secondary queued-paste"
+          disabled={!!blocked}
+          onClick={() => onPaste(item)}
+        >
+          Paste its page
+          <span className="visually-hidden"> for {item.source.url}</span>
+        </button>
+      )}
     </li>
+  );
+}
+
+function pasteProblem(outcome: Exclude<PasteOutcome, { kind: "ingested" }>): string {
+  switch (outcome.kind) {
+    case "no-recipe":
+      return "No recipe was found in that. Copy the page’s whole source (HTML), not just the text you can see, and paste it again.";
+    case "too-large":
+      return "That’s too large: a page can be about 2 MB at most. Check you copied only this page’s source (HTML), and paste it again.";
+    case "gone":
+      return GONE;
+    case "not-an-editor":
+      return NOT_AN_EDITOR;
+    case "conflict":
+      return CONFLICT;
+    case "failed":
+      return UNREACHABLE;
+  }
+}
+
+// Focuses the heading a step opens with, and shows the top of it.
+function useOpeningHeading() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }, []);
+  return heading;
+}
+
+// Finishes a Queued Ingest that needs its page: the editor pastes the page's source, and what it
+// captures goes to the review. The paste lives only in this component's state, and stays in the
+// field through every failure. The field doesn't wrap or spell-check, so a huge paste stays quick.
+export function PastePage({
+  item,
+  onIngested,
+  onBack,
+}: {
+  item: QueuedIngest;
+  onIngested: (ingested: Ingested) => void;
+  onBack: () => void;
+}) {
+  const blocked = useEditBlock();
+  const [html, setHtml] = useState("");
+  const [reading, setReading] = useState(false);
+  const [problem, setProblem] = useState<string>();
+  const mounted = useMounted();
+  const heading = useOpeningHeading();
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (reading) return;
+    if (!html.trim()) return setProblem("Paste the page’s source (HTML) first.");
+    setProblem(undefined);
+    setReading(true);
+    let outcome: PasteOutcome;
+    try {
+      outcome = pasteOutcome(
+        await api.POST("/api/queued-ingests/{ingest_id}/pasted-page", {
+          params: { path: { ingest_id: item.id } },
+          body: { html },
+        }),
+      );
+    } catch {
+      outcome = { kind: "failed" };
+    }
+    if (!mounted.current) return;
+    setReading(false);
+    if (outcome.kind === "ingested") return onIngested(outcome.ingested);
+    if (outcome.kind === "gone") forgetCollection();
+    setProblem(pasteProblem(outcome));
+  };
+
+  return (
+    <div className="add-recipe paste-page">
+      <h2 ref={heading} tabIndex={-1}>
+        Paste the page
+      </h2>
+      <p className="queued-site">{sourceName(item)}</p>
+      <SourceLink item={item} />
+      <form className="ingest-form" noValidate onSubmit={submit}>
+        <fieldset disabled={!!blocked}>
+          <label htmlFor="pasted-page">The page’s source (HTML)</label>
+          <p id="pasted-page-hint" className="field-hint">
+            Open the page in a browser, view its source, then copy all of it and paste it here.
+          </p>
+          <textarea
+            id="pasted-page"
+            className="text-input pasted-page-input"
+            aria-describedby="pasted-page-hint"
+            rows={8}
+            wrap="off"
+            spellCheck={false}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            value={html}
+            onChange={(event) => setHtml(event.target.value)}
+          />
+        </fieldset>
+        <div className="review-actions">
+          <button type="submit" className="button" disabled={!!blocked} aria-disabled={reading}>
+            {reading ? "Reading…" : "Read the page"}
+          </button>
+          <button type="button" className="button button-secondary" onClick={onBack}>
+            Back to the list
+          </button>
+        </div>
+        {blocked && (
+          <p className="screen-note">
+            {blocked === "offline"
+              ? "You’re offline. Paste the page once you’re back online."
+              : PAUSED}
+          </p>
+        )}
+        <p role="status" className="screen-note">
+          {reading && "Reading the page…"}
+        </p>
+        {problem && (
+          <p role="alert" className="form-problem">
+            {problem}
+          </p>
+        )}
+      </form>
+    </div>
   );
 }
 
@@ -333,7 +506,16 @@ function useCandidates(urls: string[]): Candidate[] {
 
 // The captured Original, read-only, beside the editor's Preview Photo and optional Difficulty and
 // Tags. The hero plate, and a small one beside the Focal Point picker, preview the round crop.
-function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => void }) {
+// With a `queuedIngestId`, saving finishes that Queued Ingest.
+function Review({
+  ingested,
+  queuedIngestId,
+  onCancel,
+}: {
+  ingested: Ingested;
+  queuedIngestId?: string;
+  onCancel: () => void;
+}) {
   const { source, original } = ingested;
   const candidates = useCandidates(ingested.candidate_photos);
   const [picked, setPicked] = useState<PhotoChoice>();
@@ -341,17 +523,12 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
   const navigate = useNavigate();
   const blocked = useEditBlock();
   const mounted = useMounted();
-  const heading = useRef<HTMLHeadingElement>(null);
+  const heading = useOpeningHeading();
   const [difficulty, setDifficulty] = useState<DifficultyChoice>({});
   const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<ReactNode>();
   const storing = stillStoring(candidates) > 0;
-
-  useEffect(() => {
-    heading.current?.focus({ preventScroll: true });
-    window.scrollTo(0, 0);
-  }, []);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -361,20 +538,24 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
     if (!chosen.complete) return setProblem("Rate all of Prep, Cook and Cleanup, or clear them.");
     setProblem(undefined);
     setSaving(true);
+    const body: NewRecipe = {
+      source,
+      original,
+      difficulty: chosen.difficulty,
+      tags: parseTags(tags),
+      // Every candidate that stored, picked or not, and the Preview Photo, or null for none.
+      images: storedImages(candidates),
+      preview,
+    };
     let outcome: SaveOutcome;
     try {
       outcome = saveOutcome(
-        await api.POST("/api/recipes", {
-          body: {
-            source,
-            original,
-            difficulty: chosen.difficulty,
-            tags: parseTags(tags),
-            // Every candidate that stored, picked or not, and the Preview Photo, or null for none.
-            images: storedImages(candidates),
-            preview,
-          },
-        }),
+        await (queuedIngestId
+          ? api.POST("/api/queued-ingests/{ingest_id}/recipe", {
+              params: { path: { ingest_id: queuedIngestId } },
+              body,
+            })
+          : api.POST("/api/recipes", { body })),
       );
     } catch {
       // Offline or unreachable: the problem below says to try again.
@@ -386,10 +567,13 @@ function Review({ ingested, onCancel }: { ingested: Ingested; onCancel: () => vo
       forgetCollection();
       return navigate("/recipes");
     }
-    if (outcome.kind === "duplicate" && outcome.duplicate.recipe_id) forgetCollection();
+    if (outcome.kind === "gone" || (outcome.kind === "duplicate" && outcome.duplicate.recipe_id))
+      forgetCollection();
     setProblem(
       outcome.kind === "duplicate" ? (
         <DuplicateNote duplicate={outcome.duplicate} />
+      ) : outcome.kind === "gone" ? (
+        GONE
       ) : outcome.kind === "not-an-editor" ? (
         NOT_AN_EDITOR
       ) : outcome.kind === "conflict" ? (

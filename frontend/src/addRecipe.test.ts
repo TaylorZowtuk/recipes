@@ -5,6 +5,7 @@ import {
   defaultPreview,
   ingestOutcome,
   parseTags,
+  pasteOutcome,
   previewPhoto,
   saveOutcome,
   stillStoring,
@@ -70,9 +71,56 @@ describe("ingestOutcome", () => {
   });
 });
 
+describe("pasteOutcome", () => {
+  it("is the captured Original on a 200, to review", () => {
+    expect(pasteOutcome({ data: ingested, response: response(200) })).toEqual({
+      kind: "ingested",
+      ingested,
+    });
+  });
+
+  it("tells no recipe, too large and gone apart", () => {
+    const detail = { detail: "No" };
+    expect(pasteOutcome({ error: detail, response: response(422) })).toEqual({
+      kind: "no-recipe",
+    });
+    expect(pasteOutcome({ error: detail, response: response(413) })).toEqual({
+      kind: "too-large",
+    });
+    expect(pasteOutcome({ error: detail, response: response(404) })).toEqual({ kind: "gone" });
+  });
+
+  it("is too large however the 413 is spelled: Lambda's own limit answers with no JSON", () => {
+    expect(pasteOutcome({ error: "Too large", response: response(413) })).toEqual({
+      kind: "too-large",
+    });
+  });
+
+  it("isn't gone when something other than the API answers the 404", () => {
+    expect(pasteOutcome({ error: "<html>", response: response(404) })).toEqual({ kind: "failed" });
+  });
+
+  it("is not-an-editor only for the API's own 403, and anything else a failure", () => {
+    expect(pasteOutcome({ error: { detail: "No" }, response: response(403) })).toEqual({
+      kind: "not-an-editor",
+    });
+    expect(pasteOutcome({ error: "Forbidden", response: response(403) })).toEqual({
+      kind: "failed",
+    });
+    expect(pasteOutcome({ response: response(503) })).toEqual({ kind: "failed" });
+  });
+});
+
 describe("saveOutcome", () => {
   it("is saved on a 201", () => {
     expect(saveOutcome({ response: response(201) })).toEqual({ kind: "saved" });
+  });
+
+  it("is gone when the API can't find the Queued Ingest being finished", () => {
+    expect(saveOutcome({ error: { detail: "No" }, response: response(404) })).toEqual({
+      kind: "gone",
+    });
+    expect(saveOutcome({ error: "<html>", response: response(404) })).toEqual({ kind: "failed" });
   });
 
   it("names a duplicate, or is a retry when the 409 names nothing", () => {

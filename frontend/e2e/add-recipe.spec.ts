@@ -69,7 +69,7 @@ async function fetchRecipe(page: Page, url: string) {
 }
 
 const queuedItem = (page: Page, url: string) =>
-  page.getByRole("list", { name: "Waiting for the fallback" }).getByRole("listitem").filter({
+  page.getByRole("list", { name: "Waiting to be added" }).getByRole("listitem").filter({
     hasText: url,
   });
 
@@ -276,7 +276,7 @@ test("a page that can't be fetched waits for the fallback", async ({ page }, tes
 
   await fetchRecipe(page, robots);
   await expect(page.getByRole("status").filter({ hasText: "pasted" })).toContainText(
-    "needs its page pasted in later",
+    "needs its page pasted in",
   );
   await expect(queuedItem(page, robots)).toContainText("The site doesn’t allow automated fetching");
   await expect(queuedItem(page, robots).locator(".badge")).toHaveText("Needs the page pasted in");
@@ -286,7 +286,7 @@ test("a page that can't be fetched waits for the fallback", async ({ page }, tes
   await expect(queuedItem(page, blocked)).toBeVisible();
   await fetchRecipe(page, blocked);
   await expect(page.getByRole("status").filter({ hasText: "already" })).toHaveText(
-    "This recipe is already waiting for the fallback, in the list below.",
+    "This recipe is already waiting to be added, in the list below.",
   );
   await expect(queuedItem(page, blocked)).toHaveCount(1);
 });
@@ -342,7 +342,7 @@ test("the Waiting list says it isn't available offline, and loads once back", as
   page,
   context,
 }) => {
-  const waiting = page.getByRole("region", { name: "Waiting for the fallback" });
+  const waiting = page.getByRole("region", { name: "Waiting to be added" });
   await openAddRecipe(page);
   await expect(waiting.getByRole("status")).not.toHaveText("Loading…");
   await context.setOffline(true);
