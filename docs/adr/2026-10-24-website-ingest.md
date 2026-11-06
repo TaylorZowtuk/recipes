@@ -1,5 +1,7 @@
 # A website is ingested in two stateless steps, and a failed plain fetch becomes a Queued Ingest for the local CLI
 
+Superseded in part by [The CLI turns a Queued Ingest into a recipe through a browser, recipe-scrapers and a model, and an editor pastes only HTML](2026-11-05-ingest-fallback-chain.md): the list in Add a recipe is now called "Waiting to be added", an editor pastes a page's HTML only, not its text, and how a Queued Ingest becomes a recipe is decided. Everything else here stands.
+
 Superseded in part by [Candidate Photos are stored by their own endpoint before save](2026-10-24-candidate-photos-stored-before-save.md): the preview step may now store Candidate Photos before save, though still no recipe data. Everything else here stands.
 
 The API Lambda does one thing with a website: a polite plain fetch, parsed by `recipe-scrapers`. Playwright, LLM extraction and any other fallback run in the local CLI ([TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50)), so the backend has no headless browser and makes no LLM call. This extends the [recipe data model ADR](2026-09-29-recipe-data-model.md) with one more kind of item and a wider source guard. It departs from nothing the [enrichment ADR](2026-09-26-enrichment-pipeline.md) says: ingest still stores only the Original, and enrichment runs after the recipe is saved.
