@@ -4,6 +4,28 @@
  */
 
 export interface paths {
+    "/api/canonical-ingredients/{canonical_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Canonical Ingredient
+         * @description Apply an editor's changes to a Canonical Ingredient at `body.version`, in one write.
+         *
+         *     Choosing a Store Category also needs the Kitchen settings unchanged; a Pantry Staple doesn't.
+         */
+        patch: operations["patch_canonical_ingredient_api_canonical_ingredients__canonical_id__patch"];
+        trace?: never;
+    };
     "/api/collection": {
         parameters: {
             query?: never;
@@ -84,6 +106,27 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/kitchen-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Kitchen Settings
+         * @description Apply an editor's batch to the Store Categories at `body.version`, moving the Canonical
+         *     Ingredients of each one it deletes.
+         */
+        patch: operations["patch_kitchen_settings_api_kitchen_settings_patch"];
         trace?: never;
     };
     "/api/queued-ingests": {
@@ -370,6 +413,19 @@ export interface components {
             op: "add";
         };
         /**
+         * AddStoreCategory
+         * @description Add a Store Category at the end of the list. The API mints its id.
+         */
+        AddStoreCategory: {
+            /** Name */
+            name: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "add";
+        };
+        /**
          * CanonicalIngredient
          * @description `CANON` / `<id>`: the one name every wording of an ingredient maps to.
          */
@@ -426,6 +482,16 @@ export interface components {
             schema_version: number;
             /** Store Category Id */
             store_category_id: string;
+            /** Version */
+            version: number;
+        };
+        /**
+         * CanonicalIngredientEdit
+         * @description Changes to one Canonical Ingredient at `version`, applied in the order sent, in one write.
+         */
+        CanonicalIngredientEdit: {
+            /** Operations */
+            operations: (components["schemas"]["SetPantryStaple"] | components["schemas"]["SetStoreCategory"])[];
             /** Version */
             version: number;
         };
@@ -618,6 +684,22 @@ export interface components {
         DeleteSite: {
             /** Id */
             id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "delete";
+        };
+        /**
+         * DeleteStoreCategory
+         * @description Delete a Store Category, moving its Canonical Ingredients to another one that exists at
+         *     that point in the batch.
+         */
+        DeleteStoreCategory: {
+            /** Id */
+            id: string;
+            /** Move To */
+            move_to: string;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -961,6 +1043,17 @@ export interface components {
             schema_version: number;
             /** Store Categories */
             store_categories: components["schemas"]["StoreCategory"][];
+            /** Version */
+            version: number;
+        };
+        /**
+         * KitchenSettingsEdit
+         * @description An editor's batch of changes to the Store Categories at `version`, applied in the order
+         *     sent. The names only have to differ once they are all applied.
+         */
+        KitchenSettingsEdit: {
+            /** Operations */
+            operations: (components["schemas"]["AddStoreCategory"] | components["schemas"]["RenameStoreCategory"] | components["schemas"]["ReorderStoreCategories"] | components["schemas"]["DeleteStoreCategory"])[];
             /** Version */
             version: number;
         };
@@ -1423,11 +1516,36 @@ export interface components {
              */
             op: "rename";
         };
+        /** RenameStoreCategory */
+        RenameStoreCategory: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "rename";
+        };
         /**
          * ReorderSites
          * @description Put the sites in this order, naming each site present at that point in the batch once.
          */
         ReorderSites: {
+            /** Ids */
+            ids: string[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "reorder";
+        };
+        /**
+         * ReorderStoreCategories
+         * @description Put the categories in this order, naming each one present at that point in the batch once.
+         */
+        ReorderStoreCategories: {
             /** Ids */
             ids: string[];
             /**
@@ -1538,6 +1656,16 @@ export interface components {
              */
             op: "set_difficulty";
         };
+        /** SetPantryStaple */
+        SetPantryStaple: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_pantry_staple";
+            /** Pantry Staple */
+            pantry_staple: boolean;
+        };
         /**
          * SetPreview
          * @description Show one of the recipe's images as its Preview Photo, or none with null.
@@ -1573,6 +1701,16 @@ export interface components {
              * @enum {string}
              */
             op: "set_note";
+        };
+        /** SetStoreCategory */
+        SetStoreCategory: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_store_category";
+            /** Store Category Id */
+            store_category_id: string;
         };
         /** SetTags */
         SetTags: {
@@ -2026,6 +2164,60 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    patch_canonical_ingredient_api_canonical_ingredients__canonical_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                canonical_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CanonicalIngredientEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CanonicalIngredient-Output"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Canonical Ingredient */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description It, or the Kitchen settings it was placed against, changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a valid edit, or the Store Category isn't there */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     get_current_collection_api_collection_get: {
         parameters: {
             query?: never;
@@ -2196,6 +2388,51 @@ export interface operations {
                 };
             };
             /** @description Not an http(s) URL with a host */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_kitchen_settings_api_kitchen_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KitchenSettingsEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KitchenSettings"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Kitchen settings or a moved ingredient changed since read */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a valid edit, an operation names a Store Category that isn't there, it deletes the last one, or two would have the same name */
             422: {
                 headers: {
                     [name: string]: unknown;
