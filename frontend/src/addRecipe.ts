@@ -18,7 +18,7 @@ export type PasteOutcome =
   | { kind: "no-recipe" | "too-large" | "gone" }
   | WriteRefusal;
 
-export type DiscardOutcome = { kind: "discarded" | "gone" } | WriteRefusal;
+export type DiscardOutcome = { kind: "discarded" } | { kind: "gone" } | WriteRefusal;
 
 // A 409 that names a recipe or a Queued Ingest is a duplicate; anything else is a write refusal.
 export function refusal(answer: Answer<unknown>): Refusal {
