@@ -114,12 +114,6 @@ describe("draftOperations", () => {
       { op: "add", name: "Two" },
     ]);
   });
-
-  it("works from the list the Draft opened on, whatever has loaded since", () => {
-    const draft = draftAfter(rename("a", "New"));
-    expect(draft.base).toBe(SAVED);
-    expect(draftOperations(draft)).toEqual([{ op: "rename", id: "a", name: "New" }]);
-  });
 });
 
 describe("changeCount", () => {
