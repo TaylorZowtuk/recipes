@@ -14,7 +14,7 @@ trap 'rm -rf "$stage"' EXIT
 
 cd "$repo/backend"
 # No dependency groups: dev's tools stay out of the zip, and so does enrich's parser for now, until
-# the Our Version ticket decides whether the API parses lines on save.
+# the Our Version ticket decides whether the API parses lines on save, and fallback's browser.
 uv export --locked --quiet --no-default-groups --no-emit-project --no-header \
   --output-file "$stage/requirements.txt"
 # Wheels only, so nothing is compiled for this container's platform. jstyleson (recipe-scrapers,
