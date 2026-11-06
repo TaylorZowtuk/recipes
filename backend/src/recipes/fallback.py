@@ -250,7 +250,7 @@ def _stored_photos(base_url: str, send: Send, urls: list[str]) -> tuple[Image, .
                 _post(send, f"{base_url}/api/images", {"url": url}, HTTPStatus.OK)
             )
         except (ApiRefused, ValidationError, requests.RequestException) as error:
-            _say(f"  Dropped the photo {url}: {error}")
+            _say(f"  Dropped the photo {url!r}: {error}")
             continue
         images.setdefault(image.id, image)
     return tuple(images.values())

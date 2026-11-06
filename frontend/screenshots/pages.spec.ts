@@ -165,7 +165,7 @@ const pages: Shot[] = [
     editor: true,
     ingest: "blocked/screenshot-soup",
     loaded:
-      "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
+      "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below, where you can paste its page now.",
   },
   {
     name: "add-recipe-needs-page",

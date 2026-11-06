@@ -108,7 +108,7 @@ The version of enrichment a recipe was enriched with, recorded on the recipe so 
 _Avoid_: Enrichment run, parser version
 
 **Ingest Channel**:
-How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import).
+How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
 _Avoid_: Origin, import type
 
 **Enrichment Status**:

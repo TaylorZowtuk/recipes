@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AddRecipeScreen, PastePage, QueuedItem } from "./AddRecipeScreen";
-import type { QueuedIngest } from "./api/client";
+import { AddRecipeScreen, PastePage, QueuedItem, Review } from "./AddRecipeScreen";
+import type { Ingested, QueuedIngest } from "./api/client";
 
 vi.mock("./collection", () => ({ useSync: () => undefined, forgetCollection: () => {} }));
 vi.mock("./session", () => ({
@@ -117,5 +117,26 @@ describe("PastePage", () => {
     expect(html).toMatch(/<fieldset disabled/);
     expect(html).toMatch(/<button type="submit"[^>]*disabled/);
     expect(html).toContain("You’re offline. Paste the page once you’re back online.");
+  });
+});
+
+describe("Review", () => {
+  const ingested = {
+    source: needsPage.source,
+    original: { title: "Synthetic Stew", ingredients: [], steps: [], stated_times: {} },
+    candidate_photos: [],
+  } as unknown as Ingested;
+  const review = (queuedIngestId?: string) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <Review ingested={ingested} queuedIngestId={queuedIngestId} onCancel={() => {}} />
+      </MemoryRouter>,
+    );
+
+  it("goes back to the list from a Queued Ingest, and starts over otherwise", () => {
+    expect(review(needsPage.id)).toContain("Back to the list");
+    expect(review(needsPage.id)).not.toContain("Start over");
+    expect(review()).toContain("Start over");
+    expect(review()).not.toContain("Back to the list");
   });
 });

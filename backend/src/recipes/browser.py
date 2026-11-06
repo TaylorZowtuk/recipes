@@ -44,8 +44,8 @@ UNNEEDED_RESOURCES = {"Image", "Media", "Font"}
 # open any of the others from a scope this script doesn't run in.
 UNCHECKABLE_APIS = """
 for (const name of [
-  "WebSocket", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection", "Worker",
-  "SharedWorker",
+  "WebSocket", "WebSocketStream", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection",
+  "Worker", "SharedWorker",
 ]) delete globalThis[name];
 """
 READ_PAGE = "html => [html.outerHTML, document.body?.innerText ?? '']"
@@ -85,6 +85,7 @@ class _Guard:
         if kind in UNNEEDED_RESOURCES or (kind == "Document" and frame != self.main_frame):
             return False
         try:
+            self._check_deadline()
             if kind == "Document":
                 self._check_navigation(url)
             else:
@@ -94,6 +95,13 @@ class _Guard:
                 self.stopped = self.stopped or failed
             return False
         return True
+
+    def _check_deadline(self) -> None:
+        """Each check can wait on DNS, and a page can queue any number of them, so none starts
+        once the time is up.
+        """
+        if monotonic() > self.deadline:
+            raise IngestFailed(reason="unreachable")
 
     def _check_navigation(self, url: str) -> None:
         self.navigations += 1

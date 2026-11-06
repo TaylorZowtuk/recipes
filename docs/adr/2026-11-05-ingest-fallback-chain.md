@@ -6,7 +6,7 @@ The fallback runs in the local CLI, never in the API, as that ADR says. The API 
 
 ## A Queued Ingest becomes a recipe in one transaction
 
-`POST /api/queued-ingests/{ingest_id}/recipe` takes a new recipe (its Source, Original, images and preview) and in one transaction deletes the Queued Ingest, repoints the Source Guard from the Queued Ingest to the recipe, and adds the recipe with its card. Of two saves of one Queued Ingest, only the first writes: the second gets a 409. A body whose Source isn't the Queued Ingest's is a 422. The recipe is Pending enrichment, and its Ingest Channel stays *Add a recipe*: the fallback is another way of finishing an Add a recipe, not a new channel.
+`POST /api/queued-ingests/{ingest_id}/recipe` takes a new recipe (its Source, Original, images and preview) and in one transaction deletes the Queued Ingest, repoints the Source Guard from the Queued Ingest to the recipe, and adds the recipe with its card. Of two saves of one Queued Ingest, only the first writes: the second gets a 404, or a 409 if they race. A body whose Source isn't the Queued Ingest's is a 422. The recipe is Pending enrichment, and its Ingest Channel stays *Add a recipe*: the fallback is another way of finishing an Add a recipe, not a new channel.
 
 The other three endpoints:
 

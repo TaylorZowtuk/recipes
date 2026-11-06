@@ -146,6 +146,14 @@ test("an editor pastes a page, reviews what was captured and saves it", async ({
 
 const GONE = "This recipe isn’t waiting any more";
 
+// Leaves Add a recipe for the grid without a reload, so only a refetch can show the new card.
+async function expectInTheGrid(page: Page, title: string) {
+  await page.goBack();
+  await expect(
+    page.getByRole("list", { name: "Recipes" }).getByRole("link", { name: new RegExp(title) }),
+  ).toBeVisible();
+}
+
 test("a Queued Ingest finished elsewhere says so, on reading and on saving", async ({
   page,
 }, testInfo) => {
@@ -163,8 +171,11 @@ test("a Queued Ingest finished elsewhere says so, on reading and on saving", asy
   await expect(pasteField(page)).toHaveValue(html);
   await page.getByRole("button", { name: "Back to the list" }).click();
   await expect(queuedItem(page, whilePasting)).toHaveCount(0);
+  await expectInTheGrid(page, titleFor(whilePasting));
 
   // Gone during the review.
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Add a recipe" }).click();
   await page.getByRole("textbox", { name: "Recipe web address" }).fill(whileReviewing);
   await page.getByRole("button", { name: "Fetch" }).click();
   await pasteButton(page, whileReviewing).click();
@@ -175,8 +186,9 @@ test("a Queued Ingest finished elsewhere says so, on reading and on saving", asy
   await finishElsewhere(page, whileReviewing);
   await save.click();
   await expect(page.getByRole("alert")).toContainText(GONE);
-  await page.getByRole("button", { name: "Start over" }).click();
+  await page.getByRole("button", { name: "Back to the list" }).click();
   await expect(queuedItem(page, whileReviewing)).toHaveCount(0);
+  await expectInTheGrid(page, titleFor(whileReviewing));
 });
 
 test("a waiting Queued Ingest is pasted and saved, and the CLI finishing it first says so", async ({
@@ -197,7 +209,7 @@ test("a waiting Queued Ingest is pasted and saved, and the CLI finishing it firs
   await pasteField(page).fill(recipePage(titleFor(pasted)));
   await readPage(page);
   await expect(page.getByRole("heading", { level: 2, name: titleFor(pasted) })).toBeFocused();
-  await page.getByRole("button", { name: "Start over" }).click();
+  await page.getByRole("button", { name: "Back to the list" }).click();
 
   // The CLI saves it while the editor is pasting.
   await pasteButton(page, finished).click();

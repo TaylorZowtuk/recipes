@@ -267,7 +267,7 @@ test("a page that can't be fetched waits for the fallback", async ({ page }, tes
 
   await fetchRecipe(page, blocked);
   await expect(page.getByRole("status").filter({ hasText: "fetched" })).toHaveText(
-    "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
+    "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below, where you can paste its page now.",
   );
   await expect(urlField(page)).toHaveValue("");
   await expect(queuedItem(page, blocked)).toContainText("plateful.test");

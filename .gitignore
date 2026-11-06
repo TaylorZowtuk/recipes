@@ -228,3 +228,7 @@ __marimo__/
 *_override.tf
 .deploy/
 .aws-setup.env
+
+# The fallback CLI's Work Packet and its answer, which hold page text
+backend/packet.json
+backend/answer.json

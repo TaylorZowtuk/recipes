@@ -120,7 +120,7 @@ function outcomeMessage(outcome: Exclude<IngestOutcome, { kind: "ingested" }>): 
         body:
           outcome.queuedIngest.state === "needs_page"
             ? "This site doesn’t allow automated fetching, so the recipe needs its page pasted in. It’s in the list below."
-            : "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below.",
+            : "The recipe couldn’t be fetched, so it’s waiting for the fallback. It’s in the list below, where you can paste its page now.",
       };
     case "duplicate":
       return { alert: false, body: <DuplicateNote duplicate={outcome.duplicate} /> };
@@ -593,7 +593,7 @@ function useCandidates(urls: string[]): Candidate[] {
 // The captured Original, read-only, beside the editor's Preview Photo and optional Difficulty and
 // Tags. The hero plate, and a small one beside the Focal Point picker, preview the round crop.
 // With a `queuedIngestId`, saving finishes that Queued Ingest.
-function Review({
+export function Review({
   ingested,
   queuedIngestId,
   onCancel,
@@ -711,7 +711,7 @@ function Review({
             {saving ? "Saving…" : "Save recipe"}
           </button>
           <button type="button" className="button button-secondary" onClick={onCancel}>
-            Start over
+            {queuedIngestId ? "Back to the list" : "Start over"}
           </button>
         </div>
         {blocked && (

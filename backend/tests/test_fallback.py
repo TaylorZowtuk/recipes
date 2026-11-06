@@ -7,10 +7,12 @@ import io
 import json
 import re
 import socket
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import requests
 from conftest import SERVICE_TOKEN
 from fake_web import FakeWeb, Served, page, photo
 from test_enrich import (
@@ -183,12 +185,18 @@ def send(editor_client: TestClient) -> Send:
 
 
 def test_a_page_with_a_recipe_is_captured_from_the_browsers_final_url() -> None:
-    outcome = capture(f"{SITE}/start", fake_browser({f"{SITE}/start": rendered(RECIPE)}))
+    final = "https://moved.test/recipes/soup"
+    pages: dict[str, RenderedPage | Exception] = {f"{SITE}/start": rendered(RECIPE, url=final)}
+
+    outcome = capture(f"{SITE}/start", fake_browser(pages))
 
     assert isinstance(outcome, Extracted)
     assert outcome.captured.original.title == "Weeknight Miso Soup"
     assert outcome.captured.original.extractor == BROWSER_EXTRACTOR
-    assert outcome.captured.candidate_photos == [PHOTO, WIDE_PHOTO]
+    assert outcome.captured.candidate_photos == [
+        PHOTO,
+        "https://moved.test/photos/miso-soup-wide.jpg",
+    ]
 
 
 def test_a_page_without_a_recipe_needs_the_llm_with_its_visible_text() -> None:
@@ -300,6 +308,56 @@ def test_a_recipe_whose_photos_all_fail_is_saved_without_a_preview(
     recipe = only_recipe(editor_client)
     assert recipe["images"] == []
     assert recipe["preview"] is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [(500, "Server trouble"), (200, {"not": "an image"}), requests.ConnectionError("Network down")],
+)
+def test_a_photo_that_fails_to_store_is_dropped_and_the_recipe_still_saved(
+    editor_client: TestClient,
+    api_store: Store,
+    send: Send,
+    capsys: pytest.CaptureFixture[str],
+    failure: tuple[int, Any] | Exception,
+) -> None:
+    def no_photos(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if not url.endswith("/api/images"):
+            return send(method, url, body)
+        if isinstance(failure, Exception):
+            raise failure
+        return failure
+
+    queued = queue(api_store, "soup")
+
+    assert run(BASE_URL, no_photos, fake_browser({queued.source.url: rendered(RECIPE)})) == 0  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert only_recipe(editor_client)["images"] == []
+    assert f"Dropped the photo {PHOTO!r}:" in capsys.readouterr().err
+
+
+def test_the_first_of_two_stored_photos_is_the_preview(
+    editor_client: TestClient, api_store: Store, send: Send, web: FakeWeb
+) -> None:
+    web.pages[WIDE_PHOTO] = Served(200, photo(colour="teal"), content_type="image/png")
+    queued = queue(api_store, "soup")
+
+    assert run(BASE_URL, send, fake_browser({queued.source.url: rendered(RECIPE)})) == 0  # pyright: ignore[reportAttributeAccessIssue]
+
+    recipe = only_recipe(editor_client)
+    assert [image["origin"] for image in recipe["images"]] == [PHOTO, WIDE_PHOTO]
+    assert recipe["preview"]["image_id"] == recipe["images"][0]["id"]
+
+
+def test_a_saved_source_is_captured_when_it_was_saved_not_when_it_was_queued(
+    editor_client: TestClient, api_store: Store, send: Send
+) -> None:
+    queued = queue(api_store, "soup")
+    started = datetime.now(UTC)
+
+    assert run(BASE_URL, send, fake_browser({queued.source.url: rendered(RECIPE)})) == 0  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert datetime.fromisoformat(only_recipe(editor_client)["source"]["captured_at"]) >= started
 
 
 def test_run_prints_a_work_packet_of_the_pages_that_need_the_llm(
@@ -714,6 +772,33 @@ def test_an_answer_for_a_source_no_longer_queued_is_skipped_and_the_rest_go_on(
     assert queue_state(editor_client) == {kept.id: ("needs_page", "no_recipe")}
 
 
+def test_a_failure_on_one_answer_never_stops_the_others(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    refused = queue(api_store, "api-fails")
+    fine = queue(api_store, "fine")
+    also_fine = queue(api_store, "also-fine")
+
+    def flaky(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if refused.id in url:
+            return 500, "Server trouble"
+        return send(method, url, body)
+
+    failed = apply(
+        BASE_URL,
+        flaky,
+        packet_of(refused, fine, also_fine),
+        answer_of((refused, original()), (fine, original()), (also_fine, original())),
+    )
+
+    assert failed == 1
+    assert len(editor_client.get("/api/collection", follow_redirects=True).json()["cards"]) == 2
+    assert queue_state(editor_client) == {refused.id: ("waiting", "no_recipe")}
+    printed = capsys.readouterr().err
+    assert "Server trouble" in printed
+    assert "Saved 2, 0 need their page, 1 failed" in printed
+
+
 @pytest.mark.parametrize(
     ("packet", "answer"),
     [("not json", '{"answers": []}'), ('{"items": []}', '{"answers": [{"original": null}]}')],
@@ -801,19 +886,49 @@ def test_main_needs_the_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
         main(["run", "https://plateful.example"])
 
 
-def test_main_applies_an_answer_from_stdin(
-    editor_client: TestClient,
-    api_store: Store,
-    send: Send,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-) -> None:
+@pytest.fixture
+def through_the_api(send: Send, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Points the CLI's own transport at the in-process API."""
     monkeypatch.setenv("PLATEFUL_SERVICE_TOKEN", SERVICE_TOKEN)
 
     def send_with(_session: object, _token: str) -> Send:
         return send
 
     monkeypatch.setattr(fallback, "send_with", send_with)
+
+
+@pytest.mark.parametrize(
+    ("second", "code"),
+    [(rendered(RECIPE), 0), (RuntimeError("the browser went away"), 1)],
+)
+@pytest.mark.usefixtures("through_the_api")
+def test_main_runs_the_chain_and_exits_1_only_when_a_source_failed(
+    editor_client: TestClient,
+    api_store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+    second: RenderedPage | Exception,
+    code: int,
+) -> None:
+    queue(api_store, "first")
+    queue(api_store, "second")
+    fetch = fake_browser({f"{SITE}/first": rendered(RECIPE), f"{SITE}/second": second})
+    monkeypatch.setattr(fallback, "BrowserFetcher", lambda: nullcontext(fetch))
+
+    with pytest.raises(SystemExit) as exited:
+        main(["run", "https://plateful.example"])
+
+    assert exited.value.code == code
+    saved = editor_client.get("/api/collection", follow_redirects=True).json()["cards"]
+    assert len(saved) == 2 - code
+
+
+@pytest.mark.usefixtures("through_the_api")
+def test_main_applies_an_answer_from_stdin(
+    editor_client: TestClient,
+    api_store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
     queued = queue(api_store, "chutney")
     packet = tmp_path / "packet.json"
     packet.write_text(packet_of(queued))

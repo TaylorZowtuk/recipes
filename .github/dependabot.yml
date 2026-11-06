@@ -4,6 +4,10 @@ updates:
     directory: /backend
     schedule: { interval: monthly }
     groups: { uv: { patterns: ["*"] } }
+    # Pinned to @playwright/test in frontend/pnpm-lock.yaml, which the npm block moves: the toolchain
+    # image ships only that release's browsers. Bump this one by hand with it.
+    ignore:
+      - dependency-name: playwright
   - package-ecosystem: npm
     directory: /frontend
     schedule: { interval: monthly }

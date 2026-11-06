@@ -4,19 +4,23 @@ the fake web's resolver, and 127.0.0.1 as what it is.
 """
 
 import json
+import re
+import socket
 import threading
+import tomllib
 from base64 import b64encode
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from time import monotonic
-from typing import TYPE_CHECKING
+from pathlib import Path
+from time import monotonic, sleep
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from fake_web import FakeWeb, page
 from test_enrich import BASE_URL, api, through
 from test_fallback import only_recipe, queue
 
-from recipes.browser import BrowserFetcher
+from recipes.browser import BrowserFetcher, _Guard  # pyright: ignore[reportPrivateUsage]
 from recipes.fallback import run
 from recipes.ingest import (
     BROWSER_EXTRACTOR,
@@ -30,9 +34,10 @@ from recipes.ingest import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from fastapi.testclient import TestClient
+    from playwright.sync_api import CDPSession
 
     from recipes.store import Store
 
@@ -40,6 +45,18 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.xdist_group("browser")
 
 HTML = "text/html; charset=utf-8"
+REPO = Path(__file__).resolve().parents[2]
+MAIN_FRAME = "main-frame"
+# Every way out of a page that Chrome's Fetch domain never sees.
+UNCHECKABLE = [
+    "WebSocket",
+    "WebSocketStream",
+    "WebTransport",
+    "RTCPeerConnection",
+    "webkitRTCPeerConnection",
+    "Worker",
+    "SharedWorker",
+]
 
 
 @dataclass(frozen=True)
@@ -149,6 +166,30 @@ def test_a_recipe_written_by_a_script_can_be_parsed(fetch: BrowserFetcher, site:
     fetched = fetch(f"{site.public}/recipe")
 
     assert parse(fetched.html, fetched.url).original.title == "Weeknight Miso Soup"
+
+
+def test_a_recipe_written_after_a_chain_of_fetches_is_waited_for(
+    fetch: BrowserFetcher, site: Site
+) -> None:
+    recipe = """{"@context": "https://schema.org", "@type": "Recipe", "name": "Chained Stew",
+    "recipeIngredient": ["1 turnip"], "recipeInstructions": "Stew the turnip."}"""
+    site.replies["/data"] = Reply(body="{}", content_type="application/json")
+    site.replies["/recipe"] = Reply(
+        body=f"""<script>
+        (async () => {{
+          for (let n = 0; n < 30; n++) await fetch("/data");
+          const data = document.createElement("script");
+          data.type = "application/ld+json";
+          data.text = {json.dumps(recipe)};
+          document.head.append(data);
+        }})();
+        </script>"""
+    )
+
+    fetched = fetch(f"{site.public}/recipe")
+
+    assert parse(fetched.html, fetched.url).original.title == "Chained Stew"
+    assert site.seen.count("/data") == 30
 
 
 def test_a_queued_ingest_is_saved_from_a_page_real_chromium_rendered(
@@ -297,17 +338,36 @@ def test_subresources_never_reach_a_non_public_address(
           fetch("{private}/fetched", {{ mode: "no-cors" }}).catch(() => {{}});
           fetch("/bounce.js", {{ mode: "no-cors" }}).catch(() => {{}});
           navigator.sendBeacon("{private}/beacon");
-          const inner = document.body.appendChild(document.createElement("iframe")).contentWindow;
-          document.body.append(typeof WebSocket, typeof Worker, typeof RTCPeerConnection);
-          document.body.append(typeof inner.WebSocket);
         </script>"""
     )
 
     fetched = fetch(f"{site.public}/recipe")
 
     assert "Still read" in fetched.text
-    assert "undefinedundefinedundefinedundefined" in fetched.text
     assert other_site.seen == []
+
+
+def test_ways_out_the_guard_cannot_see_are_gone_from_a_page_its_frames_and_its_popups(
+    fetch: BrowserFetcher, site: Site
+) -> None:
+    site.replies["/recipe"] = Reply(
+        body=f"""<body></body><script>
+        const scopes = {{
+          page: globalThis,
+          frame: document.body.appendChild(document.createElement("iframe")).contentWindow,
+          popup: window.open("/popup"),
+        }};
+        const left = Object.entries(scopes).map(([name, scope]) => [
+          name,
+          scope && {json.dumps(UNCHECKABLE)}.filter((api) => typeof scope[api] !== "undefined"),
+        ]);
+        document.body.append(JSON.stringify(Object.fromEntries(left)));
+        </script>"""
+    )
+
+    fetched = fetch(f"{site.public}/recipe")
+
+    assert json.loads(fetched.text) == {"page": [], "frame": [], "popup": []}
 
 
 def test_frames_popups_and_service_workers_are_not_loaded(
@@ -370,6 +430,15 @@ def test_a_page_past_the_size_limit_is_unreachable(fetch: BrowserFetcher, site: 
     assert failed.value.reason == "unreachable"
 
 
+def test_the_size_limit_counts_bytes_not_characters(fetch: BrowserFetcher, site: Site) -> None:
+    site.replies["/wide"] = Reply(body=f"<body>{'é' * (MAX_PAGE_BYTES // 2 + 1)}</body>")
+
+    with pytest.raises(IngestFailed) as failed:
+        fetch(f"{site.public}/wide")
+
+    assert failed.value.reason == "unreachable"
+
+
 def test_a_page_that_grows_past_the_size_limit_is_unreachable(
     fetch: BrowserFetcher, site: Site
 ) -> None:
@@ -419,3 +488,107 @@ def test_a_page_that_hangs_is_given_up_on_at_the_deadline(
 
     assert failed.value.reason == "unreachable"
     assert monotonic() - started < 4
+
+
+def test_slow_lookups_cannot_carry_a_fetch_past_the_deadline(
+    fetch: BrowserFetcher, site: Site, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def slow(host: str) -> list[str]:
+        if host != "localhost":
+            sleep(0.2)
+        return FakeWeb.resolve(host)
+
+    monkeypatch.setattr("recipes.browser.DEADLINE_SECONDS", 1)
+    monkeypatch.setattr(fetch.polite, "resolve", slow)
+    site.replies["/recipe"] = Reply(
+        body="""<body>Words<script>
+        for (let n = 0; n < 40; n++) {
+          fetch(`http://host-${n}.test/`, { mode: "no-cors" }).catch(() => {});
+        }
+        </script></body>"""
+    )
+    started = monotonic()
+
+    with pytest.raises(IngestFailed) as failed:
+        fetch(f"{site.public}/recipe")
+
+    assert failed.value.reason == "unreachable"
+    assert monotonic() - started < 3
+
+
+class FakeCdp:
+    """A page's CDP session that a test pauses requests on by hand, recording each answer."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.paused: Callable[[dict[str, Any]], None] = lambda _event: None
+
+    def on(self, _event: str, handler: Callable[[dict[str, Any]], None]) -> None:
+        self.paused = handler
+
+    def send(self, method: str, _params: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.sent.append(method)
+        return {"frameTree": {"frame": {"id": MAIN_FRAME}}}
+
+    def pause(self, url: str, kind: str = "Document") -> None:
+        self.paused(
+            {
+                "requestId": "request",
+                "request": {"url": url},
+                "resourceType": kind,
+                "frameId": MAIN_FRAME,
+            }
+        )
+
+
+def guard_on(cdp: FakeCdp, resolve: Callable[[str], list[str]], deadline: float) -> _Guard:
+    return _Guard(PoliteFetcher(resolve=resolve), cast("CDPSession", cdp), deadline)
+
+
+@pytest.mark.parametrize("kind", ["Document", "Script"])
+def test_a_request_past_the_deadline_is_refused_with_no_lookup(kind: str) -> None:
+    looked_up: list[str] = []
+
+    def resolve(host: str) -> list[str]:
+        looked_up.append(host)
+        return FakeWeb.resolve(host)
+
+    cdp = FakeCdp()
+    guard = guard_on(cdp, resolve, monotonic() - 1)
+
+    cdp.pause("https://plateful.test/page", kind)
+
+    assert cdp.sent[-1] == "Fetch.failRequest"
+    assert looked_up == []
+    assert (guard.stopped is not None) == (kind == "Document")
+
+
+def test_the_first_navigation_refused_gives_the_reason() -> None:
+    def resolve(host: str) -> list[str]:
+        if host == "nowhere.test":
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+        return ["10.0.0.1"]
+
+    cdp = FakeCdp()
+    guard = guard_on(cdp, resolve, monotonic() + 60)
+
+    cdp.pause("https://private.test/page")
+    cdp.pause("https://nowhere.test/page")
+
+    assert guard.stopped is not None
+    assert guard.stopped.reason == "blocked"
+
+
+def test_the_python_browser_package_matches_the_browsers_in_the_toolchain_image() -> None:
+    packages = tomllib.loads((REPO / "backend/uv.lock").read_text())["package"]
+    python = next(package["version"] for package in packages if package["name"] == "playwright")
+    node = re.findall(
+        r"^  '@playwright/test@([^']*)':$",
+        (REPO / "frontend/pnpm-lock.yaml").read_text(),
+        re.MULTILINE,
+    )
+
+    assert set(node) == {python}, (
+        f"playwright is {python} in backend/uv.lock and @playwright/test is {set(node)} in "
+        "frontend/pnpm-lock.yaml, but the toolchain image has only the latter's browsers"
+    )
