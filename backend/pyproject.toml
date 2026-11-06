@@ -35,9 +35,14 @@ enrich = [
     "ingredient-parser-nlp>=2.9.1",
     "pint>=0.26.2",
 ]
+# The fallback CLI's browser, kept out of the Lambda zip. Pinned to exactly the @playwright/test
+# version in frontend/pnpm-lock.yaml, because the toolchain image ships only that release's browsers.
+fallback = [
+    "playwright==1.63.0",
+]
 
 [tool.uv]
-default-groups = ["dev", "enrich"]
+default-groups = ["dev", "enrich", "fallback"]
 
 [tool.ruff]
 line-length = 100
