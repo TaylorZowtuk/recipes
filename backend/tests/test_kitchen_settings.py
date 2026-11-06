@@ -427,21 +427,24 @@ def test_a_stale_edit_moves_nothing_even_past_the_limit(
     assert placed(store) == {"dairy": MOST_IN_ONE_WRITE + 1}
 
 
-def test_an_ingredient_that_lands_in_the_category_during_the_chunks_still_moves(
+def test_ingredients_that_land_in_the_category_during_the_chunks_still_move(
     editor_client: TestClient,
     store: Store,
     api_store: Store,
     monkeypatch: pytest.MonkeyPatch,
+    writes: list[Write],
 ) -> None:
     total = MOST_IN_ONE_WRITE + 10
+    arriving = MOST_IN_ONE_WRITE + 1
     seeded(store, *many(total, "dairy"))
-    late = canonical(total, "dairy")
-    before_write(api_store, monkeypatch, 2, lambda: seeded(store, late))
+    late = [canonical(total + number, "dairy") for number in range(arriving)]
+    before_write(api_store, monkeypatch, 2, lambda: seeded(store, *late))
 
     response = edit(editor_client, store.kitchen_settings(), delete("dairy", "frozen"))
 
     assert response.status_code == 200
-    assert placed(store) == {"frozen": total + 1}
+    assert placed(store) == {"frozen": total + arriving}
+    assert max(len(write) for write in writes) <= MAX_TRANSACTION_ITEMS
 
 
 # Refused edits
@@ -459,6 +462,20 @@ def test_the_last_category_cant_be_deleted(editor_client: TestClient, store: Sto
     assert response.status_code == 422
     assert "last" in response.json()["detail"]
     assert store.kitchen_settings() == saved
+
+
+def test_one_of_exactly_two_categories_can_be_deleted(
+    editor_client: TestClient, store: Store
+) -> None:
+    categories = [StoreCategory(id=name.lower(), name=name) for name in ("Produce", "Meat")]
+    saved = store.save_kitchen_settings(
+        store.kitchen_settings().model_copy(update={"store_categories": categories})
+    )
+
+    response = edit(editor_client, saved, delete("produce", "meat"))
+
+    assert response.status_code == 200
+    assert ids(store) == ["meat"]
 
 
 def test_the_last_category_is_checked_at_that_point_in_the_batch(
