@@ -136,6 +136,11 @@ class Page:
     url: str  # where the page finally came from, after any redirects
 
 
+@dataclass(frozen=True)
+class RenderedPage(Page):
+    text: str  # what a reader of the page sees, without its markup
+
+
 class Fetcher(Protocol):
     def __call__(self, url: str) -> Page:
         """The page. Raises PageNotFound, or IngestFailed for a Queued Ingest."""
@@ -144,6 +149,10 @@ class Fetcher(Protocol):
     def photo(self, url: str) -> bytes:
         """The photo's bytes, fetched as politely. Raises PageNotFound, IngestFailed or TooLarge."""
         ...
+
+
+# Each origin's robots.txt read so far in one fetch, None when it has none.
+type Robots = dict[str, Protego | None]
 
 
 class UnredirectedSession(requests.Session):
@@ -191,18 +200,13 @@ class PoliteFetcher:
         """Where `url` finally leads, each hop allowed by its robots.txt, and its successful
         response, its body unread.
         """
-        robots: dict[str, Protego | None] = {}
-
-        def allowed(hop: str) -> None:
-            if not self._allowed(hop, robots, deadline):
-                raise FetchRefused(reason="robots")
-
-        url, response = self._follow(url, deadline, allowed)
+        robots: Robots = {}
+        url, response = self._follow(
+            url, deadline, lambda hop: self.refuse_unless_allowed(hop, robots, deadline)
+        )
         if response.status_code >= HTTPStatus.BAD_REQUEST:
             with response:
-                if response.status_code in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
-                    raise PageNotFound(url)
-                _raise_for_status(response)
+                raise_for_page_status(response.status_code, url)
         return url, response
 
     def _follow(
@@ -213,7 +217,7 @@ class PoliteFetcher:
         timeout inside the deadline.
         """
         for _ in range(MAX_REDIRECTS + 1):
-            self._refuse_unless_public(url)
+            self.refuse_unless_public(url)
             check(url)
             response = self._get(url, deadline)
             if not response.is_redirect:
@@ -226,7 +230,7 @@ class PoliteFetcher:
         # A redirect loop, like a page that never answers.
         raise IngestFailed(reason="unreachable")
 
-    def _refuse_unless_public(self, url: str) -> None:
+    def refuse_unless_public(self, url: str) -> None:
         """Loopback, private and other non-global addresses are never fetched, so a pasted URL
         or a redirect can't reach the machine Plateful runs on or its network. The host checked
         is the one requests connects to, encoded as it encodes it (IDNA 2008).
@@ -239,14 +243,17 @@ class PoliteFetcher:
         if not all(ipaddress.ip_address(a.partition("%")[0]).is_global for a in addresses):
             raise FetchRefused(reason="blocked")
 
-    def _allowed(self, url: str, robots: dict[str, Protego | None], deadline: float) -> bool:
-        """Whether the robots.txt of `url`'s origin allows it, reading each origin's once."""
+    def refuse_unless_allowed(self, url: str, robots: Robots, deadline: float) -> None:
+        """Raises FetchRefused unless the robots.txt of `url`'s origin allows it, reading each
+        origin's once into `robots`, which lasts one fetch.
+        """
         parts = urlsplit(url)
         origin = urlunsplit((parts.scheme, parts.netloc, "", "", ""))
         if origin not in robots:
             robots[origin] = self._robots(f"{origin}/robots.txt", deadline)
         rules = robots[origin]
-        return rules is None or rules.can_fetch(url, ROBOTS_AGENT)
+        if rules is not None and not rules.can_fetch(url, ROBOTS_AGENT):
+            raise FetchRefused(reason="robots")
 
     def _robots(self, url: str, deadline: float) -> Protego | None:
         _, robots = self._follow(url, deadline, lambda _hop: None)
@@ -255,7 +262,7 @@ class PoliteFetcher:
             # unreachable (5xx) disallows everything for now, so the Source waits.
             if HTTPStatus.BAD_REQUEST <= robots.status_code < HTTPStatus.INTERNAL_SERVER_ERROR:
                 return None
-            _raise_for_status(robots)
+            raise_for_status(robots.status_code)
             return Protego.parse(_text(robots, deadline, MAX_ROBOTS_BYTES))
 
     def _get(self, url: str, deadline: float) -> requests.Response:
@@ -269,8 +276,14 @@ class PoliteFetcher:
             raise IngestFailed(reason="unreachable") from None
 
 
-def _raise_for_status(response: requests.Response) -> None:
-    status = response.status_code
+def raise_for_page_status(status: int, url: str) -> None:
+    """What a page's final status means: not there (404 or 410), or why ingest stopped."""
+    if status in {HTTPStatus.NOT_FOUND, HTTPStatus.GONE}:
+        raise PageNotFound(url)
+    raise_for_status(status)
+
+
+def raise_for_status(status: int) -> None:
     if status == HTTPStatus.TOO_MANY_REQUESTS:
         raise IngestFailed(reason="rate_limited")
     if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
