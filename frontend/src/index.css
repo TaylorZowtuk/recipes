@@ -1091,7 +1091,7 @@ h1:focus {
 
 /* While a row is dragged the others slide out of its way; the dragged one follows the pointer. */
 .is-dragging li {
-  transition: transform var(--motion) ease-out;
+  transition: transform calc(var(--motion) / 2) ease-out;
 }
 
 .category-rows li.is-dragged {
