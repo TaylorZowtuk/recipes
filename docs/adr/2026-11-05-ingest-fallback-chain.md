@@ -26,7 +26,7 @@ An editor pastes the page's HTML only, never its text. The list in Add a recipe 
 
 A saved `pasted-page` Original comes from the editor's paste, not from the CLI.
 
-The page's text goes into the packet and nowhere else: the CLI writes no file, and the packet goes to stdout. The model's answer is untrusted data, so the check requires every part of it to be on the page. The title, each ingredient line and each step must appear in the page's text word for word (whitespace aside), the Original must have ingredients, and no two lines may share an id. The extractor is `llm` whatever the answer says.
+The page's text goes into the packet and nowhere else: the CLI writes no file, and the packet goes to stdout. The model's answer is untrusted data, so it is checked against the page. The title, each ingredient line and each step must appear in the page's text word for word (whitespace aside), the Original must have ingredients, and no two lines may share an id. The extractor is `llm` whatever the answer says.
 
 **An `llm` Original always stops at Awaiting Review.** A bulk import normally skips review and goes straight to Ready. It doesn't for an `llm` Original, because a model's reading is the one extraction no rule of the code produced, so an editor checks it.
 
@@ -44,7 +44,7 @@ We use Chrome's Fetch domain, not Playwright routes, because a Playwright route 
 
 ## Accepted limits
 
-- **404 and 410 are recorded as reason `unreachable`.** A Queued Ingest has no not-found reason, and adding one is not worth a migration. The plain fetch treats a 404 as final and queues nothing, so only a page that vanishes after queueing arrives here.
+- **404 and 410 are recorded as reason `unreachable`.** A Queued Ingest has no not-found reason, and adding one would change the API and the frontend for a rare case. The plain fetch treats a 404 as final and queues nothing, so only a page that vanishes after queueing arrives here.
 - **A transient failure goes straight to needs-page.** Nothing retries it, so an editor pastes the page.
 - **An LLM save carries no photos.** The model sees only text, so there are no Candidate Photos to store.
 - **The check is a substring match, and only for the title, ingredient lines and steps.** The description, author, yield and times aren't checked verbatim. A line that is a substring of a longer line on the page passes.
@@ -53,5 +53,5 @@ We use Chrome's Fetch domain, not Playwright routes, because a Playwright route 
 ## Considered options
 
 - **robots.txt on every subresource:** rejected. It makes many more requests to the site for a recipe, and a blocked script breaks the render that Playwright is there to do.
-- **Pasted plain text, whether parsed by rules in the API, held on the Queued Ingest for the CLI's model, or typed into a form:** rejected for now. The household doesn't need it yet, since every case so far is a page an editor can open and copy HTML from. It may return for paper recipes.
+- **Pasted plain text, whether parsed by rules in the API, held on the Queued Ingest for the CLI's model, or typed into a form:** rejected for now. The household doesn't intend to use it yet. It may return for paper recipes.
 - **A model called directly from the CLI:** rejected. The session that drives enrichment already answers Work Packets, so a second path to a model would need its own key, bill and rate limit for no gain.
