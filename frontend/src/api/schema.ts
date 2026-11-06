@@ -692,8 +692,8 @@ export interface components {
         };
         /**
          * DeleteStoreCategory
-         * @description Delete a Store Category, moving its Canonical Ingredients to another one that exists at
-         *     that point in the batch.
+         * @description Delete a Store Category, moving its Canonical Ingredients to another saved one, still there
+         *     at that point in the batch. A category added in the batch has no id a client can name yet.
          */
         DeleteStoreCategory: {
             /** Id */
