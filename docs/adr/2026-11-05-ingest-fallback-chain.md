@@ -26,7 +26,7 @@ An editor pastes the page's HTML only, never its text. The list in Add a recipe 
 
 A saved `pasted-page` Original comes from the editor's paste, not from the CLI.
 
-The page's text goes into the packet and nowhere else: the CLI writes no file, and the packet goes to stdout. The model's answer is untrusted data, so it is checked against the page. The title, each ingredient line and each step must appear in the page's text word for word (whitespace aside), the Original must have ingredients, and no two lines may share an id. The extractor is `llm` whatever the answer says.
+The page's text goes into the packet and nowhere else: the CLI writes no file, and the packet goes to stdout. The model's answer is untrusted data, so it is checked against the page. The title, each ingredient line, each step and, when the answer gives them, the description, the author, the yield's text and each Stated Time's text must appear in the page's text word for word (whitespace aside, case kept) with no word character directly beside them. The Original must have ingredients and steps, and no two lines may share an id. The extractor is `llm` whatever the answer says. The check is on a model's answer only: a recipe-scrapers capture without steps is still saved, as the plain ingest saves one.
 
 **An `llm` Original always stops at Awaiting Review.** A bulk import normally skips review and goes straight to Ready. It doesn't for an `llm` Original, because a model's reading is the one extraction no rule of the code produced, so an editor checks it.
 
@@ -47,7 +47,7 @@ We use Chrome's Fetch domain, not Playwright routes, because a Playwright route 
 - **404 and 410 are recorded as reason `unreachable`.** A Queued Ingest has no not-found reason, and adding one would change the API and the frontend for a rare case. The plain fetch treats a 404 as final and queues nothing, so only a page that vanishes after queueing arrives here.
 - **A transient failure goes straight to needs-page.** Nothing retries it, so an editor pastes the page.
 - **An LLM save carries no photos.** The model sees only text, so there are no Candidate Photos to store.
-- **The check is a substring match, and only for the title, ingredient lines and steps.** The description, author, yield and times aren't checked verbatim. A line that is a substring of a longer line on the page passes.
+- **The check matches whole words, not whole lines.** A quote passes wherever it stands on the page, so a short real word such as "salt" passes as an ingredient, and two adjoining lines joined into one pass. Only the quotes are checked: a yield's `servings` and `unit`, a Stated Time's `seconds` and a line's `component` aren't.
 - **A page's size is checked only after rendering.** The browser loads the page whatever its size, then the CLI rejects one past the size limit as `unreachable`.
 
 ## Considered options

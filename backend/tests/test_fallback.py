@@ -5,6 +5,7 @@ tests/test_browser.py runs the real one.
 
 import io
 import json
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,16 @@ from test_enrich import (
 )
 
 from recipes import enrich, fallback
-from recipes.fallback import Extracted, NeedsLlm, NeedsPage, apply, capture, main, run
+from recipes.fallback import (
+    Extracted,
+    NeedsLlm,
+    NeedsPage,
+    apply,
+    capture,
+    main,
+    run,
+    verbatim_errors,
+)
 from recipes.ingest import (
     BROWSER_EXTRACTOR,
     LLM_EXTRACTOR,
@@ -31,7 +41,7 @@ from recipes.ingest import (
     RenderedPage,
     website_dedupe_key,
 )
-from recipes.models import SCHEMA_VERSION, QueuedIngest, SpreadsheetSource, new_ulid
+from recipes.models import SCHEMA_VERSION, Original, QueuedIngest, SpreadsheetSource, new_ulid
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,6 +63,12 @@ TEXT = """Plum Chutney   by a test cook
 Simmer the plums
 with the sugar. Serve cold.
 A line of the page's own chatter."""
+# TEXT with everything else an Original can quote.
+FULL_TEXT = f"""{TEXT}
+Makes 2 jars
+Prep: 10 minutes
+Cook: 1 hour
+Total: 70 minutes"""
 NO_RECIPE = page("no-recipe.html")
 RECIPE = page("json-ld-recipe.html")
 
@@ -106,6 +122,14 @@ def original(**fields: Any) -> dict[str, Any]:
         "steps": [{"id": "s1", "text": "Simmer the plums with the sugar."}],
         **fields,
     }
+
+
+def an_original(quote: str) -> Original:
+    """An Original whose every quote is `quote`."""
+    line = {"id": "l1", "text": quote}
+    return Original.model_validate(
+        {"title": quote, "extractor": "llm", "ingredients": [line], "steps": [line]}
+    )
 
 
 def packet_of(*queued: QueuedIngest, text: str = TEXT) -> str:
@@ -445,6 +469,28 @@ def test_a_null_answer_needs_its_page_as_no_recipe(
             {"steps": [{"id": "s1", "text": "Boil the plums."}]},
             "A step isn't on the page: 'Boil the plums.'",
         ),
+        (
+            {"description": "A jammy autumn favourite."},
+            "The description isn't on the page: 'A jammy autumn favourite.'",
+        ),
+        ({"author": "A Famous Chef"}, "The author isn't on the page: 'A Famous Chef'"),
+        ({"yield": {"text": "Makes 6 jars"}}, "The yield isn't on the page: 'Makes 6 jars'"),
+        (
+            {"stated_times": {"prep": {"text": "5 minutes"}}},
+            "The prep time isn't on the page: '5 minutes'",
+        ),
+        (
+            {"stated_times": {"cook": {"text": "2 hours"}}},
+            "The cook time isn't on the page: '2 hours'",
+        ),
+        (
+            {"stated_times": {"total": {"text": "3 hours"}}},
+            "The total time isn't on the page: '3 hours'",
+        ),
+        ({"description": ""}, "The description isn't on the page: ''"),
+        ({"title": "Plum Chut"}, "The title isn't on the page: 'Plum Chut'"),
+        ({"title": "plum chutney"}, "The title isn't on the page: 'plum chutney'"),
+        ({"steps": []}, "It has no steps"),
         ({"title": "   "}, "The title isn't on the page: '   '"),
         ({"steps": [{"id": "s1", "text": ""}]}, "A step isn't on the page: ''"),
         ({"ingredients": []}, "It has no ingredients"),
@@ -476,6 +522,77 @@ def test_an_original_not_on_the_page_prints_why_and_needs_its_page(
     assert why in capsys.readouterr().err
     assert queue_state(editor_client) == {queued.id: ("needs_page", "no_recipe")}
     assert editor_client.get("/api/collection", follow_redirects=True).json()["cards"] == []
+
+
+def test_an_original_quoting_everything_on_the_page_is_saved_with_its_numbers_unchecked(
+    editor_client: TestClient, api_store: Store, send: Send
+) -> None:
+    queued = queue(api_store, "chutney")
+    answered = original(
+        description="A line of the page's own chatter.",
+        author="a test cook",
+        stated_times={
+            "prep": {"text": "10 minutes", "seconds": 111},
+            "cook": {"text": "1 hour", "seconds": 222},
+            "total": {"text": "70 minutes", "seconds": 333},
+        },
+        **{"yield": {"text": "Makes 2 jars", "servings": 99}},
+    )
+
+    assert (
+        apply(BASE_URL, send, packet_of(queued, text=FULL_TEXT), answer_of((queued, answered))) == 0
+    )
+
+    saved = only_recipe(editor_client)["original"]
+    assert saved["author"] == "a test cook"
+    assert saved["yield"]["servings"] == 99
+    assert saved["stated_times"]["total"]["seconds"] == 333
+
+
+@pytest.mark.parametrize(
+    ("quote", "text"),
+    [
+        ("Warm", "Warmth of the stove"),
+        ("oil", "Bring to a boil"),
+        ("2 plums", "12 plums"),
+        ("1/2 cup", "1/2 cups"),
+        ("1/2 cup (120 ml)", "11/2 cup (120 ml) milk"),
+        ("1/2 cup (120 ml)", "1/2 cup (120 ml)milk"),
+        ("(120 ml) milk", "cup(120 ml) milk"),
+    ],
+)
+def test_a_quote_with_a_word_character_beside_it_isnt_on_the_page(quote: str, text: str) -> None:
+    assert f"The title isn't on the page: {quote!r}" in verbatim_errors(an_original(quote), text)
+
+
+@pytest.mark.parametrize(
+    ("quote", "text"),
+    [
+        ("Warm", "Warm"),
+        ("Warm", "Warm the pot."),
+        ("oil", "Bring to a boil, then add the oil."),
+        ("salt", "2 tsp sea salt, to taste"),
+        ("1/2 cup (120 ml)", "1/2 cup (120 ml)"),
+        ("1/2 cup (120 ml)", "Add 1/2 cup (120 ml) milk."),
+        ("1/2 cup (120 ml)", "(1/2 cup (120 ml))"),
+        ("(120 ml) milk", "1/2 cup (120 ml) milk"),
+        ("Serve cold.", "Simmer. Serve cold. Enjoy."),
+        ("2 plums, chopped 1 cup sugar", "2 plums, chopped\n1 cup sugar"),
+    ],
+)
+def test_a_quote_on_word_boundaries_is_on_the_page(quote: str, text: str) -> None:
+    assert verbatim_errors(an_original(quote), text) == []
+
+
+def test_a_capture_without_steps_is_still_saved_by_run(
+    editor_client: TestClient, api_store: Store, send: Send
+) -> None:
+    queued = queue(api_store, "soup")
+    no_steps = re.sub(r'"recipeInstructions": \[.*?\],', "", RECIPE, flags=re.DOTALL)
+
+    assert run(BASE_URL, send, fake_browser({queued.source.url: rendered(no_steps)})) == 0  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert only_recipe(editor_client)["original"]["steps"] == []
 
 
 def test_the_check_is_against_that_items_own_text(
