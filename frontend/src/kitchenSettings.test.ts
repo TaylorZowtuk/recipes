@@ -14,6 +14,7 @@ import {
   draftOperations,
   draftProblem,
   dragOffset,
+  dragReach,
   dropIndex,
   editingCategories,
   ingredientsMoving,
@@ -164,6 +165,15 @@ describe("dragging", () => {
   it("stays within the rows it's given, however far it goes", () => {
     expect(dropIndex(1, 5000, 100, 3)).toBe(2);
     expect(dropIndex(1, -5000, 100, 3)).toBe(0);
+  });
+
+  it("draws a dragged row no further than the first and last places", () => {
+    expect(dragReach(1, 60, 100, 3)).toBe(60);
+    expect(dragReach(1, -60, 100, 3)).toBe(-60);
+    expect(dragReach(1, 5000, 100, 3)).toBe(100);
+    expect(dragReach(1, -5000, 100, 3)).toBe(-100);
+    expect(dragReach(2, 40, 100, 3)).toBe(0);
+    expect(dragReach(0, -40, 100, 3)).toBe(0);
   });
 
   it("slides the rows it passes by one row, and the dragged row with the pointer", () => {

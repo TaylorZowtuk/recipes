@@ -29,6 +29,7 @@ import {
   draftOperations,
   draftProblem,
   dragOffset,
+  dragReach,
   dropIndex,
   editingCategories,
   ingredientsMoving,
@@ -164,7 +165,7 @@ type Grip = Pick<
 type Drag = DragShift & { key: string; pointerId: number; startY: number; count: number };
 
 const follow = (drag: Drag, pageY: number): Drag => {
-  const dy = pageY - drag.startY;
+  const dy = dragReach(drag.from, pageY - drag.startY, drag.stride, drag.count);
   return { ...drag, dy, to: dropIndex(drag.from, dy, drag.stride, drag.count) };
 };
 

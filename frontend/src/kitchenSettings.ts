@@ -81,6 +81,13 @@ export function dropIndex(from: number, dy: number, stride: number, count: numbe
   return Math.min(Math.max(from + Math.round(dy / stride), 0), count - 1);
 }
 
+// How far a row dragged `dy` from index `from` is drawn, among `count` draggable rows: no further
+// than the first and last places. Past those its transform would lengthen the page, and a scroll
+// at the window's edge would chase that new length.
+export function dragReach(from: number, dy: number, stride: number, count: number) {
+  return Math.min(Math.max(dy, (0 - from) * stride), (count - 1 - from) * stride);
+}
+
 // How far the row at `index` sits from its place mid-drag: the dragged row follows the pointer, and
 // those it has passed slide over by one row.
 export function dragOffset({ from, to, dy, stride }: DragShift, index: number) {

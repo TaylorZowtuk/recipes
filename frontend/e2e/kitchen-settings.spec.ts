@@ -453,6 +453,31 @@ test("a row held at the window's edge keeps scrolling the page, and stays under 
   await expect.poll(async () => (await draftNames(page)).indexOf(dragged)).toBe(index);
 });
 
+test("a row held at the window's foot stops the page at its end", async ({ page }) => {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("no viewport");
+  await page.setViewportSize({ width: viewport.width, height: 480 });
+  await editorEdits(page, [AISLES, BAKERY, CHILLED, DELI]);
+  const { x, y } = await gripAt(page, DELI.name);
+  const end = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+  expect(end).toBeGreaterThan(await page.evaluate(() => window.scrollY));
+
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, 470, { steps: 4 });
+  await page.waitForFunction((target) => window.scrollY >= target, end - 1);
+  // The edge scroll moves once a frame, so this many frames would carry it well past the end.
+  await page.evaluate(async () => {
+    for (let frame = 0; frame < 30; frame += 1) {
+      await new Promise(requestAnimationFrame);
+    }
+  });
+  const held = await page.evaluate(() => window.scrollY);
+  await page.mouse.up();
+
+  expect(held).toBeLessThanOrEqual(end + 1);
+});
+
 test("an unsaved category stays at the foot until it's saved", async ({ page }) => {
   await editorEdits(page, [AISLES, BAKERY]);
   await button(page, "Add a category").click();
