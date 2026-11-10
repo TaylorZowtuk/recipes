@@ -80,8 +80,12 @@ Bringing a recipe from its source into the collection.
 _Avoid_: Import, scrape (scraping is only one way to ingest)
 
 **Queued Ingest**:
-A website Source that Add a recipe couldn't turn into a recipe with a plain fetch, kept so the Source stays reserved. It is either *waiting* for the local fallback chain or *needs a page*, where an editor has to paste the page or its text. It isn't a recipe and has no card. It has nothing to do with the Enrichment Status *Pending*, which is a saved recipe waiting for enrichment.
+A website Source that Add a recipe couldn't turn into a recipe with a plain fetch, kept so the Source stays reserved. It is either *waiting* for the local fallback chain or *needs a page*, where an editor has to paste the page's HTML. An editor can paste the page in either state, or discard the Queued Ingest, which frees its Source to be ingested again. It isn't a recipe and has no card. It has nothing to do with the Enrichment Status *Pending*, which is a saved recipe waiting for enrichment.
 _Avoid_: Pending ingest (*Pending* is an Enrichment Status), draft, failed import
+
+**Fallback Chain**:
+What the local CLI tries, in order, on a waiting Queued Ingest: a browser loading the page, recipe-scrapers on the loaded page, then a model reading the page's text through a Work Packet. A page nothing can read is marked as needing its page. A fetch that fails for a reason that may pass (the site is rate limiting, has a server error or can't be reached) writes nothing, so the Queued Ingest stays waiting for the next run. The bulk import runs the same chain. A recipe a model read has the extractor `llm` and always stops at Awaiting Review.
+_Avoid_: Fallback (alone), scraper
 
 **Source Guard**:
 The record that a Source is already in the collection, which stops it being ingested twice. It points at either a recipe or a Queued Ingest, and is checked before anything is fetched.
@@ -104,7 +108,7 @@ The version of enrichment a recipe was enriched with, recorded on the recipe so 
 _Avoid_: Enrichment run, parser version
 
 **Ingest Channel**:
-How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import).
+How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
 _Avoid_: Origin, import type
 
 **Enrichment Status**:
@@ -116,7 +120,7 @@ Something enrichment corrected or was unsure about, and which an editor should c
 _Avoid_: Warning, error
 
 **Work Packet**:
-The JSON that enrichment hands a model for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it, each with an id, and default uses. The answer keeps those that really are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written.
+The JSON that a CLI hands a model to answer, checked against the packet before anything is written. Enrichment's holds, for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it, each with an id, and default uses. The answer keeps those that really are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written. The fallback chain's holds the visible text of each page that recipe-scrapers couldn't read, and its answer is the recipe on that page, which is not written unless its title, ingredient lines and steps, and any description, author, yield and Stated Times it gives, appear in that text word for word. It is printed to stdout, holds page text, and is never committed.
 _Avoid_: Prompt, batch
 
 **Step Portion**:

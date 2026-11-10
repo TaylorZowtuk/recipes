@@ -11,7 +11,14 @@ export type IngestOutcome =
   | { kind: "not-found" | "invalid" }
   | Refusal;
 
-export type SaveOutcome = { kind: "saved" } | Refusal;
+export type SaveOutcome = { kind: "saved" | "gone" } | Refusal;
+
+export type PasteOutcome =
+  | { kind: "ingested"; ingested: Ingested }
+  | { kind: "no-recipe" | "too-large" | "gone" }
+  | WriteRefusal;
+
+export type DiscardOutcome = { kind: "discarded" } | { kind: "gone" } | WriteRefusal;
 
 // A 409 that names a recipe or a Queued Ingest is a duplicate; anything else is a write refusal.
 export function refusal(answer: Answer<unknown>): Refusal {
@@ -34,9 +41,33 @@ export function ingestOutcome(answer: Answer<Ingested | QueuedIngest>): IngestOu
   return refusal(answer);
 }
 
-// What `POST /api/recipes` answered: saved (201), or why not.
+// A 404 from the API itself: the Queued Ingest is gone, most likely finished by someone else.
+function isGone({ error, response }: Answer<unknown>): boolean {
+  return response.status === 404 && apiError(error) !== undefined;
+}
+
+// What `POST /api/queued-ingests/{id}/pasted-page` answered: the Original to review (200), or why
+// not. A 413 is too large whoever answers it, since Lambda refuses a huge body before the API.
+export function pasteOutcome(answer: Answer<Ingested>): PasteOutcome {
+  const { data, response } = answer;
+  if (response.status === 200 && data) return { kind: "ingested", ingested: data };
+  if (isGone(answer)) return { kind: "gone" };
+  if (response.status === 413) return { kind: "too-large" };
+  if (response.status === 422) return { kind: "no-recipe" };
+  return writeRefusal(answer);
+}
+
+// What `DELETE /api/queued-ingests/{id}` answered: discarded (204), or why not.
+export function discardOutcome(answer: Answer<unknown>): DiscardOutcome {
+  if (answer.response.status === 204) return { kind: "discarded" };
+  return isGone(answer) ? { kind: "gone" } : writeRefusal(answer);
+}
+
+// What saving a recipe answered, from `POST /api/recipes` or from finishing a Queued Ingest:
+// saved (201), or why not.
 export function saveOutcome(answer: Answer<unknown>): SaveOutcome {
-  return answer.response.status === 201 ? { kind: "saved" } : refusal(answer);
+  if (answer.response.status === 201) return { kind: "saved" };
+  return isGone(answer) ? { kind: "gone" } : refusal(answer);
 }
 
 // Tags typed as one comma-separated line, trimmed, with blanks and repeats (ignoring case) dropped.

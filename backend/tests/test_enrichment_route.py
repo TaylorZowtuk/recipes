@@ -7,6 +7,7 @@ import pytest
 from conftest import EDITOR
 
 from recipes.auth import SERVICE_TOKEN_HEADER
+from recipes.ingest import BROWSER_EXTRACTOR, EXTRACTOR, LLM_EXTRACTOR, PASTED_EXTRACTOR
 from recipes.models import (
     MAX_LABEL,
     MAX_RECIPE_BYTES,
@@ -93,6 +94,33 @@ def test_enriching_moves_a_pending_recipe_on_by_its_ingest_channel(
     assert response.json()["status"] == status
     assert response.json()["version"] == recipe.version + 1
     assert fetch(editor_client, recipe.id)["status"] == status
+
+
+@pytest.mark.parametrize(
+    ("channel", "extractor", "status"),
+    [
+        ("bulk_import", LLM_EXTRACTOR, "awaiting_review"),
+        ("add_a_recipe", LLM_EXTRACTOR, "awaiting_review"),
+        (None, LLM_EXTRACTOR, "awaiting_review"),
+        ("bulk_import", EXTRACTOR, "ready"),
+        ("bulk_import", BROWSER_EXTRACTOR, "ready"),
+        ("bulk_import", PASTED_EXTRACTOR, "ready"),
+    ],
+)
+def test_an_llm_extracted_original_always_stops_at_awaiting_review(
+    editor_client: TestClient,
+    api_store: Store,
+    channel: str | None,
+    extractor: str,
+    status: str,
+) -> None:
+    original = PENDING.original.model_copy(update={"extractor": extractor})
+    recipe = add(api_store, ingest_channel=channel, original=original)
+
+    response = enrich(editor_client, recipe.id)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == status
 
 
 def test_the_facts_and_enrichment_version_are_stored_with_the_recipe(

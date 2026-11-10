@@ -13,6 +13,7 @@ export type Step = components["schemas"]["Step-Output"];
 export type StepFacts = components["schemas"]["StepFacts-Output"];
 export type Difficulty = components["schemas"]["Difficulty"];
 export type Ingested = components["schemas"]["Ingested"];
+export type NewRecipe = components["schemas"]["NewRecipe"];
 export type QueuedIngest = components["schemas"]["QueuedIngest"];
 export type Duplicate = components["schemas"]["Duplicate"];
 export type Image = components["schemas"]["Image"];
