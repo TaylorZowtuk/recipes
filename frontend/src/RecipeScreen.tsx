@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { formatAmount } from "./amount";
 import type { Collection, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
@@ -22,20 +22,23 @@ import {
   tabCounts,
   undoBatch,
 } from "./review";
-import { focusTitle, Screen } from "./Screen";
+import { focusTitle, hashTookFocus, Screen } from "./Screen";
 import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
-import { stepText } from "./stepText";
+import { type DurationPiece, stepText } from "./stepText";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
+import { type TimerStart, timers } from "./timers";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
 // status note stays mounted through every state, so focus can rest on it after a retry. The hero
 // shows the Difficulty and every Tag above the tabs, and to an editor an Edit button that swaps the
 // tabs for the Edit form. Keyed by the recipe, so a Draft never carries over to another one.
+const FINISH_EDITING = "Finish editing to see this step.";
+
 export function RecipeScreen() {
   const { id } = useParams();
   return <RecipePage key={id} />;
@@ -44,6 +47,7 @@ export function RecipeScreen() {
 function RecipePage() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
+  const { hash, key } = useLocation();
   const collection = useCollection();
   const card =
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
@@ -54,21 +58,34 @@ function RecipePage() {
   const ready = card && recipe.state === "ready" ? recipe.value : undefined;
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
-  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title.
+  // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
+  // step in the address has shown itself and taken focus by then: it keeps focus, to match the
+  // view, unless there's a notice, which then scrolls into view.
   const notice = useRef<HTMLParagraphElement>(null);
   const wasEditing = useRef(false);
   useEffect(() => {
     if (!wasEditing.current && draft) focusEditHeading();
     if (wasEditing.current && !draft) {
-      if (notice.current) notice.current.focus({ preventScroll: true });
-      else focusTitle();
+      const stepShown = hashTookFocus(hash);
+      if (notice.current) notice.current.focus({ preventScroll: !stepShown });
+      else if (!stepShown) focusTitle();
     }
     wasEditing.current = !!draft;
-  }, [draft]);
+  }, [draft, hash]);
+
+  // Edit keeps the Draft on screen, so a jump tapped during it can't show its step yet. Only a new
+  // navigation says so: a step jumped to before Edit opened is still in the address.
+  const shownKey = useRef(key);
+  useEffect(() => {
+    if (shownKey.current === key) return;
+    shownKey.current = key;
+    if (draft && hash.startsWith("#step-")) timers.notify(FINISH_EDITING);
+  }, [key, draft, hash]);
 
   useEffect(() => {
-    if (card && shownSlug !== slug(card.title)) navigate(recipePath(card), { replace: true });
-  }, [card, shownSlug, navigate]);
+    if (card && shownSlug !== slug(card.title))
+      navigate({ pathname: recipePath(card), hash }, { replace: true });
+  }, [card, shownSlug, hash, navigate]);
 
   const missing = collection.state === "ready" && !card;
   const loading = collection.state === "loading" || (card && recipe.state === "loading");
@@ -173,6 +190,7 @@ const focusSelectedTab = () =>
 
 const BLOCKED_REVIEW = "You’re offline. Review the recipe once you’re back online.";
 const UNDO_OFFLINE = "You’re offline. Undo once you’re back online.";
+const STEPS_TAB = 1;
 
 // The Ingredients, Steps and About tabs. To an editor, each tab counts what is left to check on
 // it, its Review Items are marked buttons that open their sheet, and a review bar confirms the
@@ -193,6 +211,8 @@ function RecipeTabs({
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
+  const location = useLocation();
+  const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
   const items = isEditor ? reviewOf(recipe) : undefined;
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
@@ -205,6 +225,16 @@ function RecipeTabs({
       setOpenId(id);
     },
   };
+
+  // A jump to a step, on every navigation to it, even a repeat of the same address: Tabs has shown
+  // the step by now, and focus goes with the view so the next Tab press carries on from there.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key tells one jump from the next.
+  useEffect(() => {
+    const step = jump && document.getElementById(jump);
+    if (!step) return;
+    step.focus({ preventScroll: true });
+    step.scrollIntoView({ block: "center" });
+  }, [jump, location.key]);
 
   // A review write disables the control that started it, which drops its focus, and can remove
   // it (Confirm N on this tab once nothing is left unchecked, Undo once undone), even when the
@@ -249,6 +279,7 @@ function RecipeTabs({
     <>
       <Tabs
         label="Recipe"
+        reveal={jump ? { tab: STEPS_TAB, key: location.key } : undefined}
         tabs={[
           {
             label: "Ingredients",
@@ -265,7 +296,12 @@ function RecipeTabs({
             count: counts?.steps,
             panel: (
               <>
-                <Steps original={recipe.original} facts={recipe.facts} review={review} />
+                <Steps
+                  recipeId={recipe.id}
+                  original={recipe.original}
+                  facts={recipe.facts}
+                  review={review}
+                />
                 {bar("steps")}
               </>
             ),
@@ -421,12 +457,16 @@ function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolea
 }
 
 // The steps, numbered through the whole recipe across its Components. Where a step names an
-// ingredient line, it shows the amount that step uses, marked so it can be told apart.
+// ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
+// is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
+// buttons follow in a row. A captured recipe has no `recipeId` yet, so no Timers.
 export function Steps({
+  recipeId,
   original,
   facts,
   review,
 }: {
+  recipeId?: string;
   original: Original;
   facts?: RecipeFacts;
   review?: ReviewTarget;
@@ -435,24 +475,52 @@ export function Steps({
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ol className="steps" start={part.start}>
-        {part.lines.map((step) => {
-          const shown = stepText(step, facts, 1).map((piece, n) =>
-            typeof piece === "string" ? (
-              piece
-            ) : (
+        {part.lines.map((step, index) => {
+          const item = review?.items.get(step.id);
+          const timer = (piece: DurationPiece, n: number) =>
+            recipeId && (
+              <TimerButton
+                key={n}
+                start={{
+                  recipeId,
+                  recipeTitle: original.title,
+                  stepId: step.id,
+                  stepNumber: part.start + index,
+                  position: n,
+                  written: piece.written,
+                  lowS: piece.low_s,
+                  highS: piece.high_s,
+                }}
+              />
+            );
+          const pieces = stepText(step, facts, 1);
+          const shown = pieces.map((piece, n) => {
+            if (typeof piece === "string") return piece;
+            if ("t" in piece) return (!item && timer(piece, n)) || piece.written;
+            return (
               // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
               <Fragment key={n}>
                 <span className="step-amount">{piece.amount}</span> {piece.name}
               </Fragment>
-            ),
+            );
+          });
+          const timerRow = pieces.flatMap((piece, n) =>
+            typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
           );
-          const item = review?.items.get(step.id);
           return (
-            <li key={step.id}>
+            <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
               {item && review ? (
-                <ReviewButton item={item} review={review}>
-                  {shown}
-                </ReviewButton>
+                <>
+                  <ReviewButton item={item} review={review}>
+                    {shown}
+                  </ReviewButton>
+                  {timerRow.length > 0 && (
+                    <div className="step-timers">
+                      <ClockIcon />
+                      {timerRow}
+                    </div>
+                  )}
+                </>
               ) : (
                 shown
               )}
@@ -462,6 +530,19 @@ export function Steps({
       </ol>
     </section>
   ));
+}
+
+function TimerButton({ start }: { start: TimerStart }) {
+  return (
+    <button
+      type="button"
+      className="step-timer"
+      aria-label={`Start a timer for ${start.written}`}
+      onClick={() => timers.start(start)}
+    >
+      {start.written}
+    </button>
+  );
 }
 
 // The Stated Times (an ISO duration humanized, other text as written) and the yield as written.

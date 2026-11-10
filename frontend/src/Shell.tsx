@@ -5,9 +5,10 @@ import { useCollection, useSync } from "./collection";
 import { FridgeIcon, RecipesIcon, SitesIcon, WeekIcon } from "./icons";
 import { needsReview } from "./needsReview";
 import { useOnline } from "./online";
-import { focusTitle } from "./Screen";
+import { focusTitle, hashTookFocus } from "./Screen";
 import { EditorOnly } from "./session";
 import { syncStatus } from "./syncStatus";
+import { TimerDock } from "./TimerDock";
 
 const tabs = [
   { to: "/recipes", label: "Recipes", icon: <RecipesIcon />, mark: <ReviewDot /> },
@@ -22,19 +23,20 @@ export function Shell() {
   const sync = useSync();
   const online = useOnline();
   const status = sync === undefined ? "Checking…" : syncStatus({ sync, online });
-  const { key } = useLocation();
+  const { key, hash } = useLocation();
   const navigationType = useNavigationType();
   const shownKey = useRef(key);
 
   // After each navigation, focus moves to the new screen's title, without scrolling the window, so
   // screen readers announce it. The first screen opened, and a navigation that replaces the screen
-  // (the redirect from / or a tap on the current place), leave focus where it was.
+  // (the redirect from / or a tap on the current place), leave focus where it was, as does one to
+  // a step that took focus, which the recipe's effect has done by now.
   useEffect(() => {
     if (shownKey.current === key) return;
     shownKey.current = key;
-    if (navigationType === "REPLACE") return;
+    if (navigationType === "REPLACE" || hashTookFocus(hash)) return;
     focusTitle();
-  }, [key, navigationType]);
+  }, [key, hash, navigationType]);
 
   return (
     <div className="shell">
@@ -54,6 +56,7 @@ export function Shell() {
       <p role="status" className="sync-status">
         {status}
       </p>
+      <TimerDock />
     </div>
   );
 }

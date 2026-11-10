@@ -199,6 +199,10 @@ _Avoid_: Inventory, pantry
 The recipes the household places on each day of one Monday-to-Sunday week. A day can be empty or hold several recipes, such as a main, a side and a sauce. Past Week Plans are kept, and a recipe on a day that has passed counts as cooked, so the plan also records what was cooked. The household corrects that record by adding or removing recipes on past days.
 _Avoid_: Meal plan, menu, schedule
 
+**Timer**:
+A countdown started from a duration in a step, one of several that can run at once in the dock while the app stays in the foreground. A range such as 8-10 minutes is one timer: it chimes at the low end, to say check it, and alarms at the high end until it is cancelled or given another minute. A single duration only alarms. A timer stays in the dock until it is cancelled, and can't be started again while it's there. It lives in the page and is never stored.
+_Avoid_: Countdown, stopwatch, reminder
+
 **Grocery List**:
 The shared list of ingredients to buy, combined from the recipes in one Week Plan, plus any extras. Items ticked off are shared by the household.
 _Avoid_: Shopping list
