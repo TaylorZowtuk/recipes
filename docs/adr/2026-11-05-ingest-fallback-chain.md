@@ -1,6 +1,6 @@
 # The CLI turns a Queued Ingest into a recipe through a browser, recipe-scrapers and a model, and an editor pastes only HTML
 
-Superseded in part by [2026-11-10-fallback-records-failed-attempts](2026-11-10-fallback-records-failed-attempts.md): a temporary failure now records its reason.
+Superseded in part by [The fallback records why its latest try at a waiting Queued Ingest failed](2026-11-10-fallback-records-failed-attempts.md): a fetch that fails with a reason that may pass no longer writes nothing; it records that reason, and the Queued Ingest stays waiting. Everything else here stands.
 
 This settles what the [website ingest ADR](2026-10-24-website-ingest.md) left to [TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50): how a Queued Ingest becomes a recipe, what the local fallback tries, and what an editor can paste. Everything else in that ADR stands.
 
