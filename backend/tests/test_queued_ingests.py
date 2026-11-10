@@ -392,6 +392,7 @@ def test_a_failed_attempt_on_an_unknown_queued_ingest_is_not_found(
     response = failed_attempt(editor_client, ingest_id=MISSING_ID)
 
     assert response.status_code == 404
+    assert response.json()["detail"] == "No such Queued Ingest"
     assert store.queued_ingests() == []
 
 

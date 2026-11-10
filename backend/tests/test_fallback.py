@@ -707,6 +707,28 @@ def test_a_packet_whose_answers_are_all_rejected_counts_them_as_needing_their_pa
     }
 
 
+def test_a_rejected_answer_whose_needs_page_mark_is_refused_counts_as_one_failure(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rejected = queue(api_store, "rejected")
+
+    def refuse_the_mark(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if url.endswith("/needs-page"):
+            return 404, "No such Queued Ingest"
+        return send(method, url, body)
+
+    failed = apply(
+        BASE_URL,
+        refuse_the_mark,
+        packet_of(rejected),
+        answer_of((rejected, original(title="Damson Chutney"))),
+    )
+
+    assert failed == 1
+    assert "Saved 0, 0 need their page, 1 failed" in capsys.readouterr().err
+    assert queue_state(editor_client) == {rejected.id: ("waiting", "no_recipe")}
+
+
 @pytest.mark.parametrize(
     ("rejected", "summary"),
     [

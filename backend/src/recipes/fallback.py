@@ -390,10 +390,10 @@ def apply(base_url: str, send: Send, packet_text: str, answer_text: str) -> int:
                 saved += 1
                 _say(f"{item.url} → saved")
             else:
-                failed += 1
                 _say("\n  ".join([f"{item.url} → rejected, needs its page:", *checked]))
                 _mark_needs_page(base_url, send, ingest_id, "no_recipe")
                 marked += 1
+                failed += 1
         except Exception as error:
             failed += 1
             _say(f"{item.url} → failed: {error}")
