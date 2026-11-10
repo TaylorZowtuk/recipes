@@ -34,8 +34,6 @@ process.env.E2E_ALL_PROJECTS ??=
   !remote || process.argv.some((arg) => arg.startsWith("--project")) ? "1" : "";
 const grepOnCli = process.argv.some((arg) => /^(-[gG]|--grep(-invert)?(=|$))/.test(arg));
 
-const localCI = !!process.env.CI && !remote;
-
 // CI splits the local-build run into parallel jobs, each running one shard: E2E_SHARD=<current>/<total>.
 const [current, total] = (process.env.E2E_SHARD ?? "").split("/").map(Number);
 
@@ -44,8 +42,6 @@ export default defineConfig({
   grep: remote && !grepOnCli ? /@deployed/ : undefined,
   forbidOnly: !!process.env.CI,
   shard: current && total ? { current, total } : null,
-  // CI's runners have 4 cores. A deployed run keeps the default, to stay under the WAF's rate limit.
-  workers: localCI ? 4 : undefined,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: { baseURL: remote ?? "http://127.0.0.1:4173", trace: remote ? "off" : "retain-on-failure" },
@@ -54,9 +50,6 @@ export default defineConfig({
       schemes.map((colorScheme) => ({
         name: `${name}-${colorScheme}`,
         use: { ...device, colorScheme },
-        // WebKit is CPU-bound: on CI's 4 cores, 4 workers run it no faster than 2 and push its slowest
-        // tests past their timeout.
-        workers: localCI && name === "iphone" ? 2 : undefined,
       })),
     )
     .filter(({ name }) => process.env.E2E_ALL_PROJECTS || deployed.includes(name)),
