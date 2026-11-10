@@ -41,10 +41,11 @@ jobs:
           path: frontend/playwright-report/
           if-no-files-found: ignore
 
-  # The one check branch protection requires: it fails unless every shard passed.
+  # The one check branch protection requires: it fails unless every shard passed. It runs even when
+  # the run is cancelled, because a skipped required check counts as passing.
   e2e:
     needs: e2e-shard
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - run: test "$RESULT" = success
