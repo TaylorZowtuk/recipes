@@ -189,6 +189,10 @@ class NeedsPage(BaseModel):
     reason: QueuedIngestReason
 
 
+class FailedAttempt(BaseModel):
+    reason: Literal["rate_limited", "server_error", "unreachable"]  # only those that may pass
+
+
 class PastedPage(BaseModel):
     html: str  # at most MAX_PAGE_BYTES as UTF-8; read once, and never stored, logged or echoed
 
@@ -1260,6 +1264,23 @@ def post_queued_ingest_needs_page(
     failed for `reason`. One that already needs its page stays as it is.
     """
     queued = store.mark_needs_page(ingest_id, body.reason)
+    if queued is None:
+        raise _no_such_queued_ingest()
+    return queued
+
+
+@router.post(
+    "/queued-ingests/{ingest_id}/failed-attempt",
+    dependencies=EDITORS_ONLY,
+    responses={403: DUPLICATE[403], **NO_SUCH_QUEUED_INGEST},
+)
+def post_queued_ingest_failed_attempt(
+    ingest_id: Annotated[Ulid, Path()], body: FailedAttempt, store: StoreDep
+) -> QueuedIngest:
+    """Record why a fallback's latest try at a waiting Queued Ingest failed, for a `reason` that
+    may pass, leaving it waiting. One that needs its page stays as it is.
+    """
+    queued = store.record_failed_attempt(ingest_id, body.reason)
     if queued is None:
         raise _no_such_queued_ingest()
     return queued

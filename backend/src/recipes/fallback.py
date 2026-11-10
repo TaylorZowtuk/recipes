@@ -113,7 +113,9 @@ class NeedsPage:
 
 @dataclass(frozen=True)
 class StillWaiting:
-    """The fetch failed for a `reason` that may pass, so the next run tries again."""
+    """The fetch failed for a `reason` that may pass, so the Queued Ingest records it and the next
+    run tries again.
+    """
 
     reason: QueuedIngestReason
 
@@ -241,6 +243,13 @@ def _mark_needs_page(base_url: str, send: Send, ingest_id: str, reason: QueuedIn
     _post(send, url, {"reason": reason}, HTTPStatus.OK)
 
 
+def _record_failed_attempt(
+    base_url: str, send: Send, ingest_id: str, reason: QueuedIngestReason
+) -> None:
+    url = f"{base_url}/api/queued-ingests/{ingest_id}/failed-attempt"
+    _post(send, url, {"reason": reason}, HTTPStatus.OK)
+
+
 def _stored_photos(base_url: str, send: Send, urls: list[str]) -> tuple[Image, ...]:
     """The candidates that stored, in order, each photo once. Any that fails is dropped."""
     images: dict[str, Image] = {}
@@ -287,8 +296,8 @@ def _save(base_url: str, send: Send, ingest_id: str, recipe: dict[str, Any]) -> 
 def run(base_url: str, send: Send, fetch: PageFetcher) -> int:
     """Take each waiting website Queued Ingest through the chain, saving what it captures and
     marking what needs its page, then print a Work Packet of those a model has to read. A temporary
-    failure writes nothing, so the next run retries it. Returns how many failed: a failure stays
-    waiting too, and the others go on.
+    failure records its reason and stays waiting, so the next run retries it. Returns how many
+    failed: a failure stays waiting too, and the others go on.
     """
     listed = _queued_ingests(base_url, send)
     if listed is None:
@@ -316,6 +325,7 @@ def run(base_url: str, send: Send, fetch: PageFetcher) -> int:
                     marked += 1
                     _say(f"{source.url} → needs its page ({reason})")
                 case StillWaiting(reason):
+                    _record_failed_attempt(base_url, send, queued.id, reason)
                     still_waiting += 1
                     _say(f"{source.url} → still waiting ({reason})")
         except Exception as error:
@@ -383,6 +393,7 @@ def apply(base_url: str, send: Send, packet_text: str, answer_text: str) -> int:
                 failed += 1
                 _say("\n  ".join([f"{item.url} → rejected, needs its page:", *checked]))
                 _mark_needs_page(base_url, send, ingest_id, "no_recipe")
+                marked += 1
         except Exception as error:
             failed += 1
             _say(f"{item.url} → failed: {error}")
@@ -393,7 +404,6 @@ def apply(base_url: str, send: Send, packet_text: str, answer_text: str) -> int:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m recipes.fallback", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-                marked += 1
     base_help = "the API's base URL, e.g. http://localhost:5173"
     run_command = commands.add_parser(
         "run", help="run the chain over the queue, and print a Work Packet"
