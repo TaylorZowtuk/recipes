@@ -1,5 +1,7 @@
 # The CLI turns a Queued Ingest into a recipe through a browser, recipe-scrapers and a model, and an editor pastes only HTML
 
+Superseded in part by [2026-11-10-fallback-records-failed-attempts](2026-11-10-fallback-records-failed-attempts.md): a temporary failure now records its reason.
+
 This settles what the [website ingest ADR](2026-10-24-website-ingest.md) left to [TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50): how a Queued Ingest becomes a recipe, what the local fallback tries, and what an editor can paste. Everything else in that ADR stands.
 
 The fallback runs in the local CLI, never in the API, as that ADR says. The API gains four endpoints, and a new module, `recipes.fallback`, runs the chain. The bulk import shares that module.
