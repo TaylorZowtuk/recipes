@@ -56,8 +56,3 @@ test("an editor narrows the grid to Needs Review and back", async ({ page }) => 
   await expect(grid(page).getByRole("listitem")).toHaveCount(all);
   await expect(grid(page).getByText(/\d+ to check/)).toHaveCount(0);
 });
-
-test("CANARY: always fails, to check the failing path of sharded CI", async ({ page }) => {
-  await page.goto("/");
-  expect(1).toBe(2);
-});
