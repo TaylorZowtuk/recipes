@@ -376,8 +376,9 @@ test("Add a recipe shows one outcome at a time, the latest", async ({ page }, te
 });
 
 test("going back to the list from Paste clears the outcome", async ({ page }, testInfo) => {
-  const robots = pageUrl("robots-denied/back-clears", testInfo);
-  const blocked = pageUrl("blocked/back-clears", testInfo);
+  // Not "back-…": these stay queued, and their buttons would match later tests' "Back" button.
+  const robots = pageUrl("robots-denied/list-clears", testInfo);
+  const blocked = pageUrl("blocked/list-clears", testInfo);
   const fetchedNote = page.getByText("The recipe couldn’t be fetched", { exact: false });
   await openAddRecipe(page);
   await fetchRecipe(page, robots);
