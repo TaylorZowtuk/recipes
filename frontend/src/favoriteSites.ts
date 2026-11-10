@@ -1,6 +1,6 @@
-import type { CountedSite, CountedSites, SiteOperation } from "./api/client";
+import type { CountedSite, SiteOperation } from "./api/client";
 import { SAVED_NOT_REFRESHED, UNREACHABLE } from "./editRecipe";
-import { type Answer, apiError, type WriteRefusal, writeRefusal } from "./writeOutcome";
+import type { BatchOutcome } from "./writeOutcome";
 
 type SiteFields = Pick<CountedSite, "name" | "address" | "note">;
 
@@ -87,21 +87,6 @@ export function recipeCountOf(saved: CountedSite[], site: DraftSite): number | u
 export const isComplete = ({ sites }: Draft) =>
   sites.every(({ name, address }) => name.trim() && /^https?:\/\/\S+$/i.test(address.trim()));
 
-export type SitesOutcome = { kind: "saved" } | { kind: "invalid"; message: string } | WriteRefusal;
-
-// What a 422 says: an HTTPException's detail, or the first of a validation error's.
-function refusalMessage(error: unknown): string | undefined {
-  const detail = (apiError(error) as { detail?: string | { msg: string }[] } | undefined)?.detail;
-  return Array.isArray(detail) ? detail[0]?.msg : detail;
-}
-
-// What `PATCH /api/favorite-sites` answered.
-export function sitesOutcome(answer: Answer<CountedSites>): SitesOutcome {
-  if (answer.response.status === 200 && answer.data) return { kind: "saved" };
-  const message = answer.response.status === 422 && refusalMessage(answer.error);
-  return message ? { kind: "invalid", message } : writeRefusal(answer);
-}
-
 // Edit on the Sites tab: a draft while editing, null while read-only. A conflict discards the
 // draft, since the newer list shows instead and nothing is merged; any other failure keeps it.
 // `refreshed` says whether the Collection reloaded after the write.
@@ -115,7 +100,7 @@ export type SitesAction =
   | { type: "add" }
   | { type: "cancel" }
   | { type: "incomplete" }
-  | { type: "settled"; outcome: SitesOutcome; refreshed: boolean };
+  | { type: "settled"; outcome: BatchOutcome; refreshed: boolean };
 
 function edited(draft: Draft, action: SitesAction): Draft {
   const { sites, addedSoFar } = draft;

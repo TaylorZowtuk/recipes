@@ -21,6 +21,10 @@ export type RecipeOperation = components["schemas"]["RecipeEdit"]["operations"][
 export type CountedSites = components["schemas"]["CountedSites"];
 export type CountedSite = components["schemas"]["CountedSite"];
 export type SiteOperation = components["schemas"]["FavoriteSitesEdit"]["operations"][number];
+export type CanonicalIngredient = components["schemas"]["CanonicalIngredient-Output"];
+export type KitchenSettings = components["schemas"]["KitchenSettings"];
+export type StoreCategoryOperation =
+  components["schemas"]["KitchenSettingsEdit"]["operations"][number];
 export type WeekPlan = components["schemas"]["WeekPlan"];
 export type WeekPlanEntry = components["schemas"]["WeekPlanEntry"];
 export type WeekOperation = components["schemas"]["WeekPlanEdit"]["operations"][number];

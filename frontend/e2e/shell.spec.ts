@@ -260,7 +260,7 @@ test("the account menu opens Kitchen settings", async ({ page }) => {
   await chooseFromAccountMenu(page, "Kitchen settings");
   await expect(page).toHaveURL(/\/kitchen-settings$/);
   await expect(page.getByRole("heading", { level: 1, name: "Kitchen settings" })).toBeFocused();
-  await expect(page.getByRole("main")).toContainText("coming soon");
+  await expect(page.getByRole("main")).toContainText("Store Categories");
   await expect(accountMenu(page)).toBeHidden();
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/fridge$/);

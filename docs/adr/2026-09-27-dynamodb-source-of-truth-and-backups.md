@@ -1,5 +1,7 @@
 # DynamoDB is the source of truth, the API is its only writer, and nightly snapshots are the backup
 
+Superseded in part by [Deleting a Store Category moves its ingredients in chunks and removes the category last](2026-11-05-store-category-delete-in-chunks.md): moving a Canonical Ingredient out of a deleted Store Category is conditional on its category, not its version. Everything else here stands.
+
 Recipe and household data live in **DynamoDB**, one table per stack. Images live in S3. Neither ever goes in the public repo. We chose DynamoDB over files in S3 (one JSON object per recipe, which kept the data next to the images) because DynamoDB is Always Free with conditional and atomic writes built in, and in provisioned mode it throttles instead of billing. The costs are that reads are charged by whole-item size under a small capacity budget, and that backups need our own export and restore code. The layout and the restore path below are shaped around both.
 
 ## Table layout
