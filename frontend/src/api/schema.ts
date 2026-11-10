@@ -170,6 +170,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/queued-ingests/{ingest_id}/failed-attempt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Queued Ingest Failed Attempt
+         * @description Record why a fallback's latest try at a waiting Queued Ingest failed, for a `reason` that
+         *     may pass, leaving it waiting. One that needs its page stays as it is.
+         */
+        post: operations["post_queued_ingest_failed_attempt_api_queued_ingests__ingest_id__failed_attempt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/queued-ingests/{ingest_id}/needs-page": {
         parameters: {
             query?: never;
@@ -988,6 +1009,14 @@ export interface components {
              * @enum {string}
              */
             status: "open" | "resolved";
+        };
+        /** FailedAttempt */
+        FailedAttempt: {
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "rate_limited" | "server_error" | "unreachable";
         };
         /**
          * FavoriteSitesEdit
@@ -2599,6 +2628,55 @@ export interface operations {
             };
             /** @description The Queued Ingest no longer reserves its Source */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_queued_ingest_failed_attempt_api_queued_ingests__ingest_id__failed_attempt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ingest_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FailedAttempt"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedIngest"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such Queued Ingest */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
