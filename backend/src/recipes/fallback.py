@@ -393,6 +393,7 @@ def apply(base_url: str, send: Send, packet_text: str, answer_text: str) -> int:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m recipes.fallback", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+                marked += 1
     base_help = "the API's base URL, e.g. http://localhost:5173"
     run_command = commands.add_parser(
         "run", help="run the chain over the queue, and print a Work Packet"

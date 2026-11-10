@@ -688,6 +688,50 @@ def test_an_original_quoting_everything_on_the_page_is_saved_with_its_numbers_un
         ("2 plums", "12 plums"),
         ("1/2 cup", "1/2 cups"),
         ("1/2 cup (120 ml)", "11/2 cup (120 ml) milk"),
+def test_a_packet_whose_answers_are_all_rejected_counts_them_as_needing_their_page(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = queue(api_store, "first")
+    second = queue(api_store, "second")
+    wrong = original(title="Damson Chutney")
+
+    failed = apply(
+        BASE_URL, send, packet_of(first, second), answer_of((first, wrong), (second, wrong))
+    )
+
+    assert failed == 2
+    assert "Saved 0, 2 need their page, 2 failed" in capsys.readouterr().err
+    assert queue_state(editor_client) == {
+        first.id: ("needs_page", "no_recipe"),
+        second.id: ("needs_page", "no_recipe"),
+    }
+
+
+@pytest.mark.parametrize(
+    ("rejected", "summary"),
+    [
+        ([original(title="Damson Chutney")], "Saved 1, 2 need their page, 1 failed"),
+        ([], "Saved 1, 1 need their page, 0 failed"),
+    ],
+)
+def test_a_mix_of_answers_counts_null_and_rejected_as_needing_their_page(
+    api_store: Store,
+    send: Send,
+    capsys: pytest.CaptureFixture[str],
+    rejected: list[dict[str, Any]],
+    summary: str,
+) -> None:
+    saved = queue(api_store, "saved")
+    null = queue(api_store, "null")
+    wrong = queue(api_store, "wrong")
+    answers = [(saved, original()), (null, None), *((wrong, a) for a in rejected)]
+
+    failed = apply(BASE_URL, send, packet_of(saved, null, wrong), answer_of(*answers))
+
+    assert failed == len(rejected)
+    assert summary in capsys.readouterr().err
+
+
         ("1/2 cup (120 ml)", "1/2 cup (120 ml)milk"),
         ("(120 ml) milk", "cup(120 ml) milk"),
     ],
