@@ -74,6 +74,24 @@ export const ClockIcon = () => (
   </Icon>
 );
 
+export const PauseIcon = () => (
+  <Icon>
+    <path d="M8.5 5v14M15.5 5v14" />
+  </Icon>
+);
+
+export const PlayIcon = () => (
+  <Icon>
+    <path d="M7.5 4.5v15l12-7.5Z" />
+  </Icon>
+);
+
+export const CloseIcon = () => (
+  <Icon>
+    <path d="m6 6 12 12M18 6 6 18" />
+  </Icon>
+);
+
 export const SearchIcon = () => (
   <Icon>
     <circle cx="10.5" cy="10.5" r="6.5" />

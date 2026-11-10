@@ -48,6 +48,7 @@
   --cooking-button: 70px;
   --rail-width: 96px;
   --nav-height: 68px;
+  --dock-height: 0px; /* set from the timer dock's height while it shows */
   --top-bar-height: calc(var(--tap) + var(--space) * 4);
 
   --elevation-card: 0 1px 2px rgba(30, 60, 45, 0.08), 0 4px 12px rgba(30, 60, 45, 0.06);
@@ -95,10 +96,11 @@
   box-sizing: border-box;
 }
 
-/* Scrolling to a focused control keeps it clear of the sticky top bar and the fixed tab bar. */
+/* Scrolling to a focused control keeps it clear of the sticky top bar, the fixed tab bar and the
+   timer dock. */
 html {
   scroll-padding: calc(var(--top-bar-height) + env(safe-area-inset-top)) 0
-    calc(var(--nav-height) + env(safe-area-inset-bottom));
+    calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--dock-height));
 }
 
 body {
@@ -135,7 +137,7 @@ button {
 /* Phones: a top bar, the screen, and a bottom tab bar that never scrolls away. */
 .shell {
   min-height: 100dvh;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--dock-height));
 }
 
 .top-bar {
@@ -1478,11 +1480,11 @@ h1:focus {
 @media (min-width: 768px) {
   /* The rail doesn't cover the screen; the top bar is at most Back and its padding tall. */
   html {
-    scroll-padding: calc(var(--tap) + var(--space) * 8) 0 0;
+    scroll-padding: calc(var(--tap) + var(--space) * 8) 0 var(--dock-height);
   }
 
   .shell {
-    padding-bottom: 0;
+    padding-bottom: var(--dock-height);
     padding-left: calc(var(--rail-width) + env(safe-area-inset-left));
   }
 
@@ -2005,7 +2007,13 @@ h1:focus {
 /* Above the tab bar while the tab has items left: what's left, and Confirm N on this tab. */
 .review-bar {
   position: sticky;
-  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 2);
+  bottom: calc(
+    var(--nav-height) +
+    env(safe-area-inset-bottom) +
+    var(--dock-height) +
+    var(--space) *
+    2
+  );
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
@@ -2088,7 +2096,8 @@ h1:focus {
 /* A toast floats above the tab bar, or at the foot of the screen beside the rail. */
 .toast-region {
   position: fixed;
-  inset: auto 0 calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 3);
+  inset: auto 0
+    calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--dock-height) + var(--space) * 3);
   z-index: 3;
   display: flex;
   justify-content: center;
@@ -2098,7 +2107,7 @@ h1:focus {
 
 /* Clear of the review bar while the open tab shows one. */
 body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
-  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + 112px);
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--dock-height) + 112px);
 }
 
 .toast {
@@ -2129,15 +2138,172 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 
 @media (min-width: 768px) {
   .review-bar {
-    bottom: calc(var(--space) * 4);
+    bottom: calc(var(--dock-height) + var(--space) * 4);
   }
 
   .toast-region {
-    inset: auto 0 calc(var(--space) * 6) var(--rail-width);
+    inset: auto 0 calc(var(--dock-height) + var(--space) * 6) var(--rail-width);
   }
 
   body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
-    bottom: calc(var(--space) * 26);
+    bottom: calc(var(--dock-height) + var(--space) * 26);
+  }
+}
+
+/* A duration in a step, drawn as part of the sentence. Its tap area reaches past the line. */
+.step-timer {
+  position: relative;
+  padding: 0 calc(var(--space) * 1.5);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.step-timer::after {
+  content: "";
+  position: absolute;
+  inset: -12px 0;
+}
+
+/* A Review Item is a button already, so its step's timers follow it in a row, in line with the
+   step's text: past the item's padding, the mark and the gap. */
+.step-timers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--space) * 3);
+  padding: var(--space) var(--space) calc(var(--space) * 2) calc(var(--space) * 7);
+  color: var(--text-secondary);
+}
+
+.step-timers > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+/* Running timers float above the tab bar, or at the foot of the screen beside the rail. Its box
+   includes the gap below the panel, so --dock-height clears both. */
+.timer-dock {
+  position: fixed;
+  inset: auto 0 calc(var(--nav-height) + env(safe-area-inset-bottom));
+  z-index: 2;
+  padding: 0 calc(var(--gutter) + env(safe-area-inset-right)) calc(var(--space) * 2)
+    calc(var(--gutter) + env(safe-area-inset-left));
+  pointer-events: none;
+}
+
+/* Many timers scroll inside the panel, under a notice that stays put, so the screen keeps its
+   room. */
+.timer-dock-panel {
+  display: flex;
+  flex-direction: column;
+  max-width: 560px;
+  max-height: 40dvh;
+  margin: 0 auto;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--elevation-float);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.timer-notice {
+  flex: none;
+  margin: 0;
+  padding: calc(var(--space) * 2) calc(var(--space) * 4);
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-size: var(--text-small);
+}
+
+/* Empty, it takes no room but stays in the accessibility tree, so screen readers announce it. */
+.timer-notice:empty {
+  padding-block: 0;
+}
+
+/* The padding keeps the first and last rows' focus rings inside the scrolling box. */
+.timer-list {
+  min-height: 0;
+  margin: 0;
+  padding: var(--space) 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+.timer-row {
+  display: flex;
+  align-items: center;
+  padding: var(--space) calc(var(--space) * 2);
+  border-radius: var(--radius-card);
+}
+
+.timer-row + .timer-row {
+  border-top: 1px solid var(--divider);
+}
+
+.timer-chimed {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.timer-alarming {
+  box-shadow: inset 0 0 0 2px var(--emphasis);
+}
+
+.timer-jump {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: var(--space) calc(var(--space) * 2);
+  color: inherit;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+.timer-title,
+.timer-step,
+.timer-countdown {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timer-title {
+  font-size: var(--text-small);
+  font-weight: 700;
+}
+
+.timer-step {
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.timer-countdown {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-chimed .timer-countdown {
+  color: var(--accent-text);
+}
+
+.timer-alarming .timer-countdown {
+  color: var(--emphasis-text);
+}
+
+.timer-add {
+  font-weight: 700;
+}
+
+@media (min-width: 768px) {
+  .timer-dock {
+    inset: auto 0 0 var(--rail-width);
+    padding-bottom: calc(var(--space) * 4 + env(safe-area-inset-bottom));
   }
 }
 

@@ -8,7 +8,8 @@ import { expect, test } from "@playwright/test";
 // the button with that name last, such as Edit, without saving anything, and `shows` is text that
 // shows once it has. `stubConfirm` answers a review confirm as if it made the recipe Ready, writing
 // nothing, since every project shares the seeded recipe. `stubWeek` answers every week with a
-// fixed plan and stops the clock on a Wednesday, since every project shares the weeks too.
+// fixed plan and stops the clock on a Wednesday, since every project shares the weeks too. `after`
+// moves the page's clock on that far once everything else is done, such as to a Timer's alarm.
 type Shot = {
   name: string;
   path: string;
@@ -22,6 +23,7 @@ type Shot = {
   shows?: string;
   stubConfirm?: boolean;
   stubWeek?: boolean;
+  after?: string;
 };
 const REVIEW_RECIPE = "/recipes/01K7SEED000000000000000007/garlic-butter-green-beans";
 const planned = (entry: string, recipe_id: string, recipe_title: string, factor = 1) => ({
@@ -202,6 +204,35 @@ const pages: Shot[] = [
     tab: "Steps",
   },
   {
+    name: "recipe-steps-timer",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    tab: "Steps",
+    click: "Start a timer for 8-10 minutes",
+    shows: "Step 3 · 8-10 minutes",
+  },
+  {
+    name: "recipe-steps-timer-editor",
+    path: "/recipes/01K7SEED000000000000000001/lemon-herb-roast-chicken",
+    ready: "Lemon Herb Roast Chicken",
+    loaded: "Lemon Herb Roast Chicken",
+    editor: true,
+    tab: "Steps",
+    click: "Start a timer for 70-80 minutes",
+    shows: "Step 4 · 70-80 minutes",
+  },
+  {
+    name: "recipe-steps-timer-alarm",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    tab: "Steps",
+    click: "Start a timer for 8-10 minutes",
+    shows: "Step 3 · 8-10 minutes",
+    after: "10:00",
+  },
+  {
     name: "recipe-edit",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
     ready: "Sesame Noodles with Crispy Tofu",
@@ -291,6 +322,7 @@ for (const shot of pages) {
       await page.clock.setFixedTime(new Date(2026, 10, 4, 12));
       await page.route("**/api/weeks/*", (route) => route.fulfill({ json: WEEK_PLAN }));
     }
+    if (shot.after) await page.clock.install();
     if (editor) {
       const signedIn = await page.request.post("/api/session", {
         data: { credential: "fake:editor@example.com" },
@@ -366,6 +398,10 @@ for (const shot of pages) {
         else await expect(shown).toBeVisible();
       }
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
+    }
+    if (shot.after) {
+      await page.clock.fastForward(shot.after);
+      await expect(page.getByText("Time’s up", { exact: true })).toBeVisible();
     }
     // Photos load after the data that names them. A full-page shot shows those below the fold too,
     // which WebKit otherwise leaves unloaded.
