@@ -2,7 +2,8 @@
 Ingredients, the Wording Cache, Kitchen settings, Favorite Sites, Week Plans and meta items.
 
 The API is the table's only writer. Every write to shared collection data bumps `META#collection`
-in the same transaction, and versioned items are written only if their version hasn't changed.
+in the same transaction, and versioned items are written only if their version hasn't changed,
+except a Store Category delete's moves, which are conditional on the ingredient's category.
 Week Plans are private to the household, so they aren't shared collection data.
 """
 
@@ -11,6 +12,7 @@ import os
 import random
 import time
 from decimal import Decimal
+from itertools import batched
 from typing import TYPE_CHECKING, Any, cast
 
 import boto3
@@ -36,7 +38,7 @@ from recipes.models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
     from pydantic import BaseModel
     from types_boto3_dynamodb import DynamoDBClient
@@ -62,6 +64,10 @@ STORE_CATEGORIES = ["Household", "Produce", "Meat", "Aisles", "Spices", "Dairy",
 MAX_TRANSACTION_ITEMS = 100
 ENRICH_FIXED_ITEMS = ("the recipe", "its card", "META#collection")
 MAX_LEARNED = MAX_TRANSACTION_ITEMS - len(ENRICH_FIXED_ITEMS)
+
+# Store.save_store_categories moves Canonical Ingredients in transactions that also hold these.
+MOVE_FIXED_ITEMS = ("the Kitchen settings, or a check on them", "META#collection")
+MAX_MOVES = MAX_TRANSACTION_ITEMS - len(MOVE_FIXED_ITEMS)
 
 # How many times a transaction or a read is tried before giving up, and the first backoff.
 ATTEMPTS = 4
@@ -428,6 +434,23 @@ class Store:
         item = self._get(canonical_key(canonical_id), consistent=True)
         return None if item is None else _from_item(CanonicalIngredient, item)
 
+    def save_canonical_ingredient(
+        self, ingredient: CanonicalIngredient, *, kitchen_version: int | None = None
+    ) -> CanonicalIngredient:
+        """Write the Canonical Ingredient if the stored one is still at `ingredient.version` and,
+        given `kitchen_version`, the Kitchen settings are still at it, so that it can't land in a
+        Store Category being deleted. Raises VersionConflict otherwise.
+        """
+        checks = [] if kitchen_version is None else [self._kitchen_unchanged(kitchen_version)]
+        try:
+            return self._save_versioned(
+                ingredient, canonical_key(ingredient.id), shared=True, also=lambda _: checks
+            )
+        except _Cancelled as cancelled:
+            if any(cancelled.failed(check) for check in checks):
+                raise VersionConflict(KITCHEN_KEY["PK"]["S"]) from None
+            raise
+
     def wording(self, wording: str) -> Wording | None:
         """The Wording Cache's entry for a normalized wording, if it has one."""
         item = self._get(wording_key(wording), consistent=True)
@@ -574,6 +597,81 @@ class Store:
         """Write the settings if the stored ones are still at `settings.version`."""
         return self._save_versioned(settings, KITCHEN_KEY, shared=True)
 
+    def save_store_categories(
+        self, settings: KitchenSettings, moves: Mapping[str, str]
+    ) -> KitchenSettings:
+        """`save_kitchen_settings`, moving the Canonical Ingredients of each Store Category in
+        `moves` to the category it maps to, in the same transaction if MAX_MOVES of them fit.
+
+        Otherwise they move in chunks and the settings are written last, so a failure part way
+        leaves the deleted categories in place, and a retry moves the rest. Ingredients read
+        again after the chunks move with the settings. Raises VersionConflict if anything changed.
+        """
+        waiting = self._in_categories(moves)
+        while len(waiting) > MAX_MOVES:
+            for chunk in batched(waiting, MAX_MOVES, strict=False):
+                self._move_chunk(chunk, moves, settings.version)
+            waiting = self._in_categories(moves)
+        moved = [self._move(ingredient, moves) for ingredient in waiting]
+        try:
+            return self._save_versioned(settings, KITCHEN_KEY, shared=True, also=lambda _: moved)
+        except _Cancelled as cancelled:
+            if any(cancelled.failed(item) for item in moved):
+                raise VersionConflict(KITCHEN_KEY["PK"]["S"]) from None
+            raise
+
+    def _in_categories(self, moves: Mapping[str, str]) -> list[CanonicalIngredient]:
+        if not moves:
+            return []
+        return [c for c in self.canonical_ingredients() if c.store_category_id in moves]
+
+    def _move_chunk(
+        self,
+        ingredients: Iterable[CanonicalIngredient],
+        moves: Mapping[str, str],
+        kitchen_version: int,
+    ) -> None:
+        check = self._kitchen_unchanged(kitchen_version)
+        moved = [self._move(ingredient, moves) for ingredient in ingredients]
+        try:
+            self._transact([check, *moved, self._bump_collection()])
+        except _Cancelled as cancelled:
+            if any(cancelled.failed(item) for item in [check, *moved]):
+                raise VersionConflict(KITCHEN_KEY["PK"]["S"]) from None
+            raise
+
+    def _move(
+        self, ingredient: CanonicalIngredient, moves: Mapping[str, str]
+    ) -> TransactWriteItemTypeDef:
+        """Change only the Store Category and the version, on the condition that the category is
+        as read, so a concurrent Pantry Staple change is kept rather than conflicting.
+        """
+        return {
+            "Update": {
+                "TableName": self.table,
+                "Key": canonical_key(ingredient.id),
+                "UpdateExpression": "SET store_category_id = :to ADD #version :one",
+                "ConditionExpression": "store_category_id = :from",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ExpressionAttributeValues": {
+                    ":to": {"S": moves[ingredient.store_category_id]},
+                    ":from": {"S": ingredient.store_category_id},
+                    ":one": {"N": "1"},
+                },
+            }
+        }
+
+    def _kitchen_unchanged(self, version: int) -> TransactWriteItemTypeDef:
+        return {
+            "ConditionCheck": {
+                "TableName": self.table,
+                "Key": KITCHEN_KEY,
+                "ConditionExpression": "#version = :expected",
+                "ExpressionAttributeNames": {"#version": "version"},
+                "ExpressionAttributeValues": {":expected": {"N": str(version)}},
+            }
+        }
+
     # Favorite Sites
 
     def favorite_sites(self) -> FavoriteSites:
@@ -665,7 +763,7 @@ class Store:
 
     # Building blocks
 
-    def _save_versioned[M: Recipe | KitchenSettings | FavoriteSites](
+    def _save_versioned[M: Recipe | CanonicalIngredient | KitchenSettings | FavoriteSites](
         self,
         model: M,
         key: Item,

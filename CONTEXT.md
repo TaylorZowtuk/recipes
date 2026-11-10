@@ -174,7 +174,7 @@ A label an editor makes up and attaches to recipes so they can be filtered by it
 _Avoid_: Category (that word belongs to store categories), label
 
 **Draft**:
-An editor's unsaved changes, either to a saved recipe's Difficulty, Tags and Preview Photo, or to the list of Favorite Sites. It is held only in that page, never stored or sent until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe.
+An editor's unsaved changes, either to a saved recipe's Difficulty, Tags and Preview Photo, to the list of Favorite Sites, or to the Store Categories in Kitchen settings. It is held only in that page, never stored or sent until the editor saves it as one batch with "Save N changes", and Cancel or leaving the page discards it. A Queued Ingest is not a draft: it is a Source waiting to become a recipe. Marking a Pantry Staple saves at once, so it is never part of a draft.
 _Avoid_: Pending changes (*Pending* is an Enrichment Status), unsaved edit
 
 **Favorite Site**:

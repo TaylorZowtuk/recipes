@@ -72,6 +72,7 @@ from recipes.models import (
     RecipeFacts,
     ScaleAmount,
     StepFacts,
+    StoreCategory,
     Substitution,
     TemperatureSegment,
     Ulid,
@@ -377,6 +378,80 @@ class FavoriteSitesEdit(BaseModel):
 
     version: RecipeVersion
     operations: Annotated[list[SiteOperation], Field(min_length=1)]
+
+
+# Not a Ulid: the Store Categories a stack starts with have ids such as "produce".
+StoreCategoryId = Annotated[str, StringConstraints(min_length=1, max_length=MAX_LABEL)]
+StoreCategoryName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_LABEL)
+]
+
+
+class AddStoreCategory(BaseModel):
+    """Add a Store Category at the end of the list. The API mints its id."""
+
+    op: Literal["add"]
+    name: StoreCategoryName
+
+
+class RenameStoreCategory(BaseModel):
+    op: Literal["rename"]
+    id: StoreCategoryId
+    name: StoreCategoryName
+
+
+class ReorderStoreCategories(BaseModel):
+    """Put the categories in this order, naming each one present at that point in the batch once."""
+
+    op: Literal["reorder"]
+    ids: list[StoreCategoryId]
+
+
+class DeleteStoreCategory(BaseModel):
+    """Delete a Store Category, moving its Canonical Ingredients to another saved one, still there
+    at that point in the batch. A category added in the batch has no id a client can name yet.
+    """
+
+    op: Literal["delete"]
+    id: StoreCategoryId
+    move_to: StoreCategoryId
+
+
+StoreCategoryOperation = Annotated[
+    AddStoreCategory | RenameStoreCategory | ReorderStoreCategories | DeleteStoreCategory,
+    Field(discriminator="op"),
+]
+
+
+class KitchenSettingsEdit(BaseModel):
+    """An editor's batch of changes to the Store Categories at `version`, applied in the order
+    sent. The names only have to differ once they are all applied.
+    """
+
+    version: RecipeVersion
+    operations: Annotated[list[StoreCategoryOperation], Field(min_length=1)]
+
+
+class SetPantryStaple(BaseModel):
+    op: Literal["set_pantry_staple"]
+    pantry_staple: bool
+
+
+class SetStoreCategory(BaseModel):
+    op: Literal["set_store_category"]
+    store_category_id: StoreCategoryId
+
+
+CanonicalIngredientOperation = Annotated[
+    SetPantryStaple | SetStoreCategory, Field(discriminator="op")
+]
+
+
+class CanonicalIngredientEdit(BaseModel):
+    """Changes to one Canonical Ingredient at `version`, applied in the order sent, in one write."""
+
+    version: RecipeVersion
+    operations: Annotated[list[CanonicalIngredientOperation], Field(min_length=1)]
 
 
 class Duplicate(BaseModel):
@@ -1345,6 +1420,117 @@ def _counted_sites(favorite_sites: FavoriteSites, cards: list[Card]) -> CountedS
             CountedSite(**site.model_dump(), recipe_count=recipes[_site_host(site.address)])
             for site in favorite_sites.sites
         ],
+    )
+
+
+@router.patch(
+    "/kitchen-settings",
+    response_model=KitchenSettings,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        409: {"description": "The Kitchen settings or a moved ingredient changed since read"},
+        422: {
+            "description": "Not a valid edit, an operation names a Store Category that isn't "
+            "there, it deletes the last one, or two would have the same name"
+        },
+    },
+)
+def patch_kitchen_settings(body: KitchenSettingsEdit, store: StoreDep) -> KitchenSettings:
+    """Apply an editor's batch to the Store Categories at `body.version`, moving the Canonical
+    Ingredients of each one it deletes.
+    """
+    current = store.kitchen_settings()
+    if current.version != body.version:
+        raise VersionConflict(body.version)
+    categories, moves = _edited_categories(current.store_categories, body.operations)
+    names = {category.name.casefold() for category in categories}
+    if len(names) < len(categories):
+        raise HTTPException(422, "Two Store Categories have the same name")
+    return store.save_store_categories(
+        current.model_copy(update={"store_categories": categories}), moves
+    )
+
+
+def _edited_categories(
+    current: list[StoreCategory],
+    operations: list[StoreCategoryOperation],
+) -> tuple[list[StoreCategory], dict[str, str]]:
+    """The categories after the batch, and where each deleted one's ingredients end up: following
+    a chain of deletes to its end, so a category that was itself deleted is never a destination.
+    """
+    categories = list(current)
+    moves: dict[str, str] = {}
+    for operation in operations:
+        match operation:
+            case AddStoreCategory():
+                categories.append(StoreCategory(id=new_ulid(), name=operation.name))
+            case RenameStoreCategory():
+                index = _category_index(categories, operation.id)
+                categories[index] = categories[index].model_copy(update={"name": operation.name})
+            case ReorderStoreCategories():
+                if sorted(operation.ids) != sorted(category.id for category in categories):
+                    raise HTTPException(422, "A reorder names each Store Category once")
+                by_id = {category.id: category for category in categories}
+                categories = [by_id[category_id] for category_id in operation.ids]
+            case DeleteStoreCategory():
+                index = _category_index(categories, operation.id)
+                if len(categories) == 1:
+                    raise HTTPException(422, "The last Store Category can't be deleted")
+                if operation.move_to == operation.id:
+                    raise HTTPException(422, "A Store Category can't move into itself")
+                _category_index(categories, operation.move_to)
+                del categories[index]
+                moves = {
+                    moved: operation.move_to if to == operation.id else to
+                    for moved, to in moves.items()
+                }
+                moves[operation.id] = operation.move_to
+    return categories, moves
+
+
+def _category_index(categories: list[StoreCategory], category_id: str) -> int:
+    for index, category in enumerate(categories):
+        if category.id == category_id:
+            return index
+    raise HTTPException(422, f"There is no Store Category {category_id}")
+
+
+@router.patch(
+    "/canonical-ingredients/{canonical_id}",
+    response_model=CanonicalIngredient,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "No such Canonical Ingredient"},
+        409: {"description": "It, or the Kitchen settings it was placed against, changed"},
+        422: {"description": "Not a valid edit, or the Store Category isn't there"},
+    },
+)
+def patch_canonical_ingredient(
+    canonical_id: Annotated[Ulid, Path()], body: CanonicalIngredientEdit, store: StoreDep
+) -> CanonicalIngredient:
+    """Apply an editor's changes to a Canonical Ingredient at `body.version`, in one write.
+
+    Choosing a Store Category also needs the Kitchen settings unchanged; a Pantry Staple doesn't.
+    """
+    current = store.canonical_ingredient(canonical_id)
+    if current is None:
+        raise HTTPException(404, "No such Canonical Ingredient")
+    if current.version != body.version:
+        raise VersionConflict(body.version)
+    changes: dict[str, str | bool] = {}
+    kitchen: KitchenSettings | None = None
+    for operation in body.operations:
+        match operation:
+            case SetPantryStaple():
+                changes["pantry_staple"] = operation.pantry_staple
+            case SetStoreCategory():
+                kitchen = kitchen or store.kitchen_settings()
+                _category_index(kitchen.store_categories, operation.store_category_id)
+                changes["store_category_id"] = operation.store_category_id
+    return store.save_canonical_ingredient(
+        current.model_copy(update=changes), kitchen_version=kitchen.version if kitchen else None
     )
 
 
