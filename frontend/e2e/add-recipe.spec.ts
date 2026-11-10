@@ -351,6 +351,30 @@ test("discarding one that has already gone says so, and it leaves the list", asy
   await expect(queuedItem(page, url)).toHaveCount(0);
 });
 
+test("Add a recipe shows one outcome at a time, the latest", async ({ page }, testInfo) => {
+  const gone = pageUrl("blocked/one-message-gone", testInfo);
+  const later = pageUrl("blocked/one-message-later", testInfo);
+  const fetchedNote = page.getByText("The recipe couldn’t be fetched", { exact: false });
+  const goneNote = page.getByText("This recipe isn’t waiting any more", { exact: false });
+  await openAddRecipe(page);
+  await fetchRecipe(page, gone);
+  await expect(fetchedNote).toBeVisible();
+
+  // Finished elsewhere, then discarded here: its message replaces the fetch's.
+  const list = await (await page.request.get("/api/queued-ingests")).json();
+  const { id } = list.find((item: { source: { url: string } }) => item.source.url === gone);
+  expect((await page.request.delete(`/api/queued-ingests/${id}`)).status(), "discard").toBe(204);
+  page.once("dialog", (dialog) => dialog.accept());
+  await discardButton(page, gone).click();
+  await expect(goneNote).toBeVisible();
+  await expect(fetchedNote).toHaveCount(0);
+
+  // And fetching again replaces the list's.
+  await fetchRecipe(page, later);
+  await expect(fetchedNote).toBeVisible();
+  await expect(goneNote).toHaveCount(0);
+});
+
 test("discarding is off while offline", async ({ page, context }, testInfo) => {
   const url = pageUrl("blocked/discard-offline", testInfo);
   await openAddRecipe(page);
