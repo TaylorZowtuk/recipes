@@ -39,7 +39,7 @@ It is the plain fetch's policy, held at the browser's network layer.
 
 - **robots.txt** is checked for the page, for each redirect hop and for each navigation the page makes. It isn't checked for subresources.
 - **Images, media and fonts** are aborted, as a recipe isn't read from them.
-- **Every request must reach a public address.** A subresource that doesn't is dropped. A page or navigation that doesn't stops the fetch with reason `blocked`.
+- **Every request the guard sees must reach a public address.** A subresource that doesn't is dropped. A page or navigation that doesn't stops the fetch with reason `blocked`. The guard doesn't see every request: see Accepted limits.
 - **Frames, popups, service workers, Workers and WebSockets are shut off.** A frame or popup runs out of sight of the guard that checks each request. Service workers are blocked in the context. The page's `Worker`, `SharedWorker`, `WebSocket`, `WebTransport` and `RTCPeerConnection` are deleted before its scripts run, because they could open requests the guard never sees, and a worker could open any other from a scope the script doesn't run in.
 - **The deadline** is 30 s for the whole fetch, with 5 s of it for the page's scripts to go quiet. A page that never does is read as it stands.
 
@@ -54,8 +54,15 @@ We use Chrome's Fetch domain, not Playwright routes, because a Playwright route 
 - **A page's size is checked only after rendering.** The browser loads the page whatever its size, then the CLI rejects one past the size limit as `unreachable`, so it stays waiting.
 - **robots.txt doesn't reach a page's own data requests.** A page's own script can read data by XHR or fetch from a path robots.txt refuses, and a recipe captured that way is saved. robots.txt stays on the page, redirects and navigations, because that is the simpler policy and more pages succeed.
 
+- **A page can still reach a private address.** A speculation-rules prefetch is sent by the browser without passing the guard, and no Chromium flag tried stopped it. So a page an editor queued can make the CLI send a GET to an address on the developer's network. It can't read the reply. Routing the browser through a proxy that checks each address would close this: [TaylorZowtuk/recipes#133](https://github.com/TaylorZowtuk/recipes/issues/133).
+- **DNS rebinding reaches further than in the plain fetch.** The guard resolves a host separately from Chromium, and a page's scripts run for up to 30 s, so a rebound host could let a page send a request to a private address and read the reply, not just make a blind GET. Chromium's Local Network Access checks are what stand in the way today. The same proxy would close this.
+- **Chromium runs without its sandbox.** Playwright starts it that way, and the sandbox doesn't start in the toolchain container. A renderer exploit would run beside the service token and a writable checkout. It needs a Chromium bug as well as a hostile page.
+- **The model that answers a Work Packet may have tools.** The packet holds untrusted page text, and the household answers it in the Claude Code session that drives enrichment, which has a shell and the service token. Page text could try to steer that session. Its only defences are the packet's instruction to treat the text as data and the session's own permission prompts. `apply` checks only the final answer.
+
 ## Considered options
 
 - **robots.txt on every subresource, or only on data requests (XHR and fetch):** rejected. On every subresource it makes many more requests to the site for a recipe, and a blocked script breaks the render that Playwright is there to do. On data requests alone it is a second rule to hold beside the page's, and a page whose data is refused renders with no recipe, so fewer pages succeed.
 - **Pasted plain text, whether parsed by rules in the API, held on the Queued Ingest for the CLI's model, or typed into a form:** rejected for now. The household doesn't intend to use it yet. It may return for paper recipes.
+- **A proxy that checks and pins each address the browser connects to:** deferred to [TaylorZowtuk/recipes#133](https://github.com/TaylorZowtuk/recipes/issues/133). It closes the prefetch and DNS rebinding limits at one point, but it is new security-critical code, HTTPS tunnelling included.
+- **Answering a Work Packet in a session with no tools and no token:** rejected for now. It adds a step to every run, and the household keeps one session for enrichment and the fallback.
 - **A model called directly from the CLI:** rejected. The session that drives enrichment already answers Work Packets, so a second path to a model would need its own key, bill and rate limit for no gain.
