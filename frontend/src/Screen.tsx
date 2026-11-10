@@ -18,6 +18,10 @@ export function focusTitle() {
   document.querySelector<HTMLElement>("h1")?.focus({ preventScroll: true });
 }
 
+/** Whether the element the address's hash names took focus, as a step does on a jump to it. */
+export const hashTookFocus = (hash: string) =>
+  !!hash && document.activeElement?.id === hash.slice(1);
+
 /** Goes one step back, or to Recipes when this screen opened the app. */
 export function useBack() {
   const navigate = useNavigate();

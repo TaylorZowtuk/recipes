@@ -58,6 +58,10 @@ describe("Shell", () => {
     expect(render()).not.toContain("place-dot");
   });
 
+  it("mounts the timer dock, hidden with no timers", () => {
+    expect(render()).toContain('<section class="timer-dock" aria-label="Timers" hidden="">');
+  });
+
   it("shows a visitor no dot", () => {
     shown.editor = false;
     expect(render()).not.toContain("place-dot");

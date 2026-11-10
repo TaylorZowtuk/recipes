@@ -1,8 +1,10 @@
+import { isValidElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { Card, Original, ParseFact, Recipe } from "./api/client";
 import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
+import { timers } from "./timers";
 
 // The Collection the recipe page reads its card from, with the recipe itself loading until a test
 // gives it one, and whether this device's person is an editor.
@@ -39,6 +41,8 @@ vi.mock("./online", () => ({ useOnline: () => !shown.offline }));
 // The account menu reads the browser's session, which a server render has none of.
 vi.mock("./AccountMenu", () => ({ AccountMenu: () => null }));
 vi.mock("./weeks", () => ({}));
+// A tap wakes the audio, which a server render has none of.
+vi.mock("./timerSound", () => ({ unlockSound: () => {}, ring: () => {} }));
 
 const original = (...lines: [string, string, string | null][]): Original => ({
   title: "Synthetic Test Noodles",
@@ -86,6 +90,19 @@ function lines(markup: string): (string | [string, string])[][] {
       ? parts.map(([, cls = "", text = ""]): [string, string] => [cls, text])
       : [inner];
   });
+}
+
+type Tree = ReactElement<{ children?: unknown; onClick: () => void; className?: string }>;
+
+// The <button> elements of what a component renders, opening the hook-free components inside it,
+// since there's no DOM here to tap in.
+function buttons(node: unknown): Tree[] {
+  if (Array.isArray(node)) return node.flatMap(buttons);
+  if (!isValidElement(node)) return [];
+  const element = node as Tree;
+  if (typeof element.type === "function")
+    return buttons((element.type as (props: unknown) => unknown)(element.props));
+  return [...(element.type === "button" ? [element] : []), ...buttons(element.props.children)];
 }
 
 describe("Ingredients", () => {
@@ -317,8 +334,103 @@ describe("Steps", () => {
     );
     expect(markup).toContain('<span class="step-amount">2 cloves</span> garlic');
     expect(
-      [...markup.matchAll(/<li>(.*?)<\/li>/g)].map(([, li = ""]) => li.replace(/<[^>]+>/g, "")),
+      [...markup.matchAll(/<li[^>]*>(.*?)<\/li>/g)].map(([, li = ""]) =>
+        li.replace(/<[^>]+>/g, ""),
+      ),
     ).toEqual(["Add 2 cloves garlic.", "Add the rest of the garlic."]);
+  });
+
+  describe("a duration", () => {
+    const fact = { provenance: "llm", confidence: 0.8, estimated: false } as const;
+    const confirmation = {
+      confirmed: false,
+      confirmed_by: null,
+      confirmed_at: null,
+      confirm_batch: null,
+    };
+    const fry = {
+      ...original(),
+      steps: [{ id: "s1", component: null, text: "Fry for 8-10 minutes." }],
+    };
+    const facts = {
+      ingredients: {},
+      difficulty: null,
+      steps: {
+        s1: {
+          segments: {
+            ...fact,
+            ...confirmation,
+            segments: [
+              { t: "text" as const, v: "Fry for " },
+              { t: "duration" as const, low_s: 480, high_s: 600, written: "8-10 minutes" },
+              { t: "text" as const, v: "." },
+            ],
+          },
+          uses: { ...fact, ...confirmation, uses: [] },
+        },
+      },
+    };
+    const item = {
+      id: "s1",
+      tab: "steps" as const,
+      factIds: ["s1.segments"],
+      mark: "confirmed" as const,
+      issues: [],
+    };
+
+    it("is a button that starts a timer, in a step with an id to jump to", () => {
+      const markup = renderToStaticMarkup(<Steps recipeId="r1" original={fry} facts={facts} />);
+      expect(markup).toContain('<li id="step-s1" tabindex="-1">');
+      expect(markup).toContain(
+        'Fry for <button type="button" class="step-timer" aria-label="Start a timer for 8-10 minutes">8-10 minutes</button>.',
+      );
+    });
+
+    describe("in a Review Item", () => {
+      const props = {
+        recipeId: "r1",
+        original: fry,
+        facts,
+        review: { items: new Map([["s1", item]]), open: vi.fn(), newCanonicals: new Set<string>() },
+      };
+
+      it("stays plain text there, with its timer button in a row after the item", () => {
+        const markup = renderToStaticMarkup(<Steps {...props} />);
+        const reviewItem = markup.match(/<button[^>]*review-item.*?<\/button>/)?.[0] ?? "";
+        expect(reviewItem.replace(/<[^>]+>/g, "")).toContain("Fry for 8-10 minutes.");
+        expect(reviewItem).not.toContain("step-timer");
+        expect(markup.slice(markup.indexOf(reviewItem) + reviewItem.length)).toMatch(
+          /^<div class="step-timers">.*aria-label="Start a timer for 8-10 minutes">8-10 minutes<\/button><\/div><\/li>/,
+        );
+      });
+
+      it("never nests a button in a button", () => {
+        const markup = renderToStaticMarkup(<Steps {...props} />);
+        let depth = 0;
+        for (const [tag] of markup.matchAll(/<\/?button/g)) {
+          depth += tag === "<button" ? 1 : -1;
+          expect(depth).toBeLessThanOrEqual(1);
+        }
+      });
+
+      it("starts the timer on a tap", () => {
+        const start = vi.spyOn(timers, "start").mockImplementation(() => {});
+        const button = buttons(Steps(props)).find(
+          ({ props: { className } }) => className === "step-timer",
+        );
+        button?.props.onClick();
+        expect(start).toHaveBeenCalledWith(
+          expect.objectContaining({ recipeId: "r1", stepId: "s1", position: 1, lowS: 480 }),
+        );
+        start.mockRestore();
+      });
+    });
+
+    it("stays plain text on a captured recipe, with no recipe id yet", () => {
+      const markup = renderToStaticMarkup(<Steps original={fry} facts={facts} />);
+      expect(markup).toContain("Fry for 8-10 minutes.");
+      expect(markup).not.toContain("<button");
+    });
   });
 });
 
@@ -473,6 +585,25 @@ describe("RecipeScreen review", () => {
       ([, attrs = "", t = ""]) =>
         attrs.match(/aria-label="([^"]*)"/)?.[1] ?? t.replace(/<[^>]+>/g, ""),
     );
+
+  it("opens on the Steps tab at a step's address", () => {
+    const selected = (path: string) => {
+      shown.cards = [card];
+      shown.recipe = recipe("ready");
+      const markup = renderToStaticMarkup(
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      shown.recipe = undefined;
+      return markup.match(/aria-selected="true"[^>]*>([^<]*)/)?.[1];
+    };
+    const path = `/recipes/${card.id}/synthetic-test-beans`;
+    expect(selected(path)).toBe("Ingredients");
+    expect(selected(`${path}#step-s1`)).toBe("Steps");
+  });
 
   it("shows an editor each tab's count of unchecked Review Items", () => {
     const markup = render(true, "awaiting_review");
