@@ -375,6 +375,37 @@ test("Add a recipe shows one outcome at a time, the latest", async ({ page }, te
   await expect(goneNote).toHaveCount(0);
 });
 
+test("going back to the list from Paste clears the outcome", async ({ page }, testInfo) => {
+  const robots = pageUrl("robots-denied/back-clears", testInfo);
+  const blocked = pageUrl("blocked/back-clears", testInfo);
+  const fetchedNote = page.getByText("The recipe couldn’t be fetched", { exact: false });
+  await openAddRecipe(page);
+  await fetchRecipe(page, robots);
+  await expect(queuedItem(page, robots).locator(".badge")).toHaveText("Needs the page pasted in");
+  await fetchRecipe(page, blocked);
+  await expect(fetchedNote).toBeVisible();
+
+  await queuedItem(page, robots)
+    .getByRole("button", { name: /^Paste its page/ })
+    .click();
+  await page.getByRole("button", { name: "Back to the list" }).click();
+  await expect(queuedItem(page, robots)).toBeVisible();
+  await expect(fetchedNote).toHaveCount(0);
+});
+
+test("a successful discard clears the fetch's outcome", async ({ page }, testInfo) => {
+  const url = pageUrl("blocked/discard-clears", testInfo);
+  const fetchedNote = page.getByText("The recipe couldn’t be fetched", { exact: false });
+  await openAddRecipe(page);
+  await fetchRecipe(page, url);
+  await expect(fetchedNote).toBeVisible();
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await discardButton(page, url).click();
+  await expect(queuedItem(page, url)).toHaveCount(0);
+  await expect(fetchedNote).toHaveCount(0);
+});
+
 test("discarding is off while offline", async ({ page, context }, testInfo) => {
   const url = pageUrl("blocked/discard-offline", testInfo);
   await openAddRecipe(page);
