@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 // shows once a page's data has arrived, for pages that render before it does. `editor` signs in
 // first (with the local API's fake sign-in), `menu` opens the account menu and `tab` opens that tab. `ingest` fetches
 // that path on the local API's fake web in Add a recipe, made unique to the project. `click` presses
-// the button with that name last, such as Edit, without saving anything, and `shows` is text that
+// the button with that name last (or each of a list, in order), such as Edit, without saving anything, and `shows` is text that
 // shows once it has. `stubConfirm` answers a review confirm as if it made the recipe Ready, writing
 // nothing, since every project shares the seeded recipe. `stubWeek` answers every week with a
 // fixed plan and stops the clock on a Wednesday, since every project shares the weeks too. `after`
@@ -19,7 +19,7 @@ type Shot = {
   menu?: boolean;
   ingest?: string;
   tab?: string;
-  click?: string | RegExp;
+  click?: string | RegExp | (string | RegExp)[];
   shows?: string;
   stubConfirm?: boolean;
   stubWeek?: boolean;
@@ -286,6 +286,24 @@ const pages: Shot[] = [
     shows: "The line says butter, so it is a new Canonical Ingredient, not margarine.",
   },
   {
+    name: "recipe-review-edit-line",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "3 to check, incl. 1 flagged",
+    editor: true,
+    click: [/^Flagged: butter/, "Edit"],
+    shows: "Line",
+  },
+  {
+    name: "recipe-review-edit-difficulty",
+    path: "/recipes/01K7SEED000000000000000004/tomato-lentil-soup",
+    ready: "Tomato Lentil Soup",
+    editor: true,
+    tab: "About",
+    click: [/Suggested difficulty/, "Edit"],
+    shows: "Cleanup",
+  },
+  {
     name: "recipe-review-ready-toast",
     path: REVIEW_RECIPE,
     ready: "Garlic Butter Green Beans",
@@ -403,15 +421,19 @@ for (const shot of pages) {
       if (editor) await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
     }
     if (click) {
-      const button = page.getByRole("button", { name: click, exact: true }).first();
-      if (mayBeMissing) {
-        const shown = await button.waitFor({ timeout: 3000 }).then(
-          () => true,
-          () => false,
-        );
-        test.skip(!shown, `no ${click} button on this branch`);
+      // After the first press a sheet is open, which makes the page behind it inert.
+      for (const [step, name] of [click].flat().entries()) {
+        const scope = step ? page.getByRole("dialog") : page;
+        const button = scope.getByRole("button", { name, exact: true }).first();
+        if (mayBeMissing) {
+          const shown = await button.waitFor({ timeout: 3000 }).then(
+            () => true,
+            () => false,
+          );
+          test.skip(!shown, `no ${name} button on this branch`);
+        }
+        await button.click();
       }
-      await button.click();
       if (shows) {
         const shown = page.getByText(shows, { exact: true }).first();
         if (mayBeMissing) await shown.waitFor({ timeout: 3000 }).catch(() => {});
