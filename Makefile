@@ -6,7 +6,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
-	kill-switch-reset dev browser browser-run browser-stop shell clean \
+	kill-switch-reset dev browser browser-run browser-stop shell enrich fallback clean \
 	gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
@@ -111,6 +111,23 @@ browser-stop: ## Stop the watched browser and remove its container and network
 
 shell: ## A shell in the toolchain container, with dependencies installed
 	$(RUN) bash -c 'make deps nltk-data && exec bash'
+
+enrich: ## Run the enrich CLI with ARGS (argv, file paths relative to backend/), without a TTY
+fallback: ## Run the fallback CLI with ARGS (argv, file paths relative to backend/), without a TTY
+# stdin and stdout are only the CLI's, and only these runs see PLATEFUL_SERVICE_TOKEN. ARGS stays
+# unexpanded: make neither exports it nor expands it, refuses it with a newline, and the host shell
+# splits it at spaces into words, unglobbed, each reaching the CLI as one argument, never as shell.
+define newline
+
+
+endef
+unexport ARGS
+enrich fallback: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
+enrich fallback:
+	$(if $(findstring $(newline),$(value ARGS)),$(error ARGS must be one line))
+	@set -f && args='$(subst ','\'',$(value ARGS))' && $(RUN) bash -c 'make --no-print-directory \
+		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$@ "$$@"' \
+		bash $$args
 
 clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
 	scripts/browser.sh stop

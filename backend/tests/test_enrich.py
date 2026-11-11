@@ -838,3 +838,56 @@ def test_main_runs_the_command_it_is_given_and_pass_1_needs_no_snapshot(
 
     assert stopped.value.code == 0
     assert calls == [(called, (url, *expected))]
+
+
+def test_apply_prints_each_written_recipes_enrichment_issues_under_its_line(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    glimmer = CanonicalIngredient(
+        id=new_ulid(),
+        name="glimmer oil",
+        family="oil",
+        store_category_id="aisles",
+        confirmed=True,
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+    confirmed = Wording(
+        wording="glimmer oil", canonical_id=glimmer.id, confirmed=True, schema_version=1
+    )
+    api_store.enrich_recipe(add(api_store, "Ready Stew", status="ready"), [glimmer], [confirmed])
+    add(api_store, "Garlic Tofu")
+    flagged = add(api_store, "Chili Noodles")
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+    oil = oil_line(canonical={"id": glimmer.id})
+    answered = json.loads(answer_text(offered, oil))
+    for answered_recipe, offered_recipe in zip(
+        answered["recipes"], offered["recipes"], strict=True
+    ):
+        if answered_recipe["recipe_id"] == flagged.id:
+            eggs = offered_recipe["lines"][2]
+            answered_recipe["lines"].append(
+                {
+                    "line_id": "i3",
+                    "canonical": {
+                        "new": {"name": "quill eggs", "family": "egg", "store_category_id": "dairy"}
+                    },
+                    "fdc_id": eggs["fdc_candidates"][0]["fdc_id"],
+                    "portion_id": None,
+                    "quantity": {"low": 2},
+                    "corrections_reason": "the method uses two",
+                }
+            )
+
+    assert apply(BASE_URL, send, SNAPSHOT, json.dumps(answered)) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    after_clean = lines[lines.index("Garlic Tofu → awaiting_review") + 1]
+    assert not after_clean.startswith(" ")
+    out = "\n".join(lines)
+    assert (
+        "Chili Noodles → awaiting_review\n"
+        "  i3.parse: 1-2 → 2 — the method uses two\n"
+        "  i3.match: (none) → quill eggs — new Canonical Ingredient quill eggs (egg, Dairy)"
+    ) in out
