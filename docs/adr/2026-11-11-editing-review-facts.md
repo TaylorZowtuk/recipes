@@ -6,10 +6,10 @@ We chose this because confirming only says "this is right". When it's wrong, the
 
 ## One edit at a time
 
-`POST /api/recipes/{id}/edit` takes `{version, edit}`, where `edit` is one Review Item's change, by `kind`: a `line`, a `step`, a `substitution` or `remove_substitution`, or the `difficulty`. A stale `version` is a 409, and nothing is written.
+`POST /api/recipes/{id}/edit` takes `{version, edit}`, where `edit` is one Review Item's change, by `kind`: a `line`, a `step`, a `substitution` or `remove_substitution`, or the `difficulty`. A stale `version` is a 409, and nothing is written, and so is an edit of a Pending recipe, which has no facts yet. An edit that would make the recipe too big to store is a 422.
 
 - **Every fact the edit writes** is Confirmed with provenance `editor`, confidence 1, `confirmed_by` `"editor"` and **no Confirm Batch**, so no undo reverses it. An edit isn't a batch: the editor undoes it by editing again. The edited item's open Enrichment Issues are resolved, also in no batch, and a recipe Awaiting Review with nothing left to check is Ready, with no `ready_batch`.
-- **A line**: the editor saves the whole line, so its parse is the editor's, and its match and conversion are Confirmed as they stand (each keeping any batch it was already confirmed in), as a Confirm would. The unit's kind (mass, volume or count) follows the unit, by the same units the parser reads, so the API needs no parser.
+- **A line**: the editor saves the whole line, so its parse is the editor's, and its match and conversion are Confirmed as they stand (each keeping any batch it was already confirmed in), as a Confirm would. A line whose wording changes needs a Canonical Ingredient choice (a 422 without one), since keeping the match would confirm the old Canonical Ingredient for the new wording. The unit's kind (mass, volume or count) stays as the parser read it while the unit is unchanged, and a changed unit's kind follows the units the parser reads, so the API needs no parser.
 - **Keep or convert weight**: keeping the written unit sets the conversion's `refused` to "kept in the written unit by an editor" and keeps its FDC numbers, and the reason wins over a density wherever the PWA reads it. Converting clears the reason, and is refused when the FDC food gives no density or grams per count.
 - **A step**: the editor sets each ingredient segment's Step Portion and each timer's range. The uses follow the segments, and a line's portions across the steps still add up to at most 1. A timer needn't match the step's text, unlike enrichment's, but no segment is added or removed.
 - **A substitution**: the editor sets its ratio and note, or removes it. Removing the last leaves the line no substitutions.
@@ -27,6 +27,7 @@ The editor picks an existing Canonical Ingredient, Confirming it if it wasn't, o
 
 - A mapping an editor corrects is fixed once for the whole Collection, and enrichment offers only it from then on.
 - The other recipes aren't written in the edited recipe's transaction. If the API stops partway, some keep the old match until the wording is edited again; they never hold a half-written recipe.
+- Once the edited recipe is saved, the edit succeeds. A recipe that kept changing through every retry, or that the match would make too big to store, is skipped and listed in the response's `not_updated`, beside `also_updated`, and the editor is told how many weren't updated. Saving the line again repairs them, since matching a recipe's lines to the wording is idempotent.
 - A line an editor matched to a new Canonical Ingredient has no nutrition or weight until a later enrichment, or an editor, gives that Canonical Ingredient an FDC food.
 
 ## Considered options
