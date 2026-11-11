@@ -41,6 +41,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 - `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup and `tests/` (`terraform test` on mock providers). See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.
 - `scripts/`: helpers the Makefile calls, and `aws-setup.sh`, the wizard for the AWS and GitHub steps only the human can do.
+- `.claude/skills/`: the repo's Claude Code skills.
 
 ## Deploys
 
@@ -103,3 +104,7 @@ Uses the five default triage labels (`needs-triage`, `needs-info`, `ready-for-ag
 ### Domain docs
 
 Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Enrich pending
+
+Enriches every Pending recipe on a chosen stack, running the Fallback Chain on waiting Queued Ingests first, and summarises the Enrichment Issues in chat. See `.claude/skills/enrich-pending/SKILL.md`.
