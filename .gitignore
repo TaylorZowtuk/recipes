@@ -229,6 +229,8 @@ __marimo__/
 .deploy/
 .aws-setup.env
 
-# The fallback CLI's Work Packet and its answer, which hold page text
+# The enrich and fallback CLIs' packets and answers, which hold recipe or page text
 backend/packet.json
 backend/answer.json
+backend/ask.json
+backend/substitutes.json

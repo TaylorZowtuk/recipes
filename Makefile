@@ -6,7 +6,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
-	kill-switch-reset dev browser browser-run browser-stop shell clean \
+	kill-switch-reset dev browser browser-run browser-stop shell cli clean \
 	gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
@@ -111,6 +111,10 @@ browser-stop: ## Stop the watched browser and remove its container and network
 
 shell: ## A shell in the toolchain container, with dependencies installed
 	$(RUN) bash -c 'make deps nltk-data && exec bash'
+
+cli: RUN_FLAGS := -T
+cli: ## Run $CMD from backend/ in the toolchain without a TTY: stdin and stdout are only $CMD's
+	@$(RUN) bash -c "make --no-print-directory deps nltk-data >&2 && cd backend && uv run --locked --quiet $$CMD"
 
 clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
 	scripts/browser.sh stop

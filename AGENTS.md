@@ -23,6 +23,7 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make browser-run < step.mjs` | Run a step script against this worktree's running watched browser (start it with `make browser` first) over CDP; it writes screenshots to `OUT` (default `.screenshots/browser`). See [`frontend/AGENTS.md`](frontend/AGENTS.md) |
 | `make browser-stop` | Remove the watched browser's container and network. `make clean` runs it too |
 | `make shell` | A shell in the toolchain container, with dependencies installed |
+| `make cli CMD='…'` | Run `CMD` with `uv run` from `backend/` in the toolchain, without a TTY, so stdin and stdout are only the command's: `make cli CMD='python -m recipes.enrich substitutes http://api:8787' > backend/ask.json`. `PLATEFUL_SERVICE_TOKEN` passes through when set. `http://api:8787` is `make dev`'s API when it runs in the same worktree |
 | `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
 
 Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew install make` and run `gmake`) and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), and CI runs the same `make` commands. The pre-commit hook runs gitleaks from the same image, so commits need Docker running, and the first commit in a fresh worktree waits for the image to build.

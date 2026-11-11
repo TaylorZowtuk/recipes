@@ -17,6 +17,8 @@ x-toolchain: &toolchain
     # Passed through only when set: `E2E_BASE_URL=<url> make e2e` runs Playwright against a deployed
     # stack instead of a local build.
     E2E_BASE_URL:
+    # Passed through only when set: the enrich and fallback CLIs sign in with it under `make cli`.
+    PLATEFUL_SERVICE_TOKEN:
   volumes:
     - .:/work/repo
     # A worktree's .git file points into the main checkout's .git, so mount it at the same path.
