@@ -367,7 +367,9 @@ export interface paths {
          *     Issues. A recipe Awaiting Review with nothing left to review is Ready.
          *
          *     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
-         *     every recipe with a line of that wording is matched to it too, each at its own version.
+         *     every recipe with a line of that wording is matched to it too, each at its own version. Once
+         *     the edited recipe is saved, the edit never fails: a recipe that kept changing, or that the
+         *     match would make too big, is listed in `not_updated`.
          */
         post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
         delete?: never;
@@ -1048,12 +1050,16 @@ export interface components {
         };
         /**
          * EditedFact
-         * @description The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, and the
-         *     other recipes a line's new Canonical Ingredient was matched in by its wording.
+         * @description The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
+         *     other recipes a line's new Canonical Ingredient was matched in by its wording, and those it
+         *     couldn't be, because they kept changing or would be too big. Saving the line again retries
+         *     them.
          */
         EditedFact: {
             /** Also Updated */
             also_updated: string[];
+            /** Not Updated */
+            not_updated: string[];
             /** Ready */
             ready: boolean;
             recipe: components["schemas"]["Recipe"];
@@ -3365,14 +3371,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe, or a Canonical Ingredient or wording the edit confirms, changed */
+            /** @description The recipe, or a Canonical Ingredient or wording the edit confirms, changed, or the recipe is Pending and has no facts to edit yet */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the Canonical Ingredient or its Store Category doesn't exist, or the line has no weight to keep or convert */
+            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has no weight to keep or convert, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
