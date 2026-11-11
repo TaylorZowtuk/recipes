@@ -150,12 +150,24 @@ def apply(
         if status == HTTPStatus.OK:
             work.learn(enrichment)
             print(f"{title} → {body['status']}")
+            for issue in body["issues"]:
+                print(f"  {issue_line(issue)}")
         else:
             failed += 1
             print(f"{title} → failed: {status} {body}")
     count = len(answer.recipes)
     print(f"Enriched {count - failed} of {count} answered recipes, {failed} failed")
     return failed
+
+
+def issue_line(issue: dict[str, Any]) -> str:
+    """An Enrichment Issue on one line: its fact, what it was before and after (or "(none)"),
+    and the reason. One with neither before nor after shows only its fact and reason.
+    """
+    before, after = issue.get("before"), issue.get("after")
+    if before is None and after is None:
+        return f"{issue['fact_id']}: {issue['reason']}"
+    return f"{issue['fact_id']}: {before or '(none)'} → {after or '(none)'} — {issue['reason']}"
 
 
 def read_answer(source: str) -> str:
