@@ -2605,3 +2605,31 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 .picker-row .plate {
   width: 40px;
 }
+
+/* An item's edit form, in its sheet: fields stacked, an amount's or a timer's two ends side by side. */
+.item-edit .edit-field {
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.edit-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--space) * 3);
+}
+
+.item-edit .choices {
+  margin-top: calc(var(--space) * 2);
+}
+
+.item-edit-found {
+  margin: calc(var(--space) * 2) 0 0;
+}
+
+.item-edit-new {
+  margin-top: calc(var(--space) * 3);
+}
+
+.item-edit-problem {
+  flex-basis: 100%;
+  margin: 0;
+}

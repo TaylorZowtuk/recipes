@@ -1,7 +1,9 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatAmount } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
+import { lineName } from "./factEdits";
+import { canEdit, ItemEditForm, type SaveEdit } from "./ItemEditForm";
 import { reviewCounts } from "./needsReview";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
 import { confirmableOn, reviewLeft, uncheckedOn } from "./review";
@@ -133,15 +135,6 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
-// A line's name as parsed, else as written.
-function lineName(recipe: Recipe, lineId: string) {
-  return (
-    recipe.facts.ingredients[lineId]?.parse?.name ??
-    recipe.original.ingredients.find((line) => line.id === lineId)?.text ??
-    lineId
-  );
-}
-
 // Everything enrichment says about a Review Item, for an editor to check before confirming it.
 export function ItemDetail({
   item,
@@ -219,6 +212,7 @@ export function ItemDetail({
               ["Store Category", category?.name ?? canonical?.store_category_id],
             ]}
           />
+          {match.fdc_id === null && <p>No FDC food, so this line has no weight or nutrition.</p>}
           <Source fact={match} />
         </Section>,
       );
@@ -328,8 +322,9 @@ function itemTitle(item: ReviewItem, recipe: Recipe) {
 }
 
 // The sheet for one Review Item, shown while there is one: its detail, then Confirm, or Accept
-// correction while flagged. Escape, Close or a tap outside it closes it; `onClose` should be
-// safe to call twice, as Close calls it and the sheet calls it again once it has closed.
+// correction while flagged, and Edit, which shows the item's edit form in the same sheet until it's
+// saved or cancelled. Escape, Close or a tap outside it closes it; `onClose` should be safe to call
+// twice, as Close calls it and the sheet calls it again once it has closed.
 export function ItemSheet({
   item,
   recipe,
@@ -337,6 +332,7 @@ export function ItemSheet({
   disabled,
   note,
   onConfirm,
+  onEdit,
   onClose,
 }: {
   item: ReviewItem | undefined;
@@ -345,36 +341,76 @@ export function ItemSheet({
   disabled: boolean;
   note?: ReactNode;
   onConfirm: (factIds: string[]) => void;
+  onEdit: SaveEdit;
   onClose: () => void;
 }) {
+  const [editingId, setEditingId] = useState<string>();
+  const editing = !!item && editingId === item.id;
+  // Cancel returns focus to Edit.
+  const editButton = useRef<HTMLButtonElement>(null);
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) editButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+  const close = () => {
+    wasEditing.current = false;
+    setEditingId(undefined);
+    onClose();
+  };
   return (
-    <Sheet open={!!item} title={item ? itemTitle(item, recipe) : ""} onClose={onClose}>
+    <Sheet open={!!item} title={item ? itemTitle(item, recipe) : ""} onClose={close}>
       {item && (
         <>
           <p className="review-sheet-mark">
             <ReviewMark mark={item.mark} shown />
           </p>
-          <ItemDetail item={item} recipe={recipe} collection={collection} />
-          {note}
-          <div className="sheet-actions">
-            <NewCanonicalNote item={item} recipe={recipe} collection={collection} />
-            <button type="button" className="button button-secondary" onClick={onClose}>
-              Close
-            </button>
-            {item.mark !== "confirmed" && (
-              <button
-                type="button"
-                className="button"
-                disabled={disabled}
-                onClick={() => {
-                  onClose();
-                  onConfirm(item.factIds);
-                }}
-              >
-                {item.mark === "flagged" ? "Accept correction" : "Confirm"}
-              </button>
-            )}
-          </div>
+          {editing ? (
+            <ItemEditForm
+              item={item}
+              recipe={recipe}
+              collection={collection}
+              disabled={disabled}
+              note={note}
+              onSave={onEdit}
+              onCancel={() => setEditingId(undefined)}
+            />
+          ) : (
+            <>
+              <ItemDetail item={item} recipe={recipe} collection={collection} />
+              {note}
+              <div className="sheet-actions">
+                <NewCanonicalNote item={item} recipe={recipe} collection={collection} />
+                <button type="button" className="button button-secondary" onClick={close}>
+                  Close
+                </button>
+                {canEdit(item, recipe) && (
+                  <button
+                    ref={editButton}
+                    type="button"
+                    className="button button-secondary"
+                    disabled={disabled}
+                    onClick={() => setEditingId(item.id)}
+                  >
+                    Edit
+                  </button>
+                )}
+                {item.mark !== "confirmed" && (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      close();
+                      onConfirm(item.factIds);
+                    }}
+                  >
+                    {item.mark === "flagged" ? "Accept correction" : "Confirm"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </>
       )}
     </Sheet>

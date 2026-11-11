@@ -34,18 +34,20 @@ const PARTS = [
   ["cleanup", "Cleanup"],
 ] as const satisfies [keyof Difficulty, string][];
 
-// Prep, Cook and Cleanup, each 1–3, and Clear Difficulty once any is rated.
+// Prep, Cook and Cleanup, each 1–3, and Clear Difficulty once any is rated, unless it's `required`.
 export function DifficultyField({
   difficulty,
   onChange,
+  required = false,
 }: {
   difficulty: DifficultyChoice;
   onChange: (difficulty: DifficultyChoice) => void;
+  required?: boolean;
 }) {
   return (
     <fieldset className="difficulty-field">
       <legend>Difficulty</legend>
-      <p className="field-hint">Optional. 1 is easy, 3 is hard.</p>
+      <p className="field-hint">{!required && "Optional. "}1 is easy, 3 is hard.</p>
       {PARTS.map(([part, label]) => (
         <fieldset key={part} className="rating">
           <legend>{label}</legend>
@@ -65,7 +67,7 @@ export function DifficultyField({
           </div>
         </fieldset>
       ))}
-      {Object.keys(difficulty).length > 0 && (
+      {!required && Object.keys(difficulty).length > 0 && (
         <button type="button" className="text-button" onClick={() => onChange({})}>
           Clear Difficulty
         </button>

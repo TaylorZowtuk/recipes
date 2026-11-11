@@ -362,3 +362,37 @@ test("the toast waits while Undo has focus or the mouse, keeps focus on a failed
   await context.setOffline(false);
   await expect(undo(page)).toBeEnabled();
 });
+
+test("an editor edits a line's amount from its sheet, and it's Confirmed", async ({
+  page,
+}, testInfo) => {
+  const path = `plum-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`plum rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: /^Unchecked: olive oil/ }).click();
+  const sheet = page.getByRole("dialog", { name: "1 tbsp olive oil" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  const amount = sheet.getByRole("textbox", { name: "Amount" });
+  await expect(amount).toBeFocused();
+  await expect(amount).toHaveValue("1");
+
+  // Cancel goes back to the detail; Edit again, and Save, saves it Confirmed.
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet.getByRole("button", { name: "Edit" })).toBeFocused();
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await amount.fill("2");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+  await expect(undo(page)).toHaveCount(0);
+  await expect(ingredients.getByRole("button", { name: /^Confirmed: olive oil/ })).toContainText(
+    "2 tbsp",
+  );
+});
