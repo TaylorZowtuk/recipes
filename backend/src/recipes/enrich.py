@@ -162,11 +162,9 @@ def apply(
 
 def issue_line(issue: dict[str, Any]) -> str:
     """An Enrichment Issue on one line: its fact, what it was before and after (or "(none)"),
-    and the reason. One with neither before nor after shows only its fact and reason.
+    and the reason.
     """
     before, after = issue.get("before"), issue.get("after")
-    if before is None and after is None:
-        return f"{issue['fact_id']}: {issue['reason']}"
     return f"{issue['fact_id']}: {before or '(none)'} → {after or '(none)'} — {issue['reason']}"
 
 
