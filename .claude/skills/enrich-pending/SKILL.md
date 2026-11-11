@@ -39,7 +39,7 @@ If it is unset, stop. Tell the user to quit, export `PLATEFUL_SERVICE_TOKEN` in 
 2. `run` exits 2 when any one item failed, but `backend/packet.json` is still the packet whenever it parses: answer it. If `items` is empty, skip to step 4. Otherwise read it and answer per its `instructions` into `backend/answer.json`, copying each item's `text` as the recipe.
 3. `fallback apply <BASE> packet.json answer.json`. It exits 2 when any one answer was rejected or failed. Correct each rejected answer from its printed errors and apply again with an answer file of only the corrected answers.
 
-Done when every item is saved or needs its page, or there were none. Keep the counts for the summary: captured (saved by `run` plus saved by `apply`), needs its page, still waiting, failed.
+Done when apply has accepted or rejected every item and every rejection you could correct has been applied again, or there were none. Keep the counts for the summary: captured (saved by `run` plus saved by `apply`), needs its page, still waiting, failed.
 
 ## 4. Enrich
 
