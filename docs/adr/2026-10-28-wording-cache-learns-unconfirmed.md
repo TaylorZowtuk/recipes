@@ -1,5 +1,7 @@
 # Wording Cache learns unconfirmed mappings
 
+Superseded in part by [An editor's edit is Confirmed, not undoable, and fixes a wording for the whole Collection](2026-11-11-editing-review-facts.md): an editor who changes a line's Canonical Ingredient overwrites its wording, even a confirmed one. Enrichment still never replaces a confirmed wording. Everything else here stands.
+
 The [enrichment pipeline ADR](2026-09-26-enrichment-pipeline.md) says that "a wording seen before maps without the LLM". This supersedes that part. Enrichment learns every wording a validated answer maps, but **unconfirmed**, and an unconfirmed wording is only a hint: the model still chooses. Only a wording an editor confirmed fixes its **Canonical Ingredient**. Everything else in the enrichment pipeline ADR stands.
 
 We chose this because nothing checks what the cache learns until an editor reviews it. If the first answer for a wording were final, one wrong match ("cream" → *ice cream*) would be copied into every later recipe without the model or an editor looking at it again.
