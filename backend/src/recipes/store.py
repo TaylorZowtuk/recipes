@@ -352,15 +352,21 @@ class Store:
         wordings: Iterable[Wording],
         *,
         created: Iterable[CanonicalIngredient] = (),
-        fixed: Iterable[Wording] = (),
+        overwrite_wordings: Iterable[Wording] = (),
     ) -> Recipe:
         """`update_recipe`, writing each changed Canonical Ingredient if it is still at its
         version, each wording unless an editor confirmed it meanwhile, each `created` Canonical
-        Ingredient if its id is free, and each `fixed` wording an editor set, over any other, in
-        the same transaction: ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+        Ingredient if its id is free, and each of `overwrite_wordings`, which an editor set, over
+        any other, in the same transaction: ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+        A wording is in `wordings` or `overwrite_wordings`, never both.
 
         Raises VersionConflict if any of them changed, writing nothing.
         """
+        wordings, overwrite_wordings = list(wordings), list(overwrite_wordings)
+        both = {w.wording for w in wordings} & {w.wording for w in overwrite_wordings}
+        if both:
+            msg = f"Wordings both learned and overwritten: {', '.join(sorted(both))}"
+            raise ValueError(msg)
         replaced = [
             self._replace(
                 canonical.model_copy(update={"version": canonical.version + 1}),
@@ -373,7 +379,7 @@ class Store:
         learned = [self._learn_wording(wording) for wording in wordings]
         overwritten: list[TransactWriteItemTypeDef] = [
             {"Put": {"TableName": self.table, "Item": _to_item(w, wording_key(w.wording))}}
-            for w in fixed
+            for w in overwrite_wordings
         ]
         try:
             return self._save_versioned(

@@ -7,7 +7,7 @@ import secrets
 import string
 from datetime import UTC, date, datetime
 from itertools import chain
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -18,6 +18,9 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 SCHEMA_VERSION = 1
 
@@ -192,14 +195,16 @@ class Fact(Model):
 # The units a line's amount is a mass or a volume in, as the parser writes them (pint's short
 # symbols) and as an editor may spell them. Any other unit counts something: "cloves", "can".
 MASS_UNITS = frozenset(
-    {"g", "gram", "grams", "kg", "kilogram", "kilograms", "mg", "oz", "ounce", "ounces"}
-    | {"lb", "lbs", "pound", "pounds"}
+    {"g", "gram", "grams", "kg", "kilogram", "kilograms", "mg", "milligram", "milligrams"}
+    | {"oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds"}
 )
 VOLUME_UNITS = frozenset(
     {"ml", "milliliter", "milliliters", "millilitre", "millilitres", "l", "liter", "liters"}
-    | {"litre", "litres", "dl", "tsp", "teaspoon", "teaspoons", "tbsp", "tablespoon"}
-    | {"tablespoons", "cup", "cups", "floz", "fl oz", "pt", "pint", "pints", "qt", "quart"}
-    | {"quarts", "gal", "gallon", "gallons"}
+    | {"litre", "litres", "cl", "centiliter", "centiliters", "centilitre", "centilitres"}
+    | {"dl", "deciliter", "deciliters", "decilitre", "decilitres", "cc", "cm3"}
+    | {"tsp", "teaspoon", "teaspoons", "tbsp", "tablespoon", "tablespoons", "cup", "cups"}
+    | {"floz", "fl oz", "fl", "pt", "pint", "pints", "qt", "quart", "quarts", "gal", "gallon"}
+    | {"gallons", "jig"}
 )
 
 
@@ -588,6 +593,29 @@ def needs_review(recipe: Recipe) -> NeedsReview:
         unconfirmed=sum(f or u for f, u in zip(flagged, unconfirmed, strict=True)),
         flagged=sum(flagged),
     )
+
+
+def resolve(
+    recipe: Recipe, on: Callable[[str], bool], batch: str | None = None
+) -> list[EnrichmentIssue]:
+    """The recipe's issues, with the open ones on facts `on` picks resolved in `batch`, or in no
+    batch for an editor's edit.
+    """
+    return [
+        issue.model_copy(update={"status": "resolved", "confirm_batch": batch})
+        if issue.status == "open" and on(issue.fact_id)
+        else issue
+        for issue in recipe.issues
+    ]
+
+
+def settled(recipe: Recipe, ready_batch: str | None = None) -> Recipe:
+    """The reviewed recipe, Ready in `ready_batch` if it was Awaiting Review and nothing is left
+    to check. An editor's edit or own Difficulty makes it Ready in no batch.
+    """
+    if recipe.status == "awaiting_review" and needs_review(recipe).unconfirmed == 0:
+        return recipe.model_copy(update={"status": "ready", "ready_batch": ready_batch})
+    return recipe
 
 
 def effective_difficulty(recipe: Recipe) -> tuple[Difficulty | None, bool]:

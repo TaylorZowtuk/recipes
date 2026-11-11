@@ -6,11 +6,12 @@ its wording for every recipe in the Collection.
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from conftest import EDITOR
+from conftest import EDITOR, SERVICE_TOKEN
 from test_enrichment_review import (
     BEEF,
     CONFIRMED,
     FACTS,
+    STEW,
     SWAP,
     awaiting,
     card,
@@ -23,9 +24,13 @@ from test_enrichment_review import (
     uses,
 )
 
+from recipes import api, edits
 from recipes.models import (
+    MASS_UNITS,
     SCHEMA_VERSION,
+    VOLUME_UNITS,
     CanonicalIngredient,
+    Difficulty,
     DurationSegment,
     IngredientFacts,
     IngredientSegment,
@@ -38,6 +43,7 @@ from recipes.models import (
     unit_kind,
 )
 from recipes.parse import parse_line
+from recipes.store import VersionConflict
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -157,13 +163,38 @@ def test_a_lines_unit_kind_follows_its_unit(
     [
         *("900 g beef", "2 tbsp flour", "1 cup barley", "8 fl oz stock", "2 lb pork"),
         *("1 l water", "3 tsp salt", "1 kg potatoes", "4 oz cheese", "1 quart milk"),
-        *("3 cloves garlic", "2 eggs"),
+        *("3 cloves garlic", "2 eggs", "50 cl wine", "1 shot rum"),
     ],
 )
 def test_the_apis_unit_kinds_are_the_parsers(line: str) -> None:
     parsed = parse_line(line)
 
     assert unit_kind(parsed.unit) == parsed.unit_kind
+
+
+@pytest.mark.parametrize("spelling", sorted(MASS_UNITS | VOLUME_UNITS))
+def test_every_unit_the_api_knows_is_the_parsers_kind_where_the_parser_reads_it(
+    spelling: str,
+) -> None:
+    parsed = parse_line(f"2 {spelling} flour")
+
+    if parsed.unit is not None:  # the parser reads "mg" and "dl" as no unit at all
+        assert unit_kind(spelling) == unit_kind(parsed.unit) == parsed.unit_kind
+
+
+@pytest.mark.parametrize(("unit", "kind"), [("cl", "volume"), ("gill", "volume")])
+def test_resaving_a_line_in_its_own_unit_keeps_the_units_kind(
+    editor_client: TestClient, api_store: Store, unit: str, kind: str
+) -> None:
+    facts = beef_line()
+    written = parse("stewing beef").model_copy(update={"unit": unit, "unit_kind": kind})
+    facts.ingredients["i1"].parse = written
+    recipe = awaiting(api_store, facts=facts)
+
+    response = edit(editor_client, recipe, **line_edit(quantity={"low": 75, "high": 75}, unit=unit))
+
+    assert response.status_code == 200
+    assert fact(stored(api_store, recipe.id), "i1.parse")["unit_kind"] == kind
 
 
 def test_editing_a_line_without_a_parse_reads_it(
@@ -218,6 +249,31 @@ def test_converting_a_weight_with_nothing_to_convert_by_is_refused(
 
     assert response.status_code == 422
     assert stored(api_store, recipe.id) == recipe
+
+
+def test_renaming_a_line_without_choosing_its_canonical_ingredient_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+    wording = api_store.wording("beef chuck")
+
+    response = edit(editor_client, recipe, **line_edit(name="beef chuck"))
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Changing the wording needs a Canonical Ingredient choice"
+    assert stored(api_store, recipe.id) == recipe
+    assert api_store.wording("beef chuck") == wording
+
+
+def test_respelling_a_line_in_the_same_wording_keeps_its_canonical_ingredient(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit(name="Stewing  Beef"))
+
+    assert response.status_code == 200
+    assert fact(stored(api_store, recipe.id), "i1.match")["canonical_id"] == BEEF.id
 
 
 # A line's Canonical Ingredient
@@ -344,6 +400,141 @@ def test_editing_a_stale_version_is_a_conflict_that_changes_nothing(
     assert stored(api_store, sharing.id) == sharing
     assert api_store.wording("stewing beef") == wording
     assert api_store.canonical_ingredients() == canonicals
+
+
+def test_renaming_a_line_with_a_canonical_ingredient_fixes_the_new_wording(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, canonicals=(BEEF, PORK))
+    renamed = other(api_store, 2, beef_line("pork shoulder"))
+    unrenamed = other(api_store, 3, beef_line())
+    old_wording = api_store.wording("stewing beef")
+
+    response = edit(
+        editor_client,
+        recipe,
+        **line_edit(name="pork shoulder", canonical={"kind": "existing", "id": PORK.id}),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["also_updated"] == [renamed.id]
+    wording = api_store.wording("pork shoulder")
+    assert wording is not None
+    assert (wording.canonical_id, wording.confirmed) == (PORK.id, True)
+    assert api_store.wording("stewing beef") == old_wording
+    assert fact(stored(api_store, renamed.id), "i1.match")["canonical_id"] == PORK.id
+    assert stored(api_store, unrenamed.id) == unrenamed
+
+
+def test_a_sharing_recipe_that_changed_meanwhile_is_read_again(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = awaiting(api_store)
+    sharing = other(api_store, 2, beef_line())
+    meanwhile = Difficulty(prep=1, cook=1, cleanup=1)
+    update = api_store.update_recipe
+    raced: list[str] = []
+
+    def racing(changed: Recipe) -> Recipe:
+        if changed.id == sharing.id and not raced:
+            raced.append(changed.id)
+            update(stored(api_store, sharing.id).model_copy(update={"difficulty": meanwhile}))
+        return update(changed)
+
+    monkeypatch.setattr(api_store, "update_recipe", racing)
+
+    response = edit(
+        editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": BEEF.id})
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([sharing.id], [])
+    after = stored(api_store, sharing.id)
+    assert edited(fact(after, "i1.match"))
+    assert after.difficulty == meanwhile
+    assert after.version == sharing.version + 2
+
+
+def test_a_sharing_recipe_that_keeps_changing_is_reported_not_updated(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = awaiting(api_store)
+    sharing = other(api_store, 2, beef_line())
+    update = api_store.update_recipe
+
+    def conflicting(changed: Recipe) -> Recipe:
+        if changed.id == sharing.id:
+            raise VersionConflict(changed.id)
+        return update(changed)
+
+    monkeypatch.setattr(api_store, "update_recipe", conflicting)
+
+    response = edit(
+        editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": BEEF.id})
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([], [sharing.id])
+    assert stored(api_store, sharing.id) == sharing
+    saved = stored(api_store, recipe.id)
+    assert saved.version == recipe.version + 1
+    assert edited(fact(saved, "i1.match"))
+
+
+def test_a_sharing_recipe_the_match_would_make_too_big_is_reported_not_updated(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = awaiting(api_store)
+    sharing = other(api_store, 2, beef_line())
+    monkeypatch.setattr(edits, "MAX_RECIPE_BYTES", 100)
+
+    response = edit(
+        editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": BEEF.id})
+    )
+
+    assert response.status_code == 200
+    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([], [sharing.id])
+    assert stored(api_store, sharing.id) == sharing
+
+
+# Refused edits
+
+
+def test_editing_a_pending_recipe_is_refused(editor_client: TestClient, api_store: Store) -> None:
+    recipe = api_store.add_recipe(STEW)
+
+    response = edit(editor_client, recipe, kind="difficulty", prep=1, cook=2, cleanup=3)
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A Pending recipe has no facts to edit yet"
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_an_edit_that_makes_the_recipe_too_big_is_refused(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = awaiting(api_store)
+    monkeypatch.setattr(api, "MAX_RECIPE_BYTES", len(recipe.model_dump_json().encode()))
+
+    response = edit(editor_client, recipe, **line_edit(preparation="cubed " * 20))
+
+    assert response.status_code == 422
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_only_an_editor_can_edit(client: TestClient, api_store: Store) -> None:
+    recipe = awaiting(api_store)
+    body = {"version": recipe.version, "edit": line_edit(name="beef chuck")}
+    path = f"/api/recipes/{recipe.id}/edit"
+
+    by_a_visitor = client.post(path, json=body)
+    with_a_wrong_token = client.post(
+        path, json=body, headers={next(iter(EDITOR)): SERVICE_TOKEN + "x"}
+    )
+
+    assert by_a_visitor.status_code == 403
+    assert with_a_wrong_token.status_code in {401, 403}
+    assert stored(api_store, recipe.id) == recipe
 
 
 # Steps

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, StringConstraints, model_validator
 from recipes.models import (
     MAX_LABEL,
     MAX_LINES,
+    MAX_RECIPE_BYTES,
     MAX_SUBSTITUTES,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
@@ -25,7 +26,6 @@ from recipes.models import (
     Difficulty,
     DifficultyFact,
     DurationSegment,
-    EnrichmentIssue,
     Fact,
     IngredientFacts,
     IngredientSegment,
@@ -44,15 +44,16 @@ from recipes.models import (
     UsesFact,
     Wording,
     item_of,
-    needs_review,
     new_ulid,
     normalize_wording,
+    resolve,
+    settled,
     unit_kind,
 )
 from recipes.store import ATTEMPTS, VersionConflict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Iterable, Mapping
 
     from recipes.store import Store
 
@@ -156,37 +157,31 @@ FactEdit = Annotated[
 ]
 
 
-def by_editor[F: Fact](fact: F, now: datetime, **changes: object) -> F:
-    """The fact as the editor wrote it: Confirmed, in no Confirm Batch."""
-    return fact.model_copy(
-        update={
-            "provenance": "editor",
-            "confidence": 1,
-            "confirmed": True,
-            "confirmed_by": CONFIRMED_BY,
-            "confirmed_at": now,
-            "confirm_batch": None,
-            **changes,
-        }
-    )
+def _confirmed(now: datetime) -> dict[str, object]:
+    """What confirming a fact records: never the editor's email."""
+    return {"confirmed": True, "confirmed_by": CONFIRMED_BY, "confirmed_at": now}
+
+
+def _editors(now: datetime) -> dict[str, object]:
+    """The provenance of a fact the editor wrote: Confirmed, in no Confirm Batch."""
+    return {"provenance": "editor", "confidence": 1, "confirm_batch": None, **_confirmed(now)}
+
+
+def _by_editor[F: Fact](fact: F, now: datetime, **changes: object) -> F:
+    """The fact as the editor wrote it."""
+    return fact.model_copy(update={**_editors(now), **changes})
+
+
+def _new_by_editor[F: Fact](kind: type[F], now: datetime, **fields: object) -> F:
+    """A fact the editor wrote where there was none."""
+    return kind.model_validate({**_editors(now), "estimated": False, **fields})
 
 
 def _checked[F: Fact](fact: F | None, now: datetime) -> F | None:
     """The fact Confirmed as it stands, keeping any Confirm Batch it was already confirmed in."""
     if fact is None or fact.confirmed:
         return fact
-    return fact.model_copy(
-        update={"confirmed": True, "confirmed_by": CONFIRMED_BY, "confirmed_at": now}
-    )
-
-
-EDITOR: dict[str, object] = {
-    "provenance": "editor",
-    "confidence": 1,
-    "estimated": False,
-    "confirmed": True,
-    "confirmed_by": CONFIRMED_BY,
-}
+    return fact.model_copy(update=_confirmed(now))
 
 
 @dataclass
@@ -197,45 +192,28 @@ class SharedMatch:
     match: MatchFact
     conversion: ConversionFact | None
 
+    def lines(self, recipe: Recipe) -> list[str]:
+        """The recipe's lines with the wording."""
+        return [
+            line_id
+            for line_id, line in recipe.facts.ingredients.items()
+            if line.parse and normalize_wording(line.parse.name) == self.wording
+        ]
+
     def apply(self, recipe: Recipe) -> Recipe | None:
         """The recipe with each of its lines with the wording matched, or None if it has none.
         Open issues on those lines' matches and conversions are resolved.
         """
-        facts = recipe.facts.model_copy(deep=True)
-        lines = [
-            line_id
-            for line_id, line in facts.ingredients.items()
-            if line.parse and normalize_wording(line.parse.name) == self.wording
-        ]
+        lines = self.lines(recipe)
         if not lines:
             return None
+        facts = recipe.facts.model_copy(deep=True)
         for line_id in lines:
             line = facts.ingredients[line_id]
             line.match, line.conversion = self.match, self.conversion
         fixed = {f"{line_id}.{kind}" for line_id in lines for kind in ("match", "conversion")}
-        return settled(recipe, facts, resolve(recipe, lambda fact_id: fact_id in fixed))
-
-
-def resolve(recipe: Recipe, on: Callable[[str], bool]) -> list[EnrichmentIssue]:
-    """The recipe's issues, with the open ones on facts `on` picks resolved, in no batch."""
-    return [
-        issue.model_copy(update={"status": "resolved", "confirm_batch": None})
-        if issue.status == "open" and on(issue.fact_id)
-        else issue
-        for issue in recipe.issues
-    ]
-
-
-def settled(
-    recipe: Recipe, facts: RecipeFacts, issues: list[EnrichmentIssue], **changes: object
-) -> Recipe:
-    """The recipe with its edited facts and issues: Ready if it was Awaiting Review and nothing
-    is left to check, though no Confirm Batch made it so.
-    """
-    edited = recipe.model_copy(update={"facts": facts, "issues": issues, **changes})
-    if edited.status == "awaiting_review" and needs_review(edited).unconfirmed == 0:
-        edited = edited.model_copy(update={"status": "ready"})
-    return edited
+        issues = resolve(recipe, lambda fact_id: fact_id in fixed)
+        return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
 
 
 @dataclass
@@ -248,7 +226,7 @@ class Edited:
     learned: list[Wording] = field(default_factory=list[Wording])
     fixed: list[Wording] = field(default_factory=list[Wording])
     shared: SharedMatch | None = None
-    others: list[Recipe] = field(default_factory=list[Recipe])
+    others: list[str] = field(default_factory=list[str])  # other recipes with the wording
 
 
 def edit_recipe(store: Store, recipe: Recipe, edit: FactEdit) -> Edited:
@@ -271,19 +249,21 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
     facts = recipe.facts.model_copy(deep=True)
     line = facts.ingredients.setdefault(edit.line_id, IngredientFacts())
     old = line.parse
-    line.parse = ParseFact.model_validate(
-        {
-            **EDITOR,
-            "confirmed_at": now,
-            "quantity": edit.quantity,
-            "unit": edit.unit,
-            "unit_kind": unit_kind(edit.unit),
-            "name": edit.name,
-            "short_name": old.short_name if old and old.name == edit.name else None,
-            "preparation": edit.preparation,
-            "comment": old.comment if old else None,
-            "optional": old.optional if old else False,
-        }
+    renamed = old is not None and normalize_wording(edit.name) != normalize_wording(old.name)
+    if renamed and line.match and not edit.canonical:
+        # Keeping the match would confirm the old Canonical Ingredient for the new wording.
+        raise HTTPException(422, "Changing the wording needs a Canonical Ingredient choice")
+    line.parse = _new_by_editor(
+        ParseFact,
+        now,
+        quantity=edit.quantity,
+        unit=edit.unit,
+        unit_kind=_unit_kind(old, edit.unit),
+        name=edit.name,
+        short_name=old.short_name if old and old.name == edit.name else None,
+        preparation=edit.preparation,
+        comment=old.comment if old else None,
+        optional=old.optional if old else False,
     )
     result, base = Edited(recipe), recipe
     if edit.canonical:
@@ -301,8 +281,7 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
                     schema_version=SCHEMA_VERSION,
                 )
             ]
-            others = (other for other in recipes if other.id != recipe.id)
-            result.others = [other for other in others if shared.apply(other)]
+            result.others = [o.id for o in recipes if o.id != recipe.id and shared.lines(o)]
             # The recipe's other lines with the same wording take the match too.
             base = shared.apply(recipe.model_copy(update={"facts": facts})) or base
             facts = base.facts
@@ -315,8 +294,17 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
     if edit.keep_weight is not None:
         line.conversion = _kept(line.conversion, keep=edit.keep_weight, now=now)
     issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
-    result.recipe = settled(base, facts, issues)
+    result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
     return result
+
+
+def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volume", "count"]:
+    """The line's unit's kind: as the parser read it when the unit is unchanged, since the parser
+    decides by the unit's dimension, which the API's tables may not know, and else by the tables.
+    """
+    if old and old.unit == unit and old.unit_kind:
+        return old.unit_kind
+    return unit_kind(unit)
 
 
 def _canonical(store: Store, choice: CanonicalChoice, result: Edited) -> CanonicalIngredient:
@@ -365,21 +353,15 @@ def _shared_match(
     fdc_id, portion_id = (
         (donor.match.fdc_id, donor.match.portion_id) if donor and donor.match else (None, None)
     )
-    match = MatchFact.model_validate(
-        {
-            **EDITOR,
-            "confirmed_at": now,
-            "canonical_id": canonical_id,
-            "fdc_id": fdc_id,
-            "portion_id": portion_id,
-        }
+    match = _new_by_editor(
+        MatchFact, now, canonical_id=canonical_id, fdc_id=fdc_id, portion_id=portion_id
     )
     conversion = donor.conversion if donor else None
     if conversion:
         # An editor kept the donor line in its written unit, which says nothing about this one.
         converts = conversion.density_g_per_ml is not None or conversion.grams_per_count is not None
         refused = None if conversion.refused == EDITOR_KEPT and converts else conversion.refused
-        conversion = by_editor(conversion, now, refused=refused)
+        conversion = _by_editor(conversion, now, refused=refused)
     return SharedMatch(wording, match, conversion)
 
 
@@ -388,10 +370,10 @@ def _kept(conversion: ConversionFact | None, *, keep: bool, now: datetime) -> Co
     if conversion is None:
         raise HTTPException(422, "The line has no weight to keep or convert")
     if keep:
-        return by_editor(conversion, now, refused=EDITOR_KEPT)
+        return _by_editor(conversion, now, refused=EDITOR_KEPT)
     if conversion.density_g_per_ml is None and conversion.grams_per_count is None:
         raise HTTPException(422, "The line's FDC food gives nothing to convert it by")
-    return by_editor(conversion, now, refused=None)
+    return _by_editor(conversion, now, refused=None)
 
 
 def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
@@ -414,7 +396,7 @@ def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
             if isinstance(segment, IngredientSegment):
                 summed[segment.ref] = summed.get(segment.ref, 0) + segment.portion
         uses = [StepUse(ref=ref, portion=portion) for ref, portion in summed.items()]
-        step.segments = by_editor(step.segments, now, segments=segments, estimated=False)
+        step.segments = _by_editor(step.segments, now, segments=segments, estimated=False)
     elif step.uses and len(edit.portions) == len(step.uses.uses) and not edit.durations:
         uses = [
             use.model_copy(update={"portion": portion})
@@ -423,15 +405,15 @@ def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
     else:
         raise HTTPException(422, f"Step {edit.step_id} has no such portions or timers")
     step.uses = (
-        by_editor(step.uses, now, uses=uses, estimated=False)
+        _by_editor(step.uses, now, uses=uses, estimated=False)
         if step.uses
-        else UsesFact.model_validate({**EDITOR, "confirmed_at": now, "uses": uses})
+        else _new_by_editor(UsesFact, now, uses=uses)
     )
     facts.steps[edit.step_id] = step
     if over := overused(facts.steps):
         raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
     issues = resolve(recipe, lambda fact_id: item_of(fact_id) == edit.step_id)
-    return settled(recipe, facts, issues)
+    return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
 
 
 def _counted(segments: list[Segment], edit: EditStep) -> list[Segment]:
@@ -472,36 +454,58 @@ def _edit_substitution(
         )
     else:
         del items[edit.index]
-    line.substitutions = by_editor(swaps, now, items=items, estimated=False) if items else None
+    line.substitutions = _by_editor(swaps, now, items=items, estimated=False) if items else None
     item = f"{edit.line_id}.substitutions"
-    return settled(recipe, facts, resolve(recipe, lambda fact_id: fact_id == item))
+    issues = resolve(recipe, lambda fact_id: fact_id == item)
+    return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
 
 
 def _edit_difficulty(recipe: Recipe, edit: EditDifficulty, now: datetime) -> Recipe:
     difficulty = Difficulty(prep=edit.prep, cook=edit.cook, cleanup=edit.cleanup)
     facts = recipe.facts.model_copy(deep=True)
-    facts.difficulty = DifficultyFact.model_validate(
-        {**EDITOR, "confirmed_at": now, **difficulty.model_dump()}
-    )
+    facts.difficulty = _new_by_editor(DifficultyFact, now, **difficulty.model_dump())
     issues = resolve(recipe, lambda fact_id: fact_id == "difficulty")
-    return settled(recipe, facts, issues, difficulty=difficulty)
+    changes = {"facts": facts, "issues": issues, "difficulty": difficulty}
+    return settled(recipe.model_copy(update=changes))
 
 
-def share(store: Store, recipe_id: str, shared: SharedMatch) -> bool:
-    """Match another recipe's lines with the wording as the editor fixed it, at its own version,
-    reading it again if it changed meanwhile. False if it no longer has such a line.
+def share_all(store: Store, edited: Edited) -> tuple[list[str], list[str]]:
+    """Match every other recipe's lines with the wording as the editor fixed it, each at its own
+    version, after the edited recipe is saved. The recipes updated, and those not updated because
+    they kept changing or would be too big: saving the line again repairs them.
     """
+    updated: list[str] = []
+    not_updated: list[str] = []
+    if edited.shared is None:
+        return updated, not_updated
+    for recipe_id in edited.others:
+        match _share(store, recipe_id, edited.shared):
+            case "updated":
+                updated.append(recipe_id)
+            case "not_updated":
+                not_updated.append(recipe_id)
+            case "gone":
+                pass
+    return updated, not_updated
+
+
+def _share(
+    store: Store, recipe_id: str, shared: SharedMatch
+) -> Literal["updated", "not_updated", "gone"]:
+    """Match one recipe's lines with the wording, reading it again if it changed meanwhile."""
     for _ in range(ATTEMPTS):
         current = store.get_recipe(recipe_id)
         changed = shared.apply(current) if current else None
         if changed is None:
-            return False
+            return "gone"  # deleted, or its line no longer has the wording
+        if len(changed.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+            return "not_updated"
         try:
             store.update_recipe(changed)
         except VersionConflict:
             continue
-        return True
-    raise VersionConflict(recipe_id)
+        return "updated"
+    return "not_updated"
 
 
 def confirm_matches(

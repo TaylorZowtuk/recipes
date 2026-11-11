@@ -22,7 +22,7 @@ from pydantic import (
 
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
-from recipes.edits import CONFIRMED_BY, FactEdit, confirm_matches, edit_recipe, overused, share
+from recipes.edits import CONFIRMED_BY, FactEdit, confirm_matches, edit_recipe, overused, share_all
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
     LLM_EXTRACTOR,
@@ -84,9 +84,10 @@ from recipes.models import (
     Wording,
     fact_at,
     fact_paths,
-    needs_review,
     new_ulid,
     normalize_wording,
+    resolve,
+    settled,
     site_host,
     written_as,
 )
@@ -333,13 +334,16 @@ class EditFact(BaseModel):
 
 
 class EditedFact(BaseModel):
-    """The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, and the
-    other recipes a line's new Canonical Ingredient was matched in by its wording.
+    """The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
+    other recipes a line's new Canonical Ingredient was matched in by its wording, and those it
+    couldn't be, because they kept changing or would be too big. Saving the line again retries
+    them.
     """
 
     recipe: Recipe
     ready: bool
     also_updated: list[Ulid]
+    not_updated: list[Ulid]
 
 
 SiteName = Annotated[
@@ -856,12 +860,9 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
                 if preview and preview.image_id not in {image.id for image in recipe.images}:
                     raise HTTPException(422, "The preview shows one of the recipe's images")
                 changes["preview"] = preview
-    edited = recipe.model_copy(update=changes)
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
-    if edited.status == "awaiting_review" and needs_review(edited).unconfirmed == 0:
-        edited = edited.model_copy(update={"status": "ready"})
-    return store.update_recipe(edited)
+    return store.update_recipe(settled(recipe.model_copy(update=changes)))
 
 
 @router.delete(
@@ -989,19 +990,12 @@ def confirm_facts(
         fact = cast("Fact", fact_at(facts, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
-    issues = [
-        issue.model_copy(update={"status": "resolved", "confirm_batch": batch})
-        if issue.status == "open" and issue.fact_id in listed
-        else issue
-        for issue in recipe.issues
-    ]
+    issues = resolve(recipe, lambda fact_id: fact_id in listed, batch)
     canonicals, wordings = confirm_matches(store, facts, confirming, batch)
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
-    reviewed = recipe.model_copy(update={"facts": facts, "issues": issues})
-    ready = recipe.status == "awaiting_review" and needs_review(reviewed).unconfirmed == 0
-    if ready:
-        reviewed = reviewed.model_copy(update={"status": "ready", "ready_batch": batch})
+    reviewed = settled(recipe.model_copy(update={"facts": facts, "issues": issues}), batch)
+    ready = recipe.status == "awaiting_review" and reviewed.status == "ready"
     saved = store.review_recipe(reviewed, canonicals, wordings)
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
 
@@ -1014,12 +1008,14 @@ def confirm_facts(
         **NO_SUCH_RECIPE,
         409: {
             "description": "The recipe, or a Canonical Ingredient or wording the edit confirms, "
-            "changed"
+            "changed, or the recipe is Pending and has no facts to edit yet"
         },
         422: {
             "description": "The recipe has no such line, step or substitute, the step's portions "
-            "and timers don't fit it or use more than all of a line, the Canonical Ingredient or "
-            "its Store Category doesn't exist, or the line has no weight to keep or convert"
+            "and timers don't fit it or use more than all of a line, the line's wording changes "
+            "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
+            "doesn't exist, the line has no weight to keep or convert, or the edited recipe is "
+            "too big to store"
         },
     },
 )
@@ -1029,23 +1025,28 @@ def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDe
     Issues. A recipe Awaiting Review with nothing left to review is Ready.
 
     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
-    every recipe with a line of that wording is matched to it too, each at its own version.
+    every recipe with a line of that wording is matched to it too, each at its own version. Once
+    the edited recipe is saved, the edit never fails: a recipe that kept changing, or that the
+    match would make too big, is listed in `not_updated`.
     """
     recipe = _recipe(store, recipe_id)
+    if recipe.status == "pending":
+        raise HTTPException(409, "A Pending recipe has no facts to edit yet")
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
     edited = edit_recipe(store, recipe, body.edit)
+    if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     saved = store.review_recipe(
         edited.recipe,
         edited.confirmed,
         edited.learned,
         created=edited.created,
-        fixed=edited.fixed,
+        overwrite_wordings=edited.fixed,
     )
-    shared = edited.shared
-    also = [o.id for o in edited.others if shared and share(store, o.id, shared)]
+    also_updated, not_updated = share_all(store, edited)
     ready = recipe.status == "awaiting_review" and saved.status == "ready"
-    return EditedFact(recipe=saved, ready=ready, also_updated=also)
+    return EditedFact(recipe=saved, ready=ready, also_updated=also_updated, not_updated=not_updated)
 
 
 @router.post(
