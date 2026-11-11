@@ -2,6 +2,7 @@ import hashlib
 from typing import TYPE_CHECKING
 
 import boto3
+import botocore.session
 import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
@@ -25,12 +26,19 @@ IMAGES_BUCKET = "plateful-test-images"
 SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = {SERVICE_TOKEN_HEADER: SERVICE_TOKEN}
 
+# mock_aws gives every test a fresh default boto3 session, which reloads botocore's service
+# models (about 50 ms a test). Each test still gets its own session, sharing only the loader.
+MODELS = botocore.session.get_session().get_component("data_loader")
+
 
 @pytest.fixture
 def table(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """An empty table on fake AWS."""
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
     with mock_aws():
+        session = botocore.session.get_session()
+        session.register_component("data_loader", MODELS)
+        boto3.setup_default_session(botocore_session=session)
         create_table(boto3.client("dynamodb"), TABLE_NAME)
         yield TABLE_NAME
 
