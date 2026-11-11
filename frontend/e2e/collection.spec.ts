@@ -88,7 +88,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   const main = page.getByRole("main");
   await expect(main).toContainText("Example Noodle House");
   await expect(main).toContainText("30 min");
-  await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toBeVisible();
 
   // Ingredients first, under their Component headings: each line's name, preparation and remark
   // on the left and its amount right-aligned, with kitchen fractions and ranges.
@@ -161,7 +161,7 @@ test("browse the Collection, search it and open a recipe", async ({ page }) => {
   await expect(source).toHaveAttribute("rel", /noopener/);
 
   // Back returns to the Collection.
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/recipes$/);
   await expect(seededCards(page)).toHaveCount(seededCount);
 });

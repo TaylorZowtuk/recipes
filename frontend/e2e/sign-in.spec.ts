@@ -247,7 +247,7 @@ test("opening sign-in again retries a session that couldn't be loaded", async ({
   await openMenu(page);
   await menu(page).getByRole("menuitem", { name: "Sign in" }).click();
   await expect(page.getByRole("alert")).toBeVisible();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
 
   reachable = true;
   await openMenu(page);
