@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 20 # a cold run builds the toolchain image
     steps:
       - uses: actions/checkout@v7
+      - run: docker run --rm mcr.microsoft.com/playwright:v1.63.0-noble sh -c 'cat /etc/apt/sources.list.d/* 2>/dev/null | grep -v "^#"; apt-get update; apt-get install -y --no-install-recommends make' || true # TEMP diagnostic
       - run: make check # in the toolchain container, like every make command
 
   # The local-build suite runs as parallel shards. Each uploads its own HTML report, with traces of
