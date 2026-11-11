@@ -120,7 +120,7 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   );
   await expect(tags(hero(page)).getByRole("listitem")).toHaveText(["weeknight", "rice"]);
 
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   const card = page
     .getByRole("list", { name: "Recipes" })
     .getByRole("link")
@@ -166,7 +166,7 @@ test("leaving the page discards the draft", async ({ page }, testInfo) => {
   const recipe = await editorOpens(page, testInfo, "edit-leaves");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await tagsField(page).fill("soup");
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page.getByRole("list", { name: "Recipes" })).toBeVisible();
   await page
     .getByRole("list", { name: "Recipes" })
@@ -337,7 +337,7 @@ test("an editor changes the Preview Photo and Focal Point, and the header and ca
   const position = await objectPositionOf(header);
   expect(position).not.toBe("50% 50%");
 
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   const card = page
     .getByRole("list", { name: "Recipes" })
     .getByRole("link")

@@ -376,7 +376,6 @@ test("Add a recipe shows one outcome at a time, the latest", async ({ page }, te
 });
 
 test("going back to the list from Paste clears the outcome", async ({ page }, testInfo) => {
-  // Not "back-…": these stay queued, and their buttons would match later tests' "Back" button.
   const robots = pageUrl("robots-denied/list-clears", testInfo);
   const blocked = pageUrl("blocked/list-clears", testInfo);
   const fetchedNote = page.getByText("The recipe couldn’t be fetched", { exact: false });
@@ -437,7 +436,7 @@ test("Add a recipe opens with a fresh form every time", async ({ page }, testInf
 
   // Typed in, then left and opened again.
   await urlField(page).fill("https://plateful.test/half-typed");
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/recipes$/);
   await openFromMenu(page);
   await expect(urlField(page)).toHaveValue("");
