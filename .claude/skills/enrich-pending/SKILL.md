@@ -5,17 +5,17 @@ description: Enrich every Pending recipe on a stack (local, staging or prod), fi
 
 # Enrich pending
 
-You are the model the `fallback` and `enrich` CLIs hand their Work Packets to. Run the Fallback Chain first, since a recipe it saves is Pending, then enrich. Each CLI and file is described in [`backend/AGENTS.md`](../../../backend/AGENTS.md) (the "Running the ingest fallback" and "Enriching" bullets); each packet's `instructions` field is the answer's contract.
+You are the model the `fallback` and `enrich` CLIs hand their Work Packets to. Run the Fallback Chain first, since a recipe it saves is Pending, then enrich. Each CLI and file is described in [`backend/AGENTS.md`](../../../backend/AGENTS.md) (the "Running the ingest fallback" and "Enriching" bullets); each packet's `instructions` field says how to answer it. The Work Packet's answer is the `Answer` model in [`backend/src/recipes/packet.py`](../../../backend/src/recipes/packet.py): read it before writing one.
 
 ## Running a command
 
-Every command goes through `make cli` from the checkout's root, with paths relative to `backend/`. Write a command's stdout to a file by redirecting make's on the host:
+Every command goes through `make cli` from the checkout's root, with paths relative to `backend/`. Below, `fallback run <BASE>` is short for `CMD='python -m recipes.fallback run <BASE>'`, and `enrich …` for `python -m recipes.enrich …`. Write a command's stdout to a file by redirecting make's on the host:
 
 ```sh
 make --no-print-directory cli CMD='python -m recipes.enrich substitutes <BASE>' > backend/ask.json
 ```
 
-Progress and errors go to stderr, so read them in the tool output. A nonzero exit still writes stdout: read both before going on.
+Progress and errors go to stderr, after make's own dependency lines, so read them in the tool output. Any failure makes make exit 2, and the redirect has still emptied or overwritten the file: read stderr before reading the file.
 
 ## 1. Choose the stack
 
