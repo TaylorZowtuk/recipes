@@ -114,11 +114,11 @@ shell: ## A shell in the toolchain container, with dependencies installed
 
 enrich: ## Run the enrich CLI with ARGS (argv, file paths relative to backend/), without a TTY
 fallback: ## Run the fallback CLI with ARGS (argv, file paths relative to backend/), without a TTY
-# stdin and stdout are only the CLI's. ARGS stays
+# stdin and stdout are only the CLI's, and only these runs see PLATEFUL_SERVICE_TOKEN. ARGS stays
 # unexpanded: make neither exports it nor expands it, and the host shell splits it into words,
 # unglobbed, each reaching the CLI as one argument, never as shell.
 unexport ARGS
-enrich fallback: RUN_FLAGS := -T
+enrich fallback: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
 enrich fallback:
 	@set -f && args='$(subst ','\'',$(value ARGS))' && $(RUN) bash -c 'make --no-print-directory \
 		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$@ "$$@"' \
