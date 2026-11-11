@@ -184,11 +184,11 @@ _Avoid_: Bookmark, source (a source is where particular recipes came from)
 ### Cooking and shopping
 
 **Canonical Ingredient**:
-The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Each one belongs to a **family**, a lowercase word that groups canonical ingredients, e.g. *chicken* for *chicken thigh* and *chicken breast*, and to a Store Category. Enrichment creates them; an editor confirms them.
+The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Each one belongs to a **family**, a lowercase word that groups canonical ingredients, e.g. *chicken* for *chicken thigh* and *chicken breast*, and to a Store Category. Enrichment creates them, and an editor confirms them or creates one while editing a line.
 _Avoid_: Normalized ingredient, food item
 
 **Wording Cache**:
-What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it.
+What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it. An editor who changes a line's Canonical Ingredient fixes its wording: the cache confirms the new one, and every recipe with a line of that wording is matched to it.
 _Avoid_: Alias table, synonym list
 
 **Pantry Staple**:
