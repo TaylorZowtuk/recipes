@@ -262,7 +262,7 @@ test("the account menu opens Kitchen settings", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Kitchen settings" })).toBeFocused();
   await expect(page.getByRole("main")).toContainText("Store Categories");
   await expect(accountMenu(page)).toBeHidden();
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/fridge$/);
 });
 
@@ -320,7 +320,7 @@ test("the sign-in screen adds a back button beside the navigation", async ({ pag
 
   await expect(page).toHaveURL(/\/sign-in$/);
   await expect(page.getByRole("heading", { level: 1, name: "Editor sign-in" })).toBeVisible();
-  const back = page.getByRole("button", { name: "Back" });
+  const back = page.getByRole("button", { name: "Back", exact: true });
   await expect(back).toBeVisible();
   await expectTapTarget(back);
   await expect(places(page)).toBeVisible();
@@ -333,12 +333,12 @@ test("the sign-in screen adds a back button beside the navigation", async ({ pag
 
   await back.click();
   await expect(page).toHaveURL(/\/week$/);
-  await expect(page.getByRole("button", { name: "Back" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Back", exact: true })).toHaveCount(0);
 });
 
 test("back goes to Recipes when sign-in was opened directly", async ({ page }) => {
   await page.goto("/sign-in");
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/recipes$/);
 });
 
@@ -347,7 +347,7 @@ test("back stays in the app after re-opening sign-in from sign-in", async ({ pag
   // Following a link to the current path replaces the history entry instead of pushing one.
   await chooseFromAccountMenu(page, "Sign in");
   await expect(page).toHaveURL(/\/sign-in$/);
-  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(page).toHaveURL(/\/recipes$/);
 });
 
@@ -432,7 +432,7 @@ test("keyboard focus in the account menu shows the focus ring", async ({ page },
 
 test("buttons have no borders and the button radius", async ({ page }) => {
   await page.goto("/sign-in");
-  const back = page.getByRole("button", { name: "Back" });
+  const back = page.getByRole("button", { name: "Back", exact: true });
   await expect(back).toHaveCSS("border-top-width", "0px");
   await expect(back).toHaveCSS("border-top-left-radius", "18px");
   await expect(accountButton(page)).toHaveCSS("border-top-width", "0px");

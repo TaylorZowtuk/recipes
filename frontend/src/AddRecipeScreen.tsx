@@ -70,11 +70,17 @@ function AddRecipe({ fromSite }: { fromSite?: string }) {
   const [review, setReview] = useState<Ingested>();
   const online = useOnline();
   const queued = useQueuedIngests(online);
+  // One outcome at a time, the latest, shown by the form or the list, whichever it came from.
+  const [outcome, setOutcome] = useState<{ from: "form" | "list"; message: Message }>();
+  const say = (from: "form" | "list") => (message?: Message) =>
+    setOutcome(message && { from, message });
+  const shown = (from: "form" | "list") => (outcome?.from === from ? outcome.message : undefined);
 
   // The Queued Ingest may have gone meanwhile, so the list loads afresh.
   const backToList = () => {
     setReview(undefined);
     setPasting(undefined);
+    setOutcome(undefined);
     queued.reload();
     focusTitle();
   };
@@ -92,8 +98,15 @@ function AddRecipe({ fromSite }: { fromSite?: string }) {
           Adding a recipe from {fromSite}. Find one at that site, then paste its address here.
         </p>
       )}
-      <UrlForm onIngested={setReview} onQueued={queued.reload} />
+      <UrlForm
+        message={shown("form")}
+        onMessage={say("form")}
+        onIngested={setReview}
+        onQueued={queued.reload}
+      />
       <QueuedIngests
+        message={shown("list")}
+        onMessage={say("list")}
         loaded={queued.loaded}
         online={online}
         retry={queued.reload}
@@ -160,16 +173,19 @@ function DuplicateNote({ duplicate }: { duplicate: Duplicate }) {
 
 // The web address form. Off while offline or paused: adding a recipe is never queued.
 function UrlForm({
+  message,
+  onMessage: setMessage,
   onIngested,
   onQueued,
 }: {
+  message?: Message;
+  onMessage: (message?: Message) => void;
   onIngested: (ingested: Ingested) => void;
   onQueued: () => void;
 }) {
   const blocked = useEditBlock();
   const [url, setUrl] = useState("");
   const [fetching, setFetching] = useState(false);
-  const [message, setMessage] = useState<Message>();
   const mounted = useMounted();
 
   const submit = async (event: FormEvent) => {
@@ -297,12 +313,16 @@ function discardProblem(outcome: Exclude<DiscardOutcome, { kind: "discarded" }>)
 }
 
 function QueuedIngests({
+  message,
+  onMessage: setMessage,
   loaded,
   online,
   retry,
   onPaste,
   onGone,
 }: {
+  message?: Message;
+  onMessage: (message?: Message) => void;
   loaded: QueuedLoad;
   online: boolean;
   retry: () => void;
@@ -312,7 +332,6 @@ function QueuedIngests({
   const blocked = useEditBlock();
   const unavailable = !online && loaded.state !== "ready";
   const [discarding, setDiscarding] = useState<string>();
-  const [problem, setProblem] = useState<string>();
   const mounted = useMounted();
 
   // Asks first, as deleting a recipe does. One that's gone leaves the list as a discarded one does,
@@ -320,7 +339,7 @@ function QueuedIngests({
   const discard = async (item: QueuedIngest) => {
     const asked = `Discard ${item.source.url}? It leaves the list, and you can add it again later.`;
     if (discarding || !window.confirm(asked)) return;
-    setProblem(undefined);
+    setMessage(undefined);
     setDiscarding(item.id);
     let outcome: DiscardOutcome;
     try {
@@ -339,7 +358,7 @@ function QueuedIngests({
       onGone(item.id);
       focusTitle();
     }
-    if (outcome.kind !== "discarded") setProblem(discardProblem(outcome));
+    if (outcome.kind !== "discarded") setMessage({ alert: true, body: discardProblem(outcome) });
   };
 
   return (
@@ -351,9 +370,9 @@ function QueuedIngests({
         {loaded.state === "ready" && loaded.value.length === 0 && "Nothing is waiting."}
         {discarding && "Discarding…"}
       </p>
-      {problem && (
+      {message && (
         <p role="alert" className="form-problem">
-          {problem}
+          {message.body}
         </p>
       )}
       {!unavailable && loaded.state === "failed" && (

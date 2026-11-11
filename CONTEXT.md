@@ -84,7 +84,7 @@ A website Source that Add a recipe couldn't turn into a recipe with a plain fetc
 _Avoid_: Pending ingest (*Pending* is an Enrichment Status), draft, failed import
 
 **Fallback Chain**:
-What the local CLI tries, in order, on a waiting Queued Ingest: a browser loading the page, recipe-scrapers on the loaded page, then a model reading the page's text through a Work Packet. A page nothing can read is marked as needing its page. A fetch that fails for a reason that may pass (the site is rate limiting, has a server error or can't be reached) writes nothing, so the Queued Ingest stays waiting for the next run. The bulk import runs the same chain. A recipe a model read has the extractor `llm` and always stops at Awaiting Review.
+What the local CLI tries, in order, on a waiting Queued Ingest: a browser loading the page, recipe-scrapers on the loaded page, then a model reading the page's text through a Work Packet. A page nothing can read is marked as needing its page. A fetch that fails for a reason that may pass (the site is rate limiting, has a server error or can't be reached) leaves the Queued Ingest waiting for the next run, with its reason updated to that one. The bulk import runs the same chain. A recipe a model read has the extractor `llm` and always stops at Awaiting Review.
 _Avoid_: Fallback (alone), scraper
 
 **Source Guard**:

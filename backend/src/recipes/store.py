@@ -588,6 +588,33 @@ class Store:
                 raise
         return self.queued_ingest(ingest_id)
 
+    def record_failed_attempt(
+        self, ingest_id: str, reason: QueuedIngestReason
+    ) -> QueuedIngest | None:
+        """Set a waiting Queued Ingest's reason to why its latest fallback failed, leaving it
+        waiting, and return it as it now is. One that needs its page keeps its reason, and None
+        means there's no such item.
+        """
+        recorded: TransactWriteItemTypeDef = {
+            "Update": {
+                "TableName": self.table,
+                "Key": queued_ingest_key(ingest_id),
+                "UpdateExpression": "SET #reason = :reason",
+                "ConditionExpression": "#state = :waiting",
+                "ExpressionAttributeNames": {"#state": "state", "#reason": "reason"},
+                "ExpressionAttributeValues": {
+                    ":reason": {"S": reason},
+                    ":waiting": {"S": "waiting"},
+                },
+            }
+        }
+        try:
+            self._transact([recorded])
+        except _Cancelled as cancelled:
+            if not cancelled.failed(recorded):
+                raise
+        return self.queued_ingest(ingest_id)
+
     # Kitchen settings
 
     def kitchen_settings(self) -> KitchenSettings:

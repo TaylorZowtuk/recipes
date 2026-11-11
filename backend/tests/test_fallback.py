@@ -44,12 +44,13 @@ from recipes.ingest import (
     PageNotFound,
     PoliteFetcher,
     RenderedPage,
+    raise_for_page_status,
     website_dedupe_key,
 )
 from recipes.models import SCHEMA_VERSION, Original, QueuedIngest, SpreadsheetSource, new_ulid
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from fastapi.testclient import TestClient
     from requests.models import PreparedRequest
@@ -101,13 +102,20 @@ def queue(store: Store, slug: str, state: str = "waiting", site: str = SITE) -> 
     return queued
 
 
-def fake_browser(pages: dict[str, RenderedPage | Exception]) -> Callable[[str], RenderedPage]:
-    """Answers each URL from `pages`, raising what's an exception."""
+def fake_browser(
+    pages: Mapping[str, RenderedPage | Exception | int],
+) -> Callable[[str], RenderedPage]:
+    """Answers each URL from `pages`, raising what's an exception, and failing a status code as
+    the real browser does.
+    """
 
     def fetch(url: str) -> RenderedPage:
         served = pages[url]
         if isinstance(served, Exception):
             raise served
+        if isinstance(served, int):
+            raise_for_page_status(served, url)
+            pytest.fail(f"{served} isn't a status the browser fails on")
         return served
 
     return fetch
@@ -455,16 +463,16 @@ def test_a_failure_on_one_source_never_stops_the_others(
     assert "Saved 1, 0 for the LLM, 0 need their page, 2 failed" in printed
 
 
-def test_a_temporary_failure_writes_nothing_and_the_next_run_retries_it(
+def test_a_temporary_failure_records_its_reason_and_the_next_run_retries_it(
     editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
 ) -> None:
     limited = queue(api_store, "limited")
     erroring = queue(api_store, "erroring")
     offline = queue(api_store, "offline")
     fine = queue(api_store, "fine")
-    pages: dict[str, RenderedPage | Exception] = {
+    pages: dict[str, RenderedPage | Exception | int] = {
         f"{SITE}/limited": IngestFailed(reason="rate_limited"),
-        f"{SITE}/erroring": IngestFailed(reason="server_error"),
+        f"{SITE}/erroring": 503,
         f"{SITE}/offline": IngestFailed(reason="unreachable"),
         f"{SITE}/fine": rendered(RECIPE),
     }
@@ -474,9 +482,9 @@ def test_a_temporary_failure_writes_nothing_and_the_next_run_retries_it(
     assert failed == 0
     assert only_recipe(editor_client)["source"]["url"] == fine.source.url  # pyright: ignore[reportAttributeAccessIssue]
     assert queue_state(editor_client) == {
-        limited.id: ("waiting", "no_recipe"),
-        erroring.id: ("waiting", "no_recipe"),
-        offline.id: ("waiting", "no_recipe"),
+        limited.id: ("waiting", "rate_limited"),
+        erroring.id: ("waiting", "server_error"),
+        offline.id: ("waiting", "unreachable"),
     }
     printed = capsys.readouterr()
     assert json.loads(printed.out)["items"] == []
@@ -490,7 +498,7 @@ def test_a_temporary_failure_writes_nothing_and_the_next_run_retries_it(
     assert [item["id"] for item in json.loads(capsys.readouterr().out)["items"]] == [limited.id]
 
 
-def test_a_whole_queue_hitting_dns_failure_writes_nothing(
+def test_a_whole_queue_hitting_dns_failure_stays_waiting_as_unreachable(
     api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
 ) -> None:
     queued = [queue(api_store, f"page-{n}", site=f"https://site-{n}.test") for n in range(3)]
@@ -510,11 +518,36 @@ def test_a_whole_queue_hitting_dns_failure_writes_nothing(
 
     assert run(BASE_URL, recording, fetch) == 0
 
-    assert written == []
-    assert api_store.queued_ingests() == queued
+    assert written == [f"{BASE_URL}/api/queued-ingests/{q.id}/failed-attempt" for q in queued]
+    assert api_store.queued_ingests() == [
+        q.model_copy(update={"reason": "unreachable"}) for q in queued
+    ]
     printed = capsys.readouterr()
     assert json.loads(printed.out)["items"] == []
     assert "Saved 0, 0 for the LLM, 0 need their page, 0 failed, 3 still waiting" in printed.err
+
+
+def test_a_failed_attempt_the_api_refuses_fails_that_source_alone(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    limited = queue(api_store, "limited")
+    offline = queue(api_store, "offline")
+    pages = {f"{SITE}/limited": 429, f"{SITE}/offline": IngestFailed(reason="unreachable")}
+
+    def flaky(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if limited.id in url:
+            return 500, "Server trouble"
+        return send(method, url, body)
+
+    assert run(BASE_URL, flaky, fake_browser(pages)) == 1
+
+    assert queue_state(editor_client) == {
+        limited.id: ("waiting", "no_recipe"),
+        offline.id: ("waiting", "unreachable"),
+    }
+    printed = capsys.readouterr().err
+    assert f"{SITE}/limited → failed: 500 Server trouble" in printed
+    assert "Saved 0, 0 for the LLM, 0 need their page, 1 failed, 1 still waiting" in printed
 
 
 def test_run_says_so_when_the_queue_cannot_be_listed(capsys: pytest.CaptureFixture[str]) -> None:
@@ -653,6 +686,72 @@ def test_an_original_not_on_the_page_prints_why_and_needs_its_page(
     assert why in capsys.readouterr().err
     assert queue_state(editor_client) == {queued.id: ("needs_page", "no_recipe")}
     assert editor_client.get("/api/collection", follow_redirects=True).json()["cards"] == []
+
+
+def test_a_packet_whose_answers_are_all_rejected_counts_them_as_needing_their_page(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = queue(api_store, "first")
+    second = queue(api_store, "second")
+    wrong = original(title="Damson Chutney")
+
+    failed = apply(
+        BASE_URL, send, packet_of(first, second), answer_of((first, wrong), (second, wrong))
+    )
+
+    assert failed == 2
+    assert "Saved 0, 2 need their page, 2 failed" in capsys.readouterr().err
+    assert queue_state(editor_client) == {
+        first.id: ("needs_page", "no_recipe"),
+        second.id: ("needs_page", "no_recipe"),
+    }
+
+
+def test_a_rejected_answer_whose_needs_page_mark_is_refused_counts_as_one_failure(
+    editor_client: TestClient, api_store: Store, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rejected = queue(api_store, "rejected")
+
+    def refuse_the_mark(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        if url.endswith("/needs-page"):
+            return 404, "No such Queued Ingest"
+        return send(method, url, body)
+
+    failed = apply(
+        BASE_URL,
+        refuse_the_mark,
+        packet_of(rejected),
+        answer_of((rejected, original(title="Damson Chutney"))),
+    )
+
+    assert failed == 1
+    assert "Saved 0, 0 need their page, 1 failed" in capsys.readouterr().err
+    assert queue_state(editor_client) == {rejected.id: ("waiting", "no_recipe")}
+
+
+@pytest.mark.parametrize(
+    ("rejected", "summary"),
+    [
+        ([original(title="Damson Chutney")], "Saved 1, 2 need their page, 1 failed"),
+        ([], "Saved 1, 1 need their page, 0 failed"),
+    ],
+)
+def test_a_mix_of_answers_counts_null_and_rejected_as_needing_their_page(
+    api_store: Store,
+    send: Send,
+    capsys: pytest.CaptureFixture[str],
+    rejected: list[dict[str, Any]],
+    summary: str,
+) -> None:
+    saved = queue(api_store, "saved")
+    null = queue(api_store, "null")
+    wrong = queue(api_store, "wrong")
+    answers = [(saved, original()), (null, None), *((wrong, a) for a in rejected)]
+
+    failed = apply(BASE_URL, send, packet_of(saved, null, wrong), answer_of(*answers))
+
+    assert failed == len(rejected)
+    assert summary in capsys.readouterr().err
 
 
 def test_an_original_quoting_everything_on_the_page_is_saved_with_its_numbers_unchecked(

@@ -71,6 +71,14 @@ def needs_page(
     )
 
 
+def failed_attempt(
+    editor_client: TestClient, reason: str = "rate_limited", ingest_id: str = INGEST_ID
+) -> Response:
+    return editor_client.post(
+        f"/api/queued-ingests/{ingest_id}/failed-attempt", json={"reason": reason}, headers=EDITOR
+    )
+
+
 def paste(editor_client: TestClient, html: object, ingest_id: str = INGEST_ID) -> Response:
     return editor_client.post(
         f"/api/queued-ingests/{ingest_id}/pasted-page", json={"html": html}, headers=EDITOR
@@ -340,6 +348,61 @@ def test_a_reason_that_isnt_one_is_refused(editor_client: TestClient, store: Sto
     store.queue_ingest(queued_ingest())
 
     response = needs_page(editor_client, "tired")
+
+    assert response.status_code == 422
+    assert store.queued_ingests() == [queued_ingest()]
+
+
+# Recording a fallback's failed attempt
+
+
+def test_a_failed_attempt_on_a_waiting_queued_ingest_records_its_reason(
+    editor_client: TestClient, store: Store
+) -> None:
+    store.queue_ingest(queued_ingest())
+    before = store.collection_version()
+
+    response = failed_attempt(editor_client, "rate_limited")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == INGEST_ID
+    assert response.json()["state"] == "waiting"
+    assert response.json()["reason"] == "rate_limited"
+    assert store.queued_ingests() == [queued_ingest(reason="rate_limited")]
+    assert store.collection_version() == before
+
+
+def test_a_failed_attempt_on_a_queued_ingest_that_needs_its_page_changes_nothing(
+    editor_client: TestClient, store: Store
+) -> None:
+    already = queued_ingest(state="needs_page", reason="robots")
+    store.queue_ingest(already)
+
+    response = failed_attempt(editor_client, "server_error")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "needs_page"
+    assert response.json()["reason"] == "robots"
+    assert store.queued_ingests() == [already]
+
+
+def test_a_failed_attempt_on_an_unknown_queued_ingest_is_not_found(
+    editor_client: TestClient, store: Store
+) -> None:
+    response = failed_attempt(editor_client, ingest_id=MISSING_ID)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No such Queued Ingest"
+    assert store.queued_ingests() == []
+
+
+@pytest.mark.parametrize("reason", ["robots", "blocked", "no_recipe", "tired"])
+def test_a_failed_attempt_takes_only_a_reason_that_may_pass(
+    editor_client: TestClient, store: Store, reason: str
+) -> None:
+    store.queue_ingest(queued_ingest())
+
+    response = failed_attempt(editor_client, reason)
 
     assert response.status_code == 422
     assert store.queued_ingests() == [queued_ingest()]
@@ -643,6 +706,7 @@ def test_a_discard_that_keeps_conflicting_is_a_conflict(
     [
         ("recipe", new_recipe()),
         ("needs-page", {"reason": "no_recipe"}),
+        ("failed-attempt", {"reason": "rate_limited"}),
         ("pasted-page", {"html": "<html></html>"}),
     ],
 )
