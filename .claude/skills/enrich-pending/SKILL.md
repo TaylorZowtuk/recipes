@@ -35,11 +35,11 @@ If it is unset, stop. Tell the user to quit, export `PLATEFUL_SERVICE_TOKEN` in 
 
 ## 3. Run the Fallback Chain
 
-1. `fallback run <BASE>` > `backend/packet.json`. Its stderr ends with the counts of saved, for the LLM, need their page, failed and still waiting.
+1. `fallback run <BASE>` > `backend/packet.json`. Its stderr ends with the counts of saved, for the LLM, need their page, failed and still waiting. A still-waiting Queued Ingest stays waiting for the next `run`, its reason updated to that fetch's (`rate_limited`, `server_error` or `unreachable`).
 2. `run` exits 2 when any one item failed, but `backend/packet.json` is still the packet whenever it parses: answer it. If `items` is empty, skip to step 4. Otherwise read it and answer per its `instructions` into `backend/answer.json`, copying each item's `text` as the recipe.
-3. `fallback apply <BASE> packet.json answer.json`. It exits 2 when any one answer was rejected or failed. Correct each rejected answer from its printed errors and apply again with an answer file of only the corrected answers.
+3. `fallback apply <BASE> packet.json answer.json`. It exits 2 when any one answer was rejected or failed. A rejected answer marks its Queued Ingest as needing its page, so apply's stderr counts it under both need their page and failed. Correct each rejected answer from its printed errors and apply again with an answer file of only the corrected answers.
 
-Done when apply has accepted, rejected or failed every item and every rejection you could correct has been applied again, or there were none. Keep the counts for the summary: captured (saved by `run` plus saved by `apply`), needs its page, still waiting, failed.
+Done when apply has accepted, rejected or failed every item and every rejection you could correct has been applied again, or there were none. Keep the counts for the summary, counting each Queued Ingest once, by its last outcome: captured (saved by `run` or by any `apply`), needs its page, still waiting, failed. A rejected answer you corrected and applied counts as captured; one you couldn't correct counts as needs its page.
 
 ## 4. Enrich
 
