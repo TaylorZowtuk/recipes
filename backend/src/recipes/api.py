@@ -1006,7 +1006,11 @@ def confirm_facts(
         raise HTTPException(422, f"The recipe has no fact {', '.join(unknown)}")
     batch, now = new_ulid(), datetime.now(UTC)
     confirming = sorted(p for p in listed if (f := fact_at(facts, p)) and not f.confirmed)
-    accepted = [i for i in recipe.issues if i.status == "open" and i.fact_id in listed and i.after]
+    accepted = [
+        i
+        for i in recipe.issues
+        if i.status == "open" and i.fact_id in listed and i.after is not None
+    ]
     if not confirming and not accepted:
         raise HTTPException(422, "Every listed fact is already Confirmed")
     for path in confirming:

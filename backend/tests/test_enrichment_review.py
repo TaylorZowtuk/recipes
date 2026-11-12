@@ -461,11 +461,21 @@ def test_confirming_only_an_asks_confirmed_fact_is_refused(
     recipe = awaiting(api_store, issues=[ASK])
     confirm(editor_client, recipe, "i1.conversion")
     again = stored(api_store, recipe.id)
+    assert [i.status for i in again.issues] == ["open"]
 
     response = confirm(editor_client, again, "i1.conversion")
 
     assert response.status_code == 422
     assert stored(api_store, recipe.id) == again
+
+
+def test_an_empty_correction_is_still_accepted(editor_client: TestClient, api_store: Store) -> None:
+    recipe = awaiting(api_store, issues=[issue(1, "i5.match", after="")])
+
+    response = confirm(editor_client, recipe, "i5.match")
+
+    assert response.status_code == 200
+    assert stored(api_store, recipe.id).issues[0].status == "resolved"
 
 
 def test_confirming_a_stale_version_is_a_conflict(
