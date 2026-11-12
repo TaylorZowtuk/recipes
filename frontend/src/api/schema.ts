@@ -82,6 +82,10 @@ export interface paths {
          *     matched to it, a Confirmed one first, is the picker's default and comes first. With `fdc_id`,
          *     the line's own food, that food comes next, so the picker can name it. Either is left out if
          *     the FDC Snapshot doesn't have it.
+         *
+         *     With `unit`, the line's written unit, empty for a line with none ("2 eggs"), each portion
+         *     says whether it fits the line, by `unit_kind` if given (the parser's kind for a unit as it
+         *     read it) and else by the unit itself.
          */
         get: operations["search_fdc_foods_api_fdc_foods_get"];
         put?: never;
@@ -1268,7 +1272,8 @@ export interface components {
          * FdcPortion
          * @description One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`. What it converts a
          *     line by, as `fdc.convert` gives it: a density for a volume, or grams per `count_unit` for a
-         *     count, or neither.
+         *     count, or neither. `fits` is whether it gives the searched line's unit a weight, as a pick
+         *     spread to other lines decides, or null when the search named no unit.
          */
         FdcPortion: {
             /** Amount */
@@ -1277,6 +1282,8 @@ export interface components {
             count_unit: string | null;
             /** Density G Per Ml */
             density_g_per_ml: number | null;
+            /** Fits */
+            fits: boolean | null;
             /** Gram Weight */
             gram_weight: number;
             /** Grams Per Count */
@@ -2690,6 +2697,8 @@ export interface operations {
                 q: string;
                 canonical?: string | null;
                 fdc_id?: number | null;
+                unit?: string | null;
+                unit_kind?: ("mass" | "volume" | "count") | null;
             };
             header?: never;
             path?: never;
