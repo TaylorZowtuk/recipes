@@ -346,6 +346,7 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
           defaultFrom={defaultFrom(recipe, lineId, saved.canonical)}
           unit={unit}
           unitKind={unitKind}
+          hasAmount={draft.low.trim() !== ""}
           onPick={(food) => set({ food, foodFor: pickedFor })}
         >
           {canChooseWeight(recipe, lineId, saved) && (
@@ -506,17 +507,17 @@ type FoodSearch =
   | { state: "found"; foods: FdcFood[]; defaultId: number | null };
 
 // The FDC foods for the query, searched once typing pauses, for 2 to 60 characters, with the line's
-// unit so the API says which portions fit. Until a search is answered, each also asks for the
+// unit and whether it has an amount, so the API says which portions fit. Until a search is answered, each also asks for the
 // line's own food and `canonical`'s default food. `known` keeps every food found, by its line.
 function useFoodSearch(
   query: string,
   canonical: string | undefined,
   own: number | undefined,
-  { unit, unit_kind }: FoodLine,
+  { unit, unit_kind, amount }: FoodLine,
 ) {
   const q = query.trim();
   const searchable = q.length >= 2 && q.length <= 60;
-  const line = lineKey({ unit, unit_kind });
+  const line = lineKey({ unit, unit_kind, amount });
   // Set once a search is answered, so later ones don't make the API read the Collection again.
   const answered = useRef(false);
   const [result, setResult] = useState<{ q: string; search: FoodSearch }>();
@@ -532,6 +533,7 @@ function useFoodSearch(
         ...(first && own !== undefined && { fdc_id: own }),
         unit,
         ...(unit_kind && { unit_kind }),
+        ...(!amount && { amount }),
       };
       try {
         const { data } = await api.GET("/api/fdc/foods", {
@@ -551,7 +553,7 @@ function useFoodSearch(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [q, searchable, canonical, own, unit, unit_kind, line]);
+  }, [q, searchable, canonical, own, unit, unit_kind, amount, line]);
   const search: FoodSearch = !searchable
     ? { state: "idle" }
     : result?.q === q
@@ -560,10 +562,11 @@ function useFoodSearch(
   return { search, known, line };
 }
 
-// The line's unit as the food search sends it, empty for none, and the parser's kind for it while
-// it's as the parser read it.
-type FoodLine = { unit: string; unit_kind: "mass" | "volume" | "count" | null };
-const lineKey = ({ unit, unit_kind }: FoodLine) => `${unit_kind ?? ""} ${unit}`;
+// The line's unit as the food search sends it, empty for none, the parser's kind for it while
+// it's as the parser read it, and whether the line has an amount.
+type FoodLine = { unit: string; unit_kind: "mass" | "volume" | "count" | null; amount: boolean };
+const lineKey = ({ unit, unit_kind, amount }: FoodLine) =>
+  `${amount ? "" : "no amount "}${unit_kind ?? ""} ${unit}`;
 
 const DATASETS = { foundation: "Foundation", sr_legacy: "SR Legacy" } as const;
 
@@ -582,6 +585,7 @@ function FoodPicker({
   defaultFrom,
   unit,
   unitKind,
+  hasAmount,
   onPick,
   children,
 }: {
@@ -591,6 +595,7 @@ function FoodPicker({
   defaultFrom: string | undefined;
   unit: string | null;
   unitKind: "mass" | "volume" | "count" | null;
+  hasAmount: boolean;
   onPick: (food: FoodPick) => void;
   children?: ReactNode;
 }) {
@@ -600,6 +605,7 @@ function FoodPicker({
   const { search, known, line } = useFoodSearch(query, defaultFrom, current?.fdcId, {
     unit: unit ?? "",
     unit_kind: unitKind,
+    amount: hasAmount,
   });
   const found = search.state === "found" ? search.foods : [];
   const defaultId = search.state === "found" ? search.defaultId : null;
@@ -617,7 +623,7 @@ function FoodPicker({
   const shown = [...pinned, ...found.map((f) => f.fdc_id)];
   const chosen = food && known.get(food.fdcId);
   const portion = chosen?.food.portions.find((p) => p.id === food?.portionId);
-  // Only a search for the line's unit as it now is says whether the portion fits it.
+  // Only a search for the line's unit and amount as they now are says whether the portion fits it.
   const misfit = portion && chosen?.line === line && portionMisfit(unit, portion);
   const named = (id: number) => {
     const found = known.get(id)?.food;

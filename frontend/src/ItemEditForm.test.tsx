@@ -76,20 +76,27 @@ const FOUND: Record<string, FdcFood[]> = {
   salt: [salt(746775), salt(746776)],
 };
 const BY_ID = new Map([SALTED, UNSALTED, GHEE, RAW_GARLIC].map((f) => [f.fdc_id, f]));
-type Query = { q: string; canonical?: string; fdc_id?: number; unit?: string; unit_kind?: string };
+type Query = {
+  q: string;
+  canonical?: string;
+  fdc_id?: number;
+  unit?: string;
+  unit_kind?: string;
+  amount?: boolean;
+};
 // The units the API says a portion fits, where it fits only some: the pat portion only pats.
 const FITS_ONLY: Record<number, string[]> = { 92459: ["pats"] };
 // What the API answers: a line matched to garlic elsewhere in the Collection gives its food as
 // garlic's default, first, then the named food, then what the search found, each portion saying
-// whether it fits the line's unit when the search names one.
-const answer = ({ q, canonical, fdc_id, unit }: Query) => {
+// whether it fits the line's unit when the search names one. Any portion fits a line with no amount.
+const answer = ({ q, canonical, fdc_id, unit, amount }: Query) => {
   const fallback = canonical === KNOWN_CANONICAL ? RAW_GARLIC : undefined;
   const named = [fallback, fdc_id === undefined ? undefined : BY_ID.get(fdc_id)];
   const foods = [...named, ...(FOUND[q] ?? [])].filter(
     (f, n, all): f is FdcFood => !!f && all.findIndex((g) => g?.fdc_id === f.fdc_id) === n,
   );
   const fits = (id: number) =>
-    unit === undefined ? null : (FITS_ONLY[id]?.includes(unit) ?? true);
+    unit === undefined ? null : amount === false || (FITS_ONLY[id]?.includes(unit) ?? true);
   return {
     foods: foods.map((f) => ({
       ...f,
@@ -381,6 +388,17 @@ describe("an edit form, as an editor uses it", () => {
     expect(host.textContent).toContain(
       "This portion is counted in pat, but the line is a count with no unit, so the line gets no weight.",
     );
+  });
+
+  it("says nothing of the portion for a line with no amount, which no portion gives a weight", async () => {
+    open("i1");
+    await settle();
+    await click(choice("1 pat (5 g)") as HTMLInputElement);
+    expect(host.textContent).toContain("gets no weight");
+    type("Amount", "");
+    await settle();
+    expect(queries().at(-1)).toEqual({ q: "butter", unit: "tbsp", amount: false });
+    expect(host.textContent).not.toContain("gets no weight");
   });
 
   it("asks for the default and the line's food only in the picker's first answered search", async () => {
