@@ -77,6 +77,11 @@ export interface paths {
          * Search Fdc Foods
          * @description The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
          *     them, at most ten, each with its portions.
+         *
+         *     With `canonical`, a Canonical Ingredient's id, the food of a line in the Collection already
+         *     matched to it, a Confirmed one first, is the picker's default and comes first. With `fdc_id`,
+         *     the line's own food, that food comes next, so the picker can name it. Either is left out if
+         *     the FDC Snapshot doesn't have it.
          */
         get: operations["search_fdc_foods_api_fdc_foods_get"];
         put?: never;
@@ -1015,13 +1020,14 @@ export interface components {
          * @description A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
          *     portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
          *     keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
-         *     in "to taste".
+         *     in "to taste". A line that has or gets a Canonical Ingredient needs an FDC food; a line with
+         *     none has no match, and so no food.
          */
         EditLine: {
             /** Canonical */
             canonical?: (components["schemas"]["ExistingCanonical"] | components["schemas"]["NewCanonical"]) | null;
             /** Fdc Id */
-            fdc_id: number;
+            fdc_id: number | null;
             /** Keep Weight */
             keep_weight?: boolean | null;
             /**
@@ -1225,6 +1231,17 @@ export interface components {
             portions: components["schemas"]["FdcPortion"][];
         };
         /**
+         * FdcFoods
+         * @description The foods a search found, and the food the picker starts from for a Canonical Ingredient,
+         *     if any line in the Collection is matched to it.
+         */
+        FdcFoods: {
+            /** Default Fdc Id */
+            default_fdc_id: number | null;
+            /** Foods */
+            foods: components["schemas"]["FdcFood"][];
+        };
+        /**
          * FdcNumbers
          * @description The FDC Snapshot's numbers for a food, copied in: a density for a volume, the grams in one
          *     count unit for a count, or the reason it doesn't convert, and its nutrition.
@@ -1249,13 +1266,21 @@ export interface components {
         };
         /**
          * FdcPortion
-         * @description One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`.
+         * @description One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`. What it converts a
+         *     line by, as `fdc.convert` gives it: a density for a volume, or grams per `count_unit` for a
+         *     count, or neither.
          */
         FdcPortion: {
             /** Amount */
             amount: number;
+            /** Count Unit */
+            count_unit: string | null;
+            /** Density G Per Ml */
+            density_g_per_ml: number | null;
             /** Gram Weight */
             gram_weight: number;
+            /** Grams Per Count */
+            grams_per_count: number | null;
             /** Id */
             id: number;
             /** Modifier */
@@ -2663,6 +2688,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
+                canonical?: string | null;
+                fdc_id?: number | null;
             };
             header?: never;
             path?: never;
@@ -2676,7 +2703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FdcFood"][];
+                    "application/json": components["schemas"]["FdcFoods"];
                 };
             };
             /** @description Only an editor can do that */
@@ -2686,7 +2713,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description q isn't 2 to 60 characters */
+            /** @description q isn't 2 to 60 characters, or canonical isn't an id */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3479,7 +3506,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line's FDC food isn't in the FDC Snapshot or its portion isn't the food's, the line has no weight to keep or convert, or the edited recipe is too big to store */
+            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but no Canonical Ingredient, the line's FDC food isn't in the FDC Snapshot or its portion isn't the food's, the line has no weight to keep or convert or no portion to convert it by, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
