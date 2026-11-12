@@ -10,6 +10,8 @@ import { expect, test } from "@playwright/test";
 // nothing, since every project shares the seeded recipe. `stubWeek` answers every week with a
 // fixed plan and stops the clock on a Wednesday, since every project shares the weeks too. `after`
 // moves the page's clock on that far once everything else is done, such as to a Timer's alarm.
+// `offline` takes the page offline after the clicks, and `fill` types into a field of the open
+// sheet after them, before `shows`.
 type Shot = {
   name: string;
   path: string;
@@ -24,6 +26,8 @@ type Shot = {
   stubConfirm?: boolean;
   stubWeek?: boolean;
   after?: string;
+  offline?: boolean;
+  fill?: { field: string; text: string };
 };
 const REVIEW_RECIPE = "/recipes/01K7SEED000000000000000007/garlic-butter-green-beans";
 const planned = (entry: string, recipe_id: string, recipe_title: string, factor = 1) => ({
@@ -295,6 +299,26 @@ const pages: Shot[] = [
     shows: "Line",
   },
   {
+    name: "recipe-review-edit-line-renamed",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "3 to check, incl. 1 flagged",
+    editor: true,
+    click: [/^Flagged: butter/, "Edit"],
+    fill: { field: "Name", text: "salted butter" },
+    shows: "The name’s wording changed, so choose its Canonical Ingredient.",
+  },
+  {
+    name: "recipe-review-edit-offline",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "3 to check, incl. 1 flagged",
+    editor: true,
+    offline: true,
+    click: [/^Flagged: butter/, "Edit"],
+    shows: "You’re offline. Review the recipe once you’re back online.",
+  },
+  {
     name: "recipe-review-edit-difficulty",
     path: "/recipes/01K7SEED000000000000000004/tomato-lentil-soup",
     ready: "Tomato Lentil Soup",
@@ -433,6 +457,11 @@ for (const shot of pages) {
           test.skip(!shown, `no ${name} button on this branch`);
         }
         await button.click();
+      }
+      if (shot.offline) await page.context().setOffline(true);
+      if (shot.fill) {
+        const field = page.getByRole("dialog").getByRole("textbox", { name: shot.fill.field });
+        await field.fill(shot.fill.text);
       }
       if (shows) {
         const shown = page.getByText(shows, { exact: true }).first();
