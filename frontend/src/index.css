@@ -1318,14 +1318,29 @@ h1:focus {
   line-height: var(--tap);
 }
 
+/* Each choice's label is its whole slice of the pill, so the target is the pill's full height. */
 .segments {
   float: right;
   display: flex;
   gap: var(--space);
-  padding: var(--space);
+  padding: 0;
   border: 1px solid var(--field-border);
   border-radius: var(--radius-pill);
   background: var(--surface);
+}
+
+.segments label {
+  display: block;
+  padding: var(--space) 0;
+  cursor: pointer;
+}
+
+.segments label:first-child {
+  padding-left: var(--space);
+}
+
+.segments label:last-child {
+  padding-right: var(--space);
 }
 
 .segments span {
