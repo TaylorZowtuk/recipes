@@ -8,6 +8,7 @@ portion of the food that fits its own written unit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -300,6 +301,10 @@ def fits(
     return _counts_in(conversion.count_unit, unit)
 
 
+# The "(s)" or "(es)" an editor may write to say a unit is singular or plural: "clove(s)".
+OPTIONAL_PLURAL = re.compile(r"\((?:e?s)\)", re.IGNORECASE)
+
+
 def _counts_in(count_unit: str | None, unit: str | None) -> bool:
     """Whether a portion counted in `count_unit` counts in a line's unit, ignoring case and
     plurals. See BARE_COUNTS for a line with no unit.
@@ -308,7 +313,7 @@ def _counts_in(count_unit: str | None, unit: str | None) -> bool:
         return False
     if unit is None:
         return count_unit in BARE_COUNTS
-    return fdc.words(count_unit) == fdc.words(unit)
+    return fdc.words(count_unit) == fdc.words(OPTIONAL_PLURAL.sub("", unit))
 
 
 @dataclass

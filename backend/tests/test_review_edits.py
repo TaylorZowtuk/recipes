@@ -603,6 +603,24 @@ def test_a_food_pick_with_no_portion_for_a_lines_unit_asks_for_one(
     assert card(api_store, sharing.id)["needs_review"]["flagged"] == 1
 
 
+def test_a_food_pick_spreads_the_clove_portion_to_a_clove_s_line(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("cloves"))
+    sharing = other(api_store, 2, frob_line("clove(s)"))
+
+    response = edit(
+        editor_client,
+        recipe,
+        **line_edit(**{**FROB, "unit": "cloves"}, fdc_id=2007, portion_id=608),
+    )
+
+    assert response.status_code == 200
+    after = stored(api_store, sharing.id)
+    assert fact(after, "i1.match")["portion_id"] == 608
+    assert not [issue for issue in after.issues if issue.status == "open"]
+
+
 def test_a_picked_clove_never_reaches_a_spoonful_of_garlic(
     editor_client: TestClient, api_store: Store
 ) -> None:
