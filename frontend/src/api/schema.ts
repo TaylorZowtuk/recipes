@@ -85,7 +85,8 @@ export interface paths {
          *
          *     With `unit`, the line's written unit, empty for a line with none ("2 eggs"), each portion
          *     says whether it fits the line, by `unit_kind` if given (the parser's kind for a unit as it
-         *     read it) and else by the unit itself.
+         *     read it) and else by the unit itself. With `amount` false, for a line with no amount ("salt,
+         *     to taste"), which no portion gives a weight, every portion fits.
          */
         get: operations["search_fdc_foods_api_fdc_foods_get"];
         put?: never;
@@ -347,7 +348,9 @@ export interface paths {
         /**
          * Confirm Facts
          * @description Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-         *     resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
+         *     resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
+         *     none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
+         *     can't be Ready while it is. A fact already Confirmed keeps its own batch.
          *
          *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
          *     wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
@@ -2703,6 +2706,7 @@ export interface operations {
                 fdc_id?: number | null;
                 unit?: string | null;
                 unit_kind?: ("mass" | "volume" | "count") | null;
+                amount?: boolean;
             };
             header?: never;
             path?: never;
@@ -3412,7 +3416,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A path is neither one of the recipe's facts nor named by an open Enrichment Issue, every listed fact is already Confirmed with no open issue, or it confirms more Canonical Ingredients and wordings than one write holds */
+            /** @description A path is neither one of the recipe's facts nor named by an open Enrichment Issue, every listed fact is already Confirmed with no open issue proposing a correction, or it confirms more Canonical Ingredients and wordings than one write holds */
             422: {
                 headers: {
                     [name: string]: unknown;
