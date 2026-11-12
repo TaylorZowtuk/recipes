@@ -497,6 +497,21 @@ describe("editing a Review Item", () => {
     expect(shown(0.96)).toBe("0.96");
   });
 
+  it("saves the stored amount of a line whose amount the editor didn't change", () => {
+    // As shown, these round: ⅓, 1.23 and 0.
+    for (const low of [0.333, 1.234, 0.004]) {
+      const r = recipe({ facts: withI1Quantity(low) });
+      const draft = lineDraft(r, "i1");
+      expect(built(lineEdit(r, "i1", { ...draft, preparation: "soft" })).quantity).toEqual({
+        low,
+        high: low,
+      });
+    }
+    const r = recipe({ facts: withI1Quantity(0.333) });
+    const draft = { ...lineDraft(r, "i1"), high: "1.234" };
+    expect(built(lineEdit(r, "i1", draft)).quantity).toEqual({ low: 0.333, high: 1.234 });
+  });
+
   it("saves a line as the editor reads it, keeping its Canonical Ingredient and weight", () => {
     const draft = lineDraft(recipe(), "i1");
     expect(draft).toMatchObject({ low: "2", high: "", unit: "tbsp", name: "butter" });
@@ -634,8 +649,10 @@ describe("editing a Review Item", () => {
       },
     });
     const draft = stepDraft(timed, "s1");
-    expect(draft).toEqual({ portions: ["1"], timers: [{ low: "5", high: "7" }] });
-    expect(stepEdit("s1", { portions: ["1/2"], timers: [{ low: "4", high: "4.5" }] })).toEqual({
+    expect(draft).toMatchObject({ portions: ["1"], timers: [{ low: "5", high: "7" }] });
+    expect(
+      stepEdit("s1", { ...draft, portions: ["1/2"], timers: [{ low: "4", high: "4.5" }] }),
+    ).toEqual({
       edit: {
         kind: "step",
         step_id: "s1",
@@ -643,13 +660,49 @@ describe("editing a Review Item", () => {
         durations: [{ low_s: 240, high_s: 270 }],
       },
     });
-    expect(stepEdit("s1", { portions: ["2"], timers: [] })).toEqual({
+    expect(stepEdit("s1", { ...draft, portions: ["2"], timers: [] })).toEqual({
       problem: "Give each portion as a number above 0 and at most 1, such as 1/2.",
       field: "portion-0",
     });
-    expect(stepEdit("s1", { portions: ["1"], timers: [{ low: "5", high: "2" }] })).toEqual({
+    expect(
+      stepEdit("s1", { ...draft, portions: ["1"], timers: [{ low: "5", high: "2" }] }),
+    ).toEqual({
       problem: "Give each timer in minutes above 0, its upper end not below its lower end.",
       field: "timer-0",
+    });
+  });
+
+  it("saves the stored portions and timers of a step the editor didn't change", () => {
+    const r = recipe();
+    const s1 = r.facts.steps.s1;
+    if (!s1?.segments) throw new Error("fixture");
+    // As shown, ⅛ for both: saved from the text, the portion is 0.125 and the timer 8 s.
+    const odd = recipe({
+      facts: {
+        ...r.facts,
+        steps: {
+          s1: {
+            ...s1,
+            segments: {
+              ...s1.segments,
+              segments: [
+                ...s1.segments.segments.map((segment) =>
+                  segment.t === "ingredient" ? { ...segment, portion: 0.13 } : segment,
+                ),
+                { t: "duration", written: "7 seconds", low_s: 7, high_s: 7 },
+              ],
+            },
+          },
+        },
+      },
+    });
+    expect(stepEdit("s1", stepDraft(odd, "s1"))).toEqual({
+      edit: {
+        kind: "step",
+        step_id: "s1",
+        portions: [0.13],
+        durations: [{ low_s: 7, high_s: 7 }],
+      },
     });
   });
 

@@ -34,6 +34,18 @@ export function readNumber(text: string): number | undefined {
   return Number(bottom) ? Number(whole ?? 0) + Number(top) / Number(bottom) : undefined;
 }
 
+// A number field read back: the stored number while the text is still that number as the form
+// showed it, since showing it may have rounded it, so saving never changes a number nobody touched.
+function readField(text: string, stored: number | undefined): number | undefined {
+  return stored !== undefined && text.trim() === kitchenNumber(stored) ? stored : readNumber(text);
+}
+
+// A timer's end in seconds, from its minutes as typed, or as stored while untouched.
+function readSeconds(text: string, stored: number | undefined): number {
+  if (stored !== undefined && text.trim() === kitchenNumber(stored / 60)) return stored;
+  return Math.round((readNumber(text) ?? Number.NaN) * 60);
+}
+
 // The Wording Cache's key for an ingredient's name, as the API's `normalize_wording` makes it:
 // lowercase, its whitespace collapsed and the ASCII punctuation around it stripped.
 export function normalizeWording(name: string): string {
@@ -54,6 +66,8 @@ export type CanonicalPick =
 export type LineDraft = {
   low: string;
   high: string;
+  // The amount as stored, which `low` and `high` show.
+  stored: { low: number; high: number } | null;
   unit: string;
   name: string;
   preparation: string;
@@ -68,6 +82,7 @@ export function lineDraft(recipe: Recipe, lineId: string): LineDraft {
   return {
     low: quantity ? kitchenNumber(quantity.low) : "",
     high: quantity && quantity.high !== quantity.low ? kitchenNumber(quantity.high) : "",
+    stored: quantity ?? null,
     unit: parse?.unit ?? "",
     name: lineName(recipe, lineId),
     preparation: parse?.preparation ?? "",
@@ -85,8 +100,8 @@ export function canConvert(recipe: Recipe, lineId: string) {
 const AMOUNT = "Give the amount as a number, such as 2, 1.5 or 1 1/2, or leave it empty.";
 
 export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Built {
-  const low = draft.low.trim() ? readNumber(draft.low) : null;
-  const high = draft.high.trim() ? readNumber(draft.high) : low;
+  const low = draft.low.trim() ? readField(draft.low, draft.stored?.low) : null;
+  const high = draft.high.trim() ? readField(draft.high, draft.stored?.high) : low;
   if (low === undefined || (low === null && high !== null))
     return { problem: AMOUNT, field: "Amount" };
   if (high === undefined) return { problem: AMOUNT, field: "Up to" };
@@ -207,8 +222,12 @@ export function stepRows(recipe: Recipe, stepId: string) {
   };
 }
 
-// A timer's range in minutes, as typed.
-export type StepDraft = { portions: string[]; timers: { low: string; high: string }[] };
+// A timer's range in minutes, as typed, and the portions and timers as stored, which they show.
+export type StepDraft = {
+  portions: string[];
+  timers: { low: string; high: string }[];
+  stored: { portions: number[]; timers: { low_s: number; high_s: number }[] };
+};
 
 export function stepDraft(recipe: Recipe, stepId: string): StepDraft {
   const rows = stepRows(recipe, stepId);
@@ -218,20 +237,25 @@ export function stepDraft(recipe: Recipe, stepId: string): StepDraft {
       low: kitchenNumber(timer.low_s / 60),
       high: kitchenNumber(timer.high_s / 60),
     })),
+    stored: {
+      portions: rows.portions.map((row) => row.portion),
+      timers: rows.timers.map(({ low_s, high_s }) => ({ low_s, high_s })),
+    },
   };
 }
 
 export function stepEdit(stepId: string, draft: StepDraft): Built {
-  const portions = draft.portions.map(readNumber);
+  const { stored } = draft;
+  const portions = draft.portions.map((text, n) => readField(text, stored.portions[n]));
   const portion = portions.findIndex((p) => p === undefined || p <= 0 || p > 1);
   if (portion >= 0)
     return {
       problem: "Give each portion as a number above 0 and at most 1, such as 1/2.",
       field: `portion-${portion}`,
     };
-  const durations = draft.timers.map(({ low, high }) => ({
-    low_s: Math.round((readNumber(low) ?? Number.NaN) * 60),
-    high_s: Math.round((readNumber(high) ?? Number.NaN) * 60),
+  const durations = draft.timers.map(({ low, high }, n) => ({
+    low_s: readSeconds(low, stored.timers[n]?.low_s),
+    high_s: readSeconds(high, stored.timers[n]?.high_s),
   }));
   const timer = durations.findIndex(({ low_s, high_s }) => !(low_s > 0) || !(high_s >= low_s));
   if (timer >= 0)
