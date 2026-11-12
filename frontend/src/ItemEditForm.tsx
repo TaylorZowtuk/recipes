@@ -179,8 +179,10 @@ function useSheetFoot(host: RefObject<HTMLElement | null>) {
       const field = document.activeElement;
       if (!(field instanceof HTMLElement) || !element.contains(field) || foot.contains(field))
         return;
-      if (field.getBoundingClientRect().bottom > foot.getBoundingClientRect().top)
-        field.scrollIntoView({ block: "nearest" });
+      // A choice's radio is hidden, so its label is what must show.
+      const target = (field.matches("input[type=radio]") && field.closest("label")) || field;
+      if (target.getBoundingClientRect().bottom > foot.getBoundingClientRect().top)
+        target.scrollIntoView({ block: "nearest" });
     };
     element.addEventListener("focusin", keepClear);
     const observer =

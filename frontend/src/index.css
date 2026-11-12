@@ -2629,7 +2629,7 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   margin-bottom: calc(var(--space) * 3);
 }
 
-.item-edit .text-input {
+.item-edit :is(.text-input, label:has(input[type="radio"]), button) {
   scroll-margin-bottom: var(
     --sheet-foot,
     calc(var(--space) * 8 + var(--tap) + env(safe-area-inset-bottom))

@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in, fake web and service token (backend/src/recipes/local.py) aren't
 // on a deployed stack.
@@ -418,14 +418,15 @@ test("a focused field in a line's sheet stays clear of its foot", async ({
   await sheet.getByRole("button", { name: "Edit" }).click();
   await expect(sheet.getByRole("textbox", { name: "Amount" })).toBeFocused();
   const foot = sheet.locator(".sheet-actions");
-  const clear = async (name: string) => {
-    const field = sheet.getByRole("textbox", { name, exact: true });
+  const clear = async (name: string) => clearOf(sheet.getByRole("textbox", { name, exact: true }));
+  const clearOf = async (field: Locator, shown: Locator = field) => {
     await expect(field).toBeFocused();
+    // WebKit scrolls by whole pixels, so allow a fraction of one.
     await expect(async () => {
-      const box = await field.boundingBox();
+      const box = await shown.boundingBox();
       const top = (await foot.boundingBox())?.y;
       expect(
-        box && top !== undefined && box.y + box.height <= top,
+        box && top !== undefined && box.y + box.height <= top + 1,
         JSON.stringify({ box, top }),
       ).toBe(true);
     }).toPass({ timeout: 2000 });
@@ -436,6 +437,13 @@ test("a focused field in a line's sheet stays clear of its foot", async ({
   await clear("Name");
   await page.keyboard.press("Tab");
   await clear("Preparation");
+  // A choice's radio is hidden, so its label is what must clear the foot.
+  const choice = sheet
+    .locator("label")
+    .filter({ has: page.getByRole("radio") })
+    .last();
+  await choice.getByRole("radio").focus();
+  await clearOf(choice.getByRole("radio"), choice);
 
   await name.focus();
   await clear("Name");
