@@ -40,6 +40,7 @@ from recipes.models import (
     StepFacts,
     SubstitutionsFact,
     TextSegment,
+    Wording,
     unit_kind,
 )
 from recipes.parse import parse_line
@@ -78,6 +79,12 @@ def line_edit(line_id: str = "i1", **fields: Any) -> dict[str, Any]:
         "preparation": "cubed",
         **fields,
     }
+
+
+def shared(response: Response) -> tuple[list[str], list[str], list[str]]:
+    """The other recipes the edit matched, those that kept changing and those too big."""
+    body = response.json()
+    return body["also_updated"], body["not_updated"], body["too_big"]
 
 
 def edited(found: dict[str, Any]) -> bool:
@@ -448,7 +455,7 @@ def test_a_sharing_recipe_that_changed_meanwhile_is_read_again(
     )
 
     assert response.status_code == 200
-    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([sharing.id], [])
+    assert shared(response) == ([sharing.id], [], [])
     after = stored(api_store, sharing.id)
     assert edited(fact(after, "i1.match"))
     assert after.difficulty == meanwhile
@@ -474,14 +481,14 @@ def test_a_sharing_recipe_that_keeps_changing_is_reported_not_updated(
     )
 
     assert response.status_code == 200
-    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([], [sharing.id])
+    assert shared(response) == ([], [sharing.id], [])
     assert stored(api_store, sharing.id) == sharing
     saved = stored(api_store, recipe.id)
     assert saved.version == recipe.version + 1
     assert edited(fact(saved, "i1.match"))
 
 
-def test_a_sharing_recipe_the_match_would_make_too_big_is_reported_not_updated(
+def test_a_sharing_recipe_the_match_would_make_too_big_is_reported_too_big(
     editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recipe = awaiting(api_store)
@@ -493,7 +500,69 @@ def test_a_sharing_recipe_the_match_would_make_too_big_is_reported_not_updated(
     )
 
     assert response.status_code == 200
-    assert (response.json()["also_updated"], response.json()["not_updated"]) == ([], [sharing.id])
+    assert shared(response) == ([], [], [sharing.id])
+    assert stored(api_store, sharing.id) == sharing
+
+
+def test_saving_a_line_again_retries_the_recipes_that_kept_changing(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = awaiting(api_store, canonicals=(BEEF, PORK))
+    sharing = other(api_store, 2, beef_line())
+    update = api_store.update_recipe
+
+    def conflicting(changed: Recipe) -> Recipe:
+        if changed.id == sharing.id:
+            raise VersionConflict(changed.id)
+        return update(changed)
+
+    monkeypatch.setattr(api_store, "update_recipe", conflicting)
+    first = edit(editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": PORK.id}))
+    assert shared(first) == ([], [sharing.id], [])
+    monkeypatch.setattr(api_store, "update_recipe", update)
+
+    again = edit(editor_client, stored(api_store, recipe.id), **line_edit())
+
+    assert again.status_code == 200
+    assert shared(again) == ([sharing.id], [], [])
+    matched = fact(stored(api_store, sharing.id), "i1.match")
+    assert matched == fact(stored(api_store, recipe.id), "i1.match")
+    assert matched["canonical_id"] == PORK.id
+
+
+def test_saving_a_line_again_leaves_the_recipes_already_matched(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, canonicals=(BEEF, PORK))
+    sharing = other(api_store, 2, beef_line())
+    edit(editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": PORK.id}))
+    matched = stored(api_store, sharing.id)
+
+    again = edit(editor_client, stored(api_store, recipe.id), **line_edit())
+
+    assert shared(again) == ([], [], [])
+    assert stored(api_store, sharing.id) == matched
+
+
+@pytest.mark.parametrize("cached", ["unconfirmed", "elsewhere"])
+def test_saving_a_line_whose_wording_isnt_fixed_to_its_match_shares_nothing(
+    editor_client: TestClient, api_store: Store, cached: str
+) -> None:
+    recipe = awaiting(api_store, canonicals=(BEEF, PORK))
+    if cached == "elsewhere":
+        fixed = Wording(
+            wording="stewing beef",
+            canonical_id=PORK.id,
+            confirmed=True,
+            schema_version=SCHEMA_VERSION,
+        )
+        recipe = api_store.review_recipe(recipe, [], [], overwrite_wordings=[fixed])
+    sharing = other(api_store, 2, beef_line(canonical_id=PORK.id))
+
+    response = edit(editor_client, recipe, **line_edit())
+
+    assert response.status_code == 200
+    assert shared(response) == ([], [], [])
     assert stored(api_store, sharing.id) == sharing
 
 

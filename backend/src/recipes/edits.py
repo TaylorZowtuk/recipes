@@ -200,6 +200,17 @@ class SharedMatch:
             if line.parse and normalize_wording(line.parse.name) == self.wording
         ]
 
+    def unmatched(self, recipe: Recipe) -> bool:
+        """Whether a line of the recipe's with the wording isn't Confirmed as the match's
+        Canonical Ingredient yet.
+        """
+        return any(
+            not (match := recipe.facts.ingredients[line_id].match)
+            or match.canonical_id != self.match.canonical_id
+            or not match.confirmed
+            for line_id in self.lines(recipe)
+        )
+
     def apply(self, recipe: Recipe) -> Recipe | None:
         """The recipe with each of its lines with the wording matched, or None if it has none.
         Open issues on those lines' matches and conversions are resolved.
@@ -291,11 +302,30 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
         if line.match:
             canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
             result.confirmed, result.learned = canonicals, wordings
+            _reshare(store, recipe.id, line, result, now)
     if edit.keep_weight is not None:
         line.conversion = _kept(line.conversion, keep=edit.keep_weight, now=now)
     issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
     result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
     return result
+
+
+def _reshare(
+    store: Store, recipe_id: str, line: IngredientFacts, result: Edited, now: datetime
+) -> None:
+    """Share the line's match again when the Wording Cache fixes its wording to the line's
+    Canonical Ingredient, with the recipes whose lines with the wording aren't matched to it yet:
+    those an earlier fan-out couldn't update. So saving the line again retries them.
+    """
+    if line.parse is None or line.match is None:
+        return
+    wording = normalize_wording(line.parse.name)
+    cached = store.wording(wording)
+    if not (cached and cached.confirmed and cached.canonical_id == line.match.canonical_id):
+        return
+    shared = SharedMatch(wording, line.match, _carried(line.conversion, now))
+    result.shared = shared
+    result.others = [o.id for o in store.recipes() if o.id != recipe_id and shared.unmatched(o)]
 
 
 def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volume", "count"]:
@@ -356,13 +386,18 @@ def _shared_match(
     match = _new_by_editor(
         MatchFact, now, canonical_id=canonical_id, fdc_id=fdc_id, portion_id=portion_id
     )
-    conversion = donor.conversion if donor else None
-    if conversion:
-        # An editor kept the donor line in its written unit, which says nothing about this one.
-        converts = conversion.density_g_per_ml is not None or conversion.grams_per_count is not None
-        refused = None if conversion.refused == EDITOR_KEPT and converts else conversion.refused
-        conversion = _by_editor(conversion, now, refused=refused)
-    return SharedMatch(wording, match, conversion)
+    return SharedMatch(wording, match, _carried(donor.conversion if donor else None, now))
+
+
+def _carried(conversion: ConversionFact | None, now: datetime) -> ConversionFact | None:
+    """A line's conversion, for other lines with its FDC food and portion. An editor kept that
+    line in its written unit, which says nothing about the others.
+    """
+    if conversion is None:
+        return None
+    converts = conversion.density_g_per_ml is not None or conversion.grams_per_count is not None
+    refused = None if conversion.refused == EDITOR_KEPT and converts else conversion.refused
+    return _by_editor(conversion, now, refused=refused)
 
 
 def _kept(conversion: ConversionFact | None, *, keep: bool, now: datetime) -> ConversionFact:
@@ -469,29 +504,38 @@ def _edit_difficulty(recipe: Recipe, edit: EditDifficulty, now: datetime) -> Rec
     return settled(recipe.model_copy(update=changes))
 
 
-def share_all(store: Store, edited: Edited) -> tuple[list[str], list[str]]:
+@dataclass
+class Shared:
+    """What sharing a wording's match did to the other recipes with the wording."""
+
+    updated: list[str] = field(default_factory=list[str])
+    not_updated: list[str] = field(default_factory=list[str])  # kept changing: saving again retries
+    too_big: list[str] = field(default_factory=list[str])  # the match would make them too big
+
+
+def share_all(store: Store, edited: Edited) -> Shared:
     """Match every other recipe's lines with the wording as the editor fixed it, each at its own
-    version, after the edited recipe is saved. The recipes updated, and those not updated because
-    they kept changing or would be too big: saving the line again repairs them.
+    version, after the edited recipe is saved.
     """
-    updated: list[str] = []
-    not_updated: list[str] = []
+    shared = Shared()
     if edited.shared is None:
-        return updated, not_updated
+        return shared
     for recipe_id in edited.others:
         match _share(store, recipe_id, edited.shared):
             case "updated":
-                updated.append(recipe_id)
+                shared.updated.append(recipe_id)
             case "not_updated":
-                not_updated.append(recipe_id)
+                shared.not_updated.append(recipe_id)
+            case "too_big":
+                shared.too_big.append(recipe_id)
             case "gone":
                 pass
-    return updated, not_updated
+    return shared
 
 
 def _share(
     store: Store, recipe_id: str, shared: SharedMatch
-) -> Literal["updated", "not_updated", "gone"]:
+) -> Literal["updated", "not_updated", "too_big", "gone"]:
     """Match one recipe's lines with the wording, reading it again if it changed meanwhile."""
     for _ in range(ATTEMPTS):
         current = store.get_recipe(recipe_id)
@@ -499,7 +543,7 @@ def _share(
         if changed is None:
             return "gone"  # deleted, or its line no longer has the wording
         if len(changed.model_dump_json().encode()) > MAX_RECIPE_BYTES:
-            return "not_updated"
+            return "too_big"
         try:
             store.update_recipe(changed)
         except VersionConflict:

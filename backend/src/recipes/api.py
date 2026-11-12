@@ -335,15 +335,16 @@ class EditFact(BaseModel):
 
 class EditedFact(BaseModel):
     """The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
-    other recipes a line's new Canonical Ingredient was matched in by its wording, and those it
-    couldn't be, because they kept changing or would be too big. Saving the line again retries
-    them.
+    other recipes a line's Canonical Ingredient was matched in by its wording, those it couldn't
+    be because they kept changing, which saving the line again retries, and those the match would
+    make too big.
     """
 
     recipe: Recipe
     ready: bool
     also_updated: list[Ulid]
     not_updated: list[Ulid]
+    too_big: list[Ulid]
 
 
 SiteName = Annotated[
@@ -1026,8 +1027,9 @@ def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDe
 
     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
     every recipe with a line of that wording is matched to it too, each at its own version. Once
-    the edited recipe is saved, the edit never fails: a recipe that kept changing, or that the
-    match would make too big, is listed in `not_updated`.
+    the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
+    `not_updated`, and one the match would make too big in `too_big`. Saving a line whose wording
+    the Wording Cache fixes to its Canonical Ingredient again matches the recipes not matched yet.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":
@@ -1044,9 +1046,15 @@ def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDe
         created=edited.created,
         overwrite_wordings=edited.fixed,
     )
-    also_updated, not_updated = share_all(store, edited)
+    shared = share_all(store, edited)
     ready = recipe.status == "awaiting_review" and saved.status == "ready"
-    return EditedFact(recipe=saved, ready=ready, also_updated=also_updated, not_updated=not_updated)
+    return EditedFact(
+        recipe=saved,
+        ready=ready,
+        also_updated=shared.updated,
+        not_updated=shared.not_updated,
+        too_big=shared.too_big,
+    )
 
 
 @router.post(
