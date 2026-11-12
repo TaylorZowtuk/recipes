@@ -1,5 +1,6 @@
 """The FDC Snapshot: USDA FoodData Central's Foundation Foods and SR Legacy, trimmed to what
-enrichment uses, pinned and committed under backend/fdc, outside the Lambda zip.
+enrichment uses, pinned and committed in the package's `data/`, so it ships in the Lambda zip. The
+API loads it on first use, never at import.
 
 `python -m recipes.fdc build` downloads both pinned releases, checks their sha256 and writes the
 snapshot. The same downloads always give the same bytes.
@@ -20,13 +21,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import requests
-from pint import UnitRegistry
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from recipes.models import Dataset, Per100g
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from pint import UnitRegistry
 
 
 class Source(NamedTuple):
@@ -46,7 +48,7 @@ SOURCES: dict[Dataset, Source] = {
     ),
 }
 RELEASE = f"foundation-{FOUNDATION_DATE}+sr_legacy-2018-04"
-DEFAULT_PATH = Path(__file__).resolve().parents[2] / "fdc" / f"{RELEASE}.json.gz"
+DEFAULT_PATH = Path(__file__).resolve().parent / "data" / f"{RELEASE}.json.gz"
 
 # Energy is Atwater's specific factors (2048) or general ones (2047) where the food has no 1008.
 KCAL = ("1008", "2048", "2047")
@@ -203,14 +205,30 @@ def _starts_with(phrase: str, units: tuple[str, ...] | dict[str, str]) -> str | 
 
 
 @cache
+def unit_registry() -> UnitRegistry:
+    """pint's registry, built once on first use and shared by every unit: building one takes a
+    while, so it waits until a volume portion is converted.
+    """
+    from pint import UnitRegistry
+
+    return UnitRegistry()
+
+
+@cache
 def _ml_per(unit: str) -> float:
-    return cast("float", UnitRegistry().Quantity(1, unit).m_as("milliliter"))
+    return cast("float", unit_registry().Quantity(1, unit).m_as("milliliter"))
 
 
 def load_snapshot(path: Path = DEFAULT_PATH) -> Snapshot:
     """A snapshot from its file, gzipped or not."""
     data = path.read_bytes()
     return Snapshot.model_validate_json(gzip.decompress(data) if path.suffix == ".gz" else data)
+
+
+@cache
+def snapshot() -> Snapshot:
+    """The committed FDC Snapshot, loaded on first use and shared after."""
+    return load_snapshot()
 
 
 def write_snapshot(snapshot: Snapshot, directory: Path) -> Path:

@@ -18,6 +18,7 @@ import boto3
 import pytest
 from moto.server import ThreadedMotoServer
 
+from recipes import fdc
 from recipes.store import create_table
 
 if TYPE_CHECKING:
@@ -137,6 +138,7 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
         "recipes/__init__.py",
         "recipes/api.py",
         "recipes/kill_switch.py",
+        f"recipes/data/{fdc.RELEASE}.json.gz",
         "fastapi/__init__.py",
     ):
         assert name in infos
@@ -156,18 +158,23 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     top_level = {name.split("/", 1)[0] for name in infos}
     for dev_only in ("pytest", "moto", "ruff", "pyright", "bin", ".lock"):
         assert dev_only not in top_level
-    for enrich_only in ("ingredient_parser", "nltk", "pint", "numpy"):
-        assert enrich_only not in top_level, (
-            "the enrich group stays out of the zip for now: the Our Version ticket decides "
-            "whether the API parses lines on save"
+    assert "pint" in top_level, "the API converts an editor's FDC portion with pint"
+    for parser_only in ("ingredient_parser", "nltk", "numpy"):
+        assert parser_only not in top_level, (
+            "the enrich group's parser stays out of the zip for now: the Our Version ticket "
+            "decides whether the API parses lines on save"
         )
     for fallback_only in ("playwright", "greenlet"):
         assert fallback_only not in top_level, "the browser runs only in the local fallback CLI"
     assert not any("__pycache__" in name for name in infos)
 
 
-# recipe_scrapers too, which the API imports only on its first parse, with its dependencies.
-IMPORT_FROM_ARGV = "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api, recipe_scrapers"
+# recipe_scrapers too, which the API imports only on its first parse, with its dependencies, and
+# the FDC Snapshot, which the API loads from inside the package on first use.
+IMPORT_FROM_ARGV = (
+    "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api, recipe_scrapers; "
+    "from recipes import fdc; print(fdc.DEFAULT_PATH, len(fdc.snapshot().foods))"
+)
 
 
 @lambda_zip
@@ -197,3 +204,6 @@ def test_the_api_imports_from_the_zip_without_installed_package_metadata(
     )
 
     assert imported.returncode == 0, imported.stderr
+    path, foods = imported.stdout.split()
+    assert Path(path).is_relative_to(tree), "the Snapshot should load from inside the zip"
+    assert int(foods) > 1000

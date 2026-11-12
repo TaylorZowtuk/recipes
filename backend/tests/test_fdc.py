@@ -2,6 +2,8 @@
 
 import csv
 import io
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -137,6 +139,24 @@ def test_the_committed_snapshot_loads_with_the_release_its_file_names() -> None:
     assert fdc.DEFAULT_PATH.name == f"{committed.release}.json.gz"
     assert committed.release == fdc.RELEASE
     assert {food.dataset for food in committed.foods} == {"foundation", "sr_legacy"}
+
+
+def test_importing_the_api_loads_no_snapshot_and_builds_no_unit_registry() -> None:
+    """Cold starts for reads stay as they were: the Snapshot and pint load on first use."""
+    code = (
+        "import recipes.api; from recipes import fdc; "
+        "print(fdc.snapshot.cache_info().currsize, fdc.unit_registry.cache_info().currsize)"
+    )
+    imported = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+
+    assert imported.stdout.split() == ["0", "0"]
+
+
+def test_the_snapshot_is_loaded_once_and_shared() -> None:
+    assert fdc.snapshot() is fdc.snapshot()
+    assert fdc.snapshot().release == fdc.RELEASE
 
 
 def table(rows: Sequence[Sequence[str]]) -> str:
