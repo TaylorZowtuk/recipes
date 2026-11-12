@@ -83,6 +83,8 @@ NOT_COUNTS = (
 )
 # Count units that say nothing on their own, so a size in the modifier ("large") names the count.
 GENERIC_COUNTS = ("each", "piece", "unit", "item")
+# Why a food with no portion chosen converts nothing.
+NO_PORTION = "no portion chosen"
 WORDS = re.compile(r"[a-z]+")
 PHRASE = re.compile(r"[a-z]+(?: [a-z]+)*")
 # Plurals, enough to match "berries" with "berry" and "eggs" with "egg", but not "glass".
@@ -143,6 +145,10 @@ class Snapshot(Frozen):
         """The food with this FDC id. KeyError if the FDC Snapshot has none."""
         return self._by_id[fdc_id]
 
+    def has(self, fdc_id: int) -> bool:
+        """Whether the FDC Snapshot has a food with this FDC id."""
+        return fdc_id in self._by_id
+
     def candidates(self, name: str, limit: int) -> list[Food]:
         """The foods whose descriptions share words with an ingredient's name, best first: those
         whose description starts with the name ("Egg, whole" for "egg", before "Bread, egg"), then
@@ -170,7 +176,7 @@ def _singular(word: str) -> str:
 def convert(food: Food, portion_id: int | None) -> Conversion:
     """The conversion a food's chosen portion gives."""
     if portion_id is None:
-        return Conversion(refused="no portion chosen")
+        return Conversion(refused=NO_PORTION)
     portion = next((p for p in food.portions if p.id == portion_id), None)
     if portion is None:
         return Conversion(refused=f"portion {portion_id} is not one of food {food.fdc_id}'s")

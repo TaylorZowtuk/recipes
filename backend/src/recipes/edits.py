@@ -92,7 +92,8 @@ class EditLine(BaseModel):
     """A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
     portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
     keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
-    in "to taste".
+    in "to taste". A line that has or gets a Canonical Ingredient needs an FDC food; a line with
+    none has no match, and so no food.
     """
 
     kind: Literal["line"]
@@ -101,7 +102,7 @@ class EditLine(BaseModel):
     unit: Label | None
     name: Name
     preparation: Label | None
-    fdc_id: int
+    fdc_id: int | None
     portion_id: int | None
     canonical: CanonicalChoice | None = None
     keep_weight: bool | None = None
@@ -276,12 +277,13 @@ class SharedMatch:
         return None, False
 
     def _ask(self, line_id: str, parse: ParseFact) -> EnrichmentIssue:
-        """An open issue asking an editor to pick the portion for a line none fits."""
+        """An open issue asking an editor to pick the portion for a line none fits. It proposes
+        no correction, so there's nothing to accept: the editor edits the line to pick one.
+        """
         unit = f"its unit, {parse.unit}" if parse.unit else "a count with no unit"
         return EnrichmentIssue(
             id=new_ulid(),
             fact_id=f"{line_id}.conversion",
-            after=self.food.description,
             reason=f"An editor picked {self.food.description} for {self.wording}, but none of "
             f"its portions fits {unit}, so this line has no weight: pick a portion for it.",
         )
@@ -359,10 +361,19 @@ def _edit_line(
     )
     result, base = Edited(recipe), recipe
     current, picked = line.match, (edit.fdc_id, edit.portion_id)
-    if edit.canonical or current is None or (current.fdc_id, current.portion_id) != picked:
-        choice = edit.canonical or _current_canonical(current, edit.line_id)
+    kept = ExistingCanonical(kind="existing", id=current.canonical_id) if current else None
+    choice = edit.canonical or kept
+    if choice is None:
+        # No Canonical Ingredient, so no match, and so no food.
+        if edit.fdc_id is not None:
+            raise HTTPException(
+                422, f"Line {edit.line_id} has no Canonical Ingredient, so it takes no FDC food"
+            )
+    elif edit.fdc_id is None:
+        raise HTTPException(422, f"Line {edit.line_id} needs an FDC food: the closest if none fits")
+    elif edit.canonical or current is None or (current.fdc_id, current.portion_id) != picked:
         canonical = _canonical(store, choice, result)
-        shared = _picked(snapshot(), canonical.id, edit, now)
+        shared = _picked(snapshot(), canonical.id, edit.fdc_id, edit, now)
         line.match, line.conversion = shared.picked(edit.portion_id)
         if shared.wording:
             result.shared = shared
@@ -386,34 +397,27 @@ def _edit_line(
         canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
         result.confirmed, result.learned = canonicals, wordings
     if edit.keep_weight is not None:
-        line.conversion = _kept(line.conversion, keep=edit.keep_weight, now=now)
+        line.conversion = _kept(line.conversion, edit.line_id, keep=edit.keep_weight, now=now)
     issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
     result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
     return result
 
 
-def _current_canonical(current: MatchFact | None, line_id: str) -> ExistingCanonical:
-    """The line's own Canonical Ingredient, for a food picked without choosing another."""
-    if current is None:
-        raise HTTPException(422, f"Line {line_id} needs a Canonical Ingredient for its FDC food")
-    return ExistingCanonical(kind="existing", id=current.canonical_id)
-
-
 def _picked(
-    snapshot: fdc.Snapshot, canonical_id: str, edit: EditLine, now: datetime
+    snapshot: fdc.Snapshot, canonical_id: str, fdc_id: int, edit: EditLine, now: datetime
 ) -> SharedMatch:
     """The editor's food and portion for the line's wording. A 422 naming the line for a food
     the FDC Snapshot doesn't have or a portion that isn't the food's.
     """
     try:
-        fdc.numbers(snapshot, edit.fdc_id, edit.portion_id)
+        fdc.numbers(snapshot, fdc_id, edit.portion_id)
     except fdc.NotInSnapshot as refused:
         raise HTTPException(422, f"Line {edit.line_id}: {refused}") from None
     return SharedMatch(
         wording=normalize_wording(edit.name),
         canonical_id=canonical_id,
         snapshot=snapshot,
-        food=snapshot.food(edit.fdc_id),
+        food=snapshot.food(fdc_id),
         portion_id=edit.portion_id,
         now=now,
     )
@@ -455,15 +459,38 @@ def _canonical(store: Store, choice: CanonicalChoice, result: Edited) -> Canonic
     return canonical
 
 
-def _kept(conversion: ConversionFact | None, *, keep: bool, now: datetime) -> ConversionFact:
+def _kept(
+    conversion: ConversionFact | None, line_id: str, *, keep: bool, now: datetime
+) -> ConversionFact:
     """The conversion kept in the line's written unit, or converting to a weight again."""
     if conversion is None:
-        raise HTTPException(422, "The line has no weight to keep or convert")
+        raise HTTPException(422, f"Line {line_id} has no weight to keep or convert")
     if keep:
         return _by_editor(conversion, now, refused=EDITOR_KEPT)
     if conversion.density_g_per_ml is None and conversion.grams_per_count is None:
-        raise HTTPException(422, "The line's FDC food gives nothing to convert it by")
+        if conversion.refused == fdc.NO_PORTION:
+            raise HTTPException(
+                422, f"Line {line_id} has no portion to convert it to a weight by: pick one"
+            )
+        raise HTTPException(422, f"Line {line_id}'s FDC portion gives nothing to convert it by")
     return _by_editor(conversion, now, refused=None)
+
+
+def matched_food(recipes: list[Recipe], canonical_id: str, snapshot: fdc.Snapshot) -> int | None:
+    """The FDC food of a line in the Collection matched to the Canonical Ingredient, a Confirmed
+    one first, for the picker to start from after an editor chooses it. Only a food the FDC
+    Snapshot has, so it can be picked.
+    """
+    foods = [
+        (line.match.fdc_id, line.match.confirmed)
+        for recipe in recipes
+        for line in recipe.facts.ingredients.values()
+        if line.match
+        and line.match.canonical_id == canonical_id
+        and snapshot.has(line.match.fdc_id)
+    ]
+    ordered = [fdc_id for fdc_id, confirmed in foods if confirmed] + [f for f, _ in foods]
+    return next(iter(ordered), None)
 
 
 def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:

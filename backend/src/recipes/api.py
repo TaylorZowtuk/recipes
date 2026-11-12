@@ -23,7 +23,15 @@ from pydantic import (
 from recipes import fdc
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
-from recipes.edits import CONFIRMED_BY, FactEdit, confirm_matches, edit_recipe, overused, share_all
+from recipes.edits import (
+    CONFIRMED_BY,
+    FactEdit,
+    confirm_matches,
+    edit_recipe,
+    matched_food,
+    overused,
+    share_all,
+)
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
     LLM_EXTRACTOR,
@@ -1010,7 +1018,14 @@ def confirm_facts(
 
 
 class FdcPortion(fdc.Portion):
-    """One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`."""
+    """One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`. What it converts a
+    line by, as `fdc.convert` gives it: a density for a volume, or grams per `count_unit` for a
+    count, or neither.
+    """
+
+    density_g_per_ml: float | None
+    grams_per_count: float | None
+    count_unit: str | None
 
 
 class FdcFood(Model):
@@ -1022,30 +1037,69 @@ class FdcFood(Model):
     portions: list[FdcPortion]
 
 
+class FdcFoods(Model):
+    """The foods a search found, and the food the picker starts from for a Canonical Ingredient,
+    if any line in the Collection is matched to it.
+    """
+
+    foods: list[FdcFood]
+    default_fdc_id: int | None
+
+
 # The most foods a search gives, and the lengths of what an editor may search for.
 MAX_FDC_FOODS = 10
 FdcQuery = Annotated[str, Query(min_length=2, max_length=60)]
 
 
+def _fdc_food(food: fdc.Food) -> FdcFood:
+    return FdcFood(
+        fdc_id=food.fdc_id,
+        dataset=food.dataset,
+        description=food.description,
+        portions=[
+            FdcPortion(
+                **portion.model_dump(),
+                **fdc.convert(food, portion.id).model_dump(exclude={"refused"}),
+            )
+            for portion in food.portions
+        ],
+    )
+
+
 @router.get(
     "/fdc/foods",
     dependencies=EDITORS_ONLY,
-    responses={403: DUPLICATE[403], 422: {"description": "q isn't 2 to 60 characters"}},
+    responses={
+        403: DUPLICATE[403],
+        422: {"description": "q isn't 2 to 60 characters, or canonical isn't an id"},
+    },
 )
-def search_fdc_foods(q: FdcQuery, snapshot: SnapshotDep, response: Response) -> list[FdcFood]:
+def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
+    *,
+    q: FdcQuery,
+    snapshot: SnapshotDep,
+    store: StoreDep,
+    response: Response,
+    canonical: Annotated[Ulid | None, Query()] = None,
+    fdc_id: Annotated[int | None, Query()] = None,
+) -> FdcFoods:
     """The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
     them, at most ten, each with its portions.
+
+    With `canonical`, a Canonical Ingredient's id, the food of a line in the Collection already
+    matched to it, a Confirmed one first, is the picker's default and comes first. With `fdc_id`,
+    the line's own food, that food comes next, so the picker can name it. Either is left out if
+    the FDC Snapshot doesn't have it.
     """
     response.headers.update(NO_STORE)
-    return [
-        FdcFood(
-            fdc_id=food.fdc_id,
-            dataset=food.dataset,
-            description=food.description,
-            portions=[FdcPortion.model_validate(p.model_dump()) for p in food.portions],
-        )
-        for food in snapshot().candidates(q, MAX_FDC_FOODS)
-    ]
+    foods = snapshot()
+    default = matched_food(store.recipes(), canonical, foods) if canonical else None
+    named = [i for i in (default, fdc_id) if i is not None and foods.has(i)]
+    found = [foods.food(i) for i in dict.fromkeys(named)]
+    found += [f for f in foods.candidates(q, MAX_FDC_FOODS) if f.fdc_id not in named]
+    return FdcFoods(
+        foods=[_fdc_food(food) for food in found[:MAX_FDC_FOODS]], default_fdc_id=default
+    )
 
 
 @router.post(
@@ -1062,9 +1116,10 @@ def search_fdc_foods(q: FdcQuery, snapshot: SnapshotDep, response: Response) -> 
             "description": "The recipe has no such line, step or substitute, the step's portions "
             "and timers don't fit it or use more than all of a line, the line's wording changes "
             "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
-            "doesn't exist, the line's FDC food isn't in the FDC Snapshot or its portion isn't "
-            "the food's, the line has no weight to keep or convert, or the edited recipe is "
-            "too big to store"
+            "doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but "
+            "no Canonical Ingredient, the line's FDC food isn't in the FDC Snapshot or its "
+            "portion isn't the food's, the line has no weight to keep or convert or no portion "
+            "to convert it by, or the edited recipe is too big to store"
         },
     },
 )

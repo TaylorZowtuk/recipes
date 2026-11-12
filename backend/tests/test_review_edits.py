@@ -234,6 +234,39 @@ def test_picking_a_food_for_a_line_with_no_canonical_ingredient_is_refused(
     assert stored(api_store, recipe.id) == recipe
 
 
+def test_a_line_with_no_canonical_ingredient_saves_without_an_fdc_food(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(
+        editor_client, recipe, **line_edit("i9", name="parsley", unit=None, fdc_id=None)
+    )
+
+    assert response.status_code == 200
+    line = stored(api_store, recipe.id).facts.ingredients["i9"]
+    assert line.parse is not None
+    assert line.parse.name == "parsley"
+    assert (line.match, line.conversion) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "canonical",
+    [None, {"kind": "new", "name": "Beef", "family": "beef", "store_category_id": "meat"}],
+    ids=["has one", "gets one"],
+)
+def test_a_line_with_a_canonical_ingredient_needs_an_fdc_food_naming_the_line(
+    editor_client: TestClient, api_store: Store, canonical: dict[str, str] | None
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit(fdc_id=None, canonical=canonical))
+
+    assert response.status_code == 422
+    assert "i1" in response.json()["detail"]
+    assert stored(api_store, recipe.id) == recipe
+
+
 def test_editing_a_line_the_recipe_lacks_is_refused(
     editor_client: TestClient, api_store: Store
 ) -> None:
@@ -274,6 +307,42 @@ def test_converting_a_weight_with_nothing_to_convert_by_is_refused(
     response = edit(editor_client, recipe, **line_edit(keep_weight=False))
 
     assert response.status_code == 422
+    assert stored(api_store, recipe.id) == recipe
+
+
+def kept_line() -> RecipeFacts:
+    facts = beef_line()
+    facts.ingredients["i1"].conversion = conversion(**{**DENSE, "refused": edits.EDITOR_KEPT})
+    return facts
+
+
+def test_a_line_kept_in_its_written_unit_stays_kept_with_a_new_food(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=kept_line())
+
+    response = edit(
+        editor_client, recipe, **line_edit(fdc_id=2004, portion_id=606, keep_weight=True)
+    )
+
+    assert response.status_code == 200
+    weight = fact(stored(api_store, recipe.id), "i1.conversion")
+    assert weight["refused"] == edits.EDITOR_KEPT
+    assert weight["density_g_per_ml"] == numbers(2004, 606)["density_g_per_ml"]
+
+
+def test_converting_a_new_food_with_no_portion_is_refused_naming_the_portion(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=kept_line())
+
+    response = edit(
+        editor_client, recipe, **line_edit(fdc_id=2004, portion_id=None, keep_weight=False)
+    )
+
+    assert response.status_code == 422
+    assert "portion" in response.json()["detail"]
+    assert "i1" in response.json()["detail"]
     assert stored(api_store, recipe.id) == recipe
 
 
@@ -529,6 +598,8 @@ def test_a_food_pick_with_no_portion_for_a_lines_unit_asks_for_one(
     (opened,) = [issue for issue in after.issues if issue.status == "open"]
     assert opened.fact_id == "i1.conversion"
     assert "portion" in opened.reason
+    # It proposes no correction to accept: an editor picks a portion by editing the line.
+    assert (opened.before, opened.after) == (None, None)
     assert card(api_store, sharing.id)["needs_review"]["flagged"] == 1
 
 
