@@ -368,8 +368,9 @@ export interface paths {
          *
          *     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
          *     every recipe with a line of that wording is matched to it too, each at its own version. Once
-         *     the edited recipe is saved, the edit never fails: a recipe that kept changing, or that the
-         *     match would make too big, is listed in `not_updated`.
+         *     the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
+         *     `not_updated`, and one the match would make too big in `too_big`. Saving a line whose wording
+         *     the Wording Cache fixes to its Canonical Ingredient again matches the recipes not matched yet.
          */
         post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
         delete?: never;
@@ -1051,9 +1052,9 @@ export interface components {
         /**
          * EditedFact
          * @description The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
-         *     other recipes a line's new Canonical Ingredient was matched in by its wording, and those it
-         *     couldn't be, because they kept changing or would be too big. Saving the line again retries
-         *     them.
+         *     other recipes a line's Canonical Ingredient was matched in by its wording, those it couldn't
+         *     be because they kept changing, which saving the line again retries, and those the match would
+         *     make too big.
          */
         EditedFact: {
             /** Also Updated */
@@ -1063,6 +1064,8 @@ export interface components {
             /** Ready */
             ready: boolean;
             recipe: components["schemas"]["Recipe"];
+            /** Too Big */
+            too_big: string[];
         };
         /**
          * Enrichment
