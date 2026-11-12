@@ -96,7 +96,7 @@ MANY = fdc.Snapshot(
 def test_searching_gives_at_most_ten_foods_the_named_ones_first(
     editor_client: TestClient, api_store: Store
 ) -> None:
-    other(api_store, 1, beef_line(fdc_id=13, **CONFIRMED))
+    other(api_store, 1, beef_line("stewing beef", fdc_id=13, **CONFIRMED))
     params = {"q": "zorble", "canonical": BEEF.id, "fdc_id": 14}
 
     response = editor_client.get("/api/fdc/foods", params=params, headers=EDITOR)
