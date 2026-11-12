@@ -593,6 +593,8 @@ describe("editing a Review Item", () => {
     expect(built(lineEdit(recipe(), "i1", { ...draft, keepWeight: true })).keep_weight).toBe(true);
   });
 
+  // The note is a live region, so it quotes neither the typed name nor the new one's name, and
+  // changes only with the pick.
   it("says a new Canonical Ingredient applies to every recipe with the wording, without a weight", () => {
     const draft = lineDraft(recipe(), "i1");
     expect(canonicalNote(draft, collection, recipe())).toBeNull();
@@ -603,7 +605,7 @@ describe("editing a Review Item", () => {
         recipe({ facts: { ...recipe().facts, ingredients: {} } }),
       ),
     ).toBe(
-      "Every line worded “butter”, in every recipe, will use garlic. Without an FDC food, this line has no weight or nutrition.",
+      "Every line with this line’s wording, in every recipe, will use garlic. Without an FDC food, this line has no weight or nutrition.",
     );
     // A line of the recipe already matched to it with an FDC food gives this one its food too.
     expect(
@@ -612,7 +614,7 @@ describe("editing a Review Item", () => {
         collection,
         recipe(),
       ),
-    ).toBe("Every line worded “butter”, in every recipe, will use butter.");
+    ).toBe("Every line with this line’s wording, in every recipe, will use butter.");
     expect(
       canonicalNote(
         {
@@ -623,7 +625,7 @@ describe("editing a Review Item", () => {
         recipe(),
       ),
     ).toBe(
-      "Every line worded “butter”, in every recipe, will use salted butter. Without an FDC food, this line has no weight or nutrition.",
+      "Every line with this line’s wording, in every recipe, will use the new Canonical Ingredient. Without an FDC food, this line has no weight or nutrition.",
     );
   });
 

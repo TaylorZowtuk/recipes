@@ -174,7 +174,8 @@ export function withWording(
 }
 
 // What changing the line's Canonical Ingredient does beyond this line, or null when it's kept:
-// and, unless a line of the recipe already gives it an FDC food, that it may have none.
+// and, unless a line of the recipe already gives it an FDC food, that it may have none. It quotes
+// nothing typed, so a live region showing it speaks only when the pick changes.
 export function canonicalNote(
   draft: LineDraft,
   collection: Pick<Collection, "canonical_ingredients">,
@@ -184,14 +185,14 @@ export function canonicalNote(
   if (pick.kind === "keep") return null;
   const chosen =
     pick.kind === "new"
-      ? pick.name.trim()
+      ? "the new Canonical Ingredient"
       : (collection.canonical_ingredients.find((c) => c.id === pick.id)?.name ?? "it");
   const fed =
     pick.kind === "existing" &&
     Object.values(recipe.facts.ingredients).some(
       (line) => line.match?.canonical_id === pick.id && line.match.fdc_id !== null,
     );
-  const reach = `Every line worded “${draft.name.trim()}”, in every recipe, will use ${chosen}.`;
+  const reach = `Every line with this line’s wording, in every recipe, will use ${chosen}.`;
   return fed ? reach : `${reach} Without an FDC food, this line has no weight or nutrition.`;
 }
 

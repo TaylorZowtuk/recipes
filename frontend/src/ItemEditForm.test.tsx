@@ -90,9 +90,12 @@ describe("an edit form, as an editor uses it", () => {
     expect(choice("Keep butter")).toBeUndefined();
     expect(choice("butter")?.checked).toBe(true);
     const note = host.querySelector('[role="status"]');
-    expect(note?.textContent).toBe(
-      "Every line worded “salted butter”, in every recipe, will use butter.",
-    );
+    const said = "Every line with this line’s wording, in every recipe, will use butter.";
+    expect(note?.textContent).toBe(said);
+    // Typing on doesn't change it, so it's announced only when the pick changes.
+    type("Name", "salted butter cubes");
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(said);
+    type("Name", "salted butter");
     await click(button("Save"));
     expect(saved()).toEqual([
       expect.objectContaining({
@@ -106,6 +109,17 @@ describe("an edit form, as an editor uses it", () => {
     expect(choice("Keep butter")?.checked).toBe(true);
     await click(button("Save"));
     expect(saved()[1]).not.toHaveProperty("canonical");
+  });
+
+  it("says what a pick reaches under the choices, not over the fields at the sheet's foot", () => {
+    open("i1");
+    type("Name", "salted butter");
+    const note = host.querySelector('[role="status"]');
+    expect(note?.previousElementSibling?.classList.contains("choices")).toBe(true);
+    expect(note?.closest("fieldset")?.querySelector("legend")?.textContent).toBe(
+      "Canonical Ingredient",
+    );
+    expect(host.querySelector(".sheet-actions")?.textContent).toBe("CancelSave");
   });
 
   it("picks the new wording's confirmed Wording Cache entry when the Collection has one", async () => {

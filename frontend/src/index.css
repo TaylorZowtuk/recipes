@@ -1854,6 +1854,7 @@ h1:focus {
   gap: calc(var(--space) * 3);
   margin-top: calc(var(--space) * 3);
   padding: calc(var(--space) * 3) 0 calc(var(--space) * 5 + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--divider);
   background: var(--surface);
 }
 
@@ -2621,9 +2622,18 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   width: 40px;
 }
 
-/* An item's edit form, in its sheet: fields stacked, an amount's or a timer's two ends side by side. */
+/* An item's edit form, in its sheet: fields stacked, an amount's or a timer's two ends side by side.
+   A focused field scrolls clear of Cancel and Save, pinned at the sheet's foot. */
 .item-edit .edit-field {
   margin-bottom: calc(var(--space) * 3);
+}
+
+.item-edit .text-input {
+  scroll-margin-bottom: calc(var(--space) * 8 + var(--tap) + env(safe-area-inset-bottom));
+}
+
+.item-edit-reach {
+  margin-top: calc(var(--space) * 3);
 }
 
 .edit-pair {

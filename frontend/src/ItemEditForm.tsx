@@ -114,18 +114,16 @@ function Note({ id, note }: { id: string; note: ReactNode }) {
 }
 
 // The form, its first field focused as it opens, with Cancel and Save pinned at the sheet's foot,
-// and above them any note and why the last Save didn't save.
+// and above them any offline or paused note and why the last Save didn't save.
 function EditForm({
   build,
   onSave,
   onCancel,
   disabled,
   note,
-  notice,
   children,
 }: {
   build: () => Built;
-  notice?: string | null;
   children: ReactNode;
 } & Pick<FormProps, "onSave" | "onCancel" | "disabled" | "note">) {
   const form = useRef<HTMLFormElement>(null);
@@ -148,11 +146,6 @@ function EditForm({
         {children}
         <div className="sheet-actions">
           {note && <Note id={noteId} note={note} />}
-          {notice && (
-            <p role="status" className="review-note">
-              {notice}
-            </p>
-          )}
           {shown}
           <button type="button" className="button button-secondary" onClick={onCancel}>
             Cancel
@@ -250,11 +243,7 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
   const saved = withWording(recipe, lineId, draft, collection);
   const kept = saved.canonical.kind === "keep";
   return (
-    <EditForm
-      build={() => lineEdit(recipe, lineId, saved)}
-      notice={canonicalNote(saved, collection, recipe)}
-      {...props}
-    >
+    <EditForm build={() => lineEdit(recipe, lineId, saved)} {...props}>
       <fieldset className="sheet-section">
         <legend>Line</legend>
         <div className="edit-pair">
@@ -289,6 +278,7 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
         lineId={lineId}
         collection={collection}
         pick={saved.canonical}
+        reach={canonicalNote(saved, collection, recipe)}
         renamed={renamed(recipe, lineId, draft.name)}
         onPick={(canonical) => set({ canonical })}
       />
@@ -319,13 +309,14 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
 
 const SHOWN_MATCHES = 6;
 
-// Keep the line's Canonical Ingredient, pick another found by name, or create one from the search.
-// A renamed line can't keep it, but may pick it again.
+// Keep the line's Canonical Ingredient, pick another found by name, or create one from the search,
+// and under the choices, what the pick reaches. A renamed line can't keep it, but may pick it again.
 function CanonicalPicker({
   recipe,
   lineId,
   collection,
   pick,
+  reach,
   renamed,
   onPick,
 }: {
@@ -333,6 +324,7 @@ function CanonicalPicker({
   lineId: string;
   collection: Kitchen;
   pick: CanonicalPick;
+  reach: string | null;
   renamed: boolean;
   onPick: (pick: CanonicalPick) => void;
 }) {
@@ -397,6 +389,9 @@ function CanonicalPicker({
           </Choice>
         )}
       </div>
+      <p role="status" className={reach ? "review-note item-edit-reach" : "visually-hidden"}>
+        {reach}
+      </p>
       {q && shown.length === 0 && exact === false && (
         <p className="field-hint item-edit-found">No Canonical Ingredient is named “{q}”.</p>
       )}
