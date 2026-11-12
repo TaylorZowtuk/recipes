@@ -200,17 +200,6 @@ class SharedMatch:
             if line.parse and normalize_wording(line.parse.name) == self.wording
         ]
 
-    def unmatched(self, recipe: Recipe) -> bool:
-        """Whether a line of the recipe's with the wording isn't Confirmed as the match's
-        Canonical Ingredient yet.
-        """
-        return any(
-            not (match := recipe.facts.ingredients[line_id].match)
-            or match.canonical_id != self.match.canonical_id
-            or not match.confirmed
-            for line_id in self.lines(recipe)
-        )
-
     def apply(self, recipe: Recipe) -> Recipe | None:
         """The recipe with each of its lines with the wording matched, or None if it has none.
         Open issues on those lines' matches and conversions are resolved.
@@ -302,30 +291,11 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
         if line.match:
             canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
             result.confirmed, result.learned = canonicals, wordings
-            _reshare(store, recipe.id, line, result, now)
     if edit.keep_weight is not None:
         line.conversion = _kept(line.conversion, keep=edit.keep_weight, now=now)
     issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
     result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
     return result
-
-
-def _reshare(
-    store: Store, recipe_id: str, line: IngredientFacts, result: Edited, now: datetime
-) -> None:
-    """Share the line's match again when the Wording Cache fixes its wording to the line's
-    Canonical Ingredient, with the recipes whose lines with the wording aren't matched to it yet:
-    those an earlier fan-out couldn't update. So saving the line again retries them.
-    """
-    if line.parse is None or line.match is None:
-        return
-    wording = normalize_wording(line.parse.name)
-    cached = store.wording(wording)
-    if not (cached and cached.confirmed and cached.canonical_id == line.match.canonical_id):
-        return
-    shared = SharedMatch(wording, line.match, _carried(line.conversion, now))
-    result.shared = shared
-    result.others = [o.id for o in store.recipes() if o.id != recipe_id and shared.unmatched(o)]
 
 
 def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volume", "count"]:
@@ -509,7 +479,7 @@ class Shared:
     """What sharing a wording's match did to the other recipes with the wording."""
 
     updated: list[str] = field(default_factory=list[str])
-    not_updated: list[str] = field(default_factory=list[str])  # kept changing: saving again retries
+    not_updated: list[str] = field(default_factory=list[str])  # kept changing: re-picking retries
     too_big: list[str] = field(default_factory=list[str])  # the match would make them too big
 
 

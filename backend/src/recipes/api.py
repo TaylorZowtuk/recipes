@@ -336,8 +336,8 @@ class EditFact(BaseModel):
 class EditedFact(BaseModel):
     """The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
     other recipes a line's Canonical Ingredient was matched in by its wording, those it couldn't
-    be because they kept changing, which saving the line again retries, and those the match would
-    make too big.
+    be because they kept changing, which picking the same Canonical Ingredient again retries, and
+    those the match would make too big.
     """
 
     recipe: Recipe
@@ -1028,8 +1028,9 @@ def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDe
     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
     every recipe with a line of that wording is matched to it too, each at its own version. Once
     the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
-    `not_updated`, and one the match would make too big in `too_big`. Saving a line whose wording
-    the Wording Cache fixes to its Canonical Ingredient again matches the recipes not matched yet.
+    `not_updated`, and one the match would make too big in `too_big`. Picking the same Canonical
+    Ingredient again retries them. A line saved with its Canonical Ingredient unchanged reaches no
+    other recipe.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":

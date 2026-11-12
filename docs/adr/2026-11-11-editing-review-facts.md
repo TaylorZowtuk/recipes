@@ -26,9 +26,9 @@ The editor picks an existing Canonical Ingredient, Confirming it if it wasn't, o
 ## Consequences
 
 - A mapping an editor corrects is fixed once for the whole Collection, and enrichment offers only it from then on.
-- The other recipes aren't written in the edited recipe's transaction. If the API stops partway, some keep the old match until the line is saved again; they never hold a half-written recipe.
+- The other recipes aren't written in the edited recipe's transaction. If the API stops partway, some keep the old match until an editor picks the Canonical Ingredient again; they never hold a half-written recipe.
 - Once the edited recipe is saved, the edit succeeds. A recipe that kept changing through every retry is skipped and listed in the response's `not_updated`, and one the match would make too big to store in `too_big`, beside `also_updated`. The editor is told how many of each weren't updated.
-- Saving the line again, even with no change, retries them: when the Wording Cache fixes the line's wording to the line's Canonical Ingredient, the save shares the line's match and conversion with every recipe whose lines with that wording aren't Confirmed as that Canonical Ingredient yet. Recipes already matched aren't written again. A recipe in `too_big` stays too big on every retry, so the editor is told it can't be updated rather than to retry.
+- Picking the same Canonical Ingredient again retries them: the PWA always offers the line's current Canonical Ingredient beside Keep, and choosing it shares the line's match and conversion with every recipe with that wording again. A line saved with its Canonical Ingredient unchanged never reaches other recipes, so a line another recipe deliberately Confirmed as a different Canonical Ingredient is left as it is. A recipe in `too_big` stays too big on every retry, so the editor is told it can't be updated rather than to retry.
 - A line an editor matched to a new Canonical Ingredient has no nutrition or weight until a later enrichment, or an editor, gives that Canonical Ingredient an FDC food.
 
 ## Considered options
