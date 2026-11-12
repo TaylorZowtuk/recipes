@@ -2623,13 +2623,17 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 }
 
 /* An item's edit form, in its sheet: fields stacked, an amount's or a timer's two ends side by side.
-   A focused field scrolls clear of Cancel and Save, pinned at the sheet's foot. */
+   A focused field scrolls clear of the sheet's foot, pinned at its bottom: Cancel and Save with any
+   note or problem, as measured into --sheet-foot, else the buttons' height. */
 .item-edit .edit-field {
   margin-bottom: calc(var(--space) * 3);
 }
 
 .item-edit .text-input {
-  scroll-margin-bottom: calc(var(--space) * 8 + var(--tap) + env(safe-area-inset-bottom));
+  scroll-margin-bottom: var(
+    --sheet-foot,
+    calc(var(--space) * 8 + var(--tap) + env(safe-area-inset-bottom))
+  );
 }
 
 .item-edit-reach {

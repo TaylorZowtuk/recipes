@@ -187,6 +187,41 @@ describe("an edit form, as an editor uses it", () => {
     expect(said && document.getElementById(said)?.textContent).toBe("You’re offline.");
   });
 
+  // A focused field scrolls clear of the whole foot, which a note or a problem makes taller.
+  it("keeps the foot's height in --sheet-foot, and stops watching it once closed", () => {
+    const watched: { foot: Element; disconnected: boolean }[] = [];
+    let measure = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        #seen: (typeof watched)[number] | undefined;
+        constructor(callback: () => void) {
+          measure = callback;
+        }
+        observe(foot: Element) {
+          this.#seen = { foot, disconnected: false };
+          watched.push(this.#seen);
+        }
+        disconnect() {
+          if (this.#seen) this.#seen.disconnected = true;
+        }
+      },
+    );
+    try {
+      open("i1", { note: "You’re offline." });
+      const foot = host.querySelector(".sheet-actions");
+      expect(watched.map((w) => w.foot)).toEqual([foot]);
+      Object.defineProperty(foot, "offsetHeight", { value: 131 });
+      act(() => measure());
+      const form = host.querySelector<HTMLElement>(".item-edit");
+      expect(form?.style.getPropertyValue("--sheet-foot")).toBe("131px");
+      act(() => root.render(null));
+      expect(watched[0]?.disconnected).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("saves a step's portions by their order, keeping those not changed", async () => {
     const r = recipe();
     const s1 = r.facts.steps.s1;

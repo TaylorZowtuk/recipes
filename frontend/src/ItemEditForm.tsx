@@ -2,6 +2,7 @@ import {
   createContext,
   type FormEvent,
   type ReactNode,
+  type RefObject,
   useContext,
   useEffect,
   useId,
@@ -132,6 +133,7 @@ function EditForm({
   useEffect(() => {
     form.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
+  useSheetFoot(form);
   return (
     <ProblemOf value={problem}>
       <form
@@ -162,6 +164,22 @@ function EditForm({
       </form>
     </ProblemOf>
   );
+}
+
+// The height of the form's foot, Cancel and Save with any note or problem beside them, in
+// --sheet-foot, so a focused field scrolls clear of all of it. Without ResizeObserver the CSS
+// falls back to the buttons' height.
+function useSheetFoot(host: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const element = host.current;
+    const foot = element?.querySelector<HTMLElement>(".sheet-actions");
+    if (!element || !foot || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() =>
+      element.style.setProperty("--sheet-foot", `${foot.offsetHeight}px`),
+    );
+    observer.observe(foot);
+    return () => observer.disconnect();
+  }, [host]);
 }
 
 // A field, described by its hint, any hint it shares (`describedBy`), and the last Save's problem
@@ -522,6 +540,7 @@ function SubstitutionsForm({
   useEffect(() => {
     first.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
+  useSheetFoot(first);
   return (
     <div className="review-form item-edit" ref={first}>
       {items.length > 1 && <p className="field-hint">Save each substitute on its own.</p>}
