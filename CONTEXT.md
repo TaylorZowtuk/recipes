@@ -188,7 +188,7 @@ The single name that every wording of an ingredient maps to, e.g. "boneless chic
 _Avoid_: Normalized ingredient, food item
 
 **Wording Cache**:
-What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it. An editor who changes a line's Canonical Ingredient fixes its wording: the cache confirms the new one, and every recipe with a line of that wording is matched to it.
+What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it. An editor who changes a line's Canonical Ingredient, or its FDC food or portion, fixes its wording: the cache confirms the Canonical Ingredient, and every recipe with a line of that wording is matched to it and its FDC food, each line taking a portion that fits its own unit.
 _Avoid_: Alias table, synonym list
 
 **Pantry Staple**:

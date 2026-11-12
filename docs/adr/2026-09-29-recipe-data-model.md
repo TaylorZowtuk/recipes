@@ -8,6 +8,8 @@ Superseded in part by [Favorite Sites match on a card's host, and a missing item
 
 Superseded in part by [An editor's edit is Confirmed, not undoable, and fixes a wording for the whole Collection](2026-11-11-editing-review-facts.md): a match an editor makes can have no FDC id (`fdc_id` is null) until its Canonical Ingredient gets an FDC food, and an editor can create a Canonical Ingredient.
 
+Superseded in part by [Editors pick FDC foods; the FDC Snapshot ships in the Lambda](2026-11-11-editors-pick-fdc-foods.md): a match's `fdc_id` is required again, since an editor picks the FDC food.
+
 A recipe is stored as one JSON document, defined once as Pydantic v2 models in `backend/` with `snake_case` names. The same shape goes into DynamoDB, into the nightly JSON Lines backups and out of the API, and the TypeScript client is generated from the OpenAPI schema. The item holds everything the phone needs to scale, convert units, compute nutrition and render cooking mode **offline**, including the FoodData Central (FDC) numbers enrichment used. We chose this over storing only FDC ids and looking the numbers up when read, because the lookup would mean shipping the FDC snapshot to the PWA, and a newer FDC release would silently change recipes the [enrichment ADR](2026-09-26-enrichment-pipeline.md) says are frozen.
 
 ## Ids and layout
