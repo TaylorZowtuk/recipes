@@ -28,7 +28,6 @@ from recipes.edits import (
     FactEdit,
     confirm_matches,
     edit_recipe,
-    fits,
     matched_food,
     overused,
     share_all,
@@ -1069,7 +1068,7 @@ def _fdc_food(food: fdc.Food, line: tuple[UnitKind, str | None] | None) -> FdcFo
             FdcPortion(
                 **portion.model_dump(),
                 **conversion.model_dump(exclude={"refused"}),
-                fits=fits(conversion, *line) if line else None,
+                fits=fdc.fits(conversion, *line) if line else None,
             )
         )
     return FdcFood(

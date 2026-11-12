@@ -8,7 +8,6 @@ portion of the food that fits its own written unit.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
@@ -192,39 +191,37 @@ def _checked[F: Fact](fact: F | None, now: datetime) -> F | None:
     return fact.model_copy(update=_confirmed(now))
 
 
-# A line with no unit ("2 eggs") counts whole things, which FDC counts in a generic word or a
-# size ("1 large" egg, "1 medium" banana), so only those portions fit it. Any other count word
-# ("clove", "slice") fits only a line written in that word.
-BARE_COUNTS = frozenset({*fdc.GENERIC_COUNTS, "small", "medium", "large", "extra large", "jumbo"})
-
-
 @dataclass
 class SharedMatch:
     """A wording's match as an editor fixed it, for every line in the Collection with it. The
     Canonical Ingredient and FDC food go to every line; the portion only where it fits the line's
-    own written unit.
+    own written unit. Raises fdc.NotInSnapshot for a food the FDC Snapshot doesn't have or a
+    portion that isn't the food's.
     """
 
     wording: str
     canonical_id: str
     snapshot: fdc.Snapshot
-    food: fdc.Food
+    fdc_id: int
     portion_id: int | None
     now: datetime
+    food: fdc.Food = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.food = fdc.chosen(self.snapshot, self.fdc_id, self.portion_id)
 
     def picked(self, portion_id: int | None) -> tuple[MatchFact, ConversionFact]:
         """A line's match to the food and portion, and the conversion the portion gives."""
-        fdc_id = self.food.fdc_id
-        numbers = fdc.numbers(self.snapshot, fdc_id, portion_id)
+        numbers = fdc.numbers(self.snapshot, self.fdc_id, portion_id)
         return (
             _new_by_editor(
                 MatchFact,
                 self.now,
                 canonical_id=self.canonical_id,
-                fdc_id=fdc_id,
+                fdc_id=self.fdc_id,
                 portion_id=portion_id,
             ),
-            _new_by_editor(ConversionFact, self.now, fdc_id=fdc_id, **numbers.model_dump()),
+            _new_by_editor(ConversionFact, self.now, fdc_id=self.fdc_id, **numbers.model_dump()),
         )
 
     def lines(self, recipe: Recipe) -> list[str]:
@@ -271,7 +268,7 @@ class SharedMatch:
             return self.portion_id, True
         tried = [self.portion_id] if self.portion_id is not None else []
         for portion_id in [*tried, *(portion.id for portion in self.food.portions)]:
-            if fits(fdc.convert(self.food, portion_id), kind, parse.unit):
+            if fdc.fits(fdc.convert(self.food, portion_id), kind, parse.unit):
                 return portion_id, True
         return None, False
 
@@ -286,35 +283,6 @@ class SharedMatch:
             reason=f"An editor picked {self.food.description} for {self.wording}, but none of "
             f"its portions fits {unit}, so this line has no weight: pick a portion for it.",
         )
-
-
-def fits(
-    conversion: fdc.Conversion, kind: Literal["mass", "volume", "count"], unit: str | None
-) -> bool:
-    """Whether a portion's conversion gives a line of the unit's kind a weight: any does for a
-    mass line, which needs none, a density for a volume line, and for a count line a count in its
-    own unit (see `_counts_in`).
-    """
-    if kind == "mass":
-        return True
-    if kind == "volume":
-        return conversion.density_g_per_ml is not None
-    return _counts_in(conversion.count_unit, unit)
-
-
-# The "(s)" or "(es)" an editor may write to say a unit is singular or plural: "clove(s)".
-OPTIONAL_PLURAL = re.compile(r"\((?:e?s)\)", re.IGNORECASE)
-
-
-def _counts_in(count_unit: str | None, unit: str | None) -> bool:
-    """Whether a portion counted in `count_unit` counts in a line's unit, ignoring case and
-    plurals. See BARE_COUNTS for a line with no unit.
-    """
-    if count_unit is None:
-        return False
-    if unit is None:
-        return count_unit in BARE_COUNTS
-    return fdc.words(count_unit) == fdc.words(OPTIONAL_PLURAL.sub("", unit))
 
 
 @dataclass
@@ -427,17 +395,16 @@ def _picked(
     the FDC Snapshot doesn't have or a portion that isn't the food's.
     """
     try:
-        fdc.numbers(snapshot, fdc_id, edit.portion_id)
+        return SharedMatch(
+            wording=normalize_wording(edit.name),
+            canonical_id=canonical_id,
+            snapshot=snapshot,
+            fdc_id=fdc_id,
+            portion_id=edit.portion_id,
+            now=now,
+        )
     except fdc.NotInSnapshot as refused:
         raise HTTPException(422, f"Line {edit.line_id}: {refused}") from None
-    return SharedMatch(
-        wording=normalize_wording(edit.name),
-        canonical_id=canonical_id,
-        snapshot=snapshot,
-        food=snapshot.food(fdc_id),
-        portion_id=edit.portion_id,
-        now=now,
-    )
 
 
 def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volume", "count"]:

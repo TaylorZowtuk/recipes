@@ -18,7 +18,7 @@ import zipfile
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 import requests
 from pydantic import BaseModel, ConfigDict, PrivateAttr
@@ -83,6 +83,12 @@ NOT_COUNTS = (
 )
 # Count units that say nothing on their own, so a size in the modifier ("large") names the count.
 GENERIC_COUNTS = ("each", "piece", "unit", "item")
+# A line with no unit ("2 eggs") counts whole things, which FDC counts in a generic word or a
+# size ("1 large" egg, "1 medium" banana), so only those portions fit it. Any other count word
+# ("clove", "slice") fits only a line written in that word.
+BARE_COUNTS = frozenset({*GENERIC_COUNTS, "small", "medium", "large", "extra large", "jumbo"})
+# The "(s)" or "(es)" an editor may write to say a unit is singular or plural: "clove(s)".
+OPTIONAL_PLURAL = re.compile(r"\((?:e?s)\)", re.IGNORECASE)
 # Why a food with no portion chosen converts nothing.
 NO_PORTION = "no portion chosen"
 WORDS = re.compile(r"[a-z]+")
@@ -197,14 +203,38 @@ def convert(food: Food, portion_id: int | None) -> Conversion:
     return Conversion(grams_per_count=portion.gram_weight / portion.amount, count_unit=unit)
 
 
+def fits(
+    conversion: Conversion, kind: Literal["mass", "volume", "count"], unit: str | None
+) -> bool:
+    """Whether a portion's conversion gives a line of the unit's kind a weight: any does for a
+    mass line, which needs none, a density for a volume line, and for a count line a count in its
+    own unit (see `_counts_in`).
+    """
+    if kind == "mass":
+        return True
+    if kind == "volume":
+        return conversion.density_g_per_ml is not None
+    return _counts_in(conversion.count_unit, unit)
+
+
+def _counts_in(count_unit: str | None, unit: str | None) -> bool:
+    """Whether a portion counted in `count_unit` counts in a line's unit, ignoring case and
+    plurals. See BARE_COUNTS for a line with no unit.
+    """
+    if count_unit is None:
+        return False
+    if unit is None:
+        return count_unit in BARE_COUNTS
+    return words(count_unit) == words(OPTIONAL_PLURAL.sub("", unit))
+
+
 class NotInSnapshot(ValueError):
     """An FDC food the Snapshot doesn't have, or a portion that isn't the food's."""
 
 
-def numbers(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> FdcNumbers:
-    """The FDC Snapshot's numbers for a food and its chosen portion, to copy into a fact: the
-    one place a chosen food and portion become stored numbers. Raises NotInSnapshot for a food
-    the Snapshot doesn't have or a portion that isn't the food's, rather than storing a refusal.
+def chosen(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> Food:
+    """A chosen food, with no portion or one of its own. Raises NotInSnapshot for a food the
+    Snapshot doesn't have or a portion that isn't the food's.
     """
     try:
         food = snapshot.food(fdc_id)
@@ -214,6 +244,15 @@ def numbers(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> FdcNumbe
     if portion_id is not None and portion_id not in {p.id for p in food.portions}:
         msg = f"portion {portion_id} isn't one of FDC food {fdc_id}'s"
         raise NotInSnapshot(msg)
+    return food
+
+
+def numbers(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> FdcNumbers:
+    """The FDC Snapshot's numbers for a food and its chosen portion, to copy into a fact: the
+    one place a chosen food and portion become stored numbers. Raises NotInSnapshot as `chosen`
+    does, rather than storing a refusal.
+    """
+    food = chosen(snapshot, fdc_id, portion_id)
     return FdcNumbers(
         dataset=food.dataset,
         release=snapshot.release,
