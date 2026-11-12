@@ -595,6 +595,7 @@ describe("editing a Review Item", () => {
 
   // The note is a live region, so it quotes neither the typed name nor the new one's name, and
   // changes only with the pick.
+  // The Collection holds no other recipe's facts, so only this recipe can show an FDC food for it.
   it("says a new Canonical Ingredient applies to every recipe with the wording, without a weight", () => {
     const draft = lineDraft(recipe(), "i1");
     expect(canonicalNote(draft, collection, recipe())).toBeNull();
@@ -605,7 +606,7 @@ describe("editing a Review Item", () => {
         recipe({ facts: { ...recipe().facts, ingredients: {} } }),
       ),
     ).toBe(
-      "Every line with this line’s wording, in every recipe, will use garlic. Without an FDC food, this line has no weight or nutrition.",
+      "Every line worded like this one, in every recipe, will use garlic. If no line in the Collection has an FDC food for it, this line will have no weight or nutrition.",
     );
     // A line of the recipe already matched to it with an FDC food gives this one its food too.
     expect(
@@ -614,7 +615,7 @@ describe("editing a Review Item", () => {
         collection,
         recipe(),
       ),
-    ).toBe("Every line with this line’s wording, in every recipe, will use butter.");
+    ).toBe("Every line worded like this one, in every recipe, will use butter.");
     expect(
       canonicalNote(
         {
@@ -625,7 +626,7 @@ describe("editing a Review Item", () => {
         recipe(),
       ),
     ).toBe(
-      "Every line with this line’s wording, in every recipe, will use the new Canonical Ingredient. Without an FDC food, this line has no weight or nutrition.",
+      "Every line worded like this one, in every recipe, will use the new Canonical Ingredient. Without an FDC food, this line has no weight or nutrition.",
     );
   });
 
@@ -728,7 +729,7 @@ describe("editing a Review Item", () => {
       answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: [], too_big: [] }),
     );
     const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
-    expect(await runEdit(recipe(), edit)).toEqual({ toast: { text: "Saved as Confirmed." } });
+    expect(await runEdit(recipe(), edit, collection)).toEqual({ toast: { text: "Saved as Confirmed." } });
     expect(post).toHaveBeenCalledWith("/api/recipes/{recipe_id}/edit", {
       params: { path: { recipe_id: "01K7TEST000000000000000001" } },
       body: { version: 4, edit },
@@ -745,7 +746,7 @@ describe("editing a Review Item", () => {
         too_big: [],
       }),
     );
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       toast: {
         text: "Saved as Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching. 1 other recipe with the same wording changed too.",
       },
@@ -754,7 +755,15 @@ describe("editing a Review Item", () => {
 
   it("says how many other recipes with the wording weren't updated, and how to retry", async () => {
     const saved = recipe({ version: 5 });
-    const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
+    const edit = {
+      kind: "line" as const,
+      line_id: "i1",
+      quantity: null,
+      unit: null,
+      name: "butter",
+      preparation: null,
+      canonical: { kind: "existing" as const, id: KNOWN_CANONICAL },
+    };
     const others = ["01K7TEST000000000000000002", "01K7TEST000000000000000003"];
     post.mockResolvedValueOnce(
       answer(200, {
@@ -765,9 +774,9 @@ describe("editing a Review Item", () => {
         too_big: [],
       }),
     );
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       toast: {
-        text: "Saved as Confirmed. 2 other recipes with the same wording weren’t updated. Save this line again to retry.",
+        text: "Saved as Confirmed. 2 other recipes with the same wording weren’t updated. Choose garlic again for this line to retry.",
       },
     });
     post.mockResolvedValueOnce(
@@ -779,16 +788,48 @@ describe("editing a Review Item", () => {
         too_big: [],
       }),
     );
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       toast: {
-        text: "Saved as Confirmed. 1 other recipe with the same wording changed too. 1 other recipe with the same wording wasn’t updated. Save this line again to retry.",
+        text: "Saved as Confirmed. 1 other recipe with the same wording changed too. 1 other recipe with the same wording wasn’t updated. Choose garlic again for this line to retry.",
+      },
+    });
+    // A new Canonical Ingredient isn't in the Collection the edit was made against.
+    post.mockResolvedValueOnce(
+      answer(200, {
+        recipe: saved,
+        ready: false,
+        also_updated: [],
+        not_updated: [others[0]],
+        too_big: [],
+      }),
+    );
+    const created = {
+      ...edit,
+      canonical: {
+        kind: "new" as const,
+        name: "salted butter",
+        family: "dairy",
+        store_category_id: "dairy-eggs",
+      },
+    };
+    expect(await runEdit(recipe(), created, collection)).toEqual({
+      toast: {
+        text: "Saved as Confirmed. 1 other recipe with the same wording wasn’t updated. Choose salted butter again for this line to retry.",
       },
     });
   });
 
   it("says how many other recipes are too big to update, apart from those to retry", async () => {
     const saved = recipe({ version: 5 });
-    const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
+    const edit = {
+      kind: "line" as const,
+      line_id: "i1",
+      quantity: null,
+      unit: null,
+      name: "butter",
+      preparation: null,
+      canonical: { kind: "existing" as const, id: KNOWN_CANONICAL },
+    };
     const others = [
       "01K7TEST000000000000000002",
       "01K7TEST000000000000000003",
@@ -803,7 +844,7 @@ describe("editing a Review Item", () => {
         too_big: [others[0]],
       }),
     );
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       toast: {
         text: "Saved as Confirmed. 1 other recipe with the same wording is too big to update.",
       },
@@ -817,16 +858,16 @@ describe("editing a Review Item", () => {
         too_big: others.slice(1),
       }),
     );
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       toast: {
-        text: "Saved as Confirmed. 1 other recipe with the same wording wasn’t updated. Save this line again to retry. 2 other recipes with the same wording are too big to update.",
+        text: "Saved as Confirmed. 1 other recipe with the same wording wasn’t updated. Choose garlic again for this line to retry. 2 other recipes with the same wording are too big to update.",
       },
     });
   });
 
   it("reloads on a stale version, saying the recipe changed elsewhere", async () => {
     post.mockResolvedValueOnce(answer(409));
-    const toast = await runEdit(recipe(), { kind: "difficulty", prep: 1, cook: 1, cleanup: 1 });
+    const toast = await runEdit(recipe(), { kind: "difficulty", prep: 1, cook: 1, cleanup: 1 }, collection);
     expect(reloadCollection).toHaveBeenCalled();
     expect(rememberRecipe).not.toHaveBeenCalled();
     expect(toast).toEqual({
@@ -837,9 +878,9 @@ describe("editing a Review Item", () => {
   it("keeps the form open with the reason when the API refuses the edit or can't be reached", async () => {
     post.mockResolvedValueOnce(answer(422, undefined, "The steps use more than all of i1"));
     const edit = { kind: "step" as const, step_id: "s1", portions: [1], durations: [] };
-    expect(await runEdit(recipe(), edit)).toEqual({ problem: "The steps use more than all of i1" });
+    expect(await runEdit(recipe(), edit, collection)).toEqual({ problem: "The steps use more than all of i1" });
     post.mockRejectedValueOnce(new TypeError("offline"));
-    expect(await runEdit(recipe(), edit)).toEqual({
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
       problem: "Couldn’t reach Plateful. Try again.",
     });
     expect(reloadCollection).not.toHaveBeenCalled();

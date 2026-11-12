@@ -275,7 +275,7 @@ function RecipeTabs({
   const edit = async (change: FactEdit) => {
     if (busy) return null;
     setBusy(true);
-    const settled = await runEdit(recipe, change);
+    const settled = await runEdit(recipe, change, collection);
     if (!mounted.current) return null;
     setBusy(false);
     if ("problem" in settled) return settled.problem;

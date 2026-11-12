@@ -90,7 +90,7 @@ describe("an edit form, as an editor uses it", () => {
     expect(choice("Keep butter")).toBeUndefined();
     expect(choice("butter")?.checked).toBe(true);
     const note = host.querySelector('[role="status"]');
-    const said = "Every line with this line’s wording, in every recipe, will use butter.";
+    const said = "Every line worded like this one, in every recipe, will use butter.";
     expect(note?.textContent).toBe(said);
     // Typing on doesn't change it, so it's announced only when the pick changes.
     type("Name", "salted butter cubes");
@@ -109,6 +109,24 @@ describe("an edit form, as an editor uses it", () => {
     expect(choice("Keep butter")?.checked).toBe(true);
     await click(button("Save"));
     expect(saved()[1]).not.toHaveProperty("canonical");
+  });
+
+  // Choosing it again is how an editor retries the recipes an earlier fan-out couldn't update.
+  it("offers the line's current Canonical Ingredient beside Keep, saying what choosing it reaches", async () => {
+    open("i1");
+    expect(choice("Keep butter")?.checked).toBe(true);
+    expect(choice("butter")?.checked).toBe(false);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe("");
+    const current = choice("butter");
+    if (!current) throw new Error("no current choice");
+    await click(current);
+    expect(host.querySelector('[role="status"]')?.textContent).toBe(
+      "Every line worded like this one, in every recipe, will use butter.",
+    );
+    await click(button("Save"));
+    expect(saved()).toEqual([
+      expect.objectContaining({ name: "butter", canonical: { kind: "existing", id: NEW_CANONICAL } }),
+    ]);
   });
 
   it("says what a pick reaches under the choices, not over the fields at the sheet's foot", () => {

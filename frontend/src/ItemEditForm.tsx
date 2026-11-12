@@ -309,8 +309,10 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
 
 const SHOWN_MATCHES = 6;
 
-// Keep the line's Canonical Ingredient, pick another found by name, or create one from the search,
-// and under the choices, what the pick reaches. A renamed line can't keep it, but may pick it again.
+// Keep the line's Canonical Ingredient, pick it again, pick another found by name, or create one
+// from the search, and under the choices, what the pick reaches. Picking it again shares it with
+// every line worded like this one, which retries the recipes an earlier save couldn't update. A
+// renamed line can't keep it, but may pick it again.
 function CanonicalPicker({
   recipe,
   lineId,
@@ -342,7 +344,7 @@ function CanonicalPicker({
         .slice(0, SHOWN_MATCHES)
     : [];
   const picked = pick.kind === "existing" && all.find((c) => c.id === pick.id);
-  const offered = renamed && current && current !== picked ? [current, ...found] : found;
+  const offered = current && current !== picked ? [current, ...found] : found;
   const shown = picked && !offered.includes(picked) ? [picked, ...offered] : offered;
   const exact = all.some((c) => alphabetical(c.name, q) === 0);
   return (

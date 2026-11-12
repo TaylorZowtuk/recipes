@@ -1,4 +1,4 @@
-import { api, type Card, type Recipe, type RecipeFacts } from "./api/client";
+import { api, type Card, type Collection, type Recipe, type RecipeFacts } from "./api/client";
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
 import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED, UNREACHABLE } from "./editRecipe";
@@ -130,6 +130,8 @@ export type ReviewOutcome =
       alsoUpdated: number;
       notUpdated: number;
       tooBig: number;
+      // The line's Canonical Ingredient, picking which again retries those not updated.
+      canonical?: string;
     }
   | WriteRefusal;
 
@@ -179,12 +181,25 @@ export async function editFact(
   return message ? { kind: "invalid", message } : versionedRefusal(answer as Answer<unknown>);
 }
 
+// The name of the Canonical Ingredient a line edit picks: a new one isn't in the Collection yet.
+function pickedName(
+  edit: FactEdit,
+  collection: Pick<Collection, "canonical_ingredients">,
+): string | undefined {
+  if (edit.kind !== "line" || !edit.canonical) return undefined;
+  const pick = edit.canonical;
+  return pick.kind === "new"
+    ? pick.name
+    : collection.canonical_ingredients.find((c) => c.id === pick.id)?.name;
+}
+
 // Saves the edit and settles it as a confirm is, except that an edit has no Undo. A saved edit or a
 // conflict gives a toast, once the newer recipe is shown; anything else is a problem for the form,
 // which stays open with what the editor typed.
 export async function runEdit(
   recipe: Recipe,
   edit: FactEdit,
+  collection: Pick<Collection, "canonical_ingredients">,
 ): Promise<{ toast: ToastMessage } | { problem: string }> {
   let outcome: Awaited<ReturnType<typeof editFact>>;
   try {
@@ -193,7 +208,8 @@ export async function runEdit(
     return { problem: UNREACHABLE };
   }
   if (outcome.kind === "invalid") return { problem: outcome.message };
-  const settled = outcome;
+  const canonical = pickedName(edit, collection);
+  const settled = outcome.kind === "edited" && canonical ? { ...outcome, canonical } : outcome;
   const toast = await runReview(async () => settled);
   return settled.kind === "edited" || settled.kind === "conflict"
     ? { toast }
@@ -231,9 +247,10 @@ export async function runReview(
       const others = (n: number) => `${n} other ${n === 1 ? "recipe" : "recipes"}`;
       const { alsoUpdated: also, notUpdated: not, tooBig: big } = outcome;
       const changed = also ? ` ${others(also)} with the same wording changed too.` : "";
-      // Saving the line again retries the recipes that kept changing, but not those too big.
+      // Picking the line's Canonical Ingredient again retries the recipes that kept changing, but
+      // not those too big. Only a pick reaches other recipes, so one that wasn't updated has a name.
       const missed = not
-        ? ` ${others(not)} with the same wording ${not === 1 ? "wasn’t" : "weren’t"} updated. Save this line again to retry.`
+        ? ` ${others(not)} with the same wording ${not === 1 ? "wasn’t" : "weren’t"} updated. Choose ${outcome.canonical ?? "its Canonical Ingredient"} again for this line to retry.`
         : "";
       const tooBig = big
         ? ` ${others(big)} with the same wording ${big === 1 ? "is" : "are"} too big to update.`
