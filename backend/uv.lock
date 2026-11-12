@@ -1684,6 +1684,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "google-auth", extra = ["requests"] },
     { name = "pillow" },
+    { name = "pint" },
     { name = "protego" },
     { name = "recipe-scrapers" },
     { name = "uvicorn" },
@@ -1702,7 +1703,6 @@ dev = [
 ]
 enrich = [
     { name = "ingredient-parser-nlp" },
-    { name = "pint" },
 ]
 fallback = [
     { name = "playwright" },
@@ -1715,6 +1715,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.142.2" },
     { name = "google-auth", extras = ["requests"], specifier = ">=2.62.0" },
     { name = "pillow", specifier = ">=12.2,<13" },
+    { name = "pint", specifier = ">=0.26.2" },
     { name = "protego", specifier = ">=0.7.0" },
     { name = "recipe-scrapers", specifier = ">=15.13.0" },
     { name = "uvicorn", specifier = ">=0.54.0" },
@@ -1731,10 +1732,7 @@ dev = [
     { name = "types-boto3-lite", extras = ["dynamodb", "lambda", "s3", "ssm"], specifier = ">=1.43.114" },
     { name = "types-requests", specifier = ">=2.33.0.20261006" },
 ]
-enrich = [
-    { name = "ingredient-parser-nlp", specifier = ">=2.9.1" },
-    { name = "pint", specifier = ">=0.26.2" },
-]
+enrich = [{ name = "ingredient-parser-nlp", specifier = ">=2.9.1" }]
 fallback = [{ name = "playwright", specifier = "==1.63.0" }]
 
 [[package]]
