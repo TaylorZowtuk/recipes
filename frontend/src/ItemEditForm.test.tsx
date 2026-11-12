@@ -238,7 +238,7 @@ describe("an edit form, as an editor uses it", () => {
                 { t: "text", v: "Melt " },
                 { t: "ingredient", ref: "i1", written: "half the butter", portion: 0.5 },
                 { t: "text", v: ", then " },
-                { t: "ingredient", ref: "i1", written: "the rest", portion: 0.25 },
+                { t: "ingredient", ref: "i1", written: "a little more", portion: 0.13 },
                 { t: "text", v: "." },
               ],
             },
@@ -247,11 +247,13 @@ describe("an edit form, as an editor uses it", () => {
       },
     });
     open("s1", { r: split });
-    expect(field("“the rest”, butter").value).toBe("¼");
-    type("“the rest”, butter", "⅓");
+    expect(field("“half the butter”, butter").value).toBe("½");
+    // Shown as ⅛, the second portion, untouched, saves as its own stored 0.13, not as ⅛.
+    expect(field("“a little more”, butter").value).toBe("⅛");
+    type("“half the butter”, butter", "⅓");
     await click(button("Save"));
     expect(saved()).toEqual([
-      { kind: "step", step_id: "s1", portions: [0.5, 1 / 3], durations: [] },
+      { kind: "step", step_id: "s1", portions: [1 / 3, 0.13], durations: [] },
     ]);
   });
 
