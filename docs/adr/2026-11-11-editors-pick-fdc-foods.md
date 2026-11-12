@@ -12,9 +12,11 @@ Until now the API couldn't look up an FDC food, because the Lambda zip left the 
 
 ## An editor picks the line's FDC food
 
-- `GET /api/fdc/foods?q=…`, for editors only, searches the FDC Snapshot as the Work Packet's offers do. `q` is 2 to 60 characters, and the answer is at most 10 foods, each with its portions, sent `Cache-Control: no-store`.
-- Every line edit carries the line's `fdc_id`, required, and `portion_id`, which may be null. The picker starts from the line's current food and portion. After a Canonical Ingredient change it starts from the food of a line already matched to that Canonical Ingredient, a Confirmed one first, and for a new Canonical Ingredient with no such line, from a search for its name.
-- **Every match has an FDC food.** When none really fits (za'atar), the editor picks the closest, as enrichment's model already must. A portion may be left unchosen.
+- `GET /api/fdc/foods?q=…`, for editors only, searches the FDC Snapshot as the Work Packet's offers do. `q` is 2 to 60 characters, and the answer, `{foods, default_fdc_id}`, is at most 10 foods, each with its portions and what each portion converts by (`fdc.convert`'s density, or grams per count unit), sent `Cache-Control: no-store`.
+- The picker starts from the line's current food and portion. After a Canonical Ingredient change to an existing one, it starts from the food of a line anywhere in the Collection already matched to it, a Confirmed one first, with no portion, since that line's portion may not fit this one's unit. The PWA holds only the recipe it shows, so the search finds that food: its first request, for the Canonical Ingredient's name, also sends `canonical`, and the answer names the food as `default_fdc_id` and lists it first. It sends `fdc_id`, the line's own food, too, so the picker can name that food when the search wouldn't find it. Only that first request reads the Collection's recipes; the searches as the editor types don't. A new Canonical Ingredient starts from a search for its name, with no food chosen.
+- Every line edit carries the line's `fdc_id` and `portion_id`, which may be null. The food is required for a line that has or gets a Canonical Ingredient, and refused for a line with none: a line with no Canonical Ingredient has no match, and so no food, and the picker is hidden for it. Either is a 422 naming the line.
+- **Every match has an FDC food.** When none really fits (za'atar), the editor picks the closest, as enrichment's model already must. A portion may be left unchosen. The picker says when the chosen portion is the wrong kind for the line's unit (a clove on "1 tbsp garlic"), so the line gets no weight, but doesn't stop the save.
+- **The weight choice goes with the pick.** A line an editor kept in its written unit stays kept when they pick another food and portion, and the form offers converting to a weight only while the picked portion gives something to convert by.
 - **One function makes the numbers.** `fdc.numbers(snapshot, fdc_id, portion_id)` turns the pick into the numbers stored in the `ConversionFact`, using `fdc.convert`. A food the Snapshot doesn't have, or a portion that isn't the food's, is a 422 naming the line, never a stored refusal. No portion stores the "no portion chosen" refusal. The later slices use the same function.
 
 ## A pick spreads by each line's written unit
@@ -25,7 +27,7 @@ Every such line takes the food, but a portion only where it fits the line's own 
 
 1. **the chosen portion**, if it is the same kind as the line's unit: any volume unit for a volume portion, since a density works for every volume, and the same count word, ignoring case and plurals, for a count. A line with no unit ("2 eggs") fits only a generic count (each, piece, unit, item) or a size (small, medium, large, extra large, jumbo).
 2. **otherwise, the food's portion that fits**: for a volume line, its first portion that gives a density, and for a count line, its first portion counted in the line's unit word.
-3. **otherwise, no portion**: the "no portion chosen" conversion, and an open Enrichment Issue on the line's conversion asking an editor to pick a portion. It never silently stays in its written unit.
+3. **otherwise, no portion**: the "no portion chosen" conversion, and an open Enrichment Issue on the line's conversion asking an editor to pick a portion. It never silently stays in its written unit. The issue proposes no correction (it has no before or after), so its sheet offers no Accept correction: the editor settles it by editing the line and picking a portion.
 
 A mass line needs no portion, so it takes the chosen one as it is and never gets an issue.
 
