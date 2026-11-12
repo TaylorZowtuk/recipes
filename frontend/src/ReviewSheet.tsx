@@ -151,7 +151,7 @@ export function ItemDetail({
   const sections: ReactNode[] = [];
 
   // An item an open Enrichment Issue alone makes has no facts of its own to show.
-  if (item.id === "difficulty") {
+  if (item.kind === "difficulty") {
     if (recipe.facts.difficulty)
       sections.push(
         <Section key="difficulty" title="Suggested Difficulty">
@@ -159,7 +159,7 @@ export function ItemDetail({
           <Source fact={recipe.facts.difficulty} />
         </Section>,
       );
-  } else if (item.id.endsWith(".substitutions")) {
+  } else if (item.kind === "substitutions") {
     if (line?.substitutions)
       sections.push(
         <Section key="substitutions" title="Substitutions">
@@ -174,7 +174,7 @@ export function ItemDetail({
           <Source fact={line.substitutions} />
         </Section>,
       );
-  } else if (line) {
+  } else if (item.kind === "line" && line) {
     const { parse, match, conversion } = line;
     if (parse) {
       sections.push(
@@ -233,7 +233,7 @@ export function ItemDetail({
         </Section>,
       );
     }
-  } else if (step) {
+  } else if (item.kind === "step" && step) {
     if (step.segments) {
       sections.push(
         <Section key="segments" title="Segments">
@@ -300,7 +300,7 @@ export function NewCanonicalNote({
   collection: Pick<Collection, "canonical_ingredients">;
 }) {
   const [owner = ""] = item.id.split(".");
-  const match = item.id === owner ? recipe.facts.ingredients[owner]?.match : undefined;
+  const match = item.kind === "line" ? recipe.facts.ingredients[owner]?.match : undefined;
   const canonical = collection.canonical_ingredients.find((c) => c.id === match?.canonical_id);
   if (!canonical || canonical.confirmed) return null;
   return (
@@ -313,12 +313,18 @@ export function NewCanonicalNote({
 
 // What a Review Item is called in its sheet's title.
 function itemTitle(item: ReviewItem, recipe: Recipe) {
-  if (item.id === "difficulty") return "Suggested Difficulty";
   const [owner = ""] = item.id.split(".");
-  const line = recipe.original.ingredients.find((l) => l.id === owner);
-  if (line)
-    return item.id.endsWith(".substitutions") ? `Substitutions for ${line.text}` : line.text;
-  return recipe.original.steps.find((s) => s.id === owner)?.text ?? item.id;
+  const line = recipe.original.ingredients.find((l) => l.id === owner)?.text ?? item.id;
+  switch (item.kind) {
+    case "difficulty":
+      return "Suggested Difficulty";
+    case "substitutions":
+      return `Substitutions for ${line}`;
+    case "line":
+      return line;
+    case "step":
+      return recipe.original.steps.find((s) => s.id === owner)?.text ?? item.id;
+  }
 }
 
 // The sheet for one Review Item, shown while there is one: its detail, then Confirm, or Accept
@@ -337,7 +343,7 @@ export function ItemSheet({
 }: {
   item: ReviewItem | undefined;
   recipe: Recipe;
-  collection: Pick<Collection, "canonical_ingredients" | "kitchen_settings">;
+  collection: Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
   disabled: boolean;
   note?: ReactNode;
   onConfirm: (factIds: string[]) => void;

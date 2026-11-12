@@ -1,6 +1,7 @@
 import type { Quantity } from "./api/client";
 
-const FRACTIONS: [number, string][] = [
+// The kitchen fractions a recipe shows, and an editor may type.
+export const FRACTIONS: [number, string][] = [
   [1 / 8, "⅛"],
   [1 / 4, "¼"],
   [1 / 3, "⅓"],
@@ -25,7 +26,8 @@ export function formatAmount(quantity: Quantity, unit: string | null): string {
   return [formatQuantity(quantity), shown].filter(Boolean).join(" ");
 }
 
-function kitchenNumber(value: number): string {
+// A number for display, as a kitchen fraction where one fits, else a decimal of at most two places.
+export function kitchenNumber(value: number): string {
   const whole = Math.floor(value);
   const rest = value - whole;
   if (rest < 0.01) return String(whole);

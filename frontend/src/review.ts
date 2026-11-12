@@ -10,8 +10,10 @@ export type EnrichmentIssue = components["schemas"]["EnrichmentIssue-Output"];
 type NeedsReview = Card["needs_review"];
 export type ReviewTab = "ingredients" | "steps" | "about";
 export type Mark = "unchecked" | "flagged" | "confirmed";
+export type ReviewItemKind = "line" | "step" | "substitutions" | "difficulty";
 export type ReviewItem = {
   id: string;
+  kind: ReviewItemKind;
   tab: ReviewTab;
   // The item's facts, and any fact an open Enrichment Issue of it is on: what confirming it sends.
   factIds: string[];
@@ -71,9 +73,18 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   for (const [id, paths] of Object.entries(reviewItems(recipe))) {
     const issues = open.filter((issue) => itemOf(issue.fact_id) === id);
     const unconfirmed = paths.some((path) => !factAt(recipe.facts, path)?.confirmed);
+    const kind: ReviewItemKind =
+      id === "difficulty"
+        ? "difficulty"
+        : id.endsWith(".substitutions")
+          ? "substitutions"
+          : stepIds.has(id)
+            ? "step"
+            : "line";
     items.set(id, {
       id,
-      tab: id === "difficulty" ? "about" : stepIds.has(id) ? "steps" : "ingredients",
+      kind,
+      tab: kind === "difficulty" ? "about" : kind === "step" ? "steps" : "ingredients",
       factIds: paths,
       mark: issues.length ? "flagged" : unconfirmed ? "unchecked" : "confirmed",
       issues,
@@ -112,7 +123,7 @@ export const confirmableOn = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
 export type ReviewOutcome =
   | { kind: "confirmed"; recipe: Recipe; batch: string; ready: boolean }
   | { kind: "undone"; recipe: Recipe }
-  | { kind: "edited"; recipe: Recipe; ready: boolean; alsoUpdated: number }
+  | { kind: "edited"; recipe: Recipe; ready: boolean; alsoUpdated: number; notUpdated: number }
   | WriteRefusal;
 
 // Confirms the facts as one Confirm Batch at the recipe's version.
@@ -154,6 +165,7 @@ export async function editFact(
       recipe: data.recipe,
       ready: data.ready,
       alsoUpdated: data.also_updated.length,
+      notUpdated: data.not_updated.length,
     };
   const message = answer.response.status === 422 && refusalMessage(answer.error);
   return message ? { kind: "invalid", message } : versionedRefusal(answer as Answer<unknown>);
@@ -208,11 +220,16 @@ export async function runReview(
     case "undone":
       return { text: `Undone.${stale}` };
     case "edited": {
-      const others = outcome.alsoUpdated;
-      const also = others
-        ? ` ${others} other ${others === 1 ? "recipe" : "recipes"} with the same wording changed too.`
+      const others = (n: number) => `${n} other ${n === 1 ? "recipe" : "recipes"}`;
+      const { alsoUpdated: also, notUpdated: not } = outcome;
+      const changed = also ? ` ${others(also)} with the same wording changed too.` : "";
+      // The fan-out is idempotent, so saving the line again retries the recipes it missed.
+      const missed = not
+        ? ` ${others(not)} with the same wording ${not === 1 ? "wasn’t" : "weren’t"} updated. Save this line again to retry.`
         : "";
-      return { text: `Saved as Confirmed.${outcome.ready ? READY_REST : ""}${also}${stale}` };
+      return {
+        text: `Saved as Confirmed.${outcome.ready ? READY_REST : ""}${changed}${missed}${stale}`,
+      };
     }
     case "conflict":
       return { text: refreshed ? CHANGED_ELSEWHERE : CHANGED_NOT_REFRESHED };

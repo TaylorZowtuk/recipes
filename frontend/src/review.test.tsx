@@ -1,13 +1,12 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, type Collection, type Recipe } from "./api/client";
+import { api, type Recipe } from "./api/client";
 import {
   canonicalNote,
   difficultyEdit,
   lineDraft,
   lineEdit,
-  numberText,
   readNumber,
   stepDraft,
   stepEdit,
@@ -37,204 +36,16 @@ vi.mock("./collection", () => ({
   rememberRecipe: (recipe: Recipe) => rememberRecipe(recipe),
 }));
 
-const stamp = (confirmed: boolean) => ({
-  provenance: "llm" as const,
-  confidence: 0.7,
-  estimated: false,
-  confirmed,
-  confirmed_by: confirmed ? "editor" : null,
-  confirmed_at: confirmed ? "2026-11-01T00:00:00Z" : null,
-  confirm_batch: confirmed ? "01K7TESTBATCH0000000000000" : null,
-});
-
-const parse = (name: string, confirmed = false, unit: string | null = null) => ({
-  ...stamp(confirmed),
-  provenance: "parser" as const,
-  confidence: 0.9,
-  quantity: { low: 2, high: 2 },
-  unit,
-  unit_kind: null,
-  name,
-  short_name: null,
-  preparation: null,
-  comment: null,
-  optional: false,
-});
-
-const per100g = { kcal: 700, protein_g: 1, fat_g: 80, carbs_g: 0, sodium_mg: 600 };
-const conversion = (confirmed: boolean, fields: object) => ({
-  ...stamp(confirmed),
-  provenance: "fdc" as const,
-  confidence: 0.8,
-  fdc_id: 1001,
-  dataset: "sr_legacy" as const,
-  release: "2018-04",
-  density_g_per_ml: null,
-  grams_per_count: null,
-  count_unit: null,
-  refused: null,
-  per_100g: per100g,
-  ...fields,
-});
-
-const NEW_CANONICAL = "01K7TESTCANON0000000000001";
-const KNOWN_CANONICAL = "01K7TESTCANON0000000000002";
-const match = (canonical_id: string, confirmed: boolean) => ({
-  ...stamp(confirmed),
-  canonical_id,
-  fdc_id: 1001,
-  portion_id: null,
-});
-
-// A synthetic recipe Awaiting Review: i1 flagged on its match to a new Canonical Ingredient, i2
-// confirmed, i3 and its substitutions unchecked, i4 with no facts, s1 unchecked, and a suggestion.
-const recipe = (fields: Partial<Recipe> = {}): Recipe =>
-  ({
-    id: "01K7TEST000000000000000001",
-    version: 4,
-    status: "awaiting_review",
-    difficulty: null,
-    tags: [],
-    images: [],
-    preview: null,
-    original: {
-      title: "Synthetic Test Beans",
-      description: null,
-      author: null,
-      extractor: "json-ld",
-      ingredients: [
-        { id: "i1", text: "2 tbsp butter", component: null },
-        { id: "i2", text: "2 cloves garlic", component: null },
-        { id: "i3", text: "2 cups flour or rice flour", component: null },
-        { id: "i4", text: "salt", component: null },
-      ],
-      steps: [
-        { id: "s1", text: "Melt the butter.", component: null },
-        { id: "s2", text: "Serve.", component: null },
-      ],
-      yield: null,
-      stated_times: { prep: null, cook: null, total: null },
-    },
-    facts: {
-      ingredients: {
-        i1: {
-          parse: parse("butter", false, "tbsp"),
-          match: match(NEW_CANONICAL, false),
-          conversion: conversion(false, { density_g_per_ml: 0.96 }),
-          substitutions: null,
-        },
-        i2: {
-          parse: parse("garlic", true, "cloves"),
-          match: match(KNOWN_CANONICAL, true),
-          conversion: conversion(true, { refused: "no weight per clove in FDC" }),
-          substitutions: null,
-        },
-        i3: {
-          parse: parse("flour", false, "cups"),
-          match: null,
-          conversion: null,
-          substitutions: {
-            ...stamp(false),
-            items: [
-              {
-                wording: "rice flour",
-                canonical_id: KNOWN_CANONICAL,
-                ratio: 0.75,
-                note: "use a little less",
-                fdc_id: 2,
-                portion_id: null,
-                fdc: {
-                  dataset: "foundation",
-                  release: "2025-04",
-                  per_100g: per100g,
-                  density_g_per_ml: 0.5,
-                  count_unit: null,
-                  grams_per_count: null,
-                  refused: null,
-                },
-              },
-            ],
-          },
-        },
-        i4: { parse: null, match: null, conversion: null, substitutions: null },
-      },
-      steps: {
-        s1: {
-          segments: {
-            ...stamp(false),
-            segments: [
-              { t: "text", v: "Melt " },
-              { t: "ingredient", ref: "i1", written: "the butter", portion: 1 },
-              { t: "text", v: "." },
-            ],
-          },
-          uses: { ...stamp(false), uses: [{ ref: "i1", portion: 1 }] },
-        },
-      },
-      difficulty: { ...stamp(false), prep: 2, cook: 1, cleanup: 1 },
-    },
-    issues: [
-      {
-        id: "01K7TESTISSUE000000000001",
-        fact_id: "i1.match",
-        before: "margarine",
-        after: "butter",
-        reason: "The line says butter.",
-        status: "open",
-        confirm_batch: null,
-        model: "test",
-      },
-      {
-        id: "01K7TESTISSUE000000000002",
-        fact_id: "i2.parse",
-        before: "garlics",
-        after: "garlic",
-        reason: "Already settled.",
-        status: "resolved",
-        confirm_batch: "01K7TESTBATCH0000000000000",
-        model: "test",
-      },
-    ],
-    ...fields,
-  }) as Recipe;
-
-const collection = {
-  canonical_ingredients: [
-    {
-      id: NEW_CANONICAL,
-      name: "butter",
-      family: "dairy",
-      store_category_id: "dairy-eggs",
-      pantry_staple: false,
-      confirmed: false,
-      confirm_batch: null,
-      schema_version: 1,
-      version: 1,
-    },
-    {
-      id: KNOWN_CANONICAL,
-      name: "garlic",
-      family: "allium",
-      store_category_id: "produce",
-      pantry_staple: false,
-      confirmed: true,
-      confirm_batch: null,
-      schema_version: 1,
-      version: 1,
-    },
-  ],
-  kitchen_settings: {
-    schema_version: 1,
-    version: 1,
-    store_categories: [
-      { id: "produce", name: "Produce" },
-      { id: "dairy-eggs", name: "Dairy & Eggs" },
-    ],
-  },
-  wordings: [],
-  cards: [],
-  collection_version: 1,
-} as unknown as Collection;
+import {
+  collection,
+  conversion,
+  KNOWN_CANONICAL,
+  match,
+  NEW_CANONICAL,
+  parse,
+  recipe,
+  stamp,
+} from "./review.fixtures";
 
 const text = (markup: string) => markup.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
@@ -283,6 +94,17 @@ describe("reviewOf", () => {
 
   it("puts lines and substitutions on Ingredients, steps on Steps and the suggestion on About", () => {
     expect(tabCounts(items)).toEqual({ ingredients: 3, steps: 1, about: 1 });
+  });
+
+  it("says what kind of item each is", () => {
+    expect(Object.fromEntries([...items].map(([id, item]) => [id, item.kind]))).toEqual({
+      i1: "line",
+      i2: "line",
+      i3: "line",
+      "i3.substitutions": "substitutions",
+      s1: "step",
+      difficulty: "difficulty",
+    });
   });
 
   it("gives a flagged item its open issue's fact as well as its own", () => {
@@ -420,6 +242,7 @@ describe("an open Enrichment Issue on a fact the line lacks", () => {
 
   it("gives a line with no facts an item of its own", () => {
     expect(items.get("i4")).toMatchObject({
+      kind: "line",
       tab: "ingredients",
       mark: "flagged",
       factIds: ["i4.match"],
@@ -637,6 +460,19 @@ describe("editing a Review Item", () => {
       response: new Response(null, { status }),
     }) as never;
 
+  const withI1Quantity = (low: number) => {
+    const r = recipe();
+    const i1 = r.facts.ingredients.i1;
+    if (!i1?.parse) throw new Error("fixture");
+    return {
+      ...r.facts,
+      ingredients: {
+        ...r.facts.ingredients,
+        i1: { ...i1, parse: { ...i1.parse, quantity: { low, high: low } } },
+      },
+    };
+  };
+
   const built = (result: ReturnType<typeof lineEdit>) => {
     if ("problem" in result || result.edit.kind !== "line") throw new Error("not a line edit");
     return result.edit;
@@ -649,9 +485,16 @@ describe("editing a Review Item", () => {
     expect(readNumber("1 1/2")).toBe(1.5);
     expect(readNumber("a pinch")).toBeUndefined();
     expect(readNumber("1/0")).toBeUndefined();
-    expect(numberText(1.5)).toBe("1 1/2");
-    expect(numberText(1 / 3)).toBe("1/3");
-    expect(numberText(0.96)).toBe("0.96");
+    // The kitchen fractions the recipe shows, which the form shows too.
+    expect(readNumber("½")).toBe(0.5);
+    expect(readNumber("1 ½")).toBe(1.5);
+    expect(readNumber("1½")).toBe(1.5);
+    expect(readNumber("⅓")).toBe(1 / 3);
+    expect(readNumber("½½")).toBeUndefined();
+    const shown = (low: number) => lineDraft(recipe({ facts: withI1Quantity(low) }), "i1").low;
+    expect(shown(1.5)).toBe("1½");
+    expect(shown(0.333)).toBe("⅓");
+    expect(shown(0.96)).toBe("0.96");
   });
 
   it("saves a line as the editor reads it, keeping its Canonical Ingredient and weight", () => {
@@ -681,19 +524,25 @@ describe("editing a Review Item", () => {
     const draft = lineDraft(recipe(), "i1");
     expect(lineEdit(recipe(), "i1", { ...draft, low: "lots" })).toEqual({
       problem: "Give the amount as a number, such as 2, 1.5 or 1 1/2, or leave it empty.",
+      field: "Amount",
     });
     expect(lineEdit(recipe(), "i1", { ...draft, high: "1" })).toEqual({
       problem: "The amount’s upper end can’t be below its lower end.",
+      field: "Up to",
     });
     expect(lineEdit(recipe(), "i1", { ...draft, name: " " })).toEqual({
       problem: "Give the ingredient a name.",
+      field: "Name",
     });
     expect(
       lineEdit(recipe(), "i1", {
         ...draft,
         canonical: { kind: "new", name: "salted butter", family: "", storeCategoryId: "" },
       }),
-    ).toEqual({ problem: "Give the new Canonical Ingredient a family and a Store Category." });
+    ).toEqual({
+      problem: "Give the new Canonical Ingredient a family and a Store Category.",
+      field: "Family",
+    });
   });
 
   it("sends a chosen or new Canonical Ingredient, and a weight choice only when it changed", () => {
@@ -731,12 +580,24 @@ describe("editing a Review Item", () => {
 
   it("says a new Canonical Ingredient applies to every recipe with the wording, without a weight", () => {
     const draft = lineDraft(recipe(), "i1");
-    expect(canonicalNote(draft, collection)).toBeNull();
+    expect(canonicalNote(draft, collection, recipe())).toBeNull();
     expect(
-      canonicalNote({ ...draft, canonical: { kind: "existing", id: KNOWN_CANONICAL } }, collection),
+      canonicalNote(
+        { ...draft, canonical: { kind: "existing", id: KNOWN_CANONICAL } },
+        collection,
+        recipe({ facts: { ...recipe().facts, ingredients: {} } }),
+      ),
     ).toBe(
-      "Saving matches every line worded “butter” to garlic, in every recipe. Without another line matched to garlic with an FDC food, this line has no weight or nutrition.",
+      "Every line worded “butter”, in every recipe, will use garlic. Without an FDC food, this line has no weight or nutrition.",
     );
+    // A line of the recipe already matched to it with an FDC food gives this one its food too.
+    expect(
+      canonicalNote(
+        { ...draft, canonical: { kind: "existing", id: NEW_CANONICAL } },
+        collection,
+        recipe(),
+      ),
+    ).toBe("Every line worded “butter”, in every recipe, will use butter.");
     expect(
       canonicalNote(
         {
@@ -744,9 +605,10 @@ describe("editing a Review Item", () => {
           canonical: { kind: "new", name: "salted butter", family: "dairy", storeCategoryId: "" },
         },
         collection,
+        recipe(),
       ),
     ).toBe(
-      "Saving matches every line worded “butter” to salted butter, in every recipe. With no FDC food yet, the line has no weight or nutrition.",
+      "Every line worded “butter”, in every recipe, will use salted butter. Without an FDC food, this line has no weight or nutrition.",
     );
   });
 
@@ -783,9 +645,11 @@ describe("editing a Review Item", () => {
     });
     expect(stepEdit("s1", { portions: ["2"], timers: [] })).toEqual({
       problem: "Give each portion as a number above 0 and at most 1, such as 1/2.",
+      field: "portion-0",
     });
     expect(stepEdit("s1", { portions: ["1"], timers: [{ low: "5", high: "2" }] })).toEqual({
       problem: "Give each timer in minutes above 0, its upper end not below its lower end.",
+      field: "timer-0",
     });
   });
 
@@ -795,6 +659,7 @@ describe("editing a Review Item", () => {
     });
     expect(substitutionEdit("i3", 0, "11", "")).toEqual({
       problem: "Give the ratio as a number above 0 and at most 10.",
+      field: "Ratio",
     });
     expect(difficultyEdit({ prep: 1, cook: 2, cleanup: 3 })).toEqual({
       edit: { kind: "difficulty", prep: 1, cook: 2, cleanup: 3 },
@@ -804,7 +669,9 @@ describe("editing a Review Item", () => {
 
   it("posts the edit at the recipe's version and shows the saved recipe, Confirmed, with no Undo", async () => {
     const saved = recipe({ version: 5 });
-    post.mockResolvedValueOnce(answer(200, { recipe: saved, ready: false, also_updated: [] }));
+    post.mockResolvedValueOnce(
+      answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: [] }),
+    );
     const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
     expect(await runEdit(recipe(), edit)).toEqual({ toast: { text: "Saved as Confirmed." } });
     expect(post).toHaveBeenCalledWith("/api/recipes/{recipe_id}/edit", {
@@ -815,11 +682,43 @@ describe("editing a Review Item", () => {
     expect(reloadCollection).toHaveBeenCalled();
 
     post.mockResolvedValueOnce(
-      answer(200, { recipe: saved, ready: true, also_updated: ["01K7TEST000000000000000002"] }),
+      answer(200, {
+        recipe: saved,
+        ready: true,
+        also_updated: ["01K7TEST000000000000000002"],
+        not_updated: [],
+      }),
     );
     expect(await runEdit(recipe(), edit)).toEqual({
       toast: {
         text: "Saved as Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching. 1 other recipe with the same wording changed too.",
+      },
+    });
+  });
+
+  it("says how many other recipes with the wording weren't updated, and how to retry", async () => {
+    const saved = recipe({ version: 5 });
+    const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
+    const others = ["01K7TEST000000000000000002", "01K7TEST000000000000000003"];
+    post.mockResolvedValueOnce(
+      answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: others }),
+    );
+    expect(await runEdit(recipe(), edit)).toEqual({
+      toast: {
+        text: "Saved as Confirmed. 2 other recipes with the same wording weren’t updated. Save this line again to retry.",
+      },
+    });
+    post.mockResolvedValueOnce(
+      answer(200, {
+        recipe: saved,
+        ready: false,
+        also_updated: [others[0]],
+        not_updated: [others[1]],
+      }),
+    );
+    expect(await runEdit(recipe(), edit)).toEqual({
+      toast: {
+        text: "Saved as Confirmed. 1 other recipe with the same wording changed too. 1 other recipe with the same wording wasn’t updated. Save this line again to retry.",
       },
     });
   });

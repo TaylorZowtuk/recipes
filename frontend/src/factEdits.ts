@@ -1,11 +1,13 @@
 import type { DifficultyChoice } from "./addRecipe";
+import { FRACTIONS, kitchenNumber } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import type { FactEdit } from "./review";
 
 // What an editor's edit form holds for each kind of Review Item, as typed, and the edit it saves:
 // or, when what's typed can't be saved, why not.
 
-export type Built = { edit: FactEdit } | { problem: string };
+// A problem may name the field at fault, by its label or the name a form gives it.
+export type Built = { edit: FactEdit } | { problem: string; field?: string };
 
 // A line's name as parsed, else as written.
 export function lineName(recipe: Recipe, lineId: string) {
@@ -16,33 +18,31 @@ export function lineName(recipe: Recipe, lineId: string) {
   );
 }
 
-// A number as an editor types it: "2", "1.5", "1/2" or "1 1/2". Undefined if it isn't one.
+const GLYPHS = new Map(FRACTIONS.map(([part, glyph]) => [glyph, part]));
+
+// A number as an editor types it: "2", "1.5", "1/2", "1 1/2", or a kitchen fraction as the recipe
+// shows it, "½", "1 ½" or "1½". Undefined if it isn't one.
 export function readNumber(text: string): number | undefined {
-  const typed = /^(?:(\d*\.?\d+)|(?:(\d+)\s+)?(\d+)\/(\d+))$/.exec(text.trim());
+  const typed = /^(?:(\d*\.?\d+)|(?:(\d+)\s+)?(\d+)\/(\d+)|(?:(\d+)\s*)?(.))$/u.exec(text.trim());
   if (!typed) return undefined;
-  const [, decimal, whole, top, bottom] = typed;
+  const [, decimal, whole, top, bottom, glyphWhole, glyph] = typed;
   if (decimal !== undefined) return Number(decimal);
+  if (glyph !== undefined) {
+    const part = GLYPHS.get(glyph);
+    return part === undefined ? undefined : Number(glyphWhole ?? 0) + part;
+  }
   return Number(bottom) ? Number(whole ?? 0) + Number(top) / Number(bottom) : undefined;
 }
 
-const FRACTIONS: [number, string][] = [
-  [1 / 8, "1/8"],
-  [1 / 4, "1/4"],
-  [1 / 3, "1/3"],
-  [3 / 8, "3/8"],
-  [1 / 2, "1/2"],
-  [5 / 8, "5/8"],
-  [2 / 3, "2/3"],
-  [3 / 4, "3/4"],
-  [7 / 8, "7/8"],
-];
-
-// A number as the form shows it, in the kitchen fractions an editor would type.
-export function numberText(value: number): string {
-  const whole = Math.floor(value);
-  const fraction = FRACTIONS.find(([part]) => Math.abs(value - whole - part) < 0.001);
-  if (fraction) return whole ? `${whole} ${fraction[1]}` : fraction[1];
-  return String(Math.round(value * 1000) / 1000);
+// The Wording Cache's key for an ingredient's name, as the API's `normalize_wording` makes it:
+// lowercase, its whitespace collapsed and the ASCII punctuation around it stripped.
+export function normalizeWording(name: string): string {
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ")
+    .replace(/^[\s!-/:-@[-`{-~]+|[\s!-/:-@[-`{-~]+$/g, "");
 }
 
 // Keep the line's Canonical Ingredient, choose another, or create one.
@@ -66,8 +66,8 @@ export function lineDraft(recipe: Recipe, lineId: string): LineDraft {
   const { parse, conversion } = recipe.facts.ingredients[lineId] ?? {};
   const quantity = parse?.quantity;
   return {
-    low: quantity ? numberText(quantity.low) : "",
-    high: quantity && quantity.high !== quantity.low ? numberText(quantity.high) : "",
+    low: quantity ? kitchenNumber(quantity.low) : "",
+    high: quantity && quantity.high !== quantity.low ? kitchenNumber(quantity.high) : "",
     unit: parse?.unit ?? "",
     name: lineName(recipe, lineId),
     preparation: parse?.preparation ?? "",
@@ -87,12 +87,13 @@ const AMOUNT = "Give the amount as a number, such as 2, 1.5 or 1 1/2, or leave i
 export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Built {
   const low = draft.low.trim() ? readNumber(draft.low) : null;
   const high = draft.high.trim() ? readNumber(draft.high) : low;
-  if (low === undefined || high === undefined || (low === null && high !== null))
-    return { problem: AMOUNT };
+  if (low === undefined || (low === null && high !== null))
+    return { problem: AMOUNT, field: "Amount" };
+  if (high === undefined) return { problem: AMOUNT, field: "Up to" };
   if (low !== null && high !== null && high < low)
-    return { problem: "The amount’s upper end can’t be below its lower end." };
+    return { problem: "The amount’s upper end can’t be below its lower end.", field: "Up to" };
   const name = draft.name.trim();
-  if (!name) return { problem: "Give the ingredient a name." };
+  if (!name) return { problem: "Give the ingredient a name.", field: "Name" };
   const edit: FactEdit = {
     kind: "line",
     line_id: lineId,
@@ -105,9 +106,13 @@ export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Buil
   if (pick.kind === "existing") edit.canonical = { kind: "existing", id: pick.id };
   if (pick.kind === "new") {
     const family = pick.family.trim().toLowerCase();
-    if (!pick.name.trim()) return { problem: "Give the new Canonical Ingredient a name." };
+    if (!pick.name.trim())
+      return { problem: "Give the new Canonical Ingredient a name.", field: "New name" };
     if (!family || !pick.storeCategoryId)
-      return { problem: "Give the new Canonical Ingredient a family and a Store Category." };
+      return {
+        problem: "Give the new Canonical Ingredient a family and a Store Category.",
+        ...(!family && { field: "Family" }),
+      };
     edit.canonical = {
       kind: "new",
       name: pick.name.trim(),
@@ -122,10 +127,43 @@ export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Buil
   return { edit };
 }
 
-// What changing the line's Canonical Ingredient does beyond this line, or null when it's kept.
+type Wordings = Pick<Collection, "canonical_ingredients" | "wordings">;
+
+// Whether the name's wording isn't the matched line's: then keeping the line's Canonical Ingredient
+// would confirm it for the new wording, so the API wants a choice.
+export function renamed(recipe: Recipe, lineId: string, name: string): boolean {
+  const { parse, match } = recipe.facts.ingredients[lineId] ?? {};
+  return !!parse && !!match && normalizeWording(name) !== normalizeWording(parse.name);
+}
+
+// The draft as it saves: once its name's wording changed, Keep stands for a choice, the new
+// wording's confirmed Wording Cache entry if there is one, else the line's Canonical Ingredient.
+// Named back, it keeps it again.
+export function withWording(
+  recipe: Recipe,
+  lineId: string,
+  draft: LineDraft,
+  collection: Wordings,
+): LineDraft {
+  const current = recipe.facts.ingredients[lineId]?.match?.canonical_id;
+  if (draft.canonical.kind !== "keep" || !current || !renamed(recipe, lineId, draft.name))
+    return draft;
+  const wording = normalizeWording(draft.name);
+  const cached = collection.wordings.find(
+    (w) =>
+      w.confirmed &&
+      w.wording === wording &&
+      collection.canonical_ingredients.some((c) => c.id === w.canonical_id),
+  );
+  return { ...draft, canonical: { kind: "existing", id: cached?.canonical_id ?? current } };
+}
+
+// What changing the line's Canonical Ingredient does beyond this line, or null when it's kept:
+// and, unless a line of the recipe already gives it an FDC food, that it may have none.
 export function canonicalNote(
   draft: LineDraft,
   collection: Pick<Collection, "canonical_ingredients">,
+  recipe: Recipe,
 ): string | null {
   const pick = draft.canonical;
   if (pick.kind === "keep") return null;
@@ -133,11 +171,13 @@ export function canonicalNote(
     pick.kind === "new"
       ? pick.name.trim()
       : (collection.canonical_ingredients.find((c) => c.id === pick.id)?.name ?? "it");
-  const weight =
-    pick.kind === "new"
-      ? "With no FDC food yet, the line has no weight or nutrition."
-      : `Without another line matched to ${chosen} with an FDC food, this line has no weight or nutrition.`;
-  return `Saving matches every line worded “${draft.name.trim()}” to ${chosen}, in every recipe. ${weight}`;
+  const fed =
+    pick.kind === "existing" &&
+    Object.values(recipe.facts.ingredients).some(
+      (line) => line.match?.canonical_id === pick.id && line.match.fdc_id !== null,
+    );
+  const reach = `Every line worded “${draft.name.trim()}”, in every recipe, will use ${chosen}.`;
+  return fed ? reach : `${reach} Without an FDC food, this line has no weight or nutrition.`;
 }
 
 // A step's Step Portions, one for each ingredient segment in order, or for each line it uses when
@@ -173,25 +213,31 @@ export type StepDraft = { portions: string[]; timers: { low: string; high: strin
 export function stepDraft(recipe: Recipe, stepId: string): StepDraft {
   const rows = stepRows(recipe, stepId);
   return {
-    portions: rows.portions.map((row) => numberText(row.portion)),
+    portions: rows.portions.map((row) => kitchenNumber(row.portion)),
     timers: rows.timers.map((timer) => ({
-      low: numberText(timer.low_s / 60),
-      high: numberText(timer.high_s / 60),
+      low: kitchenNumber(timer.low_s / 60),
+      high: kitchenNumber(timer.high_s / 60),
     })),
   };
 }
 
 export function stepEdit(stepId: string, draft: StepDraft): Built {
   const portions = draft.portions.map(readNumber);
-  if (portions.some((portion) => portion === undefined || portion <= 0 || portion > 1))
-    return { problem: "Give each portion as a number above 0 and at most 1, such as 1/2." };
+  const portion = portions.findIndex((p) => p === undefined || p <= 0 || p > 1);
+  if (portion >= 0)
+    return {
+      problem: "Give each portion as a number above 0 and at most 1, such as 1/2.",
+      field: `portion-${portion}`,
+    };
   const durations = draft.timers.map(({ low, high }) => ({
     low_s: Math.round((readNumber(low) ?? Number.NaN) * 60),
     high_s: Math.round((readNumber(high) ?? Number.NaN) * 60),
   }));
-  if (durations.some(({ low_s, high_s }) => !(low_s > 0) || !(high_s >= low_s)))
+  const timer = durations.findIndex(({ low_s, high_s }) => !(low_s > 0) || !(high_s >= low_s));
+  if (timer >= 0)
     return {
       problem: "Give each timer in minutes above 0, its upper end not below its lower end.",
+      field: `timer-${timer}`,
     };
   return { edit: { kind: "step", step_id: stepId, portions: portions as number[], durations } };
 }
@@ -204,7 +250,7 @@ export function substitutionEdit(
 ): Built {
   const value = readNumber(ratio);
   if (value === undefined || value <= 0 || value > 10)
-    return { problem: "Give the ratio as a number above 0 and at most 10." };
+    return { problem: "Give the ratio as a number above 0 and at most 10.", field: "Ratio" };
   return {
     edit: { kind: "substitution", line_id: lineId, index, ratio: value, note: note.trim() },
   };

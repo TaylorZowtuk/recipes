@@ -1,4 +1,13 @@
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import {
+  createContext,
+  type FormEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import type { DifficultyChoice } from "./addRecipe";
 import type { Collection, Recipe } from "./api/client";
 import {
@@ -11,16 +20,18 @@ import {
   lineDraft,
   lineEdit,
   lineName,
+  renamed,
   stepDraft,
   stepEdit,
   stepRows,
   substitutionEdit,
+  withWording,
 } from "./factEdits";
 import { DifficultyField } from "./RecipeFields";
 import type { FactEdit, ReviewItem } from "./review";
 import { alphabetical, titleMatches } from "./titleSearch";
 
-type Kitchen = Pick<Collection, "canonical_ingredients" | "kitchen_settings">;
+type Kitchen = Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
 
 // Saves the edit, answering why it wasn't saved, or null once it was or the recipe changed
 // elsewhere, when the sheet closes.
@@ -39,38 +50,67 @@ type FormProps = {
 // Whether the item has facts an editor can edit: a line always, a step with portions or timers,
 // substitutions while there are any, and the Difficulty.
 export function canEdit(item: ReviewItem, recipe: Recipe): boolean {
-  if (item.id === "difficulty") return true;
   const [owner = ""] = item.id.split(".");
-  if (item.id.endsWith(".substitutions"))
-    return !!recipe.facts.ingredients[owner]?.substitutions?.items.length;
-  if (recipe.original.ingredients.some((line) => line.id === owner)) return true;
-  const rows = stepRows(recipe, owner);
-  return rows.portions.length + rows.timers.length > 0;
+  switch (item.kind) {
+    case "difficulty":
+    case "line":
+      return true;
+    case "substitutions":
+      return !!recipe.facts.ingredients[owner]?.substitutions?.items.length;
+    case "step": {
+      const rows = stepRows(recipe, owner);
+      return rows.portions.length + rows.timers.length > 0;
+    }
+  }
 }
 
 // The edit form for the item's kind, in place of its detail in the same sheet.
 export function ItemEditForm(props: FormProps) {
-  const { item } = props;
-  const [owner = ""] = item.id.split(".");
-  if (item.id === "difficulty") return <DifficultyForm {...props} />;
-  if (item.id.endsWith(".substitutions")) return <SubstitutionsForm lineId={owner} {...props} />;
-  if (props.recipe.original.ingredients.some((line) => line.id === owner))
-    return <LineForm lineId={owner} {...props} />;
-  return <StepForm stepId={owner} {...props} />;
+  const [owner = ""] = props.item.id.split(".");
+  switch (props.item.kind) {
+    case "difficulty":
+      return <DifficultyForm {...props} />;
+    case "substitutions":
+      return <SubstitutionsForm lineId={owner} {...props} />;
+    case "line":
+      return <LineForm lineId={owner} {...props} />;
+    case "step":
+      return <StepForm stepId={owner} {...props} />;
+  }
 }
 
+type Problem = { problem: string; field?: string };
+
+// Why the last Save didn't save, by the id of the text that says so, and the field at fault.
+const ProblemOf = createContext<{ id: string; field?: string } | null>(null);
+
 function useSave(onSave: SaveEdit) {
-  const [problem, setProblem] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
+  const id = useId();
   const save = async (built: Built) => {
-    if ("problem" in built) return setProblem(built.problem);
+    if ("problem" in built) return setProblem(built);
     setProblem(null);
     setSaving(true);
     const refused = await onSave(built.edit);
     setSaving(false);
-    setProblem(refused);
+    setProblem(refused === null ? null : { problem: refused });
   };
-  return { problem, saving, save };
+  const shown = problem && (
+    <p id={id} role="alert" className="form-problem item-edit-problem">
+      {problem.problem}
+    </p>
+  );
+  return { problem: problem && { id, field: problem.field }, shown, saving, save };
+}
+
+// The offline or paused note, pinned with the buttons it explains, which it describes.
+function Note({ id, note }: { id: string; note: ReactNode }) {
+  return (
+    <div id={id} className="item-edit-note">
+      {note}
+    </div>
+  );
 }
 
 // The form, its first field focused as it opens, with Cancel and Save pinned at the sheet's foot,
@@ -89,54 +129,71 @@ function EditForm({
   children: ReactNode;
 } & Pick<FormProps, "onSave" | "onCancel" | "disabled" | "note">) {
   const form = useRef<HTMLFormElement>(null);
-  const { problem, saving, save } = useSave(onSave);
+  const { problem, shown, saving, save } = useSave(onSave);
+  const noteId = useId();
   useEffect(() => {
     form.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
   return (
-    <form
-      ref={form}
-      className="review-form item-edit"
-      noValidate
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault();
-        save(build());
-      }}
-    >
-      {children}
-      {note}
-      <div className="sheet-actions">
-        {notice && <p className="review-note">{notice}</p>}
-        {problem && (
-          <p role="alert" className="form-problem item-edit-problem">
-            {problem}
-          </p>
-        )}
-        <button type="button" className="button button-secondary" onClick={onCancel}>
-          Cancel
-        </button>
-        <button type="submit" className="button" disabled={disabled || saving}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </form>
+    <ProblemOf value={problem}>
+      <form
+        ref={form}
+        className="review-form item-edit"
+        noValidate
+        onSubmit={(event: FormEvent) => {
+          event.preventDefault();
+          save(build());
+        }}
+      >
+        {children}
+        <div className="sheet-actions">
+          {note && <Note id={noteId} note={note} />}
+          {notice && (
+            <p role="status" className="review-note">
+              {notice}
+            </p>
+          )}
+          {shown}
+          <button type="button" className="button button-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="button"
+            disabled={disabled || saving}
+            aria-describedby={note ? noteId : undefined}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
+    </ProblemOf>
   );
 }
 
+// A field, described by its hint, any hint it shares (`describedBy`), and the last Save's problem
+// when that names this field, by its `name`, else its label.
 function Field({
   label,
+  name = label,
   value,
   onChange,
   hint,
+  describedBy,
   decimal = false,
 }: {
   label: string;
+  name?: string;
   value: string;
   onChange: (value: string) => void;
   hint?: string;
+  describedBy?: string;
   decimal?: boolean;
 }) {
   const id = useId();
+  const problem = useContext(ProblemOf);
+  const invalid = !!problem && problem.field === name;
+  const described = [hint && `${id}-hint`, describedBy, invalid && problem.id].filter(Boolean);
   return (
     <div className="edit-field">
       <label htmlFor={id}>{label}</label>
@@ -150,7 +207,8 @@ function Field({
         className="text-input"
         autoComplete="off"
         inputMode={decimal ? "decimal" : undefined}
-        aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-describedby={described.length ? described.join(" ") : undefined}
+        aria-invalid={invalid || undefined}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -187,20 +245,35 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
   const [draft, setDraft] = useState(() => lineDraft(recipe, lineId));
   const set = (patch: Partial<LineDraft>) => setDraft((was) => ({ ...was, ...patch }));
   const weight = useId();
-  const kept = draft.canonical.kind === "keep";
+  const amountHint = useId();
+  // What saving sends, which picks a Canonical Ingredient once the name's wording changed.
+  const saved = withWording(recipe, lineId, draft, collection);
+  const kept = saved.canonical.kind === "keep";
   return (
     <EditForm
-      build={() => lineEdit(recipe, lineId, draft)}
-      notice={canonicalNote(draft, collection)}
+      build={() => lineEdit(recipe, lineId, saved)}
+      notice={canonicalNote(saved, collection, recipe)}
       {...props}
     >
       <fieldset className="sheet-section">
         <legend>Line</legend>
         <div className="edit-pair">
-          <Field label="Amount" decimal value={draft.low} onChange={(low) => set({ low })} />
-          <Field label="Up to" decimal value={draft.high} onChange={(high) => set({ high })} />
+          <Field
+            label="Amount"
+            decimal
+            describedBy={amountHint}
+            value={draft.low}
+            onChange={(low) => set({ low })}
+          />
+          <Field
+            label="Up to"
+            decimal
+            describedBy={amountHint}
+            value={draft.high}
+            onChange={(high) => set({ high })}
+          />
         </div>
-        <p className="field-hint">
+        <p id={amountHint} className="field-hint">
           Such as 2, 1.5 or 1 1/2. Leave it empty for none, as in “to taste”.
         </p>
         <Field label="Unit" value={draft.unit} onChange={(unit) => set({ unit })} />
@@ -215,7 +288,8 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
         recipe={recipe}
         lineId={lineId}
         collection={collection}
-        pick={draft.canonical}
+        pick={saved.canonical}
+        renamed={renamed(recipe, lineId, draft.name)}
         onPick={(canonical) => set({ canonical })}
       />
       {kept && draft.keepWeight !== null && canConvert(recipe, lineId) && (
@@ -246,17 +320,20 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
 const SHOWN_MATCHES = 6;
 
 // Keep the line's Canonical Ingredient, pick another found by name, or create one from the search.
+// A renamed line can't keep it, but may pick it again.
 function CanonicalPicker({
   recipe,
   lineId,
   collection,
   pick,
+  renamed,
   onPick,
 }: {
   recipe: Recipe;
   lineId: string;
   collection: Kitchen;
   pick: CanonicalPick;
+  renamed: boolean;
   onPick: (pick: CanonicalPick) => void;
 }) {
   const group = useId();
@@ -273,7 +350,8 @@ function CanonicalPicker({
         .slice(0, SHOWN_MATCHES)
     : [];
   const picked = pick.kind === "existing" && all.find((c) => c.id === pick.id);
-  const shown = picked && !found.includes(picked) ? [picked, ...found] : found;
+  const offered = renamed && current && current !== picked ? [current, ...found] : found;
+  const shown = picked && !offered.includes(picked) ? [picked, ...offered] : offered;
   const exact = all.some((c) => alphabetical(c.name, q) === 0);
   return (
     <fieldset className="sheet-section">
@@ -284,14 +362,21 @@ function CanonicalPicker({
         value={query}
         onChange={setQuery}
       />
+      {renamed && (
+        <p className="field-hint item-edit-found">
+          The name’s wording changed, so choose its Canonical Ingredient.
+        </p>
+      )}
       <div className="choices">
-        <Choice
-          group={group}
-          checked={pick.kind === "keep"}
-          onChange={() => onPick({ kind: "keep" })}
-        >
-          {current ? `Keep ${current.name}` : "Keep none"}
-        </Choice>
+        {!renamed && (
+          <Choice
+            group={group}
+            checked={pick.kind === "keep"}
+            onChange={() => onPick({ kind: "keep" })}
+          >
+            {current ? `Keep ${current.name}` : "Keep none"}
+          </Choice>
+        )}
         {shown.map((c) => (
           <Choice
             key={c.id}
@@ -352,12 +437,13 @@ function CanonicalPicker({
 function StepForm({ stepId, recipe, ...props }: FormProps & { stepId: string }) {
   const rows = stepRows(recipe, stepId);
   const [draft, setDraft] = useState(() => stepDraft(recipe, stepId));
+  const portionsHint = useId();
   return (
     <EditForm build={() => stepEdit(stepId, draft)} {...props}>
       {rows.portions.length > 0 && (
         <fieldset className="sheet-section">
           <legend>Step Portions</legend>
-          <p className="field-hint">
+          <p id={portionsHint} className="field-hint">
             How much of each line this step uses: 1 is all of it, 1/2 half.
           </p>
           {rows.portions.map((row, n) => (
@@ -369,6 +455,8 @@ function StepForm({ stepId, recipe, ...props }: FormProps & { stepId: string }) 
                   ? `“${row.written}”, ${lineName(recipe, row.ref)}`
                   : lineName(recipe, row.ref)
               }
+              name={`portion-${n}`}
+              describedBy={portionsHint}
               decimal
               value={draft.portions[n] ?? ""}
               onChange={(value) =>
@@ -389,6 +477,7 @@ function StepForm({ stepId, recipe, ...props }: FormProps & { stepId: string }) 
             <div className="edit-pair">
               <Field
                 label="From, minutes"
+                name={`timer-${n}`}
                 decimal
                 value={typed.low}
                 onChange={(low) => setTimer({ low })}
@@ -432,11 +521,13 @@ function SubstitutionsForm({
 }: FormProps & { lineId: string }) {
   const items = recipe.facts.ingredients[lineId]?.substitutions?.items ?? [];
   const first = useRef<HTMLDivElement>(null);
+  const noteId = useId();
   useEffect(() => {
     first.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
   return (
     <div className="review-form item-edit" ref={first}>
+      {items.length > 1 && <p className="field-hint">Save each substitute on its own.</p>}
       {items.map((sub, index) => (
         <Substitute
           // biome-ignore lint/suspicious/noArrayIndexKey: the API names a substitute by its index.
@@ -447,11 +538,12 @@ function SubstitutionsForm({
           ratio={sub.ratio}
           note={sub.note}
           disabled={disabled}
+          noteId={note ? noteId : undefined}
           onSave={onSave}
         />
       ))}
-      {note}
       <div className="sheet-actions">
+        {note && <Note id={noteId} note={note} />}
         <button type="button" className="button button-secondary" onClick={onCancel}>
           Cancel
         </button>
@@ -467,6 +559,7 @@ function Substitute({
   ratio,
   note,
   disabled,
+  noteId,
   onSave,
 }: {
   lineId: string;
@@ -475,52 +568,60 @@ function Substitute({
   ratio: number;
   note: string;
   disabled: boolean;
+  noteId?: string;
   onSave: SaveEdit;
 }) {
   const [typed, setTyped] = useState({ ratio: String(ratio), note });
-  const { problem, saving, save } = useSave(onSave);
+  const { problem, shown, saving, save } = useSave(onSave);
   return (
-    <form
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        save(substitutionEdit(lineId, index, typed.ratio, typed.note));
-      }}
-    >
-      <fieldset className="sheet-section">
-        <legend>{wording}</legend>
-        <Field
-          label="Ratio"
-          hint="How much to use for each 1 of the line, such as 0.75."
-          decimal
-          value={typed.ratio}
-          onChange={(value) => setTyped((was) => ({ ...was, ratio: value }))}
-        />
-        <Field
-          label="Note"
-          value={typed.note}
-          onChange={(value) => setTyped((was) => ({ ...was, note: value }))}
-        />
-        {problem && (
-          <p role="alert" className="form-problem">
-            {problem}
-          </p>
-        )}
-        <div className="site-actions">
-          <button type="submit" className="button" disabled={disabled || saving}>
-            {saving ? "Saving…" : "Save"}
-            <span className="visually-hidden"> {wording}</span>
-          </button>
-          <button
-            type="button"
-            className="text-button text-button-danger"
-            disabled={disabled || saving}
-            onClick={() => save({ edit: { kind: "remove_substitution", line_id: lineId, index } })}
-          >
-            Remove<span className="visually-hidden"> {wording}</span>
-          </button>
-        </div>
-      </fieldset>
-    </form>
+    <ProblemOf value={problem}>
+      <form
+        className="item-edit-substitute"
+        noValidate
+        onSubmit={(event) => {
+          event.preventDefault();
+          save(substitutionEdit(lineId, index, typed.ratio, typed.note));
+        }}
+      >
+        <fieldset className="sheet-section">
+          <legend>{wording}</legend>
+          <Field
+            label="Ratio"
+            hint="How much to use for each 1 of the line, such as 0.75."
+            decimal
+            value={typed.ratio}
+            onChange={(value) => setTyped((was) => ({ ...was, ratio: value }))}
+          />
+          <Field
+            label="Note"
+            value={typed.note}
+            onChange={(value) => setTyped((was) => ({ ...was, note: value }))}
+          />
+          {shown}
+          <div className="site-actions">
+            <button
+              type="submit"
+              className="button"
+              disabled={disabled || saving}
+              aria-describedby={noteId}
+            >
+              {saving ? "Saving…" : "Save"}
+              <span className="visually-hidden"> {wording}</span>
+            </button>
+            <button
+              type="button"
+              className="text-button text-button-danger"
+              disabled={disabled || saving}
+              aria-describedby={noteId}
+              onClick={() =>
+                save({ edit: { kind: "remove_substitution", line_id: lineId, index } })
+              }
+            >
+              Remove<span className="visually-hidden"> {wording}</span>
+            </button>
+          </div>
+        </fieldset>
+      </form>
+    </ProblemOf>
   );
 }
