@@ -6,7 +6,7 @@ import { lineName } from "./factEdits";
 import { canEdit, ItemEditForm, type SaveEdit } from "./ItemEditForm";
 import { reviewCounts } from "./needsReview";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { acceptable, confirmableOn, reviewLeft, uncheckedOn } from "./review";
+import { acceptable, confirmableOn, confirmedBy, reviewLeft, uncheckedOn } from "./review";
 import { Sheet } from "./Sheet";
 
 // What the recipe view needs to show an editor Review Items: each item by id, opening one, and
@@ -327,9 +327,10 @@ function itemTitle(item: ReviewItem, recipe: Recipe) {
 }
 
 // The sheet for one Review Item, shown while there is one: its detail, then Confirm, or Accept
-// correction while flagged by an issue that proposes one, and Edit, which shows the item's edit form in the same sheet until it's
-// saved or cancelled. Escape, Close or a tap outside it closes it; `onClose` should be safe to call
-// twice, as Close calls it and the sheet calls it again once it has closed.
+// correction while flagged by an issue that proposes one, and Edit, which shows the item's edit
+// form in the same sheet until it's saved or cancelled. Escape, Close or a tap outside it closes
+// it; `onClose` should be safe to call twice, as Close calls it and the sheet calls it again once
+// it has closed.
 export function ItemSheet({
   item,
   recipe,
@@ -407,7 +408,7 @@ export function ItemSheet({
                     disabled={disabled}
                     onClick={() => {
                       close();
-                      onConfirm(item.factIds);
+                      onConfirm(confirmedBy(item));
                     }}
                   >
                     {item.mark === "flagged" ? "Accept correction" : "Confirm"}

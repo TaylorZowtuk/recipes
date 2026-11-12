@@ -372,14 +372,110 @@ describe("an edit form, as an editor uses it", () => {
     // Until the API answers for the new unit, it says nothing of the old one's.
     expect(host.textContent).not.toContain("gets no weight");
     await settle();
-    expect(queries().at(-1)).toEqual({ q: "butter", fdc_id: BUTTER.fdcId, unit: "pats" });
+    expect(queries().at(-1)).toEqual({ q: "butter", unit: "pats" });
     expect(host.textContent).not.toContain("gets no weight");
     expect(choice("1 pat (5 g)")?.checked).toBe(true);
     type("Unit", "");
     await settle();
-    expect(queries().at(-1)).toEqual({ q: "butter", fdc_id: BUTTER.fdcId, unit: "" });
+    expect(queries().at(-1)).toEqual({ q: "butter", unit: "" });
     expect(host.textContent).toContain(
       "This portion is counted in pat, but the line is a count with no unit, so the line gets no weight.",
+    );
+  });
+
+  it("asks for the default and the line's food only in the picker's first answered search", async () => {
+    open("i1", { r: spoon() });
+    await settle();
+    expect(queries()).toEqual([
+      { q: "butter", fdc_id: BUTTER.fdcId, unit: "tbsp", unit_kind: "volume" },
+    ]);
+    type("Unit", "pats");
+    await settle();
+    type("Find an FDC food", "ghee");
+    await settle();
+    // Back to the start query, as the picker opened with.
+    type("Find an FDC food", "butter");
+    await settle();
+    expect(queries().slice(1)).toEqual([
+      { q: "butter", unit: "pats" },
+      { q: "ghee", unit: "pats" },
+      { q: "butter", unit: "pats" },
+    ]);
+  });
+
+  it("asks again for the default while the first search has no answer", async () => {
+    search.mockImplementationOnce((async () => ({
+      error: "x",
+      response: new Response(null, { status: 503 }),
+    })) as never);
+    open("i1");
+    await settle();
+    type("Find an FDC food", "ghee");
+    await settle();
+    expect(queries()).toEqual([
+      { q: "butter", fdc_id: BUTTER.fdcId, unit: "tbsp" },
+      { q: "ghee", fdc_id: BUTTER.fdcId, unit: "tbsp" },
+    ]);
+  });
+
+  it("keeps the newer query's foods shown when an older search answers after it", async () => {
+    let answerFirst = () => {};
+    search.mockImplementationOnce(
+      ((_path: string, options: { params: { query: Query } }) =>
+        new Promise((done) => {
+          answerFirst = () =>
+            done({ data: answer(options.params.query), response: new Response(null) });
+        })) as never,
+    );
+    open("i1");
+    await settle();
+    type("Find an FDC food", "ghee");
+    await settle();
+    expect(searched()).toEqual(["butter", "ghee"]);
+    expect(choice("Butter, Clarified butter (ghee) · SR Legacy")).toBeDefined();
+    await act(async () => answerFirst());
+    await settle();
+    expect(choice("Butter, Clarified butter (ghee) · SR Legacy")).toBeDefined();
+    expect(choice("Butter, without salt · SR Legacy")).toBeUndefined();
+  });
+
+  const status = () =>
+    [...host.querySelectorAll('[role="status"]')].map((s) => s.textContent).join(" ");
+
+  it("announces how many foods the search found, never that it is searching", async () => {
+    open("i1");
+    type("Find an FDC food", "ghee");
+    expect(host.textContent).toContain("Searching the FDC foods…");
+    expect(status()).not.toContain("Searching");
+    await settle();
+    expect(status()).toContain("2 FDC foods found.");
+    type("Find an FDC food", "butter without");
+    await settle();
+    expect(status()).toContain("1 FDC food found.");
+    expect(status()).not.toContain("butter");
+  });
+
+  it("announces the default food when the picker chooses it", async () => {
+    open("i1");
+    await settle();
+    type("Find or create one", "garlic");
+    await click(choice("garlic") as HTMLInputElement);
+    await settle();
+    expect(status()).toContain(
+      "2 FDC foods found. Chose Garlic, raw · SR Legacy, the food the Collection gives this Canonical Ingredient.",
+    );
+  });
+
+  it("offers converting to a weight right after the portion that gives one", async () => {
+    open("i1");
+    await settle();
+    const legends = [...host.querySelectorAll("legend")].map((l) => l.textContent);
+    expect(legends.slice(legends.indexOf("Portion"))).toEqual(["Portion", "Weight"]);
+    const weight = [...host.querySelectorAll("fieldset")].find(
+      (f) => f.querySelector("legend")?.textContent === "Weight",
+    );
+    expect(weight?.parentElement?.closest("fieldset")?.querySelector("legend")?.textContent).toBe(
+      "FDC food",
     );
   });
 
@@ -412,8 +508,10 @@ describe("an edit form, as an editor uses it", () => {
     open("i1");
     await settle();
     expect(host.textContent).toContain("Couldn’t search the FDC foods. Check you’re online.");
-    expect(choice(`FDC food ${BUTTER.fdcId}`)?.checked).toBe(true);
-    expect(choice("Current portion")?.checked).toBe(true);
+    expect(choice("The line’s current FDC food (its name loads when you’re online)")?.checked).toBe(
+      true,
+    );
+    expect(choice("The line’s current portion")?.checked).toBe(true);
     await click(button("Save"));
     expect(saved()).toEqual([
       expect.objectContaining({ fdc_id: BUTTER.fdcId, portion_id: BUTTER.tbsp }),
