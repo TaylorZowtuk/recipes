@@ -26,6 +26,7 @@ import { ItemDetail, NewCanonicalNote, ReviewBar } from "./ReviewSheet";
 import {
   acceptable,
   confirmableOn,
+  confirmedBy,
   confirmItems,
   type EnrichmentIssue,
   READY_TOAST,
@@ -476,6 +477,32 @@ describe("the item sheet", () => {
     const shown = text(markup("i2", asked));
     expect(shown).not.toContain("→");
     expect(shown).toContain("pick a portion for it.");
+  });
+
+  it("confirms a correction's facts, not a fact only an ask is on, which only an edit settles", () => {
+    const r = recipe();
+    const [correction, settled] = r.issues as [EnrichmentIssue, EnrichmentIssue];
+    const ask = {
+      ...correction,
+      id: "01K7TESTISSUE000000000009",
+      fact_id: "i1.conversion",
+      before: null,
+      after: null,
+      reason: "None of its portions fits its unit, so this line has no weight: pick a portion.",
+    } as EnrichmentIssue;
+    const asked = recipe({
+      issues: [{ ...correction, fact_id: "i1.parse" }, settled, ask],
+    });
+    const i1 = reviewOf(asked).get("i1") as ReviewItem;
+    expect(acceptable(i1)).toBe(true);
+    expect(confirmedBy(i1)).toEqual(["i1.parse", "i1.match"]);
+    // A correction on the asked-about fact still confirms it.
+    const both = recipe({ issues: [{ ...correction, fact_id: "i1.conversion" }, ask] });
+    expect(confirmedBy(reviewOf(both).get("i1") as ReviewItem)).toEqual([
+      "i1.parse",
+      "i1.match",
+      "i1.conversion",
+    ]);
   });
 
   it("says why a weight stays in the written unit", () => {
