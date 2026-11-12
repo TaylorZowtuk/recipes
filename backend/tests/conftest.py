@@ -102,8 +102,17 @@ def fetcher() -> Callable[[], Fetcher]:
 
 
 @pytest.fixture
+def fdc_snapshot() -> Callable[[], fdc.Snapshot]:
+    """How the API loads its FDC Snapshot. A test parametrizes it to give its own."""
+    return lambda: SNAPSHOT
+
+
+@pytest.fixture
 def editor_client(
-    api_store: Store, images: ImageStore, fetcher: Callable[[], Fetcher]
+    api_store: Store,
+    images: ImageStore,
+    fetcher: Callable[[], Fetcher],
+    fdc_snapshot: Callable[[], fdc.Snapshot],
 ) -> Iterator[TestClient]:
     """The API over HTTP on `api_store`, where the service token in `EDITOR` signs in an editor."""
     settings = AuthSettings.parse(
@@ -115,7 +124,7 @@ def editor_client(
         auth=lambda: auth,
         fetcher=fetcher,
         images=lambda: images,
-        snapshot=lambda: SNAPSHOT,
+        snapshot=fdc_snapshot,
     )
     with TestClient(app, follow_redirects=False) as client:
         yield client

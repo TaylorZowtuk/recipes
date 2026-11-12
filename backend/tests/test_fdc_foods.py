@@ -2,7 +2,7 @@
 Snapshot load it.
 """
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR, SNAPSHOT
@@ -13,17 +13,20 @@ from recipes import fdc
 from recipes.models import Per100g, Recipe
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
     from recipes.store import Store
 
 
-def load_with(client: TestClient, snapshot: Callable[[], fdc.Snapshot]) -> None:
-    """Have the started API load its FDC Snapshot with `snapshot`."""
-    cast("FastAPI", client.app).state.snapshot = snapshot
+class Counted:
+    """Loads the synthetic FDC Snapshot, counting each load."""
+
+    def __init__(self) -> None:
+        self.loads = 0
+
+    def __call__(self) -> fdc.Snapshot:
+        self.loads += 1
+        return SNAPSHOT
 
 
 def test_searching_gives_each_foods_portions_and_is_never_cached(
@@ -68,27 +71,40 @@ def test_searching_gives_each_foods_portions_and_is_never_cached(
     }
 
 
-def test_searching_gives_at_most_ten_foods(editor_client: TestClient) -> None:
-    nutrition = Per100g(kcal=None, protein_g=None, fat_g=None, carbs_g=None, sodium_mg=None)
-    many = fdc.Snapshot(
-        release="synthetic",
-        foods=tuple(
-            fdc.Food(
-                fdc_id=n,
-                dataset="sr_legacy",
-                description=f"Zorble paste {n}",
-                per_100g=nutrition,
-                portions=(),
-            )
-            for n in range(1, 13)
-        ),
-    )
-    load_with(editor_client, lambda: many)
+NUTRITION = Per100g(kcal=None, protein_g=None, fat_g=None, carbs_g=None, sodium_mg=None)
+# Twelve foods the search finds, and two it doesn't: a line's default food and its own.
+MANY = fdc.Snapshot(
+    release="synthetic",
+    foods=tuple(
+        fdc.Food(
+            fdc_id=n,
+            dataset="sr_legacy",
+            description=description,
+            per_100g=NUTRITION,
+            portions=(),
+        )
+        for n, description in [
+            *((n, f"Zorble paste {n}") for n in range(1, 13)),
+            (13, "Quibble flakes"),
+            (14, "Snorkel seed"),
+        ]
+    ),
+)
 
-    response = editor_client.get("/api/fdc/foods", params={"q": "zorble"}, headers=EDITOR)
+
+@pytest.mark.parametrize("fdc_snapshot", [lambda: MANY], ids=["fourteen foods"])
+def test_searching_gives_at_most_ten_foods_the_named_ones_first(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    other(api_store, 1, beef_line(fdc_id=13, **CONFIRMED))
+    params = {"q": "zorble", "canonical": BEEF.id, "fdc_id": 14}
+
+    response = editor_client.get("/api/fdc/foods", params=params, headers=EDITOR)
 
     assert response.status_code == 200
-    assert len(response.json()["foods"]) == 10
+    ids = [food["fdc_id"] for food in response.json()["foods"]]
+    assert len(ids) == 10
+    assert ids[:2] == [13, 14]
 
 
 @pytest.mark.parametrize("q", ["z", "z" * 61], ids=["too short", "too long"])
@@ -106,23 +122,21 @@ def test_only_an_editor_can_search(client: TestClient) -> None:
     assert response.status_code == 403
 
 
+COUNTED = Counted()
+
+
+# Counted from before the API starts, so a load on startup counts too.
+@pytest.mark.parametrize("fdc_snapshot", [COUNTED], ids=["counted"])
 def test_reads_and_other_edits_never_load_the_snapshot(
     editor_client: TestClient, api_store: Store
 ) -> None:
-    loads: list[int] = []
-
-    def counted() -> fdc.Snapshot:
-        loads.append(1)
-        return SNAPSHOT
-
-    load_with(editor_client, counted)
     recipe = awaiting(api_store)
 
     assert editor_client.get("/api/sync", headers=EDITOR).status_code == 200
     assert editor_client.get(f"/api/recipes/{recipe.id}", headers=EDITOR).status_code in {200, 307}
     difficulty = edit(editor_client, recipe, kind="difficulty", prep=1, cook=2, cleanup=3)
     assert difficulty.status_code == 200
-    assert loads == []
+    assert COUNTED.loads == 0
 
 
 def search(client: TestClient, **params: str | int) -> dict[str, Any]:
