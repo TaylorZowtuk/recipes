@@ -1065,8 +1065,12 @@ FdcQuery = Annotated[str, Query(min_length=2, max_length=60)]
 UnitKind = Literal["mass", "volume", "count"]
 
 
-def _fdc_food(food: fdc.Food, line: tuple[UnitKind, str | None] | None) -> FdcFood:
-    """The food for the picker, saying whether each portion fits `line`, a kind and unit."""
+def _fdc_food(
+    food: fdc.Food, line: tuple[UnitKind, str | None] | None, *, has_amount: bool
+) -> FdcFood:
+    """The food for the picker, saying whether each portion fits `line`, a kind and unit, with
+    an amount or not.
+    """
     portions: list[FdcPortion] = []
     for portion in food.portions:
         conversion = fdc.convert(food, portion.id)
@@ -1074,7 +1078,7 @@ def _fdc_food(food: fdc.Food, line: tuple[UnitKind, str | None] | None) -> FdcFo
             FdcPortion(
                 **portion.model_dump(),
                 **conversion.model_dump(exclude={"refused"}),
-                fits=fdc.fits(conversion, *line) if line else None,
+                fits=fdc.fits(conversion, *line, has_amount=has_amount) if line else None,
             )
         )
     return FdcFood(
@@ -1100,6 +1104,7 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
     fdc_id: Annotated[int | None, Query()] = None,
     unit: Annotated[str | None, Query(max_length=MAX_LABEL)] = None,
     unit_kind: Annotated[UnitKind | None, Query()] = None,
+    amount: Annotated[bool, Query()] = True,
 ) -> FdcFoods:
     """The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
     them, at most ten, each with its portions.
@@ -1111,7 +1116,8 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
 
     With `unit`, the line's written unit, empty for a line with none ("2 eggs"), each portion
     says whether it fits the line, by `unit_kind` if given (the parser's kind for a unit as it
-    read it) and else by the unit itself.
+    read it) and else by the unit itself. With `amount` false, for a line with no amount ("salt,
+    to taste"), which no portion gives a weight, every portion fits.
     """
     response.headers.update(NO_STORE)
     line = None
@@ -1124,7 +1130,8 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
     found = [foods.food(i) for i in dict.fromkeys(named)]
     found += [f for f in foods.candidates(q, MAX_FDC_FOODS) if f.fdc_id not in named]
     return FdcFoods(
-        foods=[_fdc_food(food, line) for food in found[:MAX_FDC_FOODS]], default_fdc_id=default
+        foods=[_fdc_food(food, line, has_amount=amount) for food in found[:MAX_FDC_FOODS]],
+        default_fdc_id=default,
     )
 
 

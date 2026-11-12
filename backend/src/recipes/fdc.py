@@ -204,13 +204,18 @@ def convert(food: Food, portion_id: int | None) -> Conversion:
 
 
 def fits(
-    conversion: Conversion, kind: Literal["mass", "volume", "count"], unit: str | None
+    conversion: Conversion,
+    kind: Literal["mass", "volume", "count"],
+    unit: str | None,
+    *,
+    has_amount: bool = True,
 ) -> bool:
     """Whether a portion's conversion gives a line of the unit's kind a weight: any does for a
     mass line, which needs none, a density for a volume line, and for a count line a count in its
-    own unit (see `_counts_in`).
+    own unit (see `_counts_in`). No portion gives a line with no amount ("salt, to taste") a
+    weight, so any fits it.
     """
-    if kind == "mass":
+    if kind == "mass" or not has_amount:
         return True
     if kind == "volume":
         return conversion.density_g_per_ml is not None

@@ -264,11 +264,11 @@ class SharedMatch:
         taste") a weight, so it too takes the chosen one as it is.
         """
         kind = parse.unit_kind or unit_kind(parse.unit)
-        if kind == "mass" or parse.quantity is None:
-            return self.portion_id, True
-        tried = [self.portion_id] if self.portion_id is not None else []
-        for portion_id in [*tried, *(portion.id for portion in self.food.portions)]:
-            if fdc.fits(fdc.convert(self.food, portion_id), kind, parse.unit):
+        line = (kind, parse.unit)
+        has_amount = parse.quantity is not None
+        for portion_id in [self.portion_id, *(portion.id for portion in self.food.portions)]:
+            conversion = fdc.convert(self.food, portion_id)
+            if fdc.fits(conversion, *line, has_amount=has_amount):
                 return portion_id, True
         return None, False
 

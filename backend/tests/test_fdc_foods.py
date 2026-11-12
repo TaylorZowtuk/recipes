@@ -224,6 +224,9 @@ def fits(found: dict[str, Any], fdc_id: int) -> dict[int, bool | None]:
         (2004, {"unit": "pinch"}, {606: False, 607: False}),
         (2004, {"unit": "pinch", "unit_kind": "volume"}, {606: True, 607: True}),
         (2004, {}, {606: None, 607: None}),
+        (2004, {"unit": "pinch", "amount": "false"}, {606: True, 607: True}),
+        (2008, {"unit": "", "amount": "false"}, {610: True}),
+        (2008, {"unit": "", "amount": "true"}, {610: False}),
     ],
     ids=[
         "volume portion, tbsp line",
@@ -236,6 +239,10 @@ def fits(found: dict[str, Any], fdc_id: int) -> dict[int, bool | None]:
         "volume portion, count line",
         "volume portion, unit the parser read as a volume",
         "no unit sent",
+        # No portion gives "salt, to taste" a weight, so any fits it, as a spread pick takes it.
+        "line with no amount",
+        "line with no amount or unit",
+        "line with an amount",
     ],
 )
 def test_each_portion_says_whether_it_fits_the_lines_unit_as_a_spread_pick_would(
