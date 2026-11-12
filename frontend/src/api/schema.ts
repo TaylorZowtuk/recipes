@@ -1135,7 +1135,9 @@ export interface components {
         };
         /**
          * EnrichmentIssue
-         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names.
+         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names, or a line
+         *     an editor's FDC food pick left without a portion that fits its unit. That one proposes no
+         *     correction (no `before` or `after`) and is settled by editing the line.
          */
         "EnrichmentIssue-Input": {
             /** After */
@@ -1161,7 +1163,9 @@ export interface components {
         };
         /**
          * EnrichmentIssue
-         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names.
+         * @description Something enrichment corrected or was unsure about, on the fact `fact_id` names, or a line
+         *     an editor's FDC food pick left without a portion that fits its unit. That one proposes no
+         *     correction (no `before` or `after`) and is settled by editing the line.
          */
         "EnrichmentIssue-Output": {
             /** After */

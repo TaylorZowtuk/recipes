@@ -412,7 +412,10 @@ class RecipeFacts(Model):
 
 
 class EnrichmentIssue(Model):
-    """Something enrichment corrected or was unsure about, on the fact `fact_id` names."""
+    """Something enrichment corrected or was unsure about, on the fact `fact_id` names, or a line
+    an editor's FDC food pick left without a portion that fits its unit. That one proposes no
+    correction (no `before` or `after`) and is settled by editing the line.
+    """
 
     id: Ulid
     fact_id: Label  # e.g. "i3.match"

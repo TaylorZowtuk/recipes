@@ -116,7 +116,7 @@ Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiti
 _Avoid_: Processing state
 
 **Enrichment Issue**:
-Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason.
+Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An issue can also mark a line that an editor's FDC food pick on another line with its wording left without a portion that fits its unit: that one proposes no correction (it has no before or after) and is settled by editing the line.
 _Avoid_: Warning, error
 
 **Work Packet**:
