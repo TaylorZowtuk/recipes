@@ -123,7 +123,14 @@ export const confirmableOn = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
 export type ReviewOutcome =
   | { kind: "confirmed"; recipe: Recipe; batch: string; ready: boolean }
   | { kind: "undone"; recipe: Recipe }
-  | { kind: "edited"; recipe: Recipe; ready: boolean; alsoUpdated: number; notUpdated: number }
+  | {
+      kind: "edited";
+      recipe: Recipe;
+      ready: boolean;
+      alsoUpdated: number;
+      notUpdated: number;
+      tooBig: number;
+    }
   | WriteRefusal;
 
 // Confirms the facts as one Confirm Batch at the recipe's version.
@@ -166,6 +173,7 @@ export async function editFact(
       ready: data.ready,
       alsoUpdated: data.also_updated.length,
       notUpdated: data.not_updated.length,
+      tooBig: data.too_big.length,
     };
   const message = answer.response.status === 422 && refusalMessage(answer.error);
   return message ? { kind: "invalid", message } : versionedRefusal(answer as Answer<unknown>);
@@ -221,14 +229,17 @@ export async function runReview(
       return { text: `Undone.${stale}` };
     case "edited": {
       const others = (n: number) => `${n} other ${n === 1 ? "recipe" : "recipes"}`;
-      const { alsoUpdated: also, notUpdated: not } = outcome;
+      const { alsoUpdated: also, notUpdated: not, tooBig: big } = outcome;
       const changed = also ? ` ${others(also)} with the same wording changed too.` : "";
-      // The fan-out is idempotent, so saving the line again retries the recipes it missed.
+      // Saving the line again retries the recipes that kept changing, but not those too big.
       const missed = not
         ? ` ${others(not)} with the same wording ${not === 1 ? "wasn’t" : "weren’t"} updated. Save this line again to retry.`
         : "";
+      const tooBig = big
+        ? ` ${others(big)} with the same wording ${big === 1 ? "is" : "are"} too big to update.`
+        : "";
       return {
-        text: `Saved as Confirmed.${outcome.ready ? READY_REST : ""}${changed}${missed}${stale}`,
+        text: `Saved as Confirmed.${outcome.ready ? READY_REST : ""}${changed}${missed}${tooBig}${stale}`,
       };
     }
     case "conflict":

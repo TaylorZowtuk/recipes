@@ -670,7 +670,7 @@ describe("editing a Review Item", () => {
   it("posts the edit at the recipe's version and shows the saved recipe, Confirmed, with no Undo", async () => {
     const saved = recipe({ version: 5 });
     post.mockResolvedValueOnce(
-      answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: [] }),
+      answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: [], too_big: [] }),
     );
     const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
     expect(await runEdit(recipe(), edit)).toEqual({ toast: { text: "Saved as Confirmed." } });
@@ -687,6 +687,7 @@ describe("editing a Review Item", () => {
         ready: true,
         also_updated: ["01K7TEST000000000000000002"],
         not_updated: [],
+        too_big: [],
       }),
     );
     expect(await runEdit(recipe(), edit)).toEqual({
@@ -701,7 +702,13 @@ describe("editing a Review Item", () => {
     const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
     const others = ["01K7TEST000000000000000002", "01K7TEST000000000000000003"];
     post.mockResolvedValueOnce(
-      answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: others }),
+      answer(200, {
+        recipe: saved,
+        ready: false,
+        also_updated: [],
+        not_updated: others,
+        too_big: [],
+      }),
     );
     expect(await runEdit(recipe(), edit)).toEqual({
       toast: {
@@ -714,11 +721,50 @@ describe("editing a Review Item", () => {
         ready: false,
         also_updated: [others[0]],
         not_updated: [others[1]],
+        too_big: [],
       }),
     );
     expect(await runEdit(recipe(), edit)).toEqual({
       toast: {
         text: "Saved as Confirmed. 1 other recipe with the same wording changed too. 1 other recipe with the same wording wasn’t updated. Save this line again to retry.",
+      },
+    });
+  });
+
+  it("says how many other recipes are too big to update, apart from those to retry", async () => {
+    const saved = recipe({ version: 5 });
+    const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
+    const others = [
+      "01K7TEST000000000000000002",
+      "01K7TEST000000000000000003",
+      "01K7TEST000000000000000004",
+    ];
+    post.mockResolvedValueOnce(
+      answer(200, {
+        recipe: saved,
+        ready: false,
+        also_updated: [],
+        not_updated: [],
+        too_big: [others[0]],
+      }),
+    );
+    expect(await runEdit(recipe(), edit)).toEqual({
+      toast: {
+        text: "Saved as Confirmed. 1 other recipe with the same wording is too big to update.",
+      },
+    });
+    post.mockResolvedValueOnce(
+      answer(200, {
+        recipe: saved,
+        ready: false,
+        also_updated: [],
+        not_updated: [others[0]],
+        too_big: others.slice(1),
+      }),
+    );
+    expect(await runEdit(recipe(), edit)).toEqual({
+      toast: {
+        text: "Saved as Confirmed. 1 other recipe with the same wording wasn’t updated. Save this line again to retry. 2 other recipes with the same wording are too big to update.",
       },
     });
   });
