@@ -66,6 +66,27 @@ export interface paths {
         patch: operations["patch_favorite_sites_api_favorite_sites_patch"];
         trace?: never;
     };
+    "/api/fdc/foods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Fdc Foods
+         * @description The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
+         *     them, at most ten, each with its portions.
+         */
+        get: operations["search_fdc_foods_api_fdc_foods_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/images": {
         parameters: {
             query?: never;
@@ -366,12 +387,14 @@ export interface paths {
          *     Confirmed with provenance `editor` and in no Confirm Batch, and resolve its open Enrichment
          *     Issues. A recipe Awaiting Review with nothing left to review is Ready.
          *
-         *     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
-         *     every recipe with a line of that wording is matched to it too, each at its own version. Once
-         *     the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
-         *     `not_updated`, and one the match would make too big in `too_big`. Picking the same Canonical
-         *     Ingredient again retries them. A line saved with its Canonical Ingredient unchanged reaches no
-         *     other recipe.
+         *     A line's new Canonical Ingredient, or new FDC food or portion, fixes the line's wording: the
+         *     Wording Cache confirms it, and every recipe with a line of that wording is matched to it too,
+         *     each at its own version. Every such line takes the food, and the portion only where it fits
+         *     the line's written unit: else the food's portion that does, or none and an open Enrichment
+         *     Issue asking for one. Once the edited recipe is saved, the edit never fails: a recipe that
+         *     kept changing is listed in `not_updated`, and one the match would make too big in `too_big`.
+         *     Picking the same Canonical Ingredient again retries them. A line saved with its Canonical
+         *     Ingredient, food and portion unchanged reaches no other recipe.
          */
         post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
         delete?: never;
@@ -989,13 +1012,16 @@ export interface components {
         };
         /**
          * EditLine
-         * @description A line's amount, unit, wording and preparation as the editor reads it, and, if given, its
-         *     new Canonical Ingredient and whether it keeps its written unit (true) or converts to a weight
-         *     (false). No quantity means no amount, as in "to taste".
+         * @description A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
+         *     portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
+         *     keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
+         *     in "to taste".
          */
         EditLine: {
             /** Canonical */
             canonical?: (components["schemas"]["ExistingCanonical"] | components["schemas"]["NewCanonical"]) | null;
+            /** Fdc Id */
+            fdc_id: number;
             /** Keep Weight */
             keep_weight?: boolean | null;
             /**
@@ -1007,6 +1033,8 @@ export interface components {
             line_id: string;
             /** Name */
             name: string;
+            /** Portion Id */
+            portion_id: number | null;
             /** Preparation */
             preparation: string | null;
             quantity: components["schemas"]["Quantity"] | null;
@@ -1180,6 +1208,23 @@ export interface components {
             version: number;
         };
         /**
+         * FdcFood
+         * @description An FDC food an editor may pick for a line, with every portion it can be measured in.
+         */
+        FdcFood: {
+            /**
+             * Dataset
+             * @enum {string}
+             */
+            dataset: "foundation" | "sr_legacy";
+            /** Description */
+            description: string;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Portions */
+            portions: components["schemas"]["FdcPortion"][];
+        };
+        /**
          * FdcNumbers
          * @description The FDC Snapshot's numbers for a food, copied in: a density for a volume, the grams in one
          *     count unit for a count, or the reason it doesn't convert, and its nutrition.
@@ -1201,6 +1246,22 @@ export interface components {
             refused: string | null;
             /** Release */
             release: string;
+        };
+        /**
+         * FdcPortion
+         * @description One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`.
+         */
+        FdcPortion: {
+            /** Amount */
+            amount: number;
+            /** Gram Weight */
+            gram_weight: number;
+            /** Id */
+            id: number;
+            /** Modifier */
+            modifier: string | null;
+            /** Unit */
+            unit: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1322,8 +1383,8 @@ export interface components {
         };
         /**
          * MatchFact
-         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
-         *     editor's new Canonical Ingredient has no FDC food until one is chosen for it.
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model or an editor
+         *     chose. Every match has an FDC food: where none really fits, the closest one.
          */
         "MatchFact-Input": {
             /** Canonical Id */
@@ -1344,7 +1405,7 @@ export interface components {
             /** Estimated */
             estimated: boolean;
             /** Fdc Id */
-            fdc_id: number | null;
+            fdc_id: number;
             /** Portion Id */
             portion_id: number | null;
             /**
@@ -1355,8 +1416,8 @@ export interface components {
         };
         /**
          * MatchFact
-         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
-         *     editor's new Canonical Ingredient has no FDC food until one is chosen for it.
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model or an editor
+         *     chose. Every match has an FDC food: where none really fits, the closest one.
          */
         "MatchFact-Output": {
             /** Canonical Id */
@@ -1377,7 +1438,7 @@ export interface components {
             /** Estimated */
             estimated: boolean;
             /** Fdc Id */
-            fdc_id: number | null;
+            fdc_id: number;
             /** Portion Id */
             portion_id: number | null;
             /**
@@ -2598,6 +2659,42 @@ export interface operations {
             };
         };
     };
+    search_fdc_foods_api_fdc_foods_get: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FdcFood"][];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description q isn't 2 to 60 characters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     post_image_api_images_post: {
         parameters: {
             query?: never;
@@ -3382,7 +3479,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has no weight to keep or convert, or the edited recipe is too big to store */
+            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line's FDC food isn't in the FDC Snapshot or its portion isn't the food's, the line has no weight to keep or convert, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
