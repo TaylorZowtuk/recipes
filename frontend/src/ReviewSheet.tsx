@@ -212,7 +212,6 @@ export function ItemDetail({
               ["Store Category", category?.name ?? canonical?.store_category_id],
             ]}
           />
-          {match.fdc_id === null && <p>No FDC food, so this line has no weight or nutrition.</p>}
           <Source fact={match} />
         </Section>,
       );

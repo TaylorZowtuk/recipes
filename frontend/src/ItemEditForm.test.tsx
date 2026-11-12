@@ -2,19 +2,72 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Collection, Recipe } from "./api/client";
+import { api, type Collection, type FdcFood, type Recipe } from "./api/client";
 import { normalizeWording } from "./factEdits";
 import { ItemEditForm } from "./ItemEditForm";
 import { reviewOf } from "./review";
-import { collection, KNOWN_CANONICAL, NEW_CANONICAL, recipe } from "./review.fixtures";
+import {
+  BUTTER,
+  collection,
+  GARLIC,
+  KNOWN_CANONICAL,
+  NEW_CANONICAL,
+  recipe,
+} from "./review.fixtures";
+
+// FDC Snapshot foods as the search answers with them.
+const portion = (id: number, amount: number, unit: string, gram_weight: number) => ({
+  modifier: null as string | null,
+  id,
+  amount,
+  unit,
+  gram_weight,
+});
+const SALTED: FdcFood = {
+  fdc_id: BUTTER.fdcId,
+  description: "Butter, salted",
+  dataset: "sr_legacy" as const,
+  portions: [portion(BUTTER.tbsp, 1, "tbsp", 14.2), portion(BUTTER.cup, 1, "cup", 227)],
+};
+const UNSALTED: FdcFood = {
+  fdc_id: 173430,
+  description: "Butter, without salt",
+  dataset: "sr_legacy" as const,
+  portions: [{ ...portion(92512, 1, "tbsp", 14.2), modifier: "melted" }],
+};
+const GHEE: FdcFood = {
+  fdc_id: 171314,
+  description: "Butter, Clarified butter (ghee)",
+  dataset: "sr_legacy" as const,
+  portions: [],
+};
+const FOUND: Record<string, FdcFood[]> = {
+  butter: [SALTED, UNSALTED],
+  "butter without": [UNSALTED],
+  ghee: [GHEE],
+  garlic: [],
+};
 
 describe("an edit form, as an editor uses it", () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   let root: Root;
   let host: HTMLDivElement;
   const onSave = vi.fn(async () => null);
+  const search = vi.spyOn(api, "GET");
+  const searched = () =>
+    (search.mock.calls as unknown as [string, { params: { query: { q: string } } }][]).map(
+      ([, options]) => options.params.query.q,
+    );
   beforeEach(() => {
     onSave.mockClear();
+    search.mockReset();
+    search.mockImplementation((async (
+      _path: string,
+      options: { params: { query: { q: string } } },
+    ) => ({
+      data: FOUND[options.params.query.q] ?? [],
+      response: new Response(null, { status: 200 }),
+    })) as never);
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
@@ -75,6 +128,119 @@ describe("an edit form, as an editor uses it", () => {
       .find((c) => c.textContent === name)
       ?.querySelector("input");
   const saved = () => (onSave.mock.calls as unknown as [unknown][]).map(([edit]) => edit);
+  // Lets the food search's pause pass and its answer arrive.
+  const settle = () => act(() => new Promise((done) => setTimeout(done, 400)));
+  const checked = () =>
+    [...host.querySelectorAll(".choice")]
+      .filter((c) => c.querySelector("input")?.checked)
+      .map((c) => c.textContent);
+
+  it("starts with the line's food and portion, named from a search for its Canonical Ingredient", async () => {
+    open("i1");
+    expect(field("Find an FDC food").value).toBe("butter");
+    await settle();
+    expect(searched()).toEqual(["butter"]);
+    expect(checked()).toEqual([
+      "Keep butter",
+      "Butter, salted · SR Legacy",
+      "1 tbsp (14.2 g)",
+      "Convert to a weight",
+    ]);
+    expect(choice("Butter, without salt · SR Legacy")?.checked).toBe(false);
+    expect(choice("1 cup (227 g)")?.checked).toBe(false);
+    expect(choice("No portion")?.checked).toBe(false);
+    await click(button("Save"));
+    expect(saved()).toEqual([
+      expect.objectContaining({ fdc_id: BUTTER.fdcId, portion_id: BUTTER.tbsp }),
+    ]);
+  });
+
+  it("saves a food and portion picked from the search, or no portion", async () => {
+    open("i1");
+    await settle();
+    type("Find an FDC food", "butter without");
+    await settle();
+    expect(searched()).toEqual(["butter", "butter without"]);
+    // The line's own food stays offered beside what the search found.
+    expect(choice("Butter, salted · SR Legacy")?.checked).toBe(true);
+    await click(choice("Butter, without salt · SR Legacy") as HTMLInputElement);
+    expect(choice("No portion")?.checked).toBe(true);
+    await click(choice("1 tbsp, melted (14.2 g)") as HTMLInputElement);
+    await click(button("Save"));
+    await click(choice("No portion") as HTMLInputElement);
+    await click(button("Save"));
+    expect(saved()).toEqual([
+      expect.objectContaining({ fdc_id: 173430, portion_id: 92512 }),
+      expect.objectContaining({ fdc_id: 173430, portion_id: null }),
+    ]);
+  });
+
+  it("searches only once typing pauses, and only for at least 2 characters", async () => {
+    open("i1");
+    type("Find an FDC food", "g");
+    type("Find an FDC food", "gh");
+    type("Find an FDC food", "ghee");
+    await settle();
+    expect(searched()).toEqual(["ghee"]);
+    type("Find an FDC food", "x");
+    await settle();
+    expect(searched()).toEqual(["ghee"]);
+  });
+
+  it("takes the food of a line matched to the chosen Canonical Ingredient, without its portion", async () => {
+    open("i1");
+    await settle();
+    type("Find or create one", "garlic");
+    await click(choice("garlic") as HTMLInputElement);
+    expect(field("Find an FDC food").value).toBe("garlic");
+    await settle();
+    // The search didn't find it, so it shows by its FDC id.
+    expect(choice(`FDC food ${GARLIC.fdcId}`)?.checked).toBe(true);
+    expect(choice("No portion")?.checked).toBe(true);
+    await click(button("Save"));
+    expect(saved()).toEqual([
+      expect.objectContaining({
+        canonical: { kind: "existing", id: KNOWN_CANONICAL },
+        fdc_id: GARLIC.fdcId,
+        portion_id: null,
+      }),
+    ]);
+  });
+
+  it("searches for a new Canonical Ingredient's food by its name, and won't save without one", async () => {
+    open("i1");
+    type("Find or create one", "ghee");
+    await click(choice("New: ghee") as HTMLInputElement);
+    type("Family", "dairy");
+    await click(choice("Dairy & Eggs") as HTMLInputElement);
+    expect(field("Find an FDC food").value).toBe("ghee");
+    await settle();
+    expect(choice("Butter, Clarified butter (ghee) · SR Legacy")?.checked).toBe(false);
+    expect(choice("Butter, salted · SR Legacy")).toBeUndefined();
+    await click(button("Save"));
+    expect(onSave).not.toHaveBeenCalled();
+    const problem = host.querySelector('[role="alert"]');
+    expect(problem?.textContent).toBe(
+      "Choose an FDC food for this line: the closest one if none fits.",
+    );
+    expect(field("Find an FDC food").getAttribute("aria-invalid")).toBe("true");
+    await click(choice("Butter, Clarified butter (ghee) · SR Legacy") as HTMLInputElement);
+    await click(button("Save"));
+    expect(saved()).toEqual([expect.objectContaining({ fdc_id: 171314, portion_id: null })]);
+  });
+
+  it("says plainly when the search fails, keeping the line's food to choose", async () => {
+    search.mockRejectedValue(new TypeError("offline"));
+    open("i1");
+    await settle();
+    expect(host.textContent).toContain("Couldn’t search the FDC foods. Check you’re online.");
+    expect(choice(`FDC food ${BUTTER.fdcId}`)?.checked).toBe(true);
+    expect(choice("Current portion")?.checked).toBe(true);
+    await click(button("Save"));
+    expect(saved()).toEqual([
+      expect.objectContaining({ fdc_id: BUTTER.fdcId, portion_id: BUTTER.tbsp }),
+    ]);
+  });
 
   it("normalizes a wording as the Wording Cache does", () => {
     expect(normalizeWording("  Salted   BUTTER, ")).toBe("salted butter");
