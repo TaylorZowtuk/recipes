@@ -169,11 +169,13 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     assert not any("__pycache__" in name for name in infos)
 
 
-# recipe_scrapers too, which the API imports only on its first parse, with its dependencies, and
-# the FDC Snapshot, which the API loads from inside the package on first use.
+# recipe_scrapers too, which the API imports only on its first parse, with its dependencies, the
+# FDC Snapshot, which the API loads from inside the package on first use, and pint, which it
+# imports only to convert a volume portion.
 IMPORT_FROM_ARGV = (
     "import sys; sys.path[:0] = sys.argv[1:]; import recipes.api, recipe_scrapers; "
-    "from recipes import fdc; print(fdc.DEFAULT_PATH, len(fdc.snapshot().foods))"
+    "from recipes import fdc; print(fdc.DEFAULT_PATH, len(fdc.snapshot().foods), "
+    "fdc.unit_registry().Quantity(1, 'cup').m_as('milliliter'))"
 )
 
 
@@ -204,6 +206,7 @@ def test_the_api_imports_from_the_zip_without_installed_package_metadata(
     )
 
     assert imported.returncode == 0, imported.stderr
-    path, foods = imported.stdout.split()
+    path, foods, cup_ml = imported.stdout.split()
     assert Path(path).is_relative_to(tree), "the Snapshot should load from inside the zip"
     assert int(foods) > 1000
+    assert float(cup_ml) == pytest.approx(236.6, abs=0.1)
