@@ -729,7 +729,9 @@ describe("editing a Review Item", () => {
       answer(200, { recipe: saved, ready: false, also_updated: [], not_updated: [], too_big: [] }),
     );
     const edit = { kind: "remove_substitution" as const, line_id: "i3", index: 0 };
-    expect(await runEdit(recipe(), edit, collection)).toEqual({ toast: { text: "Saved as Confirmed." } });
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
+      toast: { text: "Saved as Confirmed." },
+    });
     expect(post).toHaveBeenCalledWith("/api/recipes/{recipe_id}/edit", {
       params: { path: { recipe_id: "01K7TEST000000000000000001" } },
       body: { version: 4, edit },
@@ -867,7 +869,11 @@ describe("editing a Review Item", () => {
 
   it("reloads on a stale version, saying the recipe changed elsewhere", async () => {
     post.mockResolvedValueOnce(answer(409));
-    const toast = await runEdit(recipe(), { kind: "difficulty", prep: 1, cook: 1, cleanup: 1 }, collection);
+    const toast = await runEdit(
+      recipe(),
+      { kind: "difficulty", prep: 1, cook: 1, cleanup: 1 },
+      collection,
+    );
     expect(reloadCollection).toHaveBeenCalled();
     expect(rememberRecipe).not.toHaveBeenCalled();
     expect(toast).toEqual({
@@ -878,7 +884,9 @@ describe("editing a Review Item", () => {
   it("keeps the form open with the reason when the API refuses the edit or can't be reached", async () => {
     post.mockResolvedValueOnce(answer(422, undefined, "The steps use more than all of i1"));
     const edit = { kind: "step" as const, step_id: "s1", portions: [1], durations: [] };
-    expect(await runEdit(recipe(), edit, collection)).toEqual({ problem: "The steps use more than all of i1" });
+    expect(await runEdit(recipe(), edit, collection)).toEqual({
+      problem: "The steps use more than all of i1",
+    });
     post.mockRejectedValueOnce(new TypeError("offline"));
     expect(await runEdit(recipe(), edit, collection)).toEqual({
       problem: "Couldn’t reach Plateful. Try again.",

@@ -125,7 +125,10 @@ describe("an edit form, as an editor uses it", () => {
     );
     await click(button("Save"));
     expect(saved()).toEqual([
-      expect.objectContaining({ name: "butter", canonical: { kind: "existing", id: NEW_CANONICAL } }),
+      expect.objectContaining({
+        name: "butter",
+        canonical: { kind: "existing", id: NEW_CANONICAL },
+      }),
     ]);
   });
 
