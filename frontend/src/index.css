@@ -1318,14 +1318,29 @@ h1:focus {
   line-height: var(--tap);
 }
 
+/* Each choice's label is its whole slice of the pill, so the target is the pill's full height. */
 .segments {
   float: right;
   display: flex;
   gap: var(--space);
-  padding: var(--space);
+  padding: 0;
   border: 1px solid var(--field-border);
   border-radius: var(--radius-pill);
   background: var(--surface);
+}
+
+.segments label {
+  display: block;
+  padding: var(--space) 0;
+  cursor: pointer;
+}
+
+.segments label:first-child {
+  padding-left: var(--space);
+}
+
+.segments label:last-child {
+  padding-right: var(--space);
 }
 
 .segments span {
@@ -1839,6 +1854,7 @@ h1:focus {
   gap: calc(var(--space) * 3);
   margin-top: calc(var(--space) * 3);
   padding: calc(var(--space) * 3) 0 calc(var(--space) * 5 + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--divider);
   background: var(--surface);
 }
 
@@ -2604,4 +2620,57 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 
 .picker-row .plate {
   width: 40px;
+}
+
+/* An item's edit form, in its sheet: fields stacked, an amount's or a timer's two ends side by side.
+   A focused field scrolls clear of the sheet's foot, pinned at its bottom: Cancel and Save with any
+   note or problem, as measured into --sheet-foot, else the buttons' height. */
+.item-edit .edit-field {
+  margin-bottom: calc(var(--space) * 3);
+}
+
+.item-edit :is(.text-input, label:has(input[type="radio"]), button) {
+  scroll-margin-bottom: var(
+    --sheet-foot,
+    calc(var(--space) * 8 + var(--tap) + env(safe-area-inset-bottom))
+  );
+}
+
+.item-edit-reach {
+  margin-top: calc(var(--space) * 3);
+}
+
+.edit-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: calc(var(--space) * 3);
+}
+
+.item-edit .choices {
+  margin-top: calc(var(--space) * 2);
+}
+
+.item-edit-found {
+  margin: calc(var(--space) * 2) 0 0;
+}
+
+.item-edit-new {
+  margin-top: calc(var(--space) * 3);
+}
+
+.item-edit-problem,
+.item-edit-note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.item-edit-note .screen-note {
+  margin: 0;
+}
+
+/* Each substitute's form, apart from the one above it. */
+.item-edit-substitute + .item-edit-substitute {
+  margin-top: calc(var(--space) * 4);
+  padding-top: calc(var(--space) * 4);
+  border-top: 1px solid var(--divider);
 }

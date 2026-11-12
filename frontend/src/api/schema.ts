@@ -351,6 +351,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recipes/{recipe_id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit Fact
+         * @description Save the editor's edit of one Review Item's facts on the recipe at `body.version`,
+         *     Confirmed with provenance `editor` and in no Confirm Batch, and resolve its open Enrichment
+         *     Issues. A recipe Awaiting Review with nothing left to review is Ready.
+         *
+         *     A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
+         *     every recipe with a line of that wording is matched to it too, each at its own version. Once
+         *     the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
+         *     `not_updated`, and one the match would make too big in `too_big`. Picking the same Canonical
+         *     Ingredient again retries them. A line saved with its Canonical Ingredient unchanged reaches no
+         *     other recipe.
+         */
+        post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/recipes/{recipe_id}/enrichment": {
         parameters: {
             query?: never;
@@ -932,6 +961,114 @@ export interface components {
             written: string;
         };
         /**
+         * EditDifficulty
+         * @description The recipe's Difficulty, which is also saved as the confirmed suggestion.
+         */
+        EditDifficulty: {
+            /** Cleanup */
+            cleanup: number;
+            /** Cook */
+            cook: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "difficulty";
+            /** Prep */
+            prep: number;
+        };
+        /**
+         * EditFact
+         * @description An editor's edit of one Review Item's facts on the recipe at `version`.
+         */
+        EditFact: {
+            /** Edit */
+            edit: components["schemas"]["EditLine"] | components["schemas"]["EditStep"] | components["schemas"]["EditSubstitution"] | components["schemas"]["RemoveSubstitution"] | components["schemas"]["EditDifficulty"];
+            /** Version */
+            version: number;
+        };
+        /**
+         * EditLine
+         * @description A line's amount, unit, wording and preparation as the editor reads it, and, if given, its
+         *     new Canonical Ingredient and whether it keeps its written unit (true) or converts to a weight
+         *     (false). No quantity means no amount, as in "to taste".
+         */
+        EditLine: {
+            /** Canonical */
+            canonical?: (components["schemas"]["ExistingCanonical"] | components["schemas"]["NewCanonical"]) | null;
+            /** Keep Weight */
+            keep_weight?: boolean | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "line";
+            /** Line Id */
+            line_id: string;
+            /** Name */
+            name: string;
+            /** Preparation */
+            preparation: string | null;
+            quantity: components["schemas"]["Quantity"] | null;
+            /** Unit */
+            unit: string | null;
+        };
+        /**
+         * EditStep
+         * @description A step's Step Portions, one for each of its ingredient segments in order (or, in a step
+         *     without segments, for each line it uses), and its timers, one for each duration segment.
+         */
+        EditStep: {
+            /** Durations */
+            durations: components["schemas"]["StepTimer"][];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "step";
+            /** Portions */
+            portions: number[];
+            /** Step Id */
+            step_id: string;
+        };
+        /**
+         * EditSubstitution
+         * @description The ratio and note of the line's substitute at `index`.
+         */
+        EditSubstitution: {
+            /** Index */
+            index: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "substitution";
+            /** Line Id */
+            line_id: string;
+            /** Note */
+            note: string;
+            /** Ratio */
+            ratio: number;
+        };
+        /**
+         * EditedFact
+         * @description The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
+         *     other recipes a line's Canonical Ingredient was matched in by its wording, those it couldn't
+         *     be because they kept changing, which picking the same Canonical Ingredient again retries, and
+         *     those the match would make too big.
+         */
+        EditedFact: {
+            /** Also Updated */
+            also_updated: string[];
+            /** Not Updated */
+            not_updated: string[];
+            /** Ready */
+            ready: boolean;
+            recipe: components["schemas"]["Recipe"];
+            /** Too Big */
+            too_big: string[];
+        };
+        /**
          * Enrichment
          * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
          *     Canonical Ingredients it creates and the wordings it learns.
@@ -1009,6 +1146,19 @@ export interface components {
              * @enum {string}
              */
             status: "open" | "resolved";
+        };
+        /**
+         * ExistingCanonical
+         * @description Match the line to a Canonical Ingredient already in the Collection.
+         */
+        ExistingCanonical: {
+            /** Id */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "existing";
         };
         /** FailedAttempt */
         FailedAttempt: {
@@ -1172,7 +1322,8 @@ export interface components {
         };
         /**
          * MatchFact
-         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose.
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
+         *     editor's new Canonical Ingredient has no FDC food until one is chosen for it.
          */
         "MatchFact-Input": {
             /** Canonical Id */
@@ -1193,7 +1344,7 @@ export interface components {
             /** Estimated */
             estimated: boolean;
             /** Fdc Id */
-            fdc_id: number;
+            fdc_id: number | null;
             /** Portion Id */
             portion_id: number | null;
             /**
@@ -1204,7 +1355,8 @@ export interface components {
         };
         /**
          * MatchFact
-         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose.
+         * @description The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
+         *     editor's new Canonical Ingredient has no FDC food until one is chosen for it.
          */
         "MatchFact-Output": {
             /** Canonical Id */
@@ -1225,7 +1377,7 @@ export interface components {
             /** Estimated */
             estimated: boolean;
             /** Fdc Id */
-            fdc_id: number;
+            fdc_id: number | null;
             /** Portion Id */
             portion_id: number | null;
             /**
@@ -1253,6 +1405,23 @@ export interface components {
             open_issues: number;
             /** Unconfirmed */
             unconfirmed: number;
+        };
+        /**
+         * NewCanonical
+         * @description Match the line to a new Canonical Ingredient, created Confirmed.
+         */
+        NewCanonical: {
+            /** Family */
+            family: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "new";
+            /** Name */
+            name: string;
+            /** Store Category Id */
+            store_category_id: string;
         };
         /**
          * NewRecipe
@@ -1630,6 +1799,21 @@ export interface components {
              */
             op: "remove";
         };
+        /**
+         * RemoveSubstitution
+         * @description Remove the line's substitute at `index`. Removing the last leaves the line none.
+         */
+        RemoveSubstitution: {
+            /** Index */
+            index: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "remove_substitution";
+            /** Line Id */
+            line_id: string;
+        };
         /** RenameSite */
         RenameSite: {
             /** Id */
@@ -1934,6 +2118,13 @@ export interface components {
         "StepFacts-Output": {
             segments: components["schemas"]["SegmentsFact-Output"] | null;
             uses: components["schemas"]["UsesFact-Output"] | null;
+        };
+        /** StepTimer */
+        StepTimer: {
+            /** High S */
+            high_s: number;
+            /** Low S */
+            low_s: number;
         };
         /** StepUse */
         StepUse: {
@@ -3143,6 +3334,60 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    edit_fact_api_recipes__recipe_id__edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditFact"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditedFact"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe, or a Canonical Ingredient or wording the edit confirms, changed, or the recipe is Pending and has no facts to edit yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has no weight to keep or convert, or the edited recipe is too big to store */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

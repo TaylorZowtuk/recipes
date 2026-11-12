@@ -1,0 +1,288 @@
+import type { DifficultyChoice } from "./addRecipe";
+import { FRACTIONS, kitchenNumber } from "./amount";
+import type { Collection, Recipe } from "./api/client";
+import type { FactEdit } from "./review";
+
+// What an editor's edit form holds for each kind of Review Item, as typed, and the edit it saves:
+// or, when what's typed can't be saved, why not.
+
+// A problem may name the field at fault, by its label or the name a form gives it.
+export type Built = { edit: FactEdit } | { problem: string; field?: string };
+
+// A line's name as parsed, else as written.
+export function lineName(recipe: Recipe, lineId: string) {
+  return (
+    recipe.facts.ingredients[lineId]?.parse?.name ??
+    recipe.original.ingredients.find((line) => line.id === lineId)?.text ??
+    lineId
+  );
+}
+
+const GLYPHS = new Map(FRACTIONS.map(([part, glyph]) => [glyph, part]));
+
+// A number as an editor types it: "2", "1.5", "1/2", "1 1/2", or a kitchen fraction as the recipe
+// shows it, "½", "1 ½" or "1½". Undefined if it isn't one.
+export function readNumber(text: string): number | undefined {
+  const typed = /^(?:(\d*\.?\d+)|(?:(\d+)\s+)?(\d+)\/(\d+)|(?:(\d+)\s*)?(.))$/u.exec(text.trim());
+  if (!typed) return undefined;
+  const [, decimal, whole, top, bottom, glyphWhole, glyph] = typed;
+  if (decimal !== undefined) return Number(decimal);
+  if (glyph !== undefined) {
+    const part = GLYPHS.get(glyph);
+    return part === undefined ? undefined : Number(glyphWhole ?? 0) + part;
+  }
+  return Number(bottom) ? Number(whole ?? 0) + Number(top) / Number(bottom) : undefined;
+}
+
+// A number field read back: the stored number while the text is still that number as the form
+// showed it, since showing it may have rounded it, so saving never changes a number nobody touched.
+function readField(text: string, stored: number | undefined): number | undefined {
+  return stored !== undefined && text.trim() === kitchenNumber(stored) ? stored : readNumber(text);
+}
+
+// A timer's end in seconds, from its minutes as typed, or as stored while untouched.
+function readSeconds(text: string, stored: number | undefined): number {
+  if (stored !== undefined && text.trim() === kitchenNumber(stored / 60)) return stored;
+  return Math.round((readNumber(text) ?? Number.NaN) * 60);
+}
+
+// The Wording Cache's key for an ingredient's name, as the API's `normalize_wording` makes it:
+// lowercase, its whitespace collapsed and the ASCII punctuation around it stripped.
+export function normalizeWording(name: string): string {
+  return name
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ")
+    .replace(/^[\s!-/:-@[-`{-~]+|[\s!-/:-@[-`{-~]+$/g, "");
+}
+
+// Keep the line's Canonical Ingredient, choose another, or create one.
+export type CanonicalPick =
+  | { kind: "keep" }
+  | { kind: "existing"; id: string }
+  | { kind: "new"; name: string; family: string; storeCategoryId: string };
+
+export type LineDraft = {
+  low: string;
+  high: string;
+  // The amount as stored, which `low` and `high` show.
+  stored: { low: number; high: number } | null;
+  unit: string;
+  name: string;
+  preparation: string;
+  canonical: CanonicalPick;
+  // Whether the line stays in its written unit, or null when it has no weight to keep or convert.
+  keepWeight: boolean | null;
+};
+
+export function lineDraft(recipe: Recipe, lineId: string): LineDraft {
+  const { parse, conversion } = recipe.facts.ingredients[lineId] ?? {};
+  const quantity = parse?.quantity;
+  return {
+    low: quantity ? kitchenNumber(quantity.low) : "",
+    high: quantity && quantity.high !== quantity.low ? kitchenNumber(quantity.high) : "",
+    stored: quantity ?? null,
+    unit: parse?.unit ?? "",
+    name: lineName(recipe, lineId),
+    preparation: parse?.preparation ?? "",
+    canonical: { kind: "keep" },
+    keepWeight: conversion ? !!conversion.refused : null,
+  };
+}
+
+// Whether the line's FDC food gives anything to convert it to a weight by.
+export function canConvert(recipe: Recipe, lineId: string) {
+  const conversion = recipe.facts.ingredients[lineId]?.conversion;
+  return conversion?.density_g_per_ml != null || conversion?.grams_per_count != null;
+}
+
+const AMOUNT = "Give the amount as a number, such as 2, 1.5 or 1 1/2, or leave it empty.";
+
+export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Built {
+  const low = draft.low.trim() ? readField(draft.low, draft.stored?.low) : null;
+  const high = draft.high.trim() ? readField(draft.high, draft.stored?.high) : low;
+  if (low === undefined || (low === null && high !== null))
+    return { problem: AMOUNT, field: "Amount" };
+  if (high === undefined) return { problem: AMOUNT, field: "Up to" };
+  if (low !== null && high !== null && high < low)
+    return { problem: "The amount’s upper end can’t be below its lower end.", field: "Up to" };
+  const name = draft.name.trim();
+  if (!name) return { problem: "Give the ingredient a name.", field: "Name" };
+  const edit: FactEdit = {
+    kind: "line",
+    line_id: lineId,
+    quantity: low !== null && high !== null ? { low, high } : null,
+    unit: draft.unit.trim() || null,
+    name,
+    preparation: draft.preparation.trim() || null,
+  };
+  const pick = draft.canonical;
+  if (pick.kind === "existing") edit.canonical = { kind: "existing", id: pick.id };
+  if (pick.kind === "new") {
+    const family = pick.family.trim().toLowerCase();
+    if (!pick.name.trim())
+      return { problem: "Give the new Canonical Ingredient a name.", field: "New name" };
+    if (!family || !pick.storeCategoryId)
+      return {
+        problem: "Give the new Canonical Ingredient a family and a Store Category.",
+        ...(!family && { field: "Family" }),
+      };
+    edit.canonical = {
+      kind: "new",
+      name: pick.name.trim(),
+      family,
+      store_category_id: pick.storeCategoryId,
+    };
+  }
+  // A new Canonical Ingredient brings its own weight, if any, so the choice is only for the kept one.
+  const was = lineDraft(recipe, lineId).keepWeight;
+  if (pick.kind === "keep" && draft.keepWeight !== null && draft.keepWeight !== was)
+    edit.keep_weight = draft.keepWeight;
+  return { edit };
+}
+
+type Wordings = Pick<Collection, "canonical_ingredients" | "wordings">;
+
+// Whether the name's wording isn't the matched line's: then keeping the line's Canonical Ingredient
+// would confirm it for the new wording, so the API wants a choice.
+export function renamed(recipe: Recipe, lineId: string, name: string): boolean {
+  const { parse, match } = recipe.facts.ingredients[lineId] ?? {};
+  return !!parse && !!match && normalizeWording(name) !== normalizeWording(parse.name);
+}
+
+// The draft as it saves: once its name's wording changed, Keep stands for a choice, the new
+// wording's confirmed Wording Cache entry if there is one, else the line's Canonical Ingredient.
+// Named back, it keeps it again.
+export function withWording(
+  recipe: Recipe,
+  lineId: string,
+  draft: LineDraft,
+  collection: Wordings,
+): LineDraft {
+  const current = recipe.facts.ingredients[lineId]?.match?.canonical_id;
+  if (draft.canonical.kind !== "keep" || !current || !renamed(recipe, lineId, draft.name))
+    return draft;
+  const wording = normalizeWording(draft.name);
+  const cached = collection.wordings.find(
+    (w) =>
+      w.confirmed &&
+      w.wording === wording &&
+      collection.canonical_ingredients.some((c) => c.id === w.canonical_id),
+  );
+  return { ...draft, canonical: { kind: "existing", id: cached?.canonical_id ?? current } };
+}
+
+// What changing the line's Canonical Ingredient does beyond this line, or null when it's kept:
+// and that it may have no FDC food. The API copies one from any line in the Collection matched to
+// an existing pick, but the PWA holds only this recipe's facts, so the note hedges unless a line of
+// the recipe shows one. It quotes nothing typed, so a live region showing it speaks only when the
+// pick changes.
+export function canonicalNote(
+  draft: LineDraft,
+  collection: Pick<Collection, "canonical_ingredients">,
+  recipe: Recipe,
+): string | null {
+  const pick = draft.canonical;
+  if (pick.kind === "keep") return null;
+  const reach = "Every line worded like this one, in every recipe, will use";
+  if (pick.kind === "new")
+    return `${reach} the new Canonical Ingredient. Without an FDC food, this line has no weight or nutrition.`;
+  const chosen = collection.canonical_ingredients.find((c) => c.id === pick.id)?.name ?? "it";
+  const fed = Object.values(recipe.facts.ingredients).some(
+    (line) => line.match?.canonical_id === pick.id && line.match.fdc_id !== null,
+  );
+  return fed
+    ? `${reach} ${chosen}.`
+    : `${reach} ${chosen}. If no line in the Collection has an FDC food for it, this line will have no weight or nutrition.`;
+}
+
+// A step's Step Portions, one for each ingredient segment in order, or for each line it uses when
+// it has no segments, and its timers, one for each duration segment.
+export function stepRows(recipe: Recipe, stepId: string) {
+  const { segments, uses } = recipe.facts.steps[stepId] ?? {};
+  if (segments)
+    return {
+      portions: segments.segments.flatMap((segment) =>
+        segment.t === "ingredient"
+          ? [{ ref: segment.ref, written: segment.written, portion: segment.portion }]
+          : [],
+      ),
+      timers: segments.segments.flatMap((segment) =>
+        segment.t === "duration"
+          ? [{ written: segment.written, low_s: segment.low_s, high_s: segment.high_s }]
+          : [],
+      ),
+    };
+  return {
+    portions: (uses?.uses ?? []).map((use) => ({
+      ref: use.ref,
+      written: null,
+      portion: use.portion,
+    })),
+    timers: [],
+  };
+}
+
+// A timer's range in minutes, as typed, and the portions and timers as stored, which they show.
+export type StepDraft = {
+  portions: string[];
+  timers: { low: string; high: string }[];
+  stored: { portions: number[]; timers: { low_s: number; high_s: number }[] };
+};
+
+export function stepDraft(recipe: Recipe, stepId: string): StepDraft {
+  const rows = stepRows(recipe, stepId);
+  return {
+    portions: rows.portions.map((row) => kitchenNumber(row.portion)),
+    timers: rows.timers.map((timer) => ({
+      low: kitchenNumber(timer.low_s / 60),
+      high: kitchenNumber(timer.high_s / 60),
+    })),
+    stored: {
+      portions: rows.portions.map((row) => row.portion),
+      timers: rows.timers.map(({ low_s, high_s }) => ({ low_s, high_s })),
+    },
+  };
+}
+
+export function stepEdit(stepId: string, draft: StepDraft): Built {
+  const { stored } = draft;
+  const portions = draft.portions.map((text, n) => readField(text, stored.portions[n]));
+  const portion = portions.findIndex((p) => p === undefined || p <= 0 || p > 1);
+  if (portion >= 0)
+    return {
+      problem: "Give each portion as a number above 0 and at most 1, such as 1/2.",
+      field: `portion-${portion}`,
+    };
+  const durations = draft.timers.map(({ low, high }, n) => ({
+    low_s: readSeconds(low, stored.timers[n]?.low_s),
+    high_s: readSeconds(high, stored.timers[n]?.high_s),
+  }));
+  const timer = durations.findIndex(({ low_s, high_s }) => !(low_s > 0) || !(high_s >= low_s));
+  if (timer >= 0)
+    return {
+      problem: "Give each timer in minutes above 0, its upper end not below its lower end.",
+      field: `timer-${timer}`,
+    };
+  return { edit: { kind: "step", step_id: stepId, portions: portions as number[], durations } };
+}
+
+export function substitutionEdit(
+  lineId: string,
+  index: number,
+  ratio: string,
+  note: string,
+): Built {
+  const value = readNumber(ratio);
+  if (value === undefined || value <= 0 || value > 10)
+    return { problem: "Give the ratio as a number above 0 and at most 10.", field: "Ratio" };
+  return {
+    edit: { kind: "substitution", line_id: lineId, index, ratio: value, note: note.trim() },
+  };
+}
+
+export function difficultyEdit({ prep, cook, cleanup }: DifficultyChoice): Built {
+  if (!prep || !cook || !cleanup) return { problem: "Rate all of Prep, Cook and Cleanup." };
+  return { edit: { kind: "difficulty", prep, cook, cleanup } };
+}

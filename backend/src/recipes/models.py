@@ -7,7 +7,7 @@ import secrets
 import string
 from datetime import UTC, date, datetime
 from itertools import chain
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -18,6 +18,9 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 SCHEMA_VERSION = 1
 
@@ -189,6 +192,30 @@ class Fact(Model):
     confirm_batch: Label | None = None
 
 
+# The units a line's amount is a mass or a volume in, as the parser writes them (pint's short
+# symbols) and as an editor may spell them. Any other unit counts something: "cloves", "can".
+MASS_UNITS = frozenset(
+    {"g", "gram", "grams", "kg", "kilogram", "kilograms", "mg", "milligram", "milligrams"}
+    | {"oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds"}
+)
+VOLUME_UNITS = frozenset(
+    {"ml", "milliliter", "milliliters", "millilitre", "millilitres", "l", "liter", "liters"}
+    | {"litre", "litres", "cl", "centiliter", "centiliters", "centilitre", "centilitres"}
+    | {"dl", "deciliter", "deciliters", "decilitre", "decilitres", "cc", "cm3"}
+    | {"tsp", "teaspoon", "teaspoons", "tbsp", "tablespoon", "tablespoons", "cup", "cups"}
+    | {"floz", "fl oz", "fl", "pt", "pint", "pints", "qt", "quart", "quarts", "gal", "gallon"}
+    | {"gallons", "jig"}
+)
+
+
+def unit_kind(unit: str | None) -> Literal["mass", "volume", "count"]:
+    """Whether a line's unit weighs, measures a volume or counts, as the parser decides it."""
+    spelled = (unit or "").strip().lower()
+    if spelled in MASS_UNITS:
+        return "mass"
+    return "volume" if spelled in VOLUME_UNITS else "count"
+
+
 class ParseFact(Fact):
     """An ingredient line read into its parts. No quantity means no amount, as in "to taste"."""
 
@@ -203,10 +230,12 @@ class ParseFact(Fact):
 
 
 class MatchFact(Fact):
-    """The line's Canonical Ingredient, with the FDC food and portion row the model chose."""
+    """The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
+    editor's new Canonical Ingredient has no FDC food until one is chosen for it.
+    """
 
     canonical_id: Ulid
-    fdc_id: int
+    fdc_id: int | None
     portion_id: int | None
 
 
@@ -518,13 +547,13 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
         items["difficulty"] = ["difficulty"]
     items = {item: paths for item, paths in items.items() if paths}
     for fact_id in (issue.fact_id for issue in recipe.issues if issue.status == "open"):
-        paths = items.setdefault(_item_of(fact_id), [])
+        paths = items.setdefault(item_of(fact_id), [])
         if fact_id not in paths:
             paths.append(fact_id)
     return items
 
 
-def _item_of(fact_id: str) -> str:
+def item_of(fact_id: str) -> str:
     """The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself."""
     if fact_id == "difficulty" or fact_id.endswith(".substitutions"):
         return fact_id
@@ -564,6 +593,29 @@ def needs_review(recipe: Recipe) -> NeedsReview:
         unconfirmed=sum(f or u for f, u in zip(flagged, unconfirmed, strict=True)),
         flagged=sum(flagged),
     )
+
+
+def resolve(
+    recipe: Recipe, on: Callable[[str], bool], batch: str | None = None
+) -> list[EnrichmentIssue]:
+    """The recipe's issues, with the open ones on facts `on` picks resolved in `batch`, or in no
+    batch for an editor's edit.
+    """
+    return [
+        issue.model_copy(update={"status": "resolved", "confirm_batch": batch})
+        if issue.status == "open" and on(issue.fact_id)
+        else issue
+        for issue in recipe.issues
+    ]
+
+
+def settled(recipe: Recipe, ready_batch: str | None = None) -> Recipe:
+    """The reviewed recipe, Ready in `ready_batch` if it was Awaiting Review and nothing is left
+    to check. An editor's edit or own Difficulty makes it Ready in no batch.
+    """
+    if recipe.status == "awaiting_review" and needs_review(recipe).unconfirmed == 0:
+        return recipe.model_copy(update={"status": "ready", "ready_batch": ready_batch})
+    return recipe
 
 
 def effective_difficulty(recipe: Recipe) -> tuple[Difficulty | None, bool]:

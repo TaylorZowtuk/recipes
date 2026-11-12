@@ -32,7 +32,7 @@ export function versionedRefusal(answer: Answer<unknown>): WriteRefusal {
 export type BatchOutcome = { kind: "saved" } | { kind: "invalid"; message: string } | WriteRefusal;
 
 // What a 422 says: an HTTPException's detail, or the first of a validation error's.
-function refusalMessage(error: unknown): string | undefined {
+export function refusalMessage(error: unknown): string | undefined {
   const detail = (apiError(error) as { detail?: string | { msg: string }[] } | undefined)?.detail;
   return Array.isArray(detail) ? detail[0]?.msg : detail;
 }

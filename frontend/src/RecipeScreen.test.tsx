@@ -372,6 +372,7 @@ describe("Steps", () => {
     };
     const item = {
       id: "s1",
+      kind: "step" as const,
       tab: "steps" as const,
       factIds: ["s1.segments"],
       mark: "confirmed" as const,

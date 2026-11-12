@@ -106,6 +106,15 @@ test("an editor edits Difficulty and Tags in one save, and the card shows them",
   await expect(save).toHaveText("Save 0 changes");
   await expect(save).toBeDisabled();
 
+  // Each rating's whole slice of the pill is its target, at least 50px tall.
+  for (const n of ["1", "2", "3"]) {
+    const box = await page
+      .getByRole("group", { name: "Cook" })
+      .locator("label", { hasText: n })
+      .boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(50);
+    expect(box?.width).toBeGreaterThanOrEqual(50);
+  }
   await rate(page, "Cook", "3");
   await expect(save).toHaveText("Save 1 change");
   await tagsField(page).fill("weeknight, rice");

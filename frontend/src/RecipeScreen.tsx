@@ -15,9 +15,11 @@ import { ItemSheet, ReviewBar, ReviewButton, type ReviewTarget } from "./ReviewS
 import { byComponent } from "./recipeComponents";
 import {
   confirmItems,
+  type FactEdit,
   type ReviewOutcome,
   type ReviewTab,
   reviewOf,
+  runEdit,
   runReview,
   tabCounts,
   undoBatch,
@@ -263,6 +265,26 @@ function RecipeTabs({
     setToast(shown);
   };
   const confirm = (factIds: string[]) => write(() => confirmItems(recipe, factIds));
+  const closeSheet = () => {
+    setOpenId(undefined);
+    if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+    else focusSelectedTab();
+  };
+  // An edit keeps its sheet open until it's saved, or the recipe changed elsewhere, and says in
+  // the form why it wasn't saved. Its toast has no Undo: the editor edits again instead.
+  const edit = async (change: FactEdit) => {
+    if (busy) return null;
+    setBusy(true);
+    const settled = await runEdit(recipe, change, collection);
+    if (!mounted.current) return null;
+    setBusy(false);
+    if ("problem" in settled) return settled.problem;
+    closeSheet();
+    refocus.current = true;
+    starter.current = document.activeElement as HTMLElement | null;
+    setToast(settled.toast);
+    return null;
+  };
   const done = useCallback(() => {
     refocus.current = false;
     setToast(null);
@@ -327,11 +349,8 @@ function RecipeTabs({
             disabled={off}
             note={note}
             onConfirm={confirm}
-            onClose={() => {
-              setOpenId(undefined);
-              if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
-              else focusSelectedTab();
-            }}
+            onEdit={edit}
+            onClose={closeSheet}
           />
           <Toast
             toast={toast}

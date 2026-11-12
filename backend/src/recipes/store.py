@@ -69,6 +69,9 @@ MAX_LEARNED = MAX_TRANSACTION_ITEMS - len(ENRICH_FIXED_ITEMS)
 MOVE_FIXED_ITEMS = ("the Kitchen settings, or a check on them", "META#collection")
 MAX_MOVES = MAX_TRANSACTION_ITEMS - len(MOVE_FIXED_ITEMS)
 
+# The most keys one BatchGetItem reads.
+BATCH_GET_KEYS = 100
+
 # How many times a transaction or a read is tried before giving up, and the first backoff.
 ATTEMPTS = 4
 BACKOFF_SECONDS = 0.05
@@ -347,13 +350,23 @@ class Store:
         recipe: Recipe,
         canonical_ingredients: Iterable[CanonicalIngredient],
         wordings: Iterable[Wording],
+        *,
+        created: Iterable[CanonicalIngredient] = (),
+        overwrite_wordings: Iterable[Wording] = (),
     ) -> Recipe:
         """`update_recipe`, writing each changed Canonical Ingredient if it is still at its
-        version and each wording unless an editor confirmed it meanwhile, in the same transaction:
-        ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+        version, each wording unless an editor confirmed it meanwhile, each `created` Canonical
+        Ingredient if its id is free, and each of `overwrite_wordings`, which an editor set, over
+        any other, in the same transaction: ENRICH_FIXED_ITEMS and these, at most MAX_LEARNED.
+        A wording is in `wordings` or `overwrite_wordings`, never both.
 
         Raises VersionConflict if any of them changed, writing nothing.
         """
+        wordings, overwrite_wordings = list(wordings), list(overwrite_wordings)
+        both = {w.wording for w in wordings} & {w.wording for w in overwrite_wordings}
+        if both:
+            msg = f"Wordings both learned and overwritten: {', '.join(sorted(both))}"
+            raise ValueError(msg)
         replaced = [
             self._replace(
                 canonical.model_copy(update={"version": canonical.version + 1}),
@@ -362,13 +375,18 @@ class Store:
             )
             for canonical in canonical_ingredients
         ]
+        replaced += [self._create(canonical, canonical_key(canonical.id)) for canonical in created]
         learned = [self._learn_wording(wording) for wording in wordings]
+        overwritten: list[TransactWriteItemTypeDef] = [
+            {"Put": {"TableName": self.table, "Item": _to_item(w, wording_key(w.wording))}}
+            for w in overwrite_wordings
+        ]
         try:
             return self._save_versioned(
                 recipe,
                 recipe_key(recipe.id),
                 shared=True,
-                also=lambda saved: [self._put_card(saved), *replaced, *learned],
+                also=lambda saved: [self._put_card(saved), *replaced, *learned, *overwritten],
                 unchanged=("dedupe_key",),
             )
         except _Cancelled as cancelled:
@@ -416,6 +434,27 @@ class Store:
         # Consistent, like the card that names the version a phone asks for.
         item = self._get(recipe_key(recipe_id), consistent=True)
         return None if item is None else _from_item(Recipe, item)
+
+    def recipes(self) -> list[Recipe]:
+        """Every recipe in the Collection, by its card, read consistently."""
+        keys = [recipe_key(card.id) for card in self.cards()]
+        found: list[Recipe] = []
+        for chunk in batched(keys, BATCH_GET_KEYS, strict=False):
+            wanted: dict[str, KeysAndAttributesUnionTypeDef] = {
+                self.table: {"Keys": list(chunk), "ConsistentRead": True}
+            }
+            for attempt in range(ATTEMPTS):
+                response = self.client.batch_get_item(RequestItems=wanted)
+                items = response.get("Responses", {}).get(self.table, [])
+                found += [_from_item(Recipe, item) for item in items]
+                wanted = dict(response.get("UnprocessedKeys", {}))
+                if not wanted:
+                    break
+                self.sleep(_backoff(attempt))
+            else:
+                msg = "DynamoDB kept leaving recipes unprocessed"
+                raise RuntimeError(msg)
+        return sorted(found, key=lambda recipe: recipe.id)
 
     def cards(self, page_size: int | None = None) -> list[Card]:
         """Every card, in id order, read consistently so none is older than the counter.

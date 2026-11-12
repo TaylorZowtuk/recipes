@@ -1,4 +1,4 @@
-import { expect, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in, fake web and service token (backend/src/recipes/local.py) aren't
 // on a deployed stack.
@@ -361,4 +361,94 @@ test("the toast waits while Undo has focus or the mouse, keeps focus on a failed
   );
   await context.setOffline(false);
   await expect(undo(page)).toBeEnabled();
+});
+
+test("an editor edits a line's amount from its sheet, and it's Confirmed", async ({
+  page,
+}, testInfo) => {
+  const path = `plum-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`plum rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: /^Unchecked: olive oil/ }).click();
+  const sheet = page.getByRole("dialog", { name: "1 tbsp olive oil" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  const amount = sheet.getByRole("textbox", { name: "Amount" });
+  await expect(amount).toBeFocused();
+  await expect(amount).toHaveValue("1");
+
+  // Cancel goes back to the detail; Edit again, and Save, saves it Confirmed.
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet.getByRole("button", { name: "Edit" })).toBeFocused();
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await amount.fill("2");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+  await expect(undo(page)).toHaveCount(0);
+  await expect(ingredients.getByRole("button", { name: /^Confirmed: olive oil/ })).toContainText(
+    "2 tbsp",
+  );
+});
+
+// WebKit doesn't scroll a field into view on its own here, so the form keeps the focused field
+// clear of the pinned foot: when focus moves to it, and when the foot grows with a note.
+test("a focused field in a line's sheet stays clear of its foot", async ({
+  page,
+  context,
+}, testInfo) => {
+  const path = `fig-farro-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`fig farro ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: /^Unchecked: olive oil/ }).click();
+  const sheet = page.getByRole("dialog", { name: "1 tbsp olive oil" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Amount" })).toBeFocused();
+  const foot = sheet.locator(".sheet-actions");
+  const clear = async (name: string) => clearOf(sheet.getByRole("textbox", { name, exact: true }));
+  const clearOf = async (field: Locator, shown: Locator = field) => {
+    await expect(field).toBeFocused();
+    // WebKit scrolls by whole pixels, so allow a fraction of one.
+    await expect(async () => {
+      const box = await shown.boundingBox();
+      const top = (await foot.boundingBox())?.y;
+      expect(
+        box && top !== undefined && box.y + box.height <= top + 1,
+        JSON.stringify({ box, top }),
+      ).toBe(true);
+    }).toPass({ timeout: 2000 });
+  };
+
+  const name = sheet.getByRole("textbox", { name: "Name", exact: true });
+  await name.focus();
+  await clear("Name");
+  await page.keyboard.press("Tab");
+  await clear("Preparation");
+  // A choice's radio is hidden, so its label is what must clear the foot.
+  const choice = sheet
+    .locator("label")
+    .filter({ has: page.getByRole("radio") })
+    .last();
+  await choice.getByRole("radio").focus();
+  await clearOf(choice.getByRole("radio"), choice);
+
+  await name.focus();
+  await clear("Name");
+  await context.setOffline(true);
+  await expect(foot).toContainText("You’re offline.");
+  await clear("Name");
+  await context.setOffline(false);
 });

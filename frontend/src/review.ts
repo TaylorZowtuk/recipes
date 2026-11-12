@@ -1,16 +1,19 @@
-import { api, type Card, type Recipe, type RecipeFacts } from "./api/client";
+import { api, type Card, type Collection, type Recipe, type RecipeFacts } from "./api/client";
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
-import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED } from "./editRecipe";
+import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED, UNREACHABLE } from "./editRecipe";
 import type { ToastMessage } from "./Toast";
-import { type Answer, versionedRefusal, type WriteRefusal } from "./writeOutcome";
+import { type Answer, refusalMessage, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
+export type FactEdit = components["schemas"]["EditFact"]["edit"];
 export type EnrichmentIssue = components["schemas"]["EnrichmentIssue-Output"];
 type NeedsReview = Card["needs_review"];
 export type ReviewTab = "ingredients" | "steps" | "about";
 export type Mark = "unchecked" | "flagged" | "confirmed";
+export type ReviewItemKind = "line" | "step" | "substitutions" | "difficulty";
 export type ReviewItem = {
   id: string;
+  kind: ReviewItemKind;
   tab: ReviewTab;
   // The item's facts, and any fact an open Enrichment Issue of it is on: what confirming it sends.
   factIds: string[];
@@ -70,9 +73,18 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   for (const [id, paths] of Object.entries(reviewItems(recipe))) {
     const issues = open.filter((issue) => itemOf(issue.fact_id) === id);
     const unconfirmed = paths.some((path) => !factAt(recipe.facts, path)?.confirmed);
+    const kind: ReviewItemKind =
+      id === "difficulty"
+        ? "difficulty"
+        : id.endsWith(".substitutions")
+          ? "substitutions"
+          : stepIds.has(id)
+            ? "step"
+            : "line";
     items.set(id, {
       id,
-      tab: id === "difficulty" ? "about" : stepIds.has(id) ? "steps" : "ingredients",
+      kind,
+      tab: kind === "difficulty" ? "about" : kind === "step" ? "steps" : "ingredients",
       factIds: paths,
       mark: issues.length ? "flagged" : unconfirmed ? "unchecked" : "confirmed",
       issues,
@@ -111,6 +123,16 @@ export const confirmableOn = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
 export type ReviewOutcome =
   | { kind: "confirmed"; recipe: Recipe; batch: string; ready: boolean }
   | { kind: "undone"; recipe: Recipe }
+  | {
+      kind: "edited";
+      recipe: Recipe;
+      ready: boolean;
+      alsoUpdated: number;
+      notUpdated: number;
+      tooBig: number;
+      // The line's Canonical Ingredient, picking which again retries those not updated.
+      canonical?: string;
+    }
   | WriteRefusal;
 
 // Confirms the facts as one Confirm Batch at the recipe's version.
@@ -136,8 +158,66 @@ export async function undoBatch(recipe: Recipe, batch: string): Promise<ReviewOu
     : versionedRefusal(answer as Answer<unknown>);
 }
 
-export const READY_TOAST =
-  "Confirmed. This recipe is now Ready, so it joins the Grocery List and fridge matching.";
+// Saves an editor's edit of one Review Item at the recipe's version. A 422 says why it can't.
+export async function editFact(
+  recipe: Recipe,
+  edit: FactEdit,
+): Promise<ReviewOutcome | { kind: "invalid"; message: string }> {
+  const answer = await api.POST("/api/recipes/{recipe_id}/edit", {
+    params: { path: { recipe_id: recipe.id } },
+    body: { version: recipe.version, edit },
+  });
+  const { data } = answer;
+  if (answer.response.status === 200 && data)
+    return {
+      kind: "edited",
+      recipe: data.recipe,
+      ready: data.ready,
+      alsoUpdated: data.also_updated.length,
+      notUpdated: data.not_updated.length,
+      tooBig: data.too_big.length,
+    };
+  const message = answer.response.status === 422 && refusalMessage(answer.error);
+  return message ? { kind: "invalid", message } : versionedRefusal(answer as Answer<unknown>);
+}
+
+// The name of the Canonical Ingredient a line edit picks: a new one isn't in the Collection yet.
+function pickedName(
+  edit: FactEdit,
+  collection: Pick<Collection, "canonical_ingredients">,
+): string | undefined {
+  if (edit.kind !== "line" || !edit.canonical) return undefined;
+  const pick = edit.canonical;
+  return pick.kind === "new"
+    ? pick.name
+    : collection.canonical_ingredients.find((c) => c.id === pick.id)?.name;
+}
+
+// Saves the edit and settles it as a confirm is, except that an edit has no Undo. A saved edit or a
+// conflict gives a toast, once the newer recipe is shown; anything else is a problem for the form,
+// which stays open with what the editor typed.
+export async function runEdit(
+  recipe: Recipe,
+  edit: FactEdit,
+  collection: Pick<Collection, "canonical_ingredients">,
+): Promise<{ toast: ToastMessage } | { problem: string }> {
+  let outcome: Awaited<ReturnType<typeof editFact>>;
+  try {
+    outcome = await editFact(recipe, edit);
+  } catch {
+    return { problem: UNREACHABLE };
+  }
+  if (outcome.kind === "invalid") return { problem: outcome.message };
+  const canonical = pickedName(edit, collection);
+  const settled = outcome.kind === "edited" && canonical ? { ...outcome, canonical } : outcome;
+  const toast = await runReview(async () => settled);
+  return settled.kind === "edited" || settled.kind === "conflict"
+    ? { toast }
+    : { problem: toast.text };
+}
+
+const READY_REST = " This recipe is now Ready, so it joins the Grocery List and fridge matching.";
+export const READY_TOAST = `Confirmed.${READY_REST}`;
 const NOT_REFRESHED = " Couldn’t refresh, so reload to see the latest.";
 
 // Runs a review write and settles it as edits do: a written recipe is remembered and the
@@ -153,7 +233,8 @@ export async function runReview(
   } catch {
     outcome = { kind: "failed" };
   }
-  if (outcome.kind === "confirmed" || outcome.kind === "undone") rememberRecipe(outcome.recipe);
+  if (outcome.kind === "confirmed" || outcome.kind === "undone" || outcome.kind === "edited")
+    rememberRecipe(outcome.recipe);
   const refreshed =
     outcome.kind === "failed" || outcome.kind === "not-an-editor" || (await reloadCollection());
   const stale = refreshed ? "" : NOT_REFRESHED;
@@ -162,6 +243,22 @@ export async function runReview(
       return { text: (outcome.ready ? READY_TOAST : "Confirmed.") + stale, undo: outcome.batch };
     case "undone":
       return { text: `Undone.${stale}` };
+    case "edited": {
+      const others = (n: number) => `${n} other ${n === 1 ? "recipe" : "recipes"}`;
+      const { alsoUpdated: also, notUpdated: not, tooBig: big } = outcome;
+      const changed = also ? ` ${others(also)} with the same wording changed too.` : "";
+      // Picking the line's Canonical Ingredient again retries the recipes that kept changing, but
+      // not those too big. Only a pick reaches other recipes, so one that wasn't updated has a name.
+      const missed = not
+        ? ` ${others(not)} with the same wording ${not === 1 ? "wasn’t" : "weren’t"} updated. Choose ${outcome.canonical ?? "its Canonical Ingredient"} again for this line to retry.`
+        : "";
+      const tooBig = big
+        ? ` ${others(big)} with the same wording ${big === 1 ? "is" : "are"} too big to update.`
+        : "";
+      return {
+        text: `Saved as Confirmed.${outcome.ready ? READY_REST : ""}${changed}${missed}${tooBig}${stale}`,
+      };
+    }
     case "conflict":
       return { text: refreshed ? CHANGED_ELSEWHERE : CHANGED_NOT_REFRESHED };
     case "not-an-editor":

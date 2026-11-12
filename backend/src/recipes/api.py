@@ -22,6 +22,7 @@ from pydantic import (
 
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
+from recipes.edits import CONFIRMED_BY, FactEdit, confirm_matches, edit_recipe, overused, share_all
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
     LLM_EXTRACTOR,
@@ -83,9 +84,10 @@ from recipes.models import (
     Wording,
     fact_at,
     fact_paths,
-    needs_review,
     new_ulid,
     normalize_wording,
+    resolve,
+    settled,
     site_host,
     written_as,
 )
@@ -322,6 +324,27 @@ class ConfirmedBatch(BaseModel):
     recipe: Recipe
     confirm_batch: Ulid
     ready: bool
+
+
+class EditFact(BaseModel):
+    """An editor's edit of one Review Item's facts on the recipe at `version`."""
+
+    version: RecipeVersion
+    edit: FactEdit
+
+
+class EditedFact(BaseModel):
+    """The recipe after an edit, whether the edit moved it from Awaiting Review to Ready, the
+    other recipes a line's Canonical Ingredient was matched in by its wording, those it couldn't
+    be because they kept changing, which picking the same Canonical Ingredient again retries, and
+    those the match would make too big.
+    """
+
+    recipe: Recipe
+    ready: bool
+    also_updated: list[Ulid]
+    not_updated: list[Ulid]
+    too_big: list[Ulid]
 
 
 SiteName = Annotated[
@@ -838,12 +861,9 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
                 if preview and preview.image_id not in {image.id for image in recipe.images}:
                     raise HTTPException(422, "The preview shows one of the recipe's images")
                 changes["preview"] = preview
-    edited = recipe.model_copy(update=changes)
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
-    if edited.status == "awaiting_review" and needs_review(edited).unconfirmed == 0:
-        edited = edited.model_copy(update={"status": "ready"})
-    return store.update_recipe(edited)
+    return store.update_recipe(settled(recipe.model_copy(update=changes)))
 
 
 @router.delete(
@@ -930,11 +950,6 @@ def _entry_at(days: list[list[WeekPlanEntry]], entry_id: str) -> tuple[list[Week
     raise HTTPException(404, "No such entry")
 
 
-# Who confirmed a fact, as recipes record it: never the editor's email, because recipes are public
-# and cached for good.
-CONFIRMED_BY = "editor"
-
-
 @router.post(
     "/recipes/{recipe_id}/confirm",
     dependencies=EDITORS_ONLY,
@@ -976,52 +991,71 @@ def confirm_facts(
         fact = cast("Fact", fact_at(facts, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
-    issues = [
-        issue.model_copy(update={"status": "resolved", "confirm_batch": batch})
-        if issue.status == "open" and issue.fact_id in listed
-        else issue
-        for issue in recipe.issues
-    ]
-    canonicals, wordings = _confirm_matches(store, facts, confirming, batch)
+    issues = resolve(recipe, lambda fact_id: fact_id in listed, batch)
+    canonicals, wordings = confirm_matches(store, facts, confirming, batch)
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
-    reviewed = recipe.model_copy(update={"facts": facts, "issues": issues})
-    ready = recipe.status == "awaiting_review" and needs_review(reviewed).unconfirmed == 0
-    if ready:
-        reviewed = reviewed.model_copy(update={"status": "ready", "ready_batch": batch})
+    reviewed = settled(recipe.model_copy(update={"facts": facts, "issues": issues}), batch)
+    ready = recipe.status == "awaiting_review" and reviewed.status == "ready"
     saved = store.review_recipe(reviewed, canonicals, wordings)
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
 
 
-def _confirm_matches(
-    store: Store, facts: RecipeFacts, confirming: list[str], batch: str
-) -> tuple[list[CanonicalIngredient], list[Wording]]:
-    """The unconfirmed Canonical Ingredients of the matches being confirmed, now Confirmed in
-    `batch`, and their lines' wordings, Confirmed unless an editor already confirmed them.
+@router.post(
+    "/recipes/{recipe_id}/edit",
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_RECIPE,
+        409: {
+            "description": "The recipe, or a Canonical Ingredient or wording the edit confirms, "
+            "changed, or the recipe is Pending and has no facts to edit yet"
+        },
+        422: {
+            "description": "The recipe has no such line, step or substitute, the step's portions "
+            "and timers don't fit it or use more than all of a line, the line's wording changes "
+            "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
+            "doesn't exist, the line has no weight to keep or convert, or the edited recipe is "
+            "too big to store"
+        },
+    },
+)
+def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDep) -> EditedFact:
+    """Save the editor's edit of one Review Item's facts on the recipe at `body.version`,
+    Confirmed with provenance `editor` and in no Confirm Batch, and resolve its open Enrichment
+    Issues. A recipe Awaiting Review with nothing left to review is Ready.
+
+    A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
+    every recipe with a line of that wording is matched to it too, each at its own version. Once
+    the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
+    `not_updated`, and one the match would make too big in `too_big`. Picking the same Canonical
+    Ingredient again retries them. A line saved with its Canonical Ingredient unchanged reaches no
+    other recipe.
     """
-    canonicals: dict[str, CanonicalIngredient] = {}
-    wordings: dict[str, Wording] = {}
-    for path in confirming:
-        line_id, _, kind = path.partition(".")
-        line = facts.ingredients.get(line_id)
-        if kind != "match" or line is None or line.match is None:
-            continue
-        canonical_id = line.match.canonical_id
-        canonical = store.canonical_ingredient(canonical_id)
-        if canonical and not canonical.confirmed:
-            canonicals[canonical_id] = canonical.model_copy(
-                update={"confirmed": True, "confirm_batch": batch}
-            )
-        wording = normalize_wording(line.parse.name) if line.parse else ""
-        cached = store.wording(wording) if wording else None
-        if wording and not (cached and cached.confirmed):
-            wordings[wording] = Wording(
-                wording=wording,
-                canonical_id=canonical_id,
-                confirmed=True,
-                schema_version=SCHEMA_VERSION,
-            )
-    return list(canonicals.values()), list(wordings.values())
+    recipe = _recipe(store, recipe_id)
+    if recipe.status == "pending":
+        raise HTTPException(409, "A Pending recipe has no facts to edit yet")
+    if recipe.version != body.version:
+        raise VersionConflict(recipe.id)
+    edited = edit_recipe(store, recipe, body.edit)
+    if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
+    saved = store.review_recipe(
+        edited.recipe,
+        edited.confirmed,
+        edited.learned,
+        created=edited.created,
+        overwrite_wordings=edited.fixed,
+    )
+    shared = share_all(store, edited)
+    ready = recipe.status == "awaiting_review" and saved.status == "ready"
+    return EditedFact(
+        recipe=saved,
+        ready=ready,
+        also_updated=shared.updated,
+        not_updated=shared.not_updated,
+        too_big=shared.too_big,
+    )
 
 
 @router.post(
@@ -1111,12 +1145,9 @@ def _check_steps(body: Enrichment, recipe: Recipe) -> None:
     if unknown := sorted(body.facts.steps.keys() - texts.keys()):
         raise HTTPException(422, f"The recipe has no step {', '.join(unknown)}")
     lines = {line.id for line in recipe.original.ingredients}
-    portions: dict[str, float] = {}
     for step_id, facts in body.facts.steps.items():
         _check_step(step_id, texts[step_id], facts, lines)
-        for use in facts.uses.uses if facts.uses else []:
-            portions[use.ref] = portions.get(use.ref, 0) + use.portion
-    if over := sorted(ref for ref, total in portions.items() if total > 1 + PORTION_TOLERANCE):
+    if over := overused(body.facts.steps):
         raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
 
 

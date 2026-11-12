@@ -179,6 +179,20 @@ def test_an_existing_canonical_ingredient_refuses_the_whole_enrichment(store: St
     assert store.collection_version() == before
 
 
+def test_a_review_cant_both_learn_and_overwrite_a_wording(store: Store) -> None:
+    added = store.add_recipe(RECIPES[0])
+    before = store.collection_version()
+    fixed = THIGHS.model_copy(update={"confirmed": True})
+
+    with pytest.raises(ValueError, match="boneless chicken thighs"):
+        store.review_recipe(added, [], [THIGHS], created=[CHICKEN], overwrite_wordings=[fixed])
+
+    assert store.get_recipe(added.id) == added
+    assert store.canonical_ingredients() == []
+    assert store.wordings() == []
+    assert store.collection_version() == before
+
+
 def test_canonical_ingredients_and_wordings_are_read_across_pages(store: Store) -> None:
     ids = [f"01K7Q0000000000000000000C{n}" for n in range(3)]
     canonicals = [CHICKEN.model_copy(update={"id": i}) for i in ids]
