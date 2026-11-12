@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Recipe } from "./api/client";
 import {
   canonicalNote,
+  defaultFood,
   difficultyEdit,
+  foodOf,
+  foodQuery,
   lineDraft,
   lineEdit,
   readNumber,
@@ -37,8 +40,10 @@ vi.mock("./collection", () => ({
 }));
 
 import {
+  BUTTER,
   collection,
   conversion,
+  GARLIC,
   KNOWN_CANONICAL,
   match,
   NEW_CANONICAL,
@@ -524,6 +529,8 @@ describe("editing a Review Item", () => {
       unit: "tbsp",
       name: "butter",
       preparation: "soft",
+      fdc_id: BUTTER.fdcId,
+      portion_id: BUTTER.tbsp,
     });
     // No amount, as in "to taste", and a range.
     expect(built(lineEdit(recipe(), "i1", { ...draft, low: "", unit: "" }))).toMatchObject({
@@ -580,6 +587,8 @@ describe("editing a Review Item", () => {
             family: "Dairy",
             storeCategoryId: "dairy-eggs",
           },
+          food: { fdcId: BUTTER.fdcId, portionId: null },
+          foodFor: "new",
         }),
       ).canonical,
     ).toEqual({
@@ -595,27 +604,12 @@ describe("editing a Review Item", () => {
 
   // The note is a live region, so it quotes neither the typed name nor the new one's name, and
   // changes only with the pick.
-  // The Collection holds no other recipe's facts, so only this recipe can show an FDC food for it.
-  it("says a new Canonical Ingredient applies to every recipe with the wording, without a weight", () => {
+  it("says a changed Canonical Ingredient applies to every recipe with the wording", () => {
     const draft = lineDraft(recipe(), "i1");
-    expect(canonicalNote(draft, collection, recipe())).toBeNull();
+    expect(canonicalNote(draft, collection)).toBeNull();
     expect(
-      canonicalNote(
-        { ...draft, canonical: { kind: "existing", id: KNOWN_CANONICAL } },
-        collection,
-        recipe({ facts: { ...recipe().facts, ingredients: {} } }),
-      ),
-    ).toBe(
-      "Every line worded like this one, in every recipe, will use garlic. If no line in the Collection has an FDC food for it, this line will have no weight or nutrition.",
-    );
-    // A line of the recipe already matched to it with an FDC food gives this one its food too.
-    expect(
-      canonicalNote(
-        { ...draft, canonical: { kind: "existing", id: NEW_CANONICAL } },
-        collection,
-        recipe(),
-      ),
-    ).toBe("Every line worded like this one, in every recipe, will use butter.");
+      canonicalNote({ ...draft, canonical: { kind: "existing", id: KNOWN_CANONICAL } }, collection),
+    ).toBe("Every line worded like this one, in every recipe, will use garlic.");
     expect(
       canonicalNote(
         {
@@ -623,11 +617,103 @@ describe("editing a Review Item", () => {
           canonical: { kind: "new", name: "salted butter", family: "dairy", storeCategoryId: "" },
         },
         collection,
-        recipe(),
       ),
     ).toBe(
-      "Every line worded like this one, in every recipe, will use the new Canonical Ingredient. Without an FDC food, this line has no weight or nutrition.",
+      "Every line worded like this one, in every recipe, will use the new Canonical Ingredient.",
     );
+  });
+
+  it("sends the line's FDC food and portion, as chosen or none", () => {
+    const draft = lineDraft(recipe(), "i1");
+    expect(draft.food).toEqual({ fdcId: BUTTER.fdcId, portionId: BUTTER.tbsp });
+    const cup = { ...draft, food: { fdcId: BUTTER.fdcId, portionId: BUTTER.cup } };
+    expect(built(lineEdit(recipe(), "i1", cup))).toMatchObject({
+      fdc_id: BUTTER.fdcId,
+      portion_id: BUTTER.cup,
+    });
+    const none = { ...draft, food: { fdcId: GARLIC.fdcId, portionId: null } };
+    expect(built(lineEdit(recipe(), "i1", none))).toMatchObject({
+      fdc_id: GARLIC.fdcId,
+      portion_id: null,
+    });
+  });
+
+  it("refuses a line with no FDC food, asking for the closest one", () => {
+    const draft = lineDraft(recipe(), "i3");
+    expect(draft.food).toBeNull();
+    expect(
+      lineEdit(recipe(), "i3", {
+        ...draft,
+        canonical: { kind: "existing", id: KNOWN_CANONICAL },
+        food: null,
+        foodFor: KNOWN_CANONICAL,
+      }),
+    ).toEqual({
+      problem: "Choose an FDC food for this line: the closest one if none fits.",
+      field: "Find an FDC food",
+    });
+  });
+
+  it("starts with the line's food, else a matched line's for the chosen Canonical Ingredient", () => {
+    const r = recipe();
+    expect(defaultFood(r, "i1", { kind: "keep" })).toEqual({
+      fdcId: BUTTER.fdcId,
+      portionId: BUTTER.tbsp,
+    });
+    // Choosing its own again keeps it.
+    expect(defaultFood(r, "i1", { kind: "existing", id: NEW_CANONICAL })).toEqual({
+      fdcId: BUTTER.fdcId,
+      portionId: BUTTER.tbsp,
+    });
+    // Garlic's food from i2, without i2's clove, which may not fit a tablespoon.
+    expect(defaultFood(r, "i1", { kind: "existing", id: KNOWN_CANONICAL })).toEqual({
+      fdcId: GARLIC.fdcId,
+      portionId: null,
+    });
+    const newPick = { kind: "new" as const, name: "ghee", family: "", storeCategoryId: "" };
+    expect(defaultFood(r, "i1", newPick)).toBeNull();
+    // A pick for no line's Canonical Ingredient has none.
+    expect(defaultFood(r, "i3", { kind: "keep" })).toBeNull();
+  });
+
+  it("takes a Confirmed line's food first for the chosen Canonical Ingredient", () => {
+    const r = recipe();
+    const { i1, i2 } = r.facts.ingredients;
+    if (!i1?.match || !i2?.match) throw new Error("fixture");
+    const two = recipe({
+      facts: {
+        ...r.facts,
+        ingredients: {
+          ...r.facts.ingredients,
+          // Unconfirmed and first, matched to garlic with another food.
+          i1: { ...i1, match: { ...i1.match, canonical_id: KNOWN_CANONICAL, fdc_id: 1104647 } },
+          i2,
+        },
+      },
+    });
+    expect(defaultFood(two, "i3", { kind: "existing", id: KNOWN_CANONICAL })).toEqual({
+      fdcId: GARLIC.fdcId,
+      portionId: null,
+    });
+  });
+
+  it("keeps a food chosen for the pick, and goes back to the default once the pick changes", () => {
+    const draft = lineDraft(recipe(), "i1");
+    const chosen = { ...draft, food: { fdcId: 173430, portionId: null } };
+    expect(foodOf(recipe(), "i1", chosen)).toEqual({ fdcId: 173430, portionId: null });
+    const garlic = { ...chosen, canonical: { kind: "existing" as const, id: KNOWN_CANONICAL } };
+    expect(foodOf(recipe(), "i1", garlic)).toEqual({ fdcId: GARLIC.fdcId, portionId: null });
+  });
+
+  it("searches the FDC foods by the Canonical Ingredient's name, else the line's", () => {
+    const r = recipe();
+    expect(foodQuery(r, "i1", { kind: "keep" }, collection)).toBe("butter");
+    expect(foodQuery(r, "i1", { kind: "existing", id: KNOWN_CANONICAL }, collection)).toBe(
+      "garlic",
+    );
+    const newPick = { kind: "new" as const, name: "ghee", family: "", storeCategoryId: "" };
+    expect(foodQuery(r, "i1", newPick, collection)).toBe("ghee");
+    expect(foodQuery(r, "i3", { kind: "keep" }, collection)).toBe("flour");
   });
 
   it("saves a step's portions and timers", () => {
@@ -764,6 +850,8 @@ describe("editing a Review Item", () => {
       unit: null,
       name: "butter",
       preparation: null,
+      fdc_id: GARLIC.fdcId,
+      portion_id: null,
       canonical: { kind: "existing" as const, id: KNOWN_CANONICAL },
     };
     const others = ["01K7TEST000000000000000002", "01K7TEST000000000000000003"];
@@ -830,6 +918,8 @@ describe("editing a Review Item", () => {
       unit: null,
       name: "butter",
       preparation: null,
+      fdc_id: GARLIC.fdcId,
+      portion_id: null,
       canonical: { kind: "existing" as const, id: KNOWN_CANONICAL },
     };
     const others = [
@@ -892,25 +982,5 @@ describe("editing a Review Item", () => {
       problem: "Couldn’t reach Plateful. Try again.",
     });
     expect(reloadCollection).not.toHaveBeenCalled();
-  });
-
-  it("says plainly when a line's Canonical Ingredient has no FDC food", () => {
-    const r = recipe();
-    const i2 = r.facts.ingredients.i2;
-    if (!i2?.match) throw new Error("fixture");
-    const bare = recipe({
-      facts: {
-        ...r.facts,
-        ingredients: {
-          ...r.facts.ingredients,
-          i2: { ...i2, match: { ...i2.match, fdc_id: null }, conversion: null },
-        },
-      },
-    });
-    const item = reviewOf(bare).get("i2");
-    if (!item) throw new Error("no item");
-    expect(
-      text(renderToStaticMarkup(<ItemDetail item={item} recipe={bare} collection={collection} />)),
-    ).toContain("No FDC food, so this line has no weight or nutrition.");
   });
 });
