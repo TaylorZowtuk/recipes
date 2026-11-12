@@ -428,6 +428,46 @@ def test_accepting_a_correction_resolves_an_issue_on_a_fact_the_recipe_lacks(
     assert stored(api_store, recipe.id).issues[0].status == "resolved"
 
 
+ASK = issue(2, "i1.conversion", before=None, after=None, reason="pick a portion for it")
+
+
+def test_confirming_a_line_leaves_open_an_ask_only_an_edit_settles(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[issue(1, "i1.parse"), ASK])
+    every_fact = ["i1.parse", "i1.match", "i1.conversion", "i9.parse", "s1.uses", "difficulty"]
+
+    response = confirm(editor_client, recipe, *every_fact)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["ready"], body["recipe"]["status"]) == (False, "awaiting_review")
+    after = stored(api_store, recipe.id)
+    assert [(i.id, i.status) for i in after.issues] == [(issue(1).id, "resolved"), (ASK.id, "open")]
+    assert fact(after, "i1.conversion")["confirmed"] is True
+    assert card(api_store, recipe.id)["needs_review"] == {
+        "open_issues": 1,
+        "unconfirmed": 1,
+        "flagged": 1,
+    }
+    # Undoing the batch reopens the correction it accepted and leaves the ask as it was.
+    assert undo(editor_client, recipe.id, body["confirm_batch"]).status_code == 200
+    assert [i.status for i in stored(api_store, recipe.id).issues] == ["open", "open"]
+
+
+def test_confirming_only_an_asks_confirmed_fact_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[ASK])
+    confirm(editor_client, recipe, "i1.conversion")
+    again = stored(api_store, recipe.id)
+
+    response = confirm(editor_client, again, "i1.conversion")
+
+    assert response.status_code == 422
+    assert stored(api_store, recipe.id) == again
+
+
 def test_confirming_a_stale_version_is_a_conflict(
     editor_client: TestClient, api_store: Store
 ) -> None:

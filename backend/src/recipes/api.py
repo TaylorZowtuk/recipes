@@ -96,7 +96,6 @@ from recipes.models import (
     fact_paths,
     new_ulid,
     normalize_wording,
-    resolve,
     settled,
     site_host,
     written_as,
@@ -980,8 +979,9 @@ def _entry_at(days: list[list[WeekPlanEntry]], entry_id: str) -> tuple[list[Week
         },
         422: {
             "description": "A path is neither one of the recipe's facts nor named by an open "
-            "Enrichment Issue, every listed fact is already Confirmed with no open issue, or it "
-            "confirms more Canonical Ingredients and wordings than one write holds"
+            "Enrichment Issue, every listed fact is already Confirmed with no open issue "
+            "proposing a correction, or it confirms more Canonical Ingredients and wordings than "
+            "one write holds"
         },
     },
 )
@@ -989,7 +989,9 @@ def confirm_facts(
     recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
     """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-    resolve the open Enrichment Issues on them. A fact already Confirmed keeps its own batch.
+    resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
+    none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
+    can't be Ready while it is. A fact already Confirmed keeps its own batch.
 
     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
     wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
@@ -1004,13 +1006,17 @@ def confirm_facts(
         raise HTTPException(422, f"The recipe has no fact {', '.join(unknown)}")
     batch, now = new_ulid(), datetime.now(UTC)
     confirming = sorted(p for p in listed if (f := fact_at(facts, p)) and not f.confirmed)
-    if not confirming and not listed & open_on:
+    accepted = [i for i in recipe.issues if i.status == "open" and i.fact_id in listed and i.after]
+    if not confirming and not accepted:
         raise HTTPException(422, "Every listed fact is already Confirmed")
     for path in confirming:
         fact = cast("Fact", fact_at(facts, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
-    issues = resolve(recipe, lambda fact_id: fact_id in listed, batch)
+    issues = [
+        i.model_copy(update={"status": "resolved", "confirm_batch": batch}) if i in accepted else i
+        for i in recipe.issues
+    ]
     canonicals, wordings = confirm_matches(store, facts, confirming, batch)
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
