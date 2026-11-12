@@ -269,10 +269,7 @@ class SharedMatch:
             return self.portion_id, True
         tried = [self.portion_id] if self.portion_id is not None else []
         for portion_id in [*tried, *(portion.id for portion in self.food.portions)]:
-            conversion = fdc.convert(self.food, portion_id)
-            if kind == "volume" and conversion.density_g_per_ml is not None:
-                return portion_id, True
-            if kind == "count" and _counts_in(conversion.count_unit, parse.unit):
+            if fits(fdc.convert(self.food, portion_id), kind, parse.unit):
                 return portion_id, True
         return None, False
 
@@ -287,6 +284,20 @@ class SharedMatch:
             reason=f"An editor picked {self.food.description} for {self.wording}, but none of "
             f"its portions fits {unit}, so this line has no weight: pick a portion for it.",
         )
+
+
+def fits(
+    conversion: fdc.Conversion, kind: Literal["mass", "volume", "count"], unit: str | None
+) -> bool:
+    """Whether a portion's conversion gives a line of the unit's kind a weight: any does for a
+    mass line, which needs none, a density for a volume line, and for a count line a count in its
+    own unit (see `_counts_in`).
+    """
+    if kind == "mass":
+        return True
+    if kind == "volume":
+        return conversion.density_g_per_ml is not None
+    return _counts_in(conversion.count_unit, unit)
 
 
 def _counts_in(count_unit: str | None, unit: str | None) -> bool:

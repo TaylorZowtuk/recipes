@@ -51,6 +51,7 @@ def test_searching_gives_each_foods_portions_and_is_never_cached(
                 "modifier": None,
                 "gram_weight": 144.0,
                 **fdc.convert(SNAPSHOT.food(1001), 501).model_dump(exclude={"refused"}),
+                "fits": None,
             },
             {
                 "id": 502,
@@ -61,6 +62,7 @@ def test_searching_gives_each_foods_portions_and_is_never_cached(
                 "density_g_per_ml": None,
                 "grams_per_count": 2.0,
                 "count_unit": "berry",
+                "fits": None,
             },
         ],
     }
@@ -187,3 +189,40 @@ def test_a_search_reads_no_recipe_unless_asked_for_a_default(
     assert loads == []
     search(editor_client, canonical=BEEF.id)
     assert loads == [1]
+
+
+def fits(found: dict[str, Any], fdc_id: int) -> dict[int, bool | None]:
+    """Whether each of the found food's portions fits the line's unit, by portion id."""
+    food = next(food for food in found["foods"] if food["fdc_id"] == fdc_id)
+    return {portion["id"]: portion["fits"] for portion in food["portions"]}
+
+
+@pytest.mark.parametrize(
+    ("fdc_id", "params", "expected"),
+    [
+        (2004, {"unit": "tbsp"}, {606: True, 607: True}),
+        (2007, {"unit": "tbsp"}, {608: False, 609: False}),
+        (2007, {"unit": "cloves"}, {608: True, 609: False}),
+        (1002, {"unit": ""}, {503: True}),
+        (2008, {"unit": ""}, {610: False}),
+        (2007, {"unit": "g"}, {608: True, 609: True}),
+        (2004, {"unit": "pinch"}, {606: False, 607: False}),
+        (2004, {"unit": "pinch", "unit_kind": "volume"}, {606: True, 607: True}),
+        (2004, {}, {606: None, 607: None}),
+    ],
+    ids=[
+        "volume portion, tbsp line",
+        "clove portion, tbsp line",
+        "clove portion, cloves line",
+        "each portion, line with no unit",
+        "slice portion, line with no unit",
+        "any portion, mass line",
+        "volume portion, count line",
+        "volume portion, unit the parser read as a volume",
+        "no unit sent",
+    ],
+)
+def test_each_portion_says_whether_it_fits_the_lines_unit_as_a_spread_pick_would(
+    editor_client: TestClient, fdc_id: int, params: dict[str, str], expected: dict[int, bool | None]
+) -> None:
+    assert fits(search(editor_client, fdc_id=fdc_id, **params), fdc_id) == expected

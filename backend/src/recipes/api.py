@@ -28,6 +28,7 @@ from recipes.edits import (
     FactEdit,
     confirm_matches,
     edit_recipe,
+    fits,
     matched_food,
     overused,
     share_all,
@@ -100,6 +101,9 @@ from recipes.models import (
     settled,
     site_host,
     written_as,
+)
+from recipes.models import (
+    unit_kind as kind_of,
 )
 from recipes.offers import find_offers
 from recipes.store import (
@@ -1020,12 +1024,14 @@ def confirm_facts(
 class FdcPortion(fdc.Portion):
     """One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`. What it converts a
     line by, as `fdc.convert` gives it: a density for a volume, or grams per `count_unit` for a
-    count, or neither.
+    count, or neither. `fits` is whether it gives the searched line's unit a weight, as a pick
+    spread to other lines decides, or null when the search named no unit.
     """
 
     density_g_per_ml: float | None
     grams_per_count: float | None
     count_unit: str | None
+    fits: bool | None
 
 
 class FdcFood(Model):
@@ -1051,18 +1057,23 @@ MAX_FDC_FOODS = 10
 FdcQuery = Annotated[str, Query(min_length=2, max_length=60)]
 
 
-def _fdc_food(food: fdc.Food) -> FdcFood:
-    return FdcFood(
-        fdc_id=food.fdc_id,
-        dataset=food.dataset,
-        description=food.description,
-        portions=[
+UnitKind = Literal["mass", "volume", "count"]
+
+
+def _fdc_food(food: fdc.Food, line: tuple[UnitKind, str | None] | None) -> FdcFood:
+    """The food for the picker, saying whether each portion fits `line`, a kind and unit."""
+    portions: list[FdcPortion] = []
+    for portion in food.portions:
+        conversion = fdc.convert(food, portion.id)
+        portions.append(
             FdcPortion(
                 **portion.model_dump(),
-                **fdc.convert(food, portion.id).model_dump(exclude={"refused"}),
+                **conversion.model_dump(exclude={"refused"}),
+                fits=fits(conversion, *line) if line else None,
             )
-            for portion in food.portions
-        ],
+        )
+    return FdcFood(
+        fdc_id=food.fdc_id, dataset=food.dataset, description=food.description, portions=portions
     )
 
 
@@ -1082,6 +1093,8 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
     response: Response,
     canonical: Annotated[Ulid | None, Query()] = None,
     fdc_id: Annotated[int | None, Query()] = None,
+    unit: Annotated[str | None, Query(max_length=MAX_LABEL)] = None,
+    unit_kind: Annotated[UnitKind | None, Query()] = None,
 ) -> FdcFoods:
     """The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
     them, at most ten, each with its portions.
@@ -1090,15 +1103,23 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
     matched to it, a Confirmed one first, is the picker's default and comes first. With `fdc_id`,
     the line's own food, that food comes next, so the picker can name it. Either is left out if
     the FDC Snapshot doesn't have it.
+
+    With `unit`, the line's written unit, empty for a line with none ("2 eggs"), each portion
+    says whether it fits the line, by `unit_kind` if given (the parser's kind for a unit as it
+    read it) and else by the unit itself.
     """
     response.headers.update(NO_STORE)
+    line = None
+    if unit is not None:
+        written = unit.strip() or None
+        line = (unit_kind or kind_of(written), written)
     foods = snapshot()
     default = matched_food(store.recipes(), canonical, foods) if canonical else None
     named = [i for i in (default, fdc_id) if i is not None and foods.has(i)]
     found = [foods.food(i) for i in dict.fromkeys(named)]
     found += [f for f in foods.candidates(q, MAX_FDC_FOODS) if f.fdc_id not in named]
     return FdcFoods(
-        foods=[_fdc_food(food) for food in found[:MAX_FDC_FOODS]], default_fdc_id=default
+        foods=[_fdc_food(food, line) for food in found[:MAX_FDC_FOODS]], default_fdc_id=default
     )
 
 
