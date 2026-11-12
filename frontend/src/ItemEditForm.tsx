@@ -167,18 +167,34 @@ function EditForm({
 }
 
 // The height of the form's foot, Cancel and Save with any note or problem beside them, in
-// --sheet-foot, so a focused field scrolls clear of all of it. Without ResizeObserver the CSS
-// falls back to the buttons' height.
+// --sheet-foot, so a focused field scrolls clear of all of it. WebKit doesn't scroll a field that's
+// already in the sheet's scroll area, so one the foot covers, on focus or as the foot grows, is
+// scrolled clear here. Without ResizeObserver the CSS falls back to the buttons' height.
 function useSheetFoot(host: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const element = host.current;
     const foot = element?.querySelector<HTMLElement>(".sheet-actions");
-    if (!element || !foot || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() =>
-      element.style.setProperty("--sheet-foot", `${foot.offsetHeight}px`),
-    );
-    observer.observe(foot);
-    return () => observer.disconnect();
+    if (!element || !foot) return;
+    const keepClear = () => {
+      const field = document.activeElement;
+      if (!(field instanceof HTMLElement) || !element.contains(field) || foot.contains(field))
+        return;
+      if (field.getBoundingClientRect().bottom > foot.getBoundingClientRect().top)
+        field.scrollIntoView({ block: "nearest" });
+    };
+    element.addEventListener("focusin", keepClear);
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(() => {
+            element.style.setProperty("--sheet-foot", `${foot.offsetHeight}px`);
+            keepClear();
+          });
+    observer?.observe(foot);
+    return () => {
+      element.removeEventListener("focusin", keepClear);
+      observer?.disconnect();
+    };
   }, [host]);
 }
 

@@ -396,3 +396,51 @@ test("an editor edits a line's amount from its sheet, and it's Confirmed", async
     "2 tbsp",
   );
 });
+
+// WebKit doesn't scroll a field into view on its own here, so the form keeps the focused field
+// clear of the pinned foot: when focus moves to it, and when the foot grows with a note.
+test("a focused field in a line's sheet stays clear of its foot", async ({
+  page,
+  context,
+}, testInfo) => {
+  const path = `fig-farro-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`fig farro ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: /^Unchecked: olive oil/ }).click();
+  const sheet = page.getByRole("dialog", { name: "1 tbsp olive oil" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await expect(sheet.getByRole("textbox", { name: "Amount" })).toBeFocused();
+  const foot = sheet.locator(".sheet-actions");
+  const clear = async (name: string) => {
+    const field = sheet.getByRole("textbox", { name, exact: true });
+    await expect(field).toBeFocused();
+    await expect(async () => {
+      const box = await field.boundingBox();
+      const top = (await foot.boundingBox())?.y;
+      expect(
+        box && top !== undefined && box.y + box.height <= top,
+        JSON.stringify({ box, top }),
+      ).toBe(true);
+    }).toPass({ timeout: 2000 });
+  };
+
+  const name = sheet.getByRole("textbox", { name: "Name", exact: true });
+  await name.focus();
+  await clear("Name");
+  await page.keyboard.press("Tab");
+  await clear("Preparation");
+
+  await name.focus();
+  await clear("Name");
+  await context.setOffline(true);
+  await expect(foot).toContainText("You’re offline.");
+  await clear("Name");
+  await context.setOffline(false);
+});
