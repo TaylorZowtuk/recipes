@@ -169,11 +169,37 @@ describe("an edit form, as an editor uses it", () => {
     expect(said && document.getElementById(said)?.textContent).toBe("You’re offline.");
   });
 
-  it("saves a step's portions and timers", async () => {
-    open("s1");
-    type("“the butter”, butter", "½");
+  it("saves a step's portions by their order, keeping those not changed", async () => {
+    const r = recipe();
+    const s1 = r.facts.steps.s1;
+    if (!s1?.segments) throw new Error("fixture");
+    const split = recipe({
+      facts: {
+        ...r.facts,
+        steps: {
+          s1: {
+            ...s1,
+            segments: {
+              ...s1.segments,
+              segments: [
+                { t: "text", v: "Melt " },
+                { t: "ingredient", ref: "i1", written: "half the butter", portion: 0.5 },
+                { t: "text", v: ", then " },
+                { t: "ingredient", ref: "i1", written: "the rest", portion: 0.25 },
+                { t: "text", v: "." },
+              ],
+            },
+          },
+        },
+      },
+    });
+    open("s1", { r: split });
+    expect(field("“the rest”, butter").value).toBe("¼");
+    type("“the rest”, butter", "⅓");
     await click(button("Save"));
-    expect(saved()).toEqual([{ kind: "step", step_id: "s1", portions: [0.5], durations: [] }]);
+    expect(saved()).toEqual([
+      { kind: "step", step_id: "s1", portions: [0.5, 1 / 3], durations: [] },
+    ]);
   });
 
   it("saves or removes each substitute by its index, and says each saves on its own", async () => {
@@ -206,11 +232,22 @@ describe("an edit form, as an editor uses it", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await click(button("Save oat flour"));
-    await click(button("Remove rice flour"));
+    await click(button("Remove oat flour"));
     expect(saved()).toEqual([
       { kind: "substitution", line_id: "i3", index: 1, ratio: 1.5, note: "" },
-      { kind: "remove_substitution", line_id: "i3", index: 0 },
+      { kind: "remove_substitution", line_id: "i3", index: 1 },
     ]);
+  });
+
+  it("says why a substitute's Save and Remove are off, beside them", () => {
+    open("i3.substitutions", { note: "You’re offline." });
+    expect(host.querySelector(".sheet-actions")?.textContent).toContain("You’re offline.");
+    for (const name of ["Save rice flour", "Remove rice flour"]) {
+      const off = button(name);
+      expect(off.disabled).toBe(true);
+      const said = off.getAttribute("aria-describedby");
+      expect(said && document.getElementById(said)?.textContent).toBe("You’re offline.");
+    }
   });
 
   it("saves the Difficulty", async () => {
