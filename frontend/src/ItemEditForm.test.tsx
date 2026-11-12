@@ -25,6 +25,7 @@ const portion = (id: number, amount: number, unit: string, gram_weight: number) 
   density_g_per_ml: gram_weight / (amount * 14.79),
   grams_per_count: null as number | null,
   count_unit: null as string | null,
+  fits: null as boolean | null,
 });
 const counted = (id: number, unit: string, gram_weight: number) => ({
   ...portion(id, 1, unit, gram_weight),
@@ -75,16 +76,27 @@ const FOUND: Record<string, FdcFood[]> = {
   salt: [salt(746775), salt(746776)],
 };
 const BY_ID = new Map([SALTED, UNSALTED, GHEE, RAW_GARLIC].map((f) => [f.fdc_id, f]));
-type Query = { q: string; canonical?: string; fdc_id?: number };
+type Query = { q: string; canonical?: string; fdc_id?: number; unit?: string; unit_kind?: string };
+// The units the API says a portion fits, where it fits only some: the pat portion only pats.
+const FITS_ONLY: Record<number, string[]> = { 92459: ["pats"] };
 // What the API answers: a line matched to garlic elsewhere in the Collection gives its food as
-// garlic's default, first, then the named food, then what the search found.
-const answer = ({ q, canonical, fdc_id }: Query) => {
+// garlic's default, first, then the named food, then what the search found, each portion saying
+// whether it fits the line's unit when the search names one.
+const answer = ({ q, canonical, fdc_id, unit }: Query) => {
   const fallback = canonical === KNOWN_CANONICAL ? RAW_GARLIC : undefined;
   const named = [fallback, fdc_id === undefined ? undefined : BY_ID.get(fdc_id)];
   const foods = [...named, ...(FOUND[q] ?? [])].filter(
     (f, n, all): f is FdcFood => !!f && all.findIndex((g) => g?.fdc_id === f.fdc_id) === n,
   );
-  return { foods, default_fdc_id: fallback?.fdc_id ?? null };
+  const fits = (id: number) =>
+    unit === undefined ? null : (FITS_ONLY[id]?.includes(unit) ?? true);
+  return {
+    foods: foods.map((f) => ({
+      ...f,
+      portions: f.portions.map((p) => ({ ...p, fits: fits(p.id) })),
+    })),
+    default_fdc_id: fallback?.fdc_id ?? null,
+  };
 };
 
 describe("an edit form, as an editor uses it", () => {
@@ -235,6 +247,7 @@ describe("an edit form, as an editor uses it", () => {
       q: "garlic",
       canonical: KNOWN_CANONICAL,
       fdc_id: BUTTER.fdcId,
+      unit: "tbsp",
     });
     expect(choice("Garlic, raw · SR Legacy")?.checked).toBe(true);
     expect(choice("No portion")?.checked).toBe(true);
@@ -243,7 +256,7 @@ describe("an edit form, as an editor uses it", () => {
     // Only the first search asks for the default and the line's food.
     type("Find an FDC food", "ghee");
     await settle();
-    expect(queries().at(-1)).toEqual({ q: "ghee" });
+    expect(queries().at(-1)).toEqual({ q: "ghee", unit: "tbsp" });
     expect(choice("Garlic, raw · SR Legacy")?.checked).toBe(true);
     await click(button("Save"));
     expect(saved()).toEqual([
@@ -258,7 +271,7 @@ describe("an edit form, as an editor uses it", () => {
   it("names the line's food though the search doesn't find it", async () => {
     open("i2");
     await settle();
-    expect(queries()).toEqual([{ q: "garlic", fdc_id: GARLIC.fdcId }]);
+    expect(queries()).toEqual([{ q: "garlic", fdc_id: GARLIC.fdcId, unit: "cloves" }]);
     expect(checked()).toContain("Garlic, raw · SR Legacy");
     expect(checked()).toContain("1 clove (3 g)");
   });
@@ -308,11 +321,12 @@ describe("an edit form, as an editor uses it", () => {
     ]);
   });
 
-  it("says when the chosen portion doesn't fit the line's unit, without stopping the save", async () => {
+  // The recipe with i1's tbsp read by the parser as a volume.
+  const spoon = () => {
     const r = recipe();
     const i1 = r.facts.ingredients.i1;
     if (!i1?.parse) throw new Error("fixture");
-    const spoon = recipe({
+    return recipe({
       facts: {
         ...r.facts,
         ingredients: {
@@ -321,8 +335,13 @@ describe("an edit form, as an editor uses it", () => {
         },
       },
     });
-    open("i1", { r: spoon });
+  };
+
+  it("says when the chosen portion doesn't fit the line's unit, without stopping the save", async () => {
+    open("i1", { r: spoon() });
     await settle();
+    // The API decides, by the parser's kind for the unit as it read it.
+    expect(queries().at(-1)).toMatchObject({ unit: "tbsp", unit_kind: "volume" });
     expect(host.textContent).not.toContain("gets no weight");
     await click(choice("1 pat (5 g)") as HTMLInputElement);
     expect(host.textContent).toContain(
@@ -330,6 +349,38 @@ describe("an edit form, as an editor uses it", () => {
     );
     await click(button("Save"));
     expect(saved()).toEqual([expect.objectContaining({ portion_id: 92459 })]);
+  });
+
+  it("says nothing of a portion the API says fits the line's unit", async () => {
+    FITS_ONLY[92459] = ["tbsp"];
+    try {
+      open("i1", { r: spoon() });
+      await settle();
+      await click(choice("1 pat (5 g)") as HTMLInputElement);
+      expect(host.textContent).not.toContain("gets no weight");
+    } finally {
+      FITS_ONLY[92459] = ["pats"];
+    }
+  });
+
+  it("asks again whether the portion fits once the line's unit is edited", async () => {
+    open("i1");
+    await settle();
+    await click(choice("1 pat (5 g)") as HTMLInputElement);
+    expect(host.textContent).toContain("gets no weight");
+    type("Unit", "pats");
+    // Until the API answers for the new unit, it says nothing of the old one's.
+    expect(host.textContent).not.toContain("gets no weight");
+    await settle();
+    expect(queries().at(-1)).toEqual({ q: "butter", fdc_id: BUTTER.fdcId, unit: "pats" });
+    expect(host.textContent).not.toContain("gets no weight");
+    expect(choice("1 pat (5 g)")?.checked).toBe(true);
+    type("Unit", "");
+    await settle();
+    expect(queries().at(-1)).toEqual({ q: "butter", fdc_id: BUTTER.fdcId, unit: "" });
+    expect(host.textContent).toContain(
+      "This portion is counted in pat, but the line is a count with no unit, so the line gets no weight.",
+    );
   });
 
   it("searches for a new Canonical Ingredient's food by its name, and won't save without one", async () => {

@@ -760,28 +760,21 @@ describe("editing a Review Item", () => {
     expect(canChooseWeight(recipe(), "i2", draft)).toBe(false);
   });
 
-  it("says when a portion doesn't fit the line's unit, so the line gets no weight", () => {
-    const portion = { density_g_per_ml: null, grams_per_count: 3, count_unit: "clove" };
-    expect(portionMisfit("volume", "tbsp", portion)).toBe(
+  it("says when the API says a portion doesn't fit the line's unit, so the line gets no weight", () => {
+    const clove = { density_g_per_ml: null, grams_per_count: 3, count_unit: "clove" };
+    expect(portionMisfit("tbsp", { ...clove, fits: false })).toBe(
       "This portion is counted in clove, but the line is in tbsp, so the line gets no weight.",
     );
-    expect(portionMisfit("count", "cloves", portion)).toBeNull();
-    expect(portionMisfit("count", "slices", portion)).toBe(
-      "This portion is counted in clove, but the line is in slices, so the line gets no weight.",
-    );
+    expect(portionMisfit("cloves", { ...clove, fits: true })).toBeNull();
+    expect(portionMisfit("tbsp", { ...clove, fits: null })).toBeNull();
     const cup = { density_g_per_ml: 0.5, grams_per_count: null, count_unit: null };
-    expect(portionMisfit("volume", "ml", cup)).toBeNull();
-    expect(portionMisfit("count", null, cup)).toBe(
+    expect(portionMisfit(null, { ...cup, fits: false })).toBe(
       "This portion is a volume, but the line is a count with no unit, so the line gets no weight.",
     );
-    const large = { density_g_per_ml: null, grams_per_count: 50, count_unit: "large" };
-    expect(portionMisfit("count", null, large)).toBeNull();
     const ounce = { density_g_per_ml: null, grams_per_count: null, count_unit: null };
-    expect(portionMisfit("mass", "g", ounce)).toBeNull();
-    expect(portionMisfit("volume", "cup", ounce)).toBe(
+    expect(portionMisfit("cup", { ...ounce, fits: false })).toBe(
       "This portion is neither a volume nor a count, but the line is in cup, so the line gets no weight.",
     );
-    expect(portionMisfit(null, "pinch", portion)).toBeNull();
   });
 
   it("searches the FDC foods by the Canonical Ingredient's name, else the line's", () => {

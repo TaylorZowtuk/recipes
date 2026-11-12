@@ -152,39 +152,18 @@ export function canChooseWeight(recipe: Recipe, lineId: string, draft: LineDraft
   );
 }
 
-type Converts = Pick<FdcPortion, "density_g_per_ml" | "grams_per_count" | "count_unit">;
-
-// A line with no unit ("2 eggs") counts whole things, which FDC counts in a generic word or a size,
-// as the API's BARE_COUNTS.
-const BARE_COUNTS = new Set(["each", "piece", "unit", "item", "small", "medium", "large"]);
-BARE_COUNTS.add("extra large").add("jumbo");
-
-// A count word's words, lowercase and singular enough to match, as the API's `fdc.words`.
-const countWords = (text: string) =>
-  [...new Set((text.toLowerCase().match(/[a-z]+/g) ?? []).map(singular))].sort().join(" ");
-const singular = (word: string) => word.replace(/(?<=..)ies$/, "y").replace(/(?<=...)(?<!s)s$/, "");
-
-// Why the chosen portion gives the line no weight, when it is the wrong kind for the line's unit,
-// as the API reads a portion for a unit: a volume line needs a density, a count line a count in its
-// own word (or, with no unit, a generic word or a size). Null when it fits, for a weight, which
-// needs no portion, and when the line's kind isn't known.
+// Why the chosen portion gives the line no weight, when the API's search said it doesn't fit the
+// line's unit (`unit`, as the search sent it). Null when it fits, and when the search didn't say.
 export function portionMisfit(
-  kind: "mass" | "volume" | "count" | null,
   unit: string | null,
-  portion: Converts,
+  portion: Pick<FdcPortion, "density_g_per_ml" | "grams_per_count" | "count_unit" | "fits">,
 ): string | null {
-  if (kind === null || kind === "mass") return null;
-  const count = portion.grams_per_count !== null ? portion.count_unit : null;
-  if (kind === "volume" && portion.density_g_per_ml !== null) return null;
-  if (kind === "count" && count !== null) {
-    const fits = unit ? countWords(count) === countWords(unit) : BARE_COUNTS.has(count);
-    if (fits) return null;
-  }
+  if (portion.fits !== false) return null;
   const is =
     portion.density_g_per_ml !== null
       ? "a volume"
-      : count !== null
-        ? `counted in ${count}`
+      : portion.grams_per_count !== null
+        ? `counted in ${portion.count_unit}`
         : "neither a volume nor a count";
   const line = unit ? `in ${unit}` : "a count with no unit";
   return `This portion is ${is}, but the line is ${line}, so the line gets no weight.`;

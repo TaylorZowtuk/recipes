@@ -507,19 +507,23 @@ type FoodSearch =
 // The FDC foods matching the query, searched once typing pauses and only for 2 to 60 characters,
 // as the API takes. A newer query cancels the request for an older one. The first search, for the
 // start query, also asks for the line's own food, so it has a name, and for the default food of
-// the Canonical Ingredient `canonical`. `known` keeps every food any search found, so a chosen food
-// keeps its name and portions after the search moves on.
+// the Canonical Ingredient `canonical`. Each search sends the line's unit, so the API says which
+// portions fit it, and searches again once the unit is edited. `known` keeps every food any search
+// found, with the line it was found for, so a chosen food keeps its name and portions after the
+// search moves on.
 function useFoodSearch(
   query: string,
   start: string,
   canonical: string | undefined,
   own: number | undefined,
+  { unit, unit_kind }: FoodLine,
 ) {
   const q = query.trim();
   const searchable = q.length >= 2 && q.length <= 60;
   const first = q === start.trim();
+  const line = lineKey({ unit, unit_kind });
   const [result, setResult] = useState<{ q: string; search: FoodSearch }>();
-  const [known, setKnown] = useState(() => new Map<number, FdcFood>());
+  const [known, setKnown] = useState(() => new Map<number, { food: FdcFood; line: string }>());
   useEffect(() => {
     if (!searchable) return;
     const controller = new AbortController();
@@ -528,6 +532,8 @@ function useFoodSearch(
       const named = {
         ...(first && canonical !== undefined && { canonical }),
         ...(first && own !== undefined && { fdc_id: own }),
+        unit,
+        ...(unit_kind && { unit_kind }),
       };
       try {
         const { data } = await api.GET("/api/fdc/foods", {
@@ -536,7 +542,8 @@ function useFoodSearch(
         });
         if (data) {
           search = { state: "found", foods: data.foods, defaultId: data.default_fdc_id };
-          setKnown((was) => new Map([...was, ...data.foods.map((f) => [f.fdc_id, f] as const)]));
+          const found = data.foods.map((food) => [food.fdc_id, { food, line }] as const);
+          setKnown((was) => new Map([...was, ...found]));
         }
       } catch {}
       if (!controller.signal.aborted) setResult({ q, search });
@@ -545,14 +552,19 @@ function useFoodSearch(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [q, searchable, first, canonical, own]);
+  }, [q, searchable, first, canonical, own, unit, unit_kind, line]);
   const search: FoodSearch = !searchable
     ? { state: "idle" }
     : result?.q === q
       ? result.search
       : { state: "searching" };
-  return { search, known };
+  return { search, known, line };
 }
+
+// The line's unit as the food search sends it, empty for none, and the parser's kind for it while
+// it's as the parser read it.
+type FoodLine = { unit: string; unit_kind: "mass" | "volume" | "count" | null };
+const lineKey = ({ unit, unit_kind }: FoodLine) => `${unit_kind ?? ""} ${unit}`;
 
 const DATASETS = { foundation: "Foundation", sr_legacy: "SR Legacy" } as const;
 
@@ -566,7 +578,7 @@ const converts = (p: FdcPortion) => p.density_g_per_ml !== null || p.grams_per_c
 // it, with no portion, unless one is already chosen. The chosen food and the line's own stay
 // offered whatever the search finds, or when it can't search, offline. A food is required, the
 // closest one where none really fits; a portion isn't, though without one the line has no weight,
-// nor with one that doesn't fit the line's unit (`unit`, of kind `unitKind`).
+// nor with one the API says doesn't fit the line's unit (`unit`, of kind `unitKind`).
 function FoodPicker({
   current,
   food,
@@ -587,7 +599,10 @@ function FoodPicker({
   const foods = useId();
   const portions = useId();
   const [query, setQuery] = useState(startQuery);
-  const { search, known } = useFoodSearch(query, startQuery, defaultFrom, current?.fdcId);
+  const { search, known, line } = useFoodSearch(query, startQuery, defaultFrom, current?.fdcId, {
+    unit: unit ?? "",
+    unit_kind: unitKind,
+  });
   const found = search.state === "found" ? search.foods : [];
   const defaultId = search.state === "found" ? search.defaultId : null;
   useEffect(() => {
@@ -599,10 +614,11 @@ function FoodPicker({
   );
   const shown = [...pinned, ...found.map((f) => f.fdc_id)];
   const chosen = food && known.get(food.fdcId);
-  const portion = chosen?.portions.find((p) => p.id === food?.portionId);
-  const misfit = portion && portionMisfit(unitKind, unit, portion);
+  const portion = chosen?.food.portions.find((p) => p.id === food?.portionId);
+  // Only a search for the line's unit as it now is says whether the portion fits it.
+  const misfit = portion && chosen?.line === line && portionMisfit(unit, portion);
   const named = (id: number) => {
-    const found = known.get(id);
+    const found = known.get(id)?.food;
     return found ? `${found.description} · ${DATASETS[found.dataset]}` : `FDC food ${id}`;
   };
   // FDC describes some foods alike, so those carry their FDC ids too.
@@ -651,7 +667,7 @@ function FoodPicker({
           <legend>Portion</legend>
           <div className="choices">
             {chosen
-              ? chosen.portions.map((p) => (
+              ? chosen.food.portions.map((p) => (
                   <Choice
                     key={p.id}
                     group={portions}
