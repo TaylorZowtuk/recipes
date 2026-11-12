@@ -424,12 +424,11 @@ def test_a_new_canonical_ingredient_needs_an_fdc_food(
 ) -> None:
     recipe = awaiting(api_store)
     new = {"kind": "new", "name": "Braising Beef", "family": "beef", "store_category_id": "meat"}
-    body = line_edit(canonical=new)
-    del body["fdc_id"]
 
-    response = edit(editor_client, recipe, **body)
+    response = edit(editor_client, recipe, **line_edit(canonical=new, fdc_id=None))
 
     assert response.status_code == 422
+    assert response.json()["detail"] == "Line i1 needs an FDC food: the closest if none fits"
     assert stored(api_store, recipe.id) == recipe
 
 
