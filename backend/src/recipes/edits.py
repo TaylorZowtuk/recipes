@@ -263,10 +263,11 @@ class SharedMatch:
         needs no portion, so a mass line takes the chosen one as it is. A volume line takes the
         chosen portion if it gives a density, which works for every volume, or else the food's
         first that does. A count line takes the chosen portion if it counts in the line's word,
-        or else the food's first that does.
+        or else the food's first that does. No portion gives a line with no amount ("salt, to
+        taste") a weight, so it too takes the chosen one as it is.
         """
         kind = parse.unit_kind or unit_kind(parse.unit)
-        if kind == "mass":
+        if kind == "mass" or parse.quantity is None:
             return self.portion_id, True
         tried = [self.portion_id] if self.portion_id is not None else []
         for portion_id in [*tried, *(portion.id for portion in self.food.portions)]:
