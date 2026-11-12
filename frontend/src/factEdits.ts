@@ -1,6 +1,6 @@
 import type { DifficultyChoice } from "./addRecipe";
 import { FRACTIONS, kitchenNumber } from "./amount";
-import type { Collection, Recipe } from "./api/client";
+import type { Collection, FdcPortion, Recipe } from "./api/client";
 import type { FactEdit } from "./review";
 
 // What an editor's edit form holds for each kind of Review Item, as typed, and the edit it saves:
@@ -73,6 +73,7 @@ export type LineDraft = {
   preparation: string;
   canonical: CanonicalPick;
   // Whether the line stays in its written unit, or null when it has no weight to keep or convert.
+  // It starts kept only when its conversion could convert but doesn't.
   keepWeight: boolean | null;
   // The FDC food and portion chosen for the Canonical Ingredient pick that `foodFor` names. Once
   // the pick changes, the food is that pick's default again.
@@ -80,8 +81,12 @@ export type LineDraft = {
   foodFor: string;
 };
 
-// An FDC food and its portion, or none chosen yet. No portion means no weight.
-export type FoodPick = { fdcId: number; portionId: number | null } | null;
+// An FDC food and its portion, or none chosen yet, and whether the portion gives anything to
+// convert the line to a weight by. No portion means no weight.
+export type FoodPick = { fdcId: number; portionId: number | null; converts: boolean } | null;
+
+// Why a line an editor kept in its written unit doesn't convert, as the API stores it.
+export const EDITOR_KEPT = "kept in the written unit by an editor";
 
 export function lineDraft(recipe: Recipe, lineId: string): LineDraft {
   const { parse, match, conversion } = recipe.facts.ingredients[lineId] ?? {};
@@ -94,8 +99,10 @@ export function lineDraft(recipe: Recipe, lineId: string): LineDraft {
     name: lineName(recipe, lineId),
     preparation: parse?.preparation ?? "",
     canonical: { kind: "keep" },
-    keepWeight: conversion ? !!conversion.refused : null,
-    food: match ? { fdcId: match.fdc_id, portionId: match.portion_id } : null,
+    keepWeight: conversion ? !!conversion.refused && canConvert(recipe, lineId) : null,
+    food: match
+      ? { fdcId: match.fdc_id, portionId: match.portion_id, converts: canConvert(recipe, lineId) }
+      : null,
     foodFor: KEEP,
   };
 }
@@ -110,18 +117,77 @@ export function pickKey(recipe: Recipe, lineId: string, pick: CanonicalPick): st
   return pick.kind === "existing" ? pick.id : "new";
 }
 
-// The food a pick starts with: the line's own while it keeps its Canonical Ingredient, else the
-// food of a line already matched to the chosen one, a Confirmed one first, with no portion, since
-// that line's portion may not fit this one's unit. The PWA holds only this recipe's facts, so only
-// its lines can give one. A new Canonical Ingredient starts with none.
+// The food a pick starts with: the line's own while it keeps its Canonical Ingredient, else none
+// until the food search answers with the Collection's food for it (see `defaultFrom`).
 export function defaultFood(recipe: Recipe, lineId: string, pick: CanonicalPick): FoodPick {
+  return pickKey(recipe, lineId, pick) === KEEP ? lineDraft(recipe, lineId).food : null;
+}
+
+// The Canonical Ingredient whose food the search should give as the pick's default: another
+// existing one. The PWA holds only this recipe's facts, so the API finds a line in the whole
+// Collection matched to it, a Confirmed one first. A new one has no such line.
+export function defaultFrom(
+  recipe: Recipe,
+  lineId: string,
+  pick: CanonicalPick,
+): string | undefined {
   const key = pickKey(recipe, lineId, pick);
-  if (key === KEEP) return lineDraft(recipe, lineId).food;
-  const matched = Object.values(recipe.facts.ingredients).flatMap((line) =>
-    line.match?.canonical_id === key ? [line.match] : [],
+  return pick.kind === "existing" && key !== KEEP ? key : undefined;
+}
+
+// Whether the line needs an FDC food: only a line that has or gets a Canonical Ingredient has a
+// match, and so a food.
+export function needsFood(recipe: Recipe, lineId: string, pick: CanonicalPick): boolean {
+  return pick.kind !== "keep" || !!recipe.facts.ingredients[lineId]?.match;
+}
+
+// Whether the draft offers keeping the line in its written unit or converting it to a weight: for
+// a line that keeps its Canonical Ingredient and has a weight, while its food's portion gives
+// something to convert by.
+export function canChooseWeight(recipe: Recipe, lineId: string, draft: LineDraft): boolean {
+  return (
+    draft.canonical.kind === "keep" &&
+    draft.keepWeight !== null &&
+    !!foodOf(recipe, lineId, draft)?.converts
   );
-  const donor = matched.find((match) => match.confirmed) ?? matched[0];
-  return donor ? { fdcId: donor.fdc_id, portionId: null } : null;
+}
+
+type Converts = Pick<FdcPortion, "density_g_per_ml" | "grams_per_count" | "count_unit">;
+
+// A line with no unit ("2 eggs") counts whole things, which FDC counts in a generic word or a size,
+// as the API's BARE_COUNTS.
+const BARE_COUNTS = new Set(["each", "piece", "unit", "item", "small", "medium", "large"]);
+BARE_COUNTS.add("extra large").add("jumbo");
+
+// A count word's words, lowercase and singular enough to match, as the API's `fdc.words`.
+const countWords = (text: string) =>
+  [...new Set((text.toLowerCase().match(/[a-z]+/g) ?? []).map(singular))].sort().join(" ");
+const singular = (word: string) => word.replace(/(?<=..)ies$/, "y").replace(/(?<=...)(?<!s)s$/, "");
+
+// Why the chosen portion gives the line no weight, when it is the wrong kind for the line's unit,
+// as the API reads a portion for a unit: a volume line needs a density, a count line a count in its
+// own word (or, with no unit, a generic word or a size). Null when it fits, for a weight, which
+// needs no portion, and when the line's kind isn't known.
+export function portionMisfit(
+  kind: "mass" | "volume" | "count" | null,
+  unit: string | null,
+  portion: Converts,
+): string | null {
+  if (kind === null || kind === "mass") return null;
+  const count = portion.grams_per_count !== null ? portion.count_unit : null;
+  if (kind === "volume" && portion.density_g_per_ml !== null) return null;
+  if (kind === "count" && count !== null) {
+    const fits = unit ? countWords(count) === countWords(unit) : BARE_COUNTS.has(count);
+    if (fits) return null;
+  }
+  const is =
+    portion.density_g_per_ml !== null
+      ? "a volume"
+      : count !== null
+        ? `counted in ${count}`
+        : "neither a volume nor a count";
+  const line = unit ? `in ${unit}` : "a count with no unit";
+  return `This portion is ${is}, but the line is ${line}, so the line gets no weight.`;
 }
 
 // The food as the draft saves it: the one chosen for its pick, else the pick's default.
@@ -147,8 +213,8 @@ export function foodQuery(
   );
 }
 
-// Whether the line's FDC food gives anything to convert it to a weight by.
-export function canConvert(recipe: Recipe, lineId: string) {
+// Whether the line's stored FDC food and portion give anything to convert it to a weight by.
+function canConvert(recipe: Recipe, lineId: string) {
   const conversion = recipe.facts.ingredients[lineId]?.conversion;
   return conversion?.density_g_per_ml != null || conversion?.grams_per_count != null;
 }
@@ -187,8 +253,9 @@ export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Buil
       store_category_id: pick.storeCategoryId,
     };
   }
-  const food = foodOf(recipe, lineId, draft);
-  if (!food) return { problem: NO_FOOD, field: FOOD_SEARCH };
+  // A line with no Canonical Ingredient has no match, and so no food.
+  const food = needsFood(recipe, lineId, pick) ? foodOf(recipe, lineId, draft) : null;
+  if (!food && needsFood(recipe, lineId, pick)) return { problem: NO_FOOD, field: FOOD_SEARCH };
   const edit: FactEdit = {
     kind: "line",
     line_id: lineId,
@@ -196,13 +263,19 @@ export function lineEdit(recipe: Recipe, lineId: string, draft: LineDraft): Buil
     unit: draft.unit.trim() || null,
     name,
     preparation: draft.preparation.trim() || null,
-    fdc_id: food.fdcId,
-    portion_id: food.portionId,
+    fdc_id: food?.fdcId ?? null,
+    portion_id: food?.portionId ?? null,
     ...(canonical && { canonical }),
   };
-  // A new Canonical Ingredient brings its own weight, if any, so the choice is only for the kept one.
-  const was = lineDraft(recipe, lineId).keepWeight;
-  if (pick.kind === "keep" && draft.keepWeight !== null && draft.keepWeight !== was)
+  // The weight choice goes with a new food or portion, which would otherwise convert, or when it
+  // changed. A new Canonical Ingredient's food converts, so the choice is only for the kept one.
+  const was = lineDraft(recipe, lineId);
+  const newFood = food?.fdcId !== was.food?.fdcId || food?.portionId !== was.food?.portionId;
+  if (
+    canChooseWeight(recipe, lineId, draft) &&
+    draft.keepWeight !== null &&
+    (newFood || draft.keepWeight !== was.keepWeight)
+  )
     edit.keep_weight = draft.keepWeight;
   return { edit };
 }

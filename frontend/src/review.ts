@@ -93,6 +93,13 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   return items;
 }
 
+// Whether the item's sheet offers Confirm, or Accept correction while flagged: not once it's
+// Confirmed, nor while every open issue on it proposes no correction (one asking an editor to pick
+// a portion), which the editor settles by editing the item instead.
+export const acceptable = (item: ReviewItem) =>
+  item.mark !== "confirmed" &&
+  (item.mark !== "flagged" || item.issues.some((issue) => issue.after !== null));
+
 const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
   [...items.values()].filter((item) => item.tab === tab);
 
