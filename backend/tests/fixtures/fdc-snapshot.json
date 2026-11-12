@@ -90,6 +90,17 @@
       "description": "Snorp garlic, raw",
       "per_100g": { "kcal": 143.0, "protein_g": 6.6, "fat_g": 0.4, "carbs_g": 28.2, "sodium_mg": 11.0 },
       "portions": []
+    },
+    {
+      "fdc_id": 2009,
+      "dataset": "sr_legacy",
+      "description": "Frob root",
+      "per_100g": { "kcal": 80.0, "protein_g": 1.8, "fat_g": 0.8, "carbs_g": 17.8, "sodium_mg": 13.0 },
+      "portions": [
+        { "id": 611, "amount": 1.0, "unit": "knob", "modifier": null, "gram_weight": 20.0 },
+        { "id": 612, "amount": 1.0, "unit": "tsp", "modifier": null, "gram_weight": 2.0 },
+        { "id": 613, "amount": 1.0, "unit": "cup, sliced", "modifier": null, "gram_weight": 96.0 }
+      ]
     }
   ]
 }

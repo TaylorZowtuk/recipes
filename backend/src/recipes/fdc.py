@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, NamedTuple, cast
 import requests
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from recipes.models import Dataset, Per100g
+from recipes.models import Dataset, FdcNumbers, Per100g
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -189,6 +189,31 @@ def convert(food: Food, portion_id: int | None) -> Conversion:
     if unit in GENERIC_COUNTS and (size := _phrase(portion.modifier or "")):
         unit = size
     return Conversion(grams_per_count=portion.gram_weight / portion.amount, count_unit=unit)
+
+
+class NotInSnapshot(ValueError):
+    """An FDC food the Snapshot doesn't have, or a portion that isn't the food's."""
+
+
+def numbers(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> FdcNumbers:
+    """The FDC Snapshot's numbers for a food and its chosen portion, to copy into a fact: the
+    one place a chosen food and portion become stored numbers. Raises NotInSnapshot for a food
+    the Snapshot doesn't have or a portion that isn't the food's, rather than storing a refusal.
+    """
+    try:
+        food = snapshot.food(fdc_id)
+    except KeyError:
+        msg = f"FDC food {fdc_id} isn't in the FDC Snapshot"
+        raise NotInSnapshot(msg) from None
+    if portion_id is not None and portion_id not in {p.id for p in food.portions}:
+        msg = f"portion {portion_id} isn't one of FDC food {fdc_id}'s"
+        raise NotInSnapshot(msg)
+    return FdcNumbers(
+        dataset=food.dataset,
+        release=snapshot.release,
+        **convert(food, portion_id).model_dump(),
+        per_100g=food.per_100g,
+    )
 
 
 def _phrase(text: str) -> str:

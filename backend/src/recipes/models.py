@@ -230,12 +230,12 @@ class ParseFact(Fact):
 
 
 class MatchFact(Fact):
-    """The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
-    editor's new Canonical Ingredient has no FDC food until one is chosen for it.
+    """The line's Canonical Ingredient, with the FDC food and portion row the model or an editor
+    chose. Every match has an FDC food: where none really fits, the closest one.
     """
 
     canonical_id: Ulid
-    fdc_id: int | None
+    fdc_id: int
     portion_id: int | None
 
 

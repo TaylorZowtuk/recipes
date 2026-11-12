@@ -20,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from recipes import fdc
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
 from recipes.edits import CONFIRMED_BY, FactEdit, confirm_matches, edit_recipe, overused, share_all
@@ -48,6 +49,7 @@ from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
     Card,
+    Dataset,
     Difficulty,
     DurationSegment,
     Enrichment,
@@ -503,9 +505,15 @@ def _images(request: Request) -> ImageStore:
     return request.app.state.images
 
 
+def _snapshot(request: Request) -> Callable[[], fdc.Snapshot]:
+    return request.app.state.snapshot
+
+
 StoreDep = Annotated[Store, Depends(_store)]
 FetcherDep = Annotated[Fetcher, Depends(_fetcher)]
 ImagesDep = Annotated[ImageStore, Depends(_images)]
+# How a route loads the FDC Snapshot: only when it looks a food up, so reads never load it.
+SnapshotDep = Annotated["Callable[[], fdc.Snapshot]", Depends(_snapshot)]
 EDITORS_ONLY = [Depends(require_editor)]
 router = APIRouter(prefix="/api")
 
@@ -1001,6 +1009,45 @@ def confirm_facts(
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
 
 
+class FdcPortion(fdc.Portion):
+    """One of an FDC food's portions: `amount` of `unit` weighs `gram_weight`."""
+
+
+class FdcFood(Model):
+    """An FDC food an editor may pick for a line, with every portion it can be measured in."""
+
+    fdc_id: int
+    dataset: Dataset
+    description: str
+    portions: list[FdcPortion]
+
+
+# The most foods a search gives, and the lengths of what an editor may search for.
+MAX_FDC_FOODS = 10
+FdcQuery = Annotated[str, Query(min_length=2, max_length=60)]
+
+
+@router.get(
+    "/fdc/foods",
+    dependencies=EDITORS_ONLY,
+    responses={403: DUPLICATE[403], 422: {"description": "q isn't 2 to 60 characters"}},
+)
+def search_fdc_foods(q: FdcQuery, snapshot: SnapshotDep, response: Response) -> list[FdcFood]:
+    """The FDC Snapshot's foods for an ingredient's name, best first, as enrichment is offered
+    them, at most ten, each with its portions.
+    """
+    response.headers.update(NO_STORE)
+    return [
+        FdcFood(
+            fdc_id=food.fdc_id,
+            dataset=food.dataset,
+            description=food.description,
+            portions=[FdcPortion.model_validate(p.model_dump()) for p in food.portions],
+        )
+        for food in snapshot().candidates(q, MAX_FDC_FOODS)
+    ]
+
+
 @router.post(
     "/recipes/{recipe_id}/edit",
     dependencies=EDITORS_ONLY,
@@ -1015,29 +1062,34 @@ def confirm_facts(
             "description": "The recipe has no such line, step or substitute, the step's portions "
             "and timers don't fit it or use more than all of a line, the line's wording changes "
             "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
-            "doesn't exist, the line has no weight to keep or convert, or the edited recipe is "
+            "doesn't exist, the line's FDC food isn't in the FDC Snapshot or its portion isn't "
+            "the food's, the line has no weight to keep or convert, or the edited recipe is "
             "too big to store"
         },
     },
 )
-def edit_fact(recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDep) -> EditedFact:
+def edit_fact(
+    recipe_id: Annotated[Ulid, Path()], body: EditFact, store: StoreDep, snapshot: SnapshotDep
+) -> EditedFact:
     """Save the editor's edit of one Review Item's facts on the recipe at `body.version`,
     Confirmed with provenance `editor` and in no Confirm Batch, and resolve its open Enrichment
     Issues. A recipe Awaiting Review with nothing left to review is Ready.
 
-    A line's new Canonical Ingredient fixes the line's wording: the Wording Cache confirms it, and
-    every recipe with a line of that wording is matched to it too, each at its own version. Once
-    the edited recipe is saved, the edit never fails: a recipe that kept changing is listed in
-    `not_updated`, and one the match would make too big in `too_big`. Picking the same Canonical
-    Ingredient again retries them. A line saved with its Canonical Ingredient unchanged reaches no
-    other recipe.
+    A line's new Canonical Ingredient, or new FDC food or portion, fixes the line's wording: the
+    Wording Cache confirms it, and every recipe with a line of that wording is matched to it too,
+    each at its own version. Every such line takes the food, and the portion only where it fits
+    the line's written unit: else the food's portion that does, or none and an open Enrichment
+    Issue asking for one. Once the edited recipe is saved, the edit never fails: a recipe that
+    kept changing is listed in `not_updated`, and one the match would make too big in `too_big`.
+    Picking the same Canonical Ingredient again retries them. A line saved with its Canonical
+    Ingredient, food and portion unchanged reaches no other recipe.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":
         raise HTTPException(409, "A Pending recipe has no facts to edit yet")
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
-    edited = edit_recipe(store, recipe, body.edit)
+    edited = edit_recipe(store, recipe, body.edit, snapshot)
     if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     saved = store.review_recipe(
@@ -1688,6 +1740,7 @@ def create_app(
     auth: Callable[[], Auth] = Auth.from_env,
     fetcher: Callable[[], Fetcher] = PoliteFetcher,
     images: Callable[[], ImageStore] = ImageStore.from_env,
+    snapshot: Callable[[], fdc.Snapshot] = fdc.snapshot,
 ) -> FastAPI:
     """The API on the table `store` opens, signing editors in with `auth`, fetching websites
     with `fetcher` and keeping photos in the bucket `images` opens. On startup it bootstraps the
@@ -1702,6 +1755,8 @@ def create_app(
         app.state.auth = auth()
         app.state.fetcher = fetcher()
         app.state.images = images()
+        # Called only by the routes that look a food up, so reads never load the FDC Snapshot.
+        app.state.snapshot = snapshot
         yield
 
     app = FastAPI(title="Plateful", lifespan=lifespan)

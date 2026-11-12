@@ -6,7 +6,7 @@ its wording for every recipe in the Collection.
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from conftest import EDITOR, SERVICE_TOKEN
+from conftest import EDITOR, SERVICE_TOKEN, SNAPSHOT
 from test_enrichment_review import (
     BEEF,
     CONFIRMED,
@@ -24,7 +24,7 @@ from test_enrichment_review import (
     uses,
 )
 
-from recipes import api, edits
+from recipes import api, edits, fdc
 from recipes.models import (
     MASS_UNITS,
     SCHEMA_VERSION,
@@ -77,6 +77,9 @@ def line_edit(line_id: str = "i1", **fields: Any) -> dict[str, Any]:
         "unit": "g",
         "name": "stewing beef",
         "preparation": "cubed",
+        # The beef line's food as enrichment matched it, so the food is unchanged.
+        "fdc_id": 1001,
+        "portion_id": None,
         **fields,
     }
 
@@ -209,10 +212,26 @@ def test_editing_a_line_without_a_parse_reads_it(
 ) -> None:
     recipe = awaiting(api_store)
 
-    response = edit(editor_client, recipe, **line_edit("i5", name="carrots", unit=None))
+    carrots = {"kind": "new", "name": "Carrots", "family": "carrot", "store_category_id": "produce"}
+
+    response = edit(
+        editor_client, recipe, **line_edit("i5", name="carrots", unit=None, canonical=carrots)
+    )
 
     assert response.status_code == 200
     assert fact(stored(api_store, recipe.id), "i5.parse")["name"] == "carrots"
+
+
+def test_picking_a_food_for_a_line_with_no_canonical_ingredient_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit("i5", name="carrots", unit=None))
+
+    assert response.status_code == 422
+    assert "i5" in response.json()["detail"]
+    assert stored(api_store, recipe.id) == recipe
 
 
 def test_editing_a_line_the_recipe_lacks_is_refused(
@@ -303,7 +322,9 @@ def test_a_new_canonical_ingredient_fixes_the_wording_across_the_collection(
                 "name": "Braising Beef",
                 "family": "Beef",
                 "store_category_id": "meat",
-            }
+            },
+            fdc_id=1002,
+            portion_id=503,  # 1 large egg: a bare count, as each line's is
         ),
     )
 
@@ -317,55 +338,250 @@ def test_a_new_canonical_ingredient_fixes_the_wording_across_the_collection(
     for before in (recipe, unconfirmed, already):
         after = stored(api_store, before.id)
         matched = fact(after, "i1.match")
-        assert matched["canonical_id"] == new.id
-        # A new Canonical Ingredient has no FDC food yet, so nothing is made up for it.
-        assert (matched["fdc_id"], matched["portion_id"]) == (None, None)
+        assert (matched["canonical_id"], matched["fdc_id"], matched["portion_id"]) == (
+            new.id,
+            1002,
+            503,
+        )
         assert edited(matched)
-        assert after.facts.ingredients["i1"].conversion is None
+        assert converted(after) == numbers(1002, 503)
         assert after.version == before.version + 1
         assert card(api_store, before.id)["recipe_version"] == after.version
     assert stored(api_store, elsewhere.id) == elsewhere
 
 
-def test_an_existing_canonical_ingredient_copies_its_food_from_a_confirmed_line(
+def test_a_new_canonical_ingredient_needs_an_fdc_food(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+    new = {"kind": "new", "name": "Braising Beef", "family": "beef", "store_category_id": "meat"}
+    body = line_edit(canonical=new)
+    del body["fdc_id"]
+
+    response = edit(editor_client, recipe, **body)
+
+    assert response.status_code == 422
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_an_existing_canonical_ingredient_takes_the_editors_food_not_another_lines(
     editor_client: TestClient, api_store: Store
 ) -> None:
     recipe = awaiting(api_store, canonicals=(BEEF, PORK))
-    weight = {**DENSE, "estimated": True}
-    other(api_store, 2, beef_line("pork", canonical_id=PORK.id, fdc_id=2001))
-    donor = beef_line("pork shoulder", canonical_id=PORK.id, fdc_id=2002, **CONFIRMED)
-    donor.ingredients["i1"].conversion = conversion(fdc_id=2002, **weight)
-    other(api_store, 3, donor)
+    matched_before = beef_line("pork shoulder", canonical_id=PORK.id, fdc_id=2002, **CONFIRMED)
+    matched_before.ingredients["i1"].conversion = conversion(fdc_id=2002, **DENSE)
+    other(api_store, 3, matched_before)
 
     response = edit(
-        editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": PORK.id})
+        editor_client,
+        recipe,
+        **line_edit(canonical={"kind": "existing", "id": PORK.id}, fdc_id=2004, portion_id=606),
     )
 
     assert response.status_code == 200
     saved = stored(api_store, recipe.id)
-    assert (fact(saved, "i1.match")["canonical_id"], fact(saved, "i1.match")["fdc_id"]) == (
+    matched = fact(saved, "i1.match")
+    assert (matched["canonical_id"], matched["fdc_id"], matched["portion_id"]) == (
         PORK.id,
-        2002,
+        2004,
+        606,
     )
-    copied = fact(saved, "i1.conversion")
-    assert (copied["fdc_id"], copied["density_g_per_ml"], copied["estimated"]) == (2002, 1.05, True)
-    assert edited(copied)
+    assert converted(saved) == numbers(2004, 606)
+    assert edited(fact(saved, "i1.conversion"))
     assert next(c for c in api_store.canonical_ingredients() if c.id == PORK.id).confirmed
 
 
-def test_an_existing_canonical_ingredient_no_line_matches_has_no_food(
+# A line's FDC food
+
+
+def numbers(fdc_id: int, portion_id: int | None) -> dict[str, Any]:
+    """The conversion fdc.convert gives the food's portion in the synthetic FDC Snapshot."""
+    food = SNAPSHOT.food(fdc_id)
+    return {
+        "fdc_id": fdc_id,
+        "dataset": food.dataset,
+        "release": SNAPSHOT.release,
+        **fdc.convert(food, portion_id).model_dump(),
+        "per_100g": food.per_100g.model_dump(),
+    }
+
+
+def converted(recipe: Recipe, line_id: str = "i1") -> dict[str, Any]:
+    """The line's conversion's FDC numbers."""
+    found = fact(recipe, f"{line_id}.conversion")
+    return {key: found[key] for key in numbers(1001, None)}
+
+
+def test_picking_a_food_and_portion_stores_its_conversion_from_the_snapshot(
     editor_client: TestClient, api_store: Store
 ) -> None:
-    recipe = awaiting(api_store, canonicals=(BEEF, PORK))
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit(fdc_id=2004, portion_id=606))
+
+    assert response.status_code == 200
+    saved = stored(api_store, recipe.id)
+    matched = fact(saved, "i1.match")
+    assert (matched["canonical_id"], matched["fdc_id"], matched["portion_id"]) == (
+        BEEF.id,
+        2004,
+        606,
+    )
+    assert edited(matched)
+    assert converted(saved) == numbers(2004, 606)
+    assert converted(saved)["density_g_per_ml"] is not None
+    assert edited(fact(saved, "i1.conversion"))
+    assert saved.issues[0].status == "resolved"
+
+
+def test_picking_a_food_with_no_portion_stores_no_portion_chosen(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit(fdc_id=2004, portion_id=None))
+
+    assert response.status_code == 200
+    saved = stored(api_store, recipe.id)
+    assert fact(saved, "i1.match")["portion_id"] is None
+    assert converted(saved)["refused"] == "no portion chosen"
+
+
+@pytest.mark.parametrize(
+    ("fdc_id", "portion_id"),
+    [(9999, None), (2004, 501)],
+    ids=["unknown food", "another food's portion"],
+)
+def test_a_food_or_portion_not_in_the_snapshot_is_refused_naming_the_line(
+    editor_client: TestClient, api_store: Store, fdc_id: int, portion_id: int | None
+) -> None:
+    recipe = awaiting(api_store)
+
+    response = edit(editor_client, recipe, **line_edit(fdc_id=fdc_id, portion_id=portion_id))
+
+    assert response.status_code == 422
+    assert "i1" in response.json()["detail"]
+    assert stored(api_store, recipe.id) == recipe
+
+
+def frob_line(unit: str | None, **match_fields: Any) -> RecipeFacts:
+    """A frob root line in its written unit."""
+    written = parse("frob root").model_copy(update={"unit": unit, "unit_kind": unit_kind(unit)})
+    return RecipeFacts(
+        ingredients={
+            "i1": IngredientFacts(
+                parse=written, match=match(**match_fields), conversion=conversion()
+            )
+        }
+    )
+
+
+FROB: dict[str, Any] = {
+    "name": "frob root",
+    "unit": "knobs",
+    "canonical": {"kind": "existing", "id": BEEF.id},
+}
+
+
+@pytest.mark.parametrize(
+    ("picked", "unit", "portion_id"),
+    [
+        (611, "tbsp", 612),  # a knob gives no density, so the food's first portion that does
+        (612, "cups", 612),  # a density works for every volume
+        (612, "knobs", 611),  # the food's portion counted in the line's word
+        (611, "knob", 611),  # the same count word, singular or plural
+        (611, "g", 611),  # a weight needs no portion: it stays as picked
+    ],
+    ids=["volume fallback", "volume", "count word", "same count", "mass"],
+)
+def test_a_food_pick_spreads_the_portion_that_fits_each_lines_unit(
+    editor_client: TestClient, api_store: Store, picked: int, unit: str, portion_id: int
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"))
+    sharing = other(api_store, 2, frob_line(unit))
+
+    response = edit(editor_client, recipe, **line_edit(**FROB, fdc_id=2009, portion_id=picked))
+
+    assert response.status_code == 200
+    assert response.json()["also_updated"] == [sharing.id]
+    after = stored(api_store, sharing.id)
+    matched = fact(after, "i1.match")
+    assert (matched["fdc_id"], matched["portion_id"]) == (2009, portion_id)
+    assert edited(matched)
+    assert converted(after) == numbers(2009, portion_id)
+    assert not [issue for issue in after.issues if issue.status == "open"]
+
+
+@pytest.mark.parametrize("unit", ["slices", None], ids=["another count", "a bare count"])
+def test_a_food_pick_with_no_portion_for_a_lines_unit_asks_for_one(
+    editor_client: TestClient, api_store: Store, unit: str | None
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"))
+    sharing = other(api_store, 2, frob_line(unit))
+
+    response = edit(editor_client, recipe, **line_edit(**FROB, fdc_id=2009, portion_id=611))
+
+    assert response.status_code == 200
+    after = stored(api_store, sharing.id)
+    matched = fact(after, "i1.match")
+    assert (matched["fdc_id"], matched["portion_id"]) == (2009, None)
+    assert converted(after) == numbers(2009, None)
+    (opened,) = [issue for issue in after.issues if issue.status == "open"]
+    assert opened.fact_id == "i1.conversion"
+    assert "portion" in opened.reason
+    assert card(api_store, sharing.id)["needs_review"]["flagged"] == 1
+
+
+def test_a_picked_clove_never_reaches_a_spoonful_of_garlic(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    cloves = parse("snorp garlic").model_copy(update={"unit": "cloves"})
+    spoon = parse("snorp garlic").model_copy(update={"unit": "tbsp", "unit_kind": "volume"})
+    facts = RecipeFacts(
+        ingredients={
+            "i1": IngredientFacts(parse=cloves, match=match(), conversion=conversion()),
+            "i2": IngredientFacts(parse=spoon, match=match(), conversion=conversion()),
+        }
+    )
+    recipe = awaiting(api_store, facts=facts, issues=[issue(1), issue(2, "i2.match")])
+    spooned = other(api_store, 2, RecipeFacts(ingredients={"i1": facts.ingredients["i2"]}))
+    ready = api_store.update_recipe(spooned.model_copy(update={"status": "ready"}))
 
     response = edit(
-        editor_client, recipe, **line_edit(canonical={"kind": "existing", "id": PORK.id})
+        editor_client,
+        recipe,
+        **line_edit(name="snorp garlic", unit="cloves", fdc_id=2007, portion_id=608),
     )
 
     assert response.status_code == 200
     saved = stored(api_store, recipe.id)
-    assert fact(saved, "i1.match")["fdc_id"] is None
-    assert saved.facts.ingredients["i1"].conversion is None
+    assert fact(saved, "i1.match")["portion_id"] == 608
+    # The same recipe's spoonful takes the garlic but not the clove, and asks for a portion.
+    spooned = fact(saved, "i2.match")
+    assert (spooned["fdc_id"], spooned["portion_id"]) == (2007, None)
+    assert [(i.fact_id, i.status) for i in saved.issues] == [
+        ("i1.match", "resolved"),
+        ("i2.match", "resolved"),
+        ("i2.conversion", "open"),
+    ]
+    elsewhere = stored(api_store, ready.id)
+    assert fact(elsewhere, "i1.match")["fdc_id"] == 2007
+    assert converted(elsewhere)["refused"] == "no portion chosen"
+    assert [i.fact_id for i in elsewhere.issues if i.status == "open"] == ["i1.conversion"]
+    assert elsewhere.status == "ready"
+
+
+def test_resaving_a_line_with_its_food_unchanged_reaches_no_other_recipe(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store)
+    sharing = other(api_store, 2, beef_line())
+
+    response = edit(editor_client, recipe, **line_edit())
+
+    assert response.status_code == 200
+    assert shared(response) == ([], [], [])
+    assert stored(api_store, sharing.id) == sharing
 
 
 @pytest.mark.parametrize(

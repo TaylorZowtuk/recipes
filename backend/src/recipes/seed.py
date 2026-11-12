@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 
 from PIL import Image, ImageDraw
 
+from recipes import fdc
 from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -31,7 +32,6 @@ from recipes.models import (
     MatchFact,
     Original,
     ParseFact,
-    Per100g,
     Preview,
     Quantity,
     Recipe,
@@ -72,6 +72,10 @@ BUTTER = CanonicalIngredient(
     version=1,
     schema_version=SCHEMA_VERSION,
 )
+# Butter's FDC food and its tablespoon portion in the committed FDC Snapshot, which make dev and
+# the end-to-end tests look foods up in.
+BUTTER_FDC_ID = 173410  # Butter, salted (SR Legacy)
+BUTTER_TBSP = 92457
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -498,23 +502,15 @@ RECIPES = [
                             confidence=0.7,
                             estimated=False,
                             canonical_id=BUTTER.id,
-                            fdc_id=1001,
-                            portion_id=None,
+                            fdc_id=BUTTER_FDC_ID,
+                            portion_id=BUTTER_TBSP,
                         ),
                         "conversion": ConversionFact(
                             provenance="fdc",
                             confidence=0.8,
                             estimated=True,
-                            fdc_id=1001,
-                            dataset="sr_legacy",
-                            release="foundation-2026-04-01+sr_legacy-2018-04",
-                            density_g_per_ml=0.96,
-                            grams_per_count=None,
-                            count_unit=None,
-                            refused=None,
-                            per_100g=Per100g(
-                                kcal=717, protein_g=0.9, fat_g=81, carbs_g=0.1, sodium_mg=640
-                            ),
+                            fdc_id=BUTTER_FDC_ID,
+                            **fdc.numbers(fdc.snapshot(), BUTTER_FDC_ID, BUTTER_TBSP).model_dump(),
                         ),
                     }
                 ),

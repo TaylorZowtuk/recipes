@@ -1,4 +1,5 @@
 import hashlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import boto3
@@ -8,6 +9,7 @@ from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from moto import mock_aws
 
+from recipes import fdc
 from recipes.api import create_app
 from recipes.auth import SERVICE_TOKEN_HEADER, Auth, AuthSettings, Claims, InvalidIdToken
 from recipes.images import ImageStore
@@ -25,6 +27,8 @@ TABLE_NAME = "plateful-test"
 IMAGES_BUCKET = "plateful-test-images"
 SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = {SERVICE_TOKEN_HEADER: SERVICE_TOKEN}
+# The synthetic FDC Snapshot the API's tests look foods up in, never the committed one.
+SNAPSHOT = fdc.load_snapshot(Path(__file__).parent / "fixtures" / "fdc-snapshot.json")
 
 # mock_aws gives every test a fresh default boto3 session, which reloads botocore's service
 # models (about 50 ms a test). Each test still gets its own session, sharing only the loader.
@@ -70,7 +74,12 @@ UNCONFIGURED = Auth(settings=lambda: AuthSettings.parse({}), verifier=no_sign_in
 
 @pytest.fixture
 def app(table: str, images: ImageStore) -> FastAPI:
-    return create_app(store=lambda: Store(table), auth=lambda: UNCONFIGURED, images=lambda: images)
+    return create_app(
+        store=lambda: Store(table),
+        auth=lambda: UNCONFIGURED,
+        images=lambda: images,
+        snapshot=lambda: SNAPSHOT,
+    )
 
 
 @pytest.fixture
@@ -102,7 +111,11 @@ def editor_client(
     )
     auth = Auth(settings=lambda: settings, verifier=no_sign_in)
     app = create_app(
-        store=lambda: api_store, auth=lambda: auth, fetcher=fetcher, images=lambda: images
+        store=lambda: api_store,
+        auth=lambda: auth,
+        fetcher=fetcher,
+        images=lambda: images,
+        snapshot=lambda: SNAPSHOT,
     )
     with TestClient(app, follow_redirects=False) as client:
         yield client
