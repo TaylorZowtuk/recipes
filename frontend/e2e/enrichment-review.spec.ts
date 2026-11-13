@@ -34,6 +34,14 @@ const parse = (low: number, unit: string, name: string) => ({
   preparation: null,
 });
 
+// FDC Snapshot foods: cooked white rice by the cup, and cooked brown rice, whose cup weighs 202 g.
+const WHITE_RICE = { fdcId: 168878, cup: 83928 };
+const BROWN_RICE = {
+  fdcId: 169704,
+  description:
+    "Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program)",
+};
+
 // What the enrich CLI might find in the fake web's recipe (2 cups cooked rice, 1 tbsp olive oil,
 // 1 tsp kosher salt; Warm the oil in a pan; Add the rice and salt, and stir until hot): a parse of
 // each line, the rice matched to a new Canonical Ingredient with a weight, both steps' uses, the
@@ -47,10 +55,15 @@ function enrichment(rice: string) {
       ingredients: {
         i1: {
           parse: parse(2, "cup", rice),
-          match: { ...stamp("llm"), canonical_id: canonicalId, fdc_id: 1001, portion_id: null },
+          match: {
+            ...stamp("llm"),
+            canonical_id: canonicalId,
+            fdc_id: WHITE_RICE.fdcId,
+            portion_id: WHITE_RICE.cup,
+          },
           conversion: {
             ...stamp("fdc", true),
-            fdc_id: 1001,
+            fdc_id: WHITE_RICE.fdcId,
             dataset: "sr_legacy",
             release: "sr_legacy-2018-04",
             density_g_per_ml: 0.66,
@@ -363,38 +376,108 @@ test("the toast waits while Undo has focus or the mouse, keeps focus on a failed
   await expect(undo(page)).toBeEnabled();
 });
 
+// The olive oil line has no Canonical Ingredient or FDC food, so these edit the rice's line.
 test("an editor edits a line's amount from its sheet, and it's Confirmed", async ({
   page,
 }, testInfo) => {
   const path = `plum-pilaf-${attempt(testInfo)}`;
   const id = await addRecipe(page, path);
+  const rice = `plum rice ${attempt(testInfo)}`;
   const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
     headers: SERVICE_TOKEN,
-    data: enrichment(`plum rice ${attempt(testInfo)}`),
+    data: enrichment(rice),
   });
   expect(enriched.status(), await enriched.text()).toBe(200);
   await page.goto(`/recipes/${id}`);
 
   const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
-  await ingredients.getByRole("button", { name: /^Unchecked: olive oil/ }).click();
-  const sheet = page.getByRole("dialog", { name: "1 tbsp olive oil" });
+  await ingredients.getByRole("button", { name: new RegExp(`^Flagged: ${rice}`) }).click();
+  const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
   await sheet.getByRole("button", { name: "Edit" }).click();
   const amount = sheet.getByRole("textbox", { name: "Amount" });
   await expect(amount).toBeFocused();
-  await expect(amount).toHaveValue("1");
+  await expect(amount).toHaveValue("2");
 
   // Cancel goes back to the detail; Edit again, and Save, saves it Confirmed.
   await sheet.getByRole("button", { name: "Cancel" }).click();
   await expect(sheet.getByRole("button", { name: "Edit" })).toBeFocused();
   await sheet.getByRole("button", { name: "Edit" }).click();
-  await amount.fill("2");
+  await amount.fill("3");
   await sheet.getByRole("button", { name: "Save" }).click();
   await expect(sheet).toBeHidden();
   await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
   await expect(undo(page)).toHaveCount(0);
-  await expect(ingredients.getByRole("button", { name: /^Confirmed: olive oil/ })).toContainText(
-    "2 tbsp",
-  );
+  await expect(
+    ingredients.getByRole("button", { name: new RegExp(`^Confirmed: ${rice}`) }),
+  ).toContainText("3 cups");
+});
+
+test("an editor picks a food and portion on a line and sees its weight", async ({
+  page,
+}, testInfo) => {
+  const path = `pear-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const rice = `pear rice ${attempt(testInfo)}`;
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(rice),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: new RegExp(`^Flagged: ${rice}`) }).click();
+  const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+
+  // The search runs on the FDC Snapshot through the local API.
+  await sheet
+    .getByRole("textbox", { name: "Find an FDC food" })
+    .fill("brown rice long-grain cooked");
+  // A choice's radio is hidden, so the editor taps its label.
+  const choice = (name: string) =>
+    sheet.locator("label", { has: page.getByRole("radio", { name, exact: true }) });
+  await choice(`${BROWN_RICE.description} · SR Legacy`).click();
+  await expect(sheet.getByRole("radio", { name: "No portion" })).toBeChecked();
+  await choice("1 cup (202 g)").click();
+  await expect(sheet.getByRole("radio", { name: "1 cup (202 g)" })).toBeChecked();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+
+  // 202 g in a cup of 236.6 ml.
+  await ingredients.getByRole("button", { name: new RegExp(`^Confirmed: ${rice}`) }).click();
+  await expect(sheet).toContainText(/Weight\s*0\.85\d* g\/ml/);
+  await expect(sheet).toContainText(`FDC ${BROWN_RICE.fdcId}`);
+});
+
+// The seed's Garlic Butter Green Beans matches its butter to Butter, salted, so choosing butter
+// for another recipe's line starts its food there, found by the API across the Collection.
+test("choosing a Canonical Ingredient starts the food from another recipe's line", async ({
+  page,
+}, testInfo) => {
+  const path = `quince-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const rice = `quince rice ${attempt(testInfo)}`;
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(rice),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: new RegExp(`^Flagged: ${rice}`) }).click();
+  const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  const choice = (name: string) =>
+    sheet.locator("label", { has: page.getByRole("radio", { name, exact: true }) });
+  await sheet.getByRole("textbox", { name: "Find or create one" }).fill("butter");
+  await choice("butter").click();
+  await expect(sheet.getByRole("textbox", { name: "Find an FDC food" })).toHaveValue("butter");
+  await expect(sheet.getByRole("radio", { name: "Butter, salted · SR Legacy" })).toBeChecked();
+  await expect(sheet.getByRole("radio", { name: "No portion" })).toBeChecked();
+  await sheet.getByRole("button", { name: "Cancel" }).click();
 });
 
 // WebKit doesn't scroll a field into view on its own here, so the form keeps the focused field

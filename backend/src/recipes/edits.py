@@ -1,8 +1,9 @@
 """An editor's edit of one Review Item's facts: a line, a step, a substitution or the Difficulty.
 
 An edit saves its facts Confirmed with provenance `editor`, in no Confirm Batch, so no undo
-reverses it. A line's new Canonical Ingredient fixes its wording: the Wording Cache confirms it,
-and every line in the Collection with that wording is matched to it.
+reverses it. A line's new Canonical Ingredient or FDC food fixes its wording: the Wording Cache
+confirms it, and every line in the Collection with that wording is matched to it, each taking the
+portion of the food that fits its own written unit.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
+from recipes import fdc
 from recipes.models import (
     MAX_LABEL,
     MAX_LINES,
@@ -26,6 +28,7 @@ from recipes.models import (
     Difficulty,
     DifficultyFact,
     DurationSegment,
+    EnrichmentIssue,
     Fact,
     IngredientFacts,
     IngredientSegment,
@@ -53,7 +56,7 @@ from recipes.models import (
 from recipes.store import ATTEMPTS, VersionConflict
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Mapping
 
     from recipes.store import Store
 
@@ -86,9 +89,11 @@ CanonicalChoice = Annotated[ExistingCanonical | NewCanonical, Field(discriminato
 
 
 class EditLine(BaseModel):
-    """A line's amount, unit, wording and preparation as the editor reads it, and, if given, its
-    new Canonical Ingredient and whether it keeps its written unit (true) or converts to a weight
-    (false). No quantity means no amount, as in "to taste".
+    """A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
+    portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
+    keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
+    in "to taste". A line that has or gets a Canonical Ingredient needs an FDC food; a line with
+    none has no match, and so no food.
     """
 
     kind: Literal["line"]
@@ -97,6 +102,8 @@ class EditLine(BaseModel):
     unit: Label | None
     name: Name
     preparation: Label | None
+    fdc_id: int | None
+    portion_id: int | None
     canonical: CanonicalChoice | None = None
     keep_weight: bool | None = None
 
@@ -186,11 +193,36 @@ def _checked[F: Fact](fact: F | None, now: datetime) -> F | None:
 
 @dataclass
 class SharedMatch:
-    """A wording's match as an editor fixed it, for every line in the Collection with it."""
+    """A wording's match as an editor fixed it, for every line in the Collection with it. The
+    Canonical Ingredient and FDC food go to every line; the portion only where it fits the line's
+    own written unit. Raises fdc.NotInSnapshot for a food the FDC Snapshot doesn't have or a
+    portion that isn't the food's.
+    """
 
     wording: str
-    match: MatchFact
-    conversion: ConversionFact | None
+    canonical_id: str
+    snapshot: fdc.Snapshot
+    fdc_id: int
+    portion_id: int | None
+    now: datetime
+    food: fdc.Food = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.food = fdc.chosen(self.snapshot, self.fdc_id, self.portion_id)
+
+    def picked(self, portion_id: int | None) -> tuple[MatchFact, ConversionFact]:
+        """A line's match to the food and portion, and the conversion the portion gives."""
+        numbers = fdc.numbers(self.snapshot, self.fdc_id, portion_id)
+        return (
+            _new_by_editor(
+                MatchFact,
+                self.now,
+                canonical_id=self.canonical_id,
+                fdc_id=self.fdc_id,
+                portion_id=portion_id,
+            ),
+            _new_by_editor(ConversionFact, self.now, fdc_id=self.fdc_id, **numbers.model_dump()),
+        )
 
     def lines(self, recipe: Recipe) -> list[str]:
         """The recipe's lines with the wording."""
@@ -200,20 +232,57 @@ class SharedMatch:
             if line.parse and normalize_wording(line.parse.name) == self.wording
         ]
 
-    def apply(self, recipe: Recipe) -> Recipe | None:
-        """The recipe with each of its lines with the wording matched, or None if it has none.
-        Open issues on those lines' matches and conversions are resolved.
+    def apply(self, recipe: Recipe, picked_on: str | None = None) -> Recipe | None:
+        """The recipe with each of its lines with the wording matched, apart from `picked_on`,
+        the line the editor picked the food on, or None if it has none. Open issues on those
+        lines' matches and conversions are resolved, and a line no portion of the food fits gets
+        an open issue asking an editor to pick one.
         """
         lines = self.lines(recipe)
         if not lines:
             return None
         facts = recipe.facts.model_copy(deep=True)
+        asks: list[EnrichmentIssue] = []
         for line_id in lines:
             line = facts.ingredients[line_id]
-            line.match, line.conversion = self.match, self.conversion
+            if line_id == picked_on or line.parse is None:
+                continue
+            portion_id, fits = self._portion_for(line.parse)
+            line.match, line.conversion = self.picked(portion_id)
+            if not fits:
+                asks.append(self._ask(line_id, line.parse))
         fixed = {f"{line_id}.{kind}" for line_id in lines for kind in ("match", "conversion")}
-        issues = resolve(recipe, lambda fact_id: fact_id in fixed)
+        issues = [*resolve(recipe, lambda fact_id: fact_id in fixed), *asks]
         return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
+
+    def _portion_for(self, parse: ParseFact) -> tuple[int | None, bool]:
+        """The food's portion that fits the line's written unit, and whether one does. A weight
+        needs no portion, so a mass line takes the chosen one as it is. A volume line takes the
+        chosen portion if it gives a density, which works for every volume, or else the food's
+        first that does. A count line takes the chosen portion if it counts in the line's word,
+        or else the food's first that does. No portion gives a line with no amount ("salt, to
+        taste") a weight, so it too takes the chosen one as it is.
+        """
+        kind = parse.unit_kind or unit_kind(parse.unit)
+        line = (kind, parse.unit)
+        has_amount = parse.quantity is not None
+        for portion_id in [self.portion_id, *(portion.id for portion in self.food.portions)]:
+            conversion = fdc.convert(self.food, portion_id)
+            if fdc.fits(conversion, *line, has_amount=has_amount):
+                return portion_id, True
+        return None, False
+
+    def _ask(self, line_id: str, parse: ParseFact) -> EnrichmentIssue:
+        """An open issue asking an editor to pick the portion for a line none fits. It proposes
+        no correction, so there's nothing to accept: the editor edits the line to pick one.
+        """
+        unit = f"its unit, {parse.unit}" if parse.unit else "a count with no unit"
+        return EnrichmentIssue(
+            id=new_ulid(),
+            fact_id=f"{line_id}.conversion",
+            reason=f"An editor picked {self.food.description} for {self.wording}, but none of "
+            f"its portions fits {unit}, so this line has no weight: pick a portion for it.",
+        )
 
 
 @dataclass
@@ -229,12 +298,16 @@ class Edited:
     others: list[str] = field(default_factory=list[str])  # other recipes with the wording
 
 
-def edit_recipe(store: Store, recipe: Recipe, edit: FactEdit) -> Edited:
-    """The recipe with the edit applied. Raises a 422 for an edit it can't take."""
+def edit_recipe(
+    store: Store, recipe: Recipe, edit: FactEdit, snapshot: Callable[[], fdc.Snapshot]
+) -> Edited:
+    """The recipe with the edit applied, loading the FDC Snapshot only to pick a line's food.
+    Raises a 422 for an edit it can't take.
+    """
     now = datetime.now(UTC)
     match edit:
         case EditLine():
-            return _edit_line(store, recipe, edit, now)
+            return _edit_line(store, recipe, edit, snapshot, now)
         case EditStep():
             return Edited(_edit_step(recipe, edit, now))
         case EditSubstitution() | RemoveSubstitution():
@@ -243,7 +316,13 @@ def edit_recipe(store: Store, recipe: Recipe, edit: FactEdit) -> Edited:
             return Edited(_edit_difficulty(recipe, edit, now))
 
 
-def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> Edited:
+def _edit_line(
+    store: Store,
+    recipe: Recipe,
+    edit: EditLine,
+    snapshot: Callable[[], fdc.Snapshot],
+    now: datetime,
+) -> Edited:
     if edit.line_id not in {line.id for line in recipe.original.ingredients}:
         raise HTTPException(422, f"The recipe has no line {edit.line_id}")
     facts = recipe.facts.model_copy(deep=True)
@@ -266,11 +345,21 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
         optional=old.optional if old else False,
     )
     result, base = Edited(recipe), recipe
-    if edit.canonical:
-        canonical = _canonical(store, edit.canonical, result)
-        recipes = store.recipes()
-        shared = _shared_match(recipes, canonical.id, normalize_wording(edit.name), now)
-        line.match, line.conversion = shared.match, shared.conversion
+    current, picked = line.match, (edit.fdc_id, edit.portion_id)
+    kept = ExistingCanonical(kind="existing", id=current.canonical_id) if current else None
+    choice = edit.canonical or kept
+    if choice is None:
+        # No Canonical Ingredient, so no match, and so no food.
+        if edit.fdc_id is not None:
+            raise HTTPException(
+                422, f"Line {edit.line_id} has no Canonical Ingredient, so it takes no FDC food"
+            )
+    elif edit.fdc_id is None:
+        raise HTTPException(422, f"Line {edit.line_id} needs an FDC food: the closest if none fits")
+    elif edit.canonical or current is None or (current.fdc_id, current.portion_id) != picked:
+        canonical = _canonical(store, choice, result)
+        shared = _picked(snapshot(), canonical.id, edit.fdc_id, edit, now)
+        line.match, line.conversion = shared.picked(edit.portion_id)
         if shared.wording:
             result.shared = shared
             result.fixed = [
@@ -281,21 +370,41 @@ def _edit_line(store: Store, recipe: Recipe, edit: EditLine, now: datetime) -> E
                     schema_version=SCHEMA_VERSION,
                 )
             ]
+            recipes = store.recipes()
             result.others = [o.id for o in recipes if o.id != recipe.id and shared.lines(o)]
-            # The recipe's other lines with the same wording take the match too.
-            base = shared.apply(recipe.model_copy(update={"facts": facts})) or base
+            # The recipe's other lines with the same wording take the food too.
+            base = shared.apply(recipe.model_copy(update={"facts": facts}), edit.line_id) or base
             facts = base.facts
             line = facts.ingredients[edit.line_id]
     else:
+        # The same food and portion: the line's match and conversion are Confirmed as they stand.
         line.match, line.conversion = _checked(line.match, now), _checked(line.conversion, now)
-        if line.match:
-            canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
-            result.confirmed, result.learned = canonicals, wordings
+        canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
+        result.confirmed, result.learned = canonicals, wordings
     if edit.keep_weight is not None:
-        line.conversion = _kept(line.conversion, keep=edit.keep_weight, now=now)
+        line.conversion = _kept(line.conversion, edit.line_id, keep=edit.keep_weight, now=now)
     issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
     result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
     return result
+
+
+def _picked(
+    snapshot: fdc.Snapshot, canonical_id: str, fdc_id: int, edit: EditLine, now: datetime
+) -> SharedMatch:
+    """The editor's food and portion for the line's wording. A 422 naming the line for a food
+    the FDC Snapshot doesn't have or a portion that isn't the food's.
+    """
+    try:
+        return SharedMatch(
+            wording=normalize_wording(edit.name),
+            canonical_id=canonical_id,
+            snapshot=snapshot,
+            fdc_id=fdc_id,
+            portion_id=edit.portion_id,
+            now=now,
+        )
+    except fdc.NotInSnapshot as refused:
+        raise HTTPException(422, f"Line {edit.line_id}: {refused}") from None
 
 
 def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volume", "count"]:
@@ -334,51 +443,38 @@ def _canonical(store: Store, choice: CanonicalChoice, result: Edited) -> Canonic
     return canonical
 
 
-def _shared_match(
-    recipes: Iterable[Recipe], canonical_id: str, wording: str, now: datetime
-) -> SharedMatch:
-    """The match for a line the editor matched to the Canonical Ingredient, with the FDC food and
-    conversion of a line already matched to it, a Confirmed one first. A conversion is the FDC
-    food and portion's, not the line's, so it carries over. With no such line, there's no FDC
-    food and no conversion, rather than a made-up one.
-    """
-    donors = [
-        line
-        for recipe in recipes
-        for line in recipe.facts.ingredients.values()
-        if line.match and line.match.canonical_id == canonical_id and line.match.fdc_id is not None
-    ]
-    donor = next((line for line in donors if line.match and line.match.confirmed), None)
-    donor = donor or next(iter(donors), None)
-    fdc_id, portion_id = (
-        (donor.match.fdc_id, donor.match.portion_id) if donor and donor.match else (None, None)
-    )
-    match = _new_by_editor(
-        MatchFact, now, canonical_id=canonical_id, fdc_id=fdc_id, portion_id=portion_id
-    )
-    return SharedMatch(wording, match, _carried(donor.conversion if donor else None, now))
-
-
-def _carried(conversion: ConversionFact | None, now: datetime) -> ConversionFact | None:
-    """A line's conversion, for other lines with its FDC food and portion. An editor kept that
-    line in its written unit, which says nothing about the others.
-    """
-    if conversion is None:
-        return None
-    converts = conversion.density_g_per_ml is not None or conversion.grams_per_count is not None
-    refused = None if conversion.refused == EDITOR_KEPT and converts else conversion.refused
-    return _by_editor(conversion, now, refused=refused)
-
-
-def _kept(conversion: ConversionFact | None, *, keep: bool, now: datetime) -> ConversionFact:
+def _kept(
+    conversion: ConversionFact | None, line_id: str, *, keep: bool, now: datetime
+) -> ConversionFact:
     """The conversion kept in the line's written unit, or converting to a weight again."""
     if conversion is None:
-        raise HTTPException(422, "The line has no weight to keep or convert")
+        raise HTTPException(422, f"Line {line_id} has no weight to keep or convert")
     if keep:
         return _by_editor(conversion, now, refused=EDITOR_KEPT)
     if conversion.density_g_per_ml is None and conversion.grams_per_count is None:
-        raise HTTPException(422, "The line's FDC food gives nothing to convert it by")
+        if conversion.refused == fdc.NO_PORTION:
+            raise HTTPException(
+                422, f"Line {line_id} has no portion to convert it to a weight by: pick one"
+            )
+        raise HTTPException(422, f"Line {line_id}'s FDC portion gives nothing to convert it by")
     return _by_editor(conversion, now, refused=None)
+
+
+def matched_food(recipes: list[Recipe], canonical_id: str, snapshot: fdc.Snapshot) -> int | None:
+    """The FDC food of a line in the Collection matched to the Canonical Ingredient, a Confirmed
+    one first, for the picker to start from after an editor chooses it. Only a food the FDC
+    Snapshot has, so it can be picked.
+    """
+    foods = [
+        (line.match.fdc_id, line.match.confirmed)
+        for recipe in recipes
+        for line in recipe.facts.ingredients.values()
+        if line.match
+        and line.match.canonical_id == canonical_id
+        and snapshot.has(line.match.fdc_id)
+    ]
+    ordered = [fdc_id for fdc_id, confirmed in foods if confirmed] + [f for f, _ in foods]
+    return next(iter(ordered), None)
 
 
 def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:

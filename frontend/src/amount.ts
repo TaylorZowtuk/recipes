@@ -33,5 +33,11 @@ export function kitchenNumber(value: number): string {
   if (rest < 0.01) return String(whole);
   const fraction = FRACTIONS.find(([part]) => Math.abs(rest - part) < 0.01);
   if (fraction) return `${whole || ""}${fraction[1]}`;
+  return decimal(value);
+}
+
+// A number for display as a decimal of at most two places, for a measure no kitchen writes as a
+// fraction, such as a density.
+export function decimal(value: number): string {
   return String(Math.round(value * 100) / 100);
 }

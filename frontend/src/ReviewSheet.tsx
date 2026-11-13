@@ -1,12 +1,12 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { formatAmount } from "./amount";
+import { decimal, formatAmount } from "./amount";
 import type { Collection, Recipe } from "./api/client";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { lineName } from "./factEdits";
 import { canEdit, ItemEditForm, type SaveEdit } from "./ItemEditForm";
 import { reviewCounts } from "./needsReview";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { confirmableOn, reviewLeft, uncheckedOn } from "./review";
+import { acceptable, confirmableOn, confirmedBy, reviewLeft, uncheckedOn } from "./review";
 import { Sheet } from "./Sheet";
 
 // What the recipe view needs to show an editor Review Items: each item by id, opening one, and
@@ -212,7 +212,6 @@ export function ItemDetail({
               ["Store Category", category?.name ?? canonical?.store_category_id],
             ]}
           />
-          {match.fdc_id === null && <p>No FDC food, so this line has no weight or nutrition.</p>}
           <Source fact={match} />
         </Section>,
       );
@@ -221,8 +220,8 @@ export function ItemDetail({
       const weight = conversion.refused
         ? `Stays in the written unit: ${conversion.refused}`
         : conversion.density_g_per_ml !== null
-          ? `${conversion.density_g_per_ml} g/ml`
-          : `${conversion.grams_per_count} g per ${conversion.count_unit ?? "count"}`;
+          ? `${decimal(conversion.density_g_per_ml)} g/ml`
+          : `${decimal(conversion.grams_per_count ?? 0)} g per ${conversion.count_unit ?? "count"}`;
       sections.push(
         <Section key="conversion" title="Weight">
           <p>{weight}</p>
@@ -328,9 +327,10 @@ function itemTitle(item: ReviewItem, recipe: Recipe) {
 }
 
 // The sheet for one Review Item, shown while there is one: its detail, then Confirm, or Accept
-// correction while flagged, and Edit, which shows the item's edit form in the same sheet until it's
-// saved or cancelled. Escape, Close or a tap outside it closes it; `onClose` should be safe to call
-// twice, as Close calls it and the sheet calls it again once it has closed.
+// correction while flagged by an issue that proposes one, and Edit, which shows the item's edit
+// form in the same sheet until it's saved or cancelled. Escape, Close or a tap outside it closes
+// it; `onClose` should be safe to call twice, as Close calls it and the sheet calls it again once
+// it has closed.
 export function ItemSheet({
   item,
   recipe,
@@ -401,14 +401,14 @@ export function ItemSheet({
                     Edit
                   </button>
                 )}
-                {item.mark !== "confirmed" && (
+                {acceptable(item) && (
                   <button
                     type="button"
                     className="button"
                     disabled={disabled}
                     onClick={() => {
                       close();
-                      onConfirm(item.factIds);
+                      onConfirm(confirmedBy(item));
                     }}
                   >
                     {item.mark === "flagged" ? "Accept correction" : "Confirm"}

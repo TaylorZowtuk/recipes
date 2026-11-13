@@ -15,7 +15,8 @@ export type ReviewItem = {
   id: string;
   kind: ReviewItemKind;
   tab: ReviewTab;
-  // The item's facts, and any fact an open Enrichment Issue of it is on: what confirming it sends.
+  // The item's facts, and any fact an open Enrichment Issue of it is on (`confirmedBy` says which
+  // of them confirming it sends).
   factIds: string[];
   mark: Mark;
   issues: EnrichmentIssue[];
@@ -92,6 +93,23 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   }
   return items;
 }
+
+// Whether the item's sheet offers Confirm, or Accept correction while flagged: not once it's
+// Confirmed, nor while every open issue on it proposes no correction (one asking an editor to pick
+// a portion), which the editor settles by editing the item instead.
+export const acceptable = (item: ReviewItem) =>
+  item.mark !== "confirmed" &&
+  (item.mark !== "flagged" || item.issues.some((issue) => issue.after !== null));
+
+// The fact ids confirming the item sends: not one that only an open issue proposing no correction
+// is on, so accepting another issue's correction leaves that ask open, and the item flagged, until
+// an edit settles it.
+export const confirmedBy = (item: ReviewItem) =>
+  item.factIds.filter(
+    (id) =>
+      !item.issues.some((issue) => issue.fact_id === id) ||
+      item.issues.some((issue) => issue.fact_id === id && issue.after !== null),
+  );
 
 const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
   [...items.values()].filter((item) => item.tab === tab);

@@ -11,7 +11,8 @@ import { expect, test } from "@playwright/test";
 // fixed plan and stops the clock on a Wednesday, since every project shares the weeks too. `after`
 // moves the page's clock on that far once everything else is done, such as to a Timer's alarm.
 // `offline` takes the page offline after the clicks, and `fill` types into a field of the open
-// sheet after them, before `shows`.
+// sheet after them, before `shows`. `choose` then picks the open sheet's choice with that name and
+// scrolls it to the middle of the sheet.
 type Shot = {
   name: string;
   path: string;
@@ -28,6 +29,7 @@ type Shot = {
   after?: string;
   offline?: boolean;
   fill?: { field: string; text: string };
+  choose?: string;
 };
 const REVIEW_RECIPE = "/recipes/01K7SEED000000000000000007/garlic-butter-green-beans";
 const planned = (entry: string, recipe_id: string, recipe_title: string, factor = 1) => ({
@@ -299,6 +301,16 @@ const pages: Shot[] = [
     shows: "Line",
   },
   {
+    name: "recipe-review-edit-line-food",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "3 to check, incl. 1 flagged",
+    editor: true,
+    click: [/^Flagged: butter/, "Edit"],
+    shows: "Butter, salted · SR Legacy",
+    choose: "1 cup (227 g)",
+  },
+  {
     name: "recipe-review-edit-line-renamed",
     path: REVIEW_RECIPE,
     ready: "Garlic Butter Green Beans",
@@ -467,6 +479,24 @@ for (const shot of pages) {
         const shown = page.getByText(shows, { exact: true }).first();
         if (mayBeMissing) await shown.waitFor({ timeout: 3000 }).catch(() => {});
         else await expect(shown).toBeVisible();
+      }
+      if (shot.choose) {
+        const sheet = page.getByRole("dialog");
+        const radio = sheet.getByRole("radio", { name: shot.choose, exact: true });
+        if (mayBeMissing) {
+          const shown = await radio.waitFor({ state: "attached", timeout: 3000 }).then(
+            () => true,
+            () => false,
+          );
+          test.skip(!shown, `no ${shot.choose} choice on this branch`);
+        }
+        // A choice's radio is hidden, so its label is what takes the tap.
+        const choice = sheet.locator("label", {
+          has: page.getByRole("radio", { name: shot.choose, exact: true }),
+        });
+        await choice.click();
+        await expect(radio).toBeChecked();
+        await choice.evaluate((label) => label.scrollIntoView({ block: "center" }));
       }
       await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished)));
     }

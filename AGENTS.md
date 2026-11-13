@@ -37,7 +37,7 @@ Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew
 
 ## Layout
 
-- `backend/`: one uv project, one `recipes` package. The API, ingest, the `enrich` CLI and the `fallback` CLI (the ingest fallback chain, which the bulk import shares) are modules in it, with `packet.py` (the Work Packet and the checks on a model's answer), `offers.py` (the durations and temperatures found in a step's text, which the API checks segments against) and `fdc.py` (the FDC Snapshot; `python -m recipes.fdc build` rebuilds it). `backend/fdc/` holds the committed FDC Snapshot, which the Lambda zip leaves out. See [`backend/AGENTS.md`](backend/AGENTS.md).
+- `backend/`: one uv project, one `recipes` package. The API, ingest, the `enrich` CLI and the `fallback` CLI (the ingest fallback chain, which the bulk import shares) are modules in it, with `packet.py` (the Work Packet and the checks on a model's answer), `offers.py` (the durations and temperatures found in a step's text, which the API checks segments against) and `fdc.py` (the FDC Snapshot; `python -m recipes.fdc build` rebuilds it). `backend/src/recipes/data/` holds the committed FDC Snapshot, which ships in the Lambda zip and the API loads on first use. See [`backend/AGENTS.md`](backend/AGENTS.md).
 - `frontend/`: one pnpm package, the PWA. Playwright tests are in `e2e/`, the generated API client in `src/api/`. See [`frontend/AGENTS.md`](frontend/AGENTS.md).
 - `infra/`: Terraform `modules/`, `stacks/prod` and `stacks/staging`, plus `bootstrap/` for the account's one-time setup and `tests/` (`terraform test` on mock providers). See [`infra/AGENTS.md`](infra/AGENTS.md).
 - `docker/`, `compose.yaml`: the toolchain image and the containers every command runs in.
@@ -60,7 +60,7 @@ For a manual check that needs a person, such as signing in as an editor on stagi
 
 ## Hard rules
 
-- **The repo is public.** It never holds scraped recipe content, saved web pages or recipe images. Fixtures are synthetic: recipes written for the repo, generated placeholder images and hand-written minimal schema.org HTML. When ingest turns up a new edge case, consider adding a fixture for it. The CC0 FDC Snapshot in `backend/fdc/` is the one third-party dataset in the repo, and it isn't a fixture.
+- **The repo is public.** It never holds scraped recipe content, saved web pages or recipe images. Fixtures are synthetic: recipes written for the repo, generated placeholder images and hand-written minimal schema.org HTML. When ingest turns up a new edge case, consider adding a fixture for it. The CC0 FDC Snapshot in `backend/src/recipes/data/` is the one third-party dataset in the repo, and it isn't a fixture.
 - **No credentials of any kind**, not only prod's. Local development reaches staging through an AWS profile in `~/.aws`. The pre-commit hook runs gitleaks.
 - **Use the glossary's vocabulary** in code, tests, issues and PRs.
 

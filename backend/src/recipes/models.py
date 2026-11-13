@@ -230,12 +230,12 @@ class ParseFact(Fact):
 
 
 class MatchFact(Fact):
-    """The line's Canonical Ingredient, with the FDC food and portion row the model chose. An
-    editor's new Canonical Ingredient has no FDC food until one is chosen for it.
+    """The line's Canonical Ingredient, with the FDC food and portion row the model or an editor
+    chose. Every match has an FDC food: where none really fits, the closest one.
     """
 
     canonical_id: Ulid
-    fdc_id: int | None
+    fdc_id: int
     portion_id: int | None
 
 
@@ -412,7 +412,10 @@ class RecipeFacts(Model):
 
 
 class EnrichmentIssue(Model):
-    """Something enrichment corrected or was unsure about, on the fact `fact_id` names."""
+    """Something enrichment corrected or was unsure about, on the fact `fact_id` names, or a line
+    an editor's FDC food pick left without a portion that fits its unit. That one proposes no
+    correction (no `before` or `after`) and is settled by editing the line.
+    """
 
     id: Ulid
     fact_id: Label  # e.g. "i3.match"

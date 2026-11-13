@@ -10,17 +10,26 @@ import {
   useState,
 } from "react";
 import type { DifficultyChoice } from "./addRecipe";
-import type { Collection, Recipe } from "./api/client";
+import { kitchenNumber } from "./amount";
+import { api, type Collection, type FdcFood, type FdcPortion, type Recipe } from "./api/client";
 import {
   type Built,
   type CanonicalPick,
-  canConvert,
+  canChooseWeight,
   canonicalNote,
+  defaultFrom,
   difficultyEdit,
+  FOOD_SEARCH,
+  type FoodPick,
+  foodOf,
+  foodQuery,
   type LineDraft,
   lineDraft,
   lineEdit,
   lineName,
+  needsFood,
+  pickKey,
+  portionMisfit,
   renamed,
   stepDraft,
   stepEdit,
@@ -97,6 +106,11 @@ function useSave(onSave: SaveEdit) {
     setSaving(false);
     setProblem(refused === null ? null : { problem: refused });
   };
+  // A problem with a field at fault brings that field into view, focused.
+  useEffect(() => {
+    if (problem?.field)
+      document.querySelector<HTMLElement>(`[aria-describedby~="${id}"][aria-invalid]`)?.focus();
+  }, [problem, id]);
   const shown = problem && (
     <p id={id} role="alert" className="form-problem item-edit-problem">
       {problem.problem}
@@ -277,7 +291,11 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
   const amountHint = useId();
   // What saving sends, which picks a Canonical Ingredient once the name's wording changed.
   const saved = withWording(recipe, lineId, draft, collection);
-  const kept = saved.canonical.kind === "keep";
+  const pickedFor = pickKey(recipe, lineId, saved.canonical);
+  const parse = recipe.facts.ingredients[lineId]?.parse;
+  const unit = draft.unit.trim() || null;
+  // The unit's kind as the parser read it, while the unit is as it read it.
+  const unitKind = parse && parse.unit === unit ? parse.unit_kind : null;
   return (
     <EditForm build={() => lineEdit(recipe, lineId, saved)} {...props}>
       <fieldset className="sheet-section">
@@ -314,30 +332,45 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
         lineId={lineId}
         collection={collection}
         pick={saved.canonical}
-        reach={canonicalNote(saved, collection, recipe)}
+        reach={canonicalNote(saved, collection)}
         renamed={renamed(recipe, lineId, draft.name)}
         onPick={(canonical) => set({ canonical })}
       />
-      {kept && draft.keepWeight !== null && canConvert(recipe, lineId) && (
-        <fieldset className="sheet-section">
-          <legend>Weight</legend>
-          <div className="choices">
-            <Choice
-              group={weight}
-              checked={!draft.keepWeight}
-              onChange={() => set({ keepWeight: false })}
-            >
-              Convert to a weight
-            </Choice>
-            <Choice
-              group={weight}
-              checked={draft.keepWeight}
-              onChange={() => set({ keepWeight: true })}
-            >
-              Keep the written unit
-            </Choice>
-          </div>
-        </fieldset>
+      {needsFood(recipe, lineId, saved.canonical) && (
+        <FoodPicker
+          // A new Canonical Ingredient pick starts the food's search afresh.
+          key={pickedFor}
+          current={lineDraft(recipe, lineId).food}
+          food={foodOf(recipe, lineId, saved)}
+          startQuery={foodQuery(recipe, lineId, saved.canonical, collection)}
+          defaultFrom={defaultFrom(recipe, lineId, saved.canonical)}
+          unit={unit}
+          unitKind={unitKind}
+          hasAmount={draft.low.trim() !== ""}
+          onPick={(food) => set({ food, foodFor: pickedFor })}
+        >
+          {canChooseWeight(recipe, lineId, saved) && (
+            <fieldset className="sheet-section">
+              <legend>Weight</legend>
+              <div className="choices">
+                <Choice
+                  group={weight}
+                  checked={!draft.keepWeight}
+                  onChange={() => set({ keepWeight: false })}
+                >
+                  Convert to a weight
+                </Choice>
+                <Choice
+                  group={weight}
+                  checked={draft.keepWeight === true}
+                  onChange={() => set({ keepWeight: true })}
+                >
+                  Keep the written unit
+                </Choice>
+              </div>
+            </fieldset>
+          )}
+        </FoodPicker>
       )}
     </EditForm>
   );
@@ -463,6 +496,232 @@ function CanonicalPicker({
           </fieldset>
         </div>
       )}
+    </fieldset>
+  );
+}
+
+const SEARCH_PAUSE_MS = 300;
+
+type FoodSearch =
+  | { state: "idle" | "searching" | "failed" }
+  | { state: "found"; foods: FdcFood[]; defaultId: number | null };
+
+// The FDC foods for the query, searched once typing pauses, for 2 to 60 characters, with the line's
+// unit and whether it has an amount, so the API says which portions fit. Until a search is answered, each also asks for the
+// line's own food and `canonical`'s default food. `known` keeps every food found, by its line.
+function useFoodSearch(
+  query: string,
+  canonical: string | undefined,
+  own: number | undefined,
+  { unit, unit_kind, amount }: FoodLine,
+) {
+  const q = query.trim();
+  const searchable = q.length >= 2 && q.length <= 60;
+  const line = lineKey({ unit, unit_kind, amount });
+  // Set once a search is answered, so later ones don't make the API read the Collection again.
+  const answered = useRef(false);
+  const [result, setResult] = useState<{ q: string; search: FoodSearch }>();
+  const [known, setKnown] = useState(() => new Map<number, { food: FdcFood; line: string }>());
+  useEffect(() => {
+    if (!searchable) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      let search: FoodSearch = { state: "failed" };
+      const first = !answered.current;
+      const named = {
+        ...(first && canonical !== undefined && { canonical }),
+        ...(first && own !== undefined && { fdc_id: own }),
+        unit,
+        ...(unit_kind && { unit_kind }),
+        ...(!amount && { amount }),
+      };
+      try {
+        const { data } = await api.GET("/api/fdc/foods", {
+          params: { query: { q, ...named } },
+          signal: controller.signal,
+        });
+        if (data) {
+          search = { state: "found", foods: data.foods, defaultId: data.default_fdc_id };
+          const found = data.foods.map((food) => [food.fdc_id, { food, line }] as const);
+          setKnown((was) => new Map([...was, ...found]));
+          if (!controller.signal.aborted) answered.current = true;
+        }
+      } catch {}
+      if (!controller.signal.aborted) setResult({ q, search });
+    }, SEARCH_PAUSE_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [q, searchable, canonical, own, unit, unit_kind, amount, line]);
+  const search: FoodSearch = !searchable
+    ? { state: "idle" }
+    : result?.q === q
+      ? result.search
+      : { state: "searching" };
+  return { search, known, line };
+}
+
+// The line's unit as the food search sends it, empty for none, the parser's kind for it while
+// it's as the parser read it, and whether the line has an amount.
+type FoodLine = { unit: string; unit_kind: "mass" | "volume" | "count" | null; amount: boolean };
+const lineKey = ({ unit, unit_kind, amount }: FoodLine) =>
+  `${amount ? "" : "no amount "}${unit_kind ?? ""} ${unit}`;
+
+const DATASETS = { foundation: "Foundation", sr_legacy: "SR Legacy" } as const;
+
+const portionLabel = (p: FdcPortion) =>
+  `${kitchenNumber(p.amount)} ${p.unit}${p.modifier ? `, ${p.modifier}` : ""} (${kitchenNumber(p.gram_weight)} g)`;
+
+const converts = (p: FdcPortion) => p.density_g_per_ml !== null || p.grams_per_count !== null;
+
+// The line's FDC food (required, the closest where none fits) and portion (optional; without one,
+// or with one that doesn't fit the line's unit, the line has no weight), searched from the
+// Canonical Ingredient's name, then `children`, the Weight choice the portion gives.
+function FoodPicker({
+  current,
+  food,
+  startQuery,
+  defaultFrom,
+  unit,
+  unitKind,
+  hasAmount,
+  onPick,
+  children,
+}: {
+  current: FoodPick;
+  food: FoodPick;
+  startQuery: string;
+  defaultFrom: string | undefined;
+  unit: string | null;
+  unitKind: "mass" | "volume" | "count" | null;
+  hasAmount: boolean;
+  onPick: (food: FoodPick) => void;
+  children?: ReactNode;
+}) {
+  const foods = useId();
+  const portions = useId();
+  const [query, setQuery] = useState(startQuery);
+  const { search, known, line } = useFoodSearch(query, defaultFrom, current?.fdcId, {
+    unit: unit ?? "",
+    unit_kind: unitKind,
+    amount: hasAmount,
+  });
+  const found = search.state === "found" ? search.foods : [];
+  const defaultId = search.state === "found" ? search.defaultId : null;
+  // The default food the picker chose, which it announces.
+  const [chose, setChose] = useState<number>();
+  useEffect(() => {
+    if (defaultId === null || food) return;
+    setChose(defaultId);
+    onPick({ fdcId: defaultId, portionId: null, converts: false });
+  }, [defaultId, food, onPick]);
+  const pinned = [food?.fdcId, current?.fdcId].filter(
+    (id, n, ids): id is number =>
+      id !== undefined && ids.indexOf(id) === n && !found.some((f) => f.fdc_id === id),
+  );
+  const shown = [...pinned, ...found.map((f) => f.fdc_id)];
+  const chosen = food && known.get(food.fdcId);
+  const portion = chosen?.food.portions.find((p) => p.id === food?.portionId);
+  // Only a search for the line's unit and amount as they now are says whether the portion fits it.
+  const misfit = portion && chosen?.line === line && portionMisfit(unit, portion);
+  const named = (id: number) => {
+    const found = known.get(id)?.food;
+    return found
+      ? `${found.description} · ${DATASETS[found.dataset]}`
+      : "The line’s current FDC food (its name loads when you’re online)";
+  };
+  // FDC describes some foods alike, so those carry their FDC ids too.
+  const label = (id: number) =>
+    shown.filter((other) => named(other) === named(id)).length > 1
+      ? `${named(id)} · FDC ${id}`
+      : named(id);
+  const said =
+    search.state === "failed"
+      ? "Couldn’t search the FDC foods. Check you’re online."
+      : search.state === "found" && found.length === 0
+        ? "No FDC food matches that."
+        : "";
+  const counted =
+    search.state === "found" && found.length > 0
+      ? `${found.length} FDC ${found.length === 1 ? "food" : "foods"} found.${
+          chose === defaultId && food?.fdcId === chose
+            ? ` Chose ${label(chose)}, the food the Collection gives this Canonical Ingredient.`
+            : ""
+        }`
+      : "";
+  return (
+    <fieldset className="sheet-section">
+      <legend>FDC food</legend>
+      <Field
+        label={FOOD_SEARCH}
+        hint="Search the FDC foods by name. Where none really fits, choose the closest."
+        value={query}
+        onChange={setQuery}
+      />
+      {search.state === "searching" && (
+        <p aria-hidden="true" className="field-hint item-edit-found">
+          Searching the FDC foods…
+        </p>
+      )}
+      <p role="status" className={said ? "field-hint item-edit-found" : "visually-hidden"}>
+        {said || counted}
+      </p>
+      <div className="choices">
+        {shown.map((id) => (
+          <Choice
+            key={id}
+            group={foods}
+            checked={food?.fdcId === id}
+            onChange={() =>
+              onPick(
+                id === current?.fdcId ? current : { fdcId: id, portionId: null, converts: false },
+              )
+            }
+          >
+            {label(id)}
+          </Choice>
+        ))}
+      </div>
+      {food && (
+        <fieldset className="sheet-section">
+          <legend>Portion</legend>
+          <div className="choices">
+            {chosen
+              ? chosen.food.portions.map((p) => (
+                  <Choice
+                    key={p.id}
+                    group={portions}
+                    checked={food.portionId === p.id}
+                    onChange={() => onPick({ ...food, portionId: p.id, converts: converts(p) })}
+                  >
+                    {portionLabel(p)}
+                  </Choice>
+                ))
+              : food.portionId !== null && (
+                  <Choice group={portions} checked onChange={() => {}}>
+                    The line’s current portion
+                  </Choice>
+                )}
+            <Choice
+              group={portions}
+              checked={food.portionId === null}
+              onChange={() => onPick({ ...food, portionId: null, converts: false })}
+            >
+              No portion
+            </Choice>
+          </div>
+          <p role="status" className={misfit ? "review-note" : "visually-hidden"}>
+            {misfit}
+          </p>
+          <p className="field-hint">
+            Without a portion, the line has no weight or nutrition. Every line worded like this one,
+            in every recipe, gets this food, and this portion where it fits that line’s unit; a line
+            no portion fits gets an Enrichment Issue asking for one.
+          </p>
+        </fieldset>
+      )}
+      {children}
     </fieldset>
   );
 }

@@ -44,7 +44,6 @@ from recipes.models import (
     DurationSegment,
     Enrichment,
     EnrichmentIssue,
-    FdcNumbers,
     IngredientFacts,
     IngredientSegment,
     Label,
@@ -712,7 +711,7 @@ class _Answering:
         confidence = parse.confidence if parse else 0
         if answered.doubts:
             confidence = min(confidence, DOUBTED_CONFIDENCE)
-        chosen = self.work.snapshot.food(food.fdc_id)
+        numbers = fdc.numbers(self.work.snapshot, food.fdc_id, answered.portion_id)
         substitutions = [
             Substitution(
                 wording=s.wording,
@@ -721,7 +720,7 @@ class _Answering:
                 note=s.note,
                 fdc_id=s.fdc_id,
                 portion_id=s.portion_id,
-                fdc=self._numbers(self.work.snapshot.food(s.fdc_id), s.portion_id),
+                fdc=fdc.numbers(self.work.snapshot, s.fdc_id, s.portion_id),
             )
             for s in answered.substitutions
         ]
@@ -732,15 +731,15 @@ class _Answering:
                 confidence=confidence,
                 estimated=False,
                 canonical_id=canonical.id,
-                fdc_id=chosen.fdc_id,
+                fdc_id=food.fdc_id,
                 portion_id=answered.portion_id,
             ),
             conversion=ConversionFact(
                 provenance="fdc",
                 confidence=confidence,
                 estimated=True,
-                fdc_id=chosen.fdc_id,
-                **self._numbers(chosen, answered.portion_id).model_dump(),
+                fdc_id=food.fdc_id,
+                **numbers.model_dump(),
             ),
             substitutions=SubstitutionsFact(
                 provenance="llm", confidence=confidence, estimated=True, items=substitutions
@@ -832,15 +831,6 @@ class _Answering:
                 # A sum past 1 by no more than the tolerance is all of the line.
                 uses=[StepUse(ref=ref, portion=min(portion, 1)) for ref, portion in uses.items()],
             ),
-        )
-
-    def _numbers(self, food: fdc.Food, portion_id: int | None) -> FdcNumbers:
-        """The FDC Snapshot's numbers for a food and its chosen portion, to copy into a fact."""
-        return FdcNumbers(
-            dataset=food.dataset,
-            release=self.work.snapshot.release,
-            **fdc.convert(food, portion_id).model_dump(),
-            per_100g=food.per_100g,
         )
 
     def _parse(self, line_id: str) -> ParseFact | None:

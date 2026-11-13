@@ -1,5 +1,6 @@
 """The FDC Snapshot: USDA FoodData Central's Foundation Foods and SR Legacy, trimmed to what
-enrichment uses, pinned and committed under backend/fdc, outside the Lambda zip.
+enrichment uses, pinned and committed in the package's `data/`, so it ships in the Lambda zip. The
+API loads it on first use, never at import.
 
 `python -m recipes.fdc build` downloads both pinned releases, checks their sha256 and writes the
 snapshot. The same downloads always give the same bytes.
@@ -17,16 +18,17 @@ import zipfile
 from fractions import Fraction
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 import requests
-from pint import UnitRegistry
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from recipes.models import Dataset, Per100g
+from recipes.models import Dataset, FdcNumbers, Per100g
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from pint import UnitRegistry
 
 
 class Source(NamedTuple):
@@ -46,7 +48,7 @@ SOURCES: dict[Dataset, Source] = {
     ),
 }
 RELEASE = f"foundation-{FOUNDATION_DATE}+sr_legacy-2018-04"
-DEFAULT_PATH = Path(__file__).resolve().parents[2] / "fdc" / f"{RELEASE}.json.gz"
+DEFAULT_PATH = Path(__file__).resolve().parent / "data" / f"{RELEASE}.json.gz"
 
 # Energy is Atwater's specific factors (2048) or general ones (2047) where the food has no 1008.
 KCAL = ("1008", "2048", "2047")
@@ -81,6 +83,14 @@ NOT_COUNTS = (
 )
 # Count units that say nothing on their own, so a size in the modifier ("large") names the count.
 GENERIC_COUNTS = ("each", "piece", "unit", "item")
+# A line with no unit ("2 eggs") counts whole things, which FDC counts in a generic word or a
+# size ("1 large" egg, "1 medium" banana), so only those portions fit it. Any other count word
+# ("clove", "slice") fits only a line written in that word.
+BARE_COUNTS = frozenset({*GENERIC_COUNTS, "small", "medium", "large", "extra large", "jumbo"})
+# The "(s)" or "(es)" an editor may write to say a unit is singular or plural: "clove(s)".
+OPTIONAL_PLURAL = re.compile(r"\((?:e?s)\)", re.IGNORECASE)
+# Why a food with no portion chosen converts nothing.
+NO_PORTION = "no portion chosen"
 WORDS = re.compile(r"[a-z]+")
 PHRASE = re.compile(r"[a-z]+(?: [a-z]+)*")
 # Plurals, enough to match "berries" with "berry" and "eggs" with "egg", but not "glass".
@@ -141,6 +151,10 @@ class Snapshot(Frozen):
         """The food with this FDC id. KeyError if the FDC Snapshot has none."""
         return self._by_id[fdc_id]
 
+    def has(self, fdc_id: int) -> bool:
+        """Whether the FDC Snapshot has a food with this FDC id."""
+        return fdc_id in self._by_id
+
     def candidates(self, name: str, limit: int) -> list[Food]:
         """The foods whose descriptions share words with an ingredient's name, best first: those
         whose description starts with the name ("Egg, whole" for "egg", before "Bread, egg"), then
@@ -168,7 +182,7 @@ def _singular(word: str) -> str:
 def convert(food: Food, portion_id: int | None) -> Conversion:
     """The conversion a food's chosen portion gives."""
     if portion_id is None:
-        return Conversion(refused="no portion chosen")
+        return Conversion(refused=NO_PORTION)
     portion = next((p for p in food.portions if p.id == portion_id), None)
     if portion is None:
         return Conversion(refused=f"portion {portion_id} is not one of food {food.fdc_id}'s")
@@ -189,6 +203,69 @@ def convert(food: Food, portion_id: int | None) -> Conversion:
     return Conversion(grams_per_count=portion.gram_weight / portion.amount, count_unit=unit)
 
 
+def fits(
+    conversion: Conversion,
+    kind: Literal["mass", "volume", "count"],
+    unit: str | None,
+    *,
+    has_amount: bool = True,
+) -> bool:
+    """Whether a portion's conversion gives a line of the unit's kind a weight: any does for a
+    mass line, which needs none, a density for a volume line, and for a count line a count in its
+    own unit (see `_counts_in`). No portion gives a line with no amount ("salt, to taste") a
+    weight, so any fits it.
+    """
+    if kind == "mass" or not has_amount:
+        return True
+    if kind == "volume":
+        return conversion.density_g_per_ml is not None
+    return _counts_in(conversion.count_unit, unit)
+
+
+def _counts_in(count_unit: str | None, unit: str | None) -> bool:
+    """Whether a portion counted in `count_unit` counts in a line's unit, ignoring case and
+    plurals. See BARE_COUNTS for a line with no unit.
+    """
+    if count_unit is None:
+        return False
+    if unit is None:
+        return count_unit in BARE_COUNTS
+    return words(count_unit) == words(OPTIONAL_PLURAL.sub("", unit))
+
+
+class NotInSnapshot(ValueError):
+    """An FDC food the Snapshot doesn't have, or a portion that isn't the food's."""
+
+
+def chosen(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> Food:
+    """A chosen food, with no portion or one of its own. Raises NotInSnapshot for a food the
+    Snapshot doesn't have or a portion that isn't the food's.
+    """
+    try:
+        food = snapshot.food(fdc_id)
+    except KeyError:
+        msg = f"FDC food {fdc_id} isn't in the FDC Snapshot"
+        raise NotInSnapshot(msg) from None
+    if portion_id is not None and portion_id not in {p.id for p in food.portions}:
+        msg = f"portion {portion_id} isn't one of FDC food {fdc_id}'s"
+        raise NotInSnapshot(msg)
+    return food
+
+
+def numbers(snapshot: Snapshot, fdc_id: int, portion_id: int | None) -> FdcNumbers:
+    """The FDC Snapshot's numbers for a food and its chosen portion, to copy into a fact: the
+    one place a chosen food and portion become stored numbers. Raises NotInSnapshot as `chosen`
+    does, rather than storing a refusal.
+    """
+    food = chosen(snapshot, fdc_id, portion_id)
+    return FdcNumbers(
+        dataset=food.dataset,
+        release=snapshot.release,
+        **convert(food, portion_id).model_dump(),
+        per_100g=food.per_100g,
+    )
+
+
 def _phrase(text: str) -> str:
     """The words a unit or modifier starts with, before any comma, bracket or number: "cup" in
     "cup, chopped", "large" in 'large (about 6-1/2" dia)'.
@@ -203,14 +280,30 @@ def _starts_with(phrase: str, units: tuple[str, ...] | dict[str, str]) -> str | 
 
 
 @cache
+def unit_registry() -> UnitRegistry:
+    """pint's registry, built once on first use and shared by every unit: building one takes a
+    while, so it waits until a volume portion is converted.
+    """
+    from pint import UnitRegistry
+
+    return UnitRegistry()
+
+
+@cache
 def _ml_per(unit: str) -> float:
-    return cast("float", UnitRegistry().Quantity(1, unit).m_as("milliliter"))
+    return cast("float", unit_registry().Quantity(1, unit).m_as("milliliter"))
 
 
 def load_snapshot(path: Path = DEFAULT_PATH) -> Snapshot:
     """A snapshot from its file, gzipped or not."""
     data = path.read_bytes()
     return Snapshot.model_validate_json(gzip.decompress(data) if path.suffix == ".gz" else data)
+
+
+@cache
+def snapshot() -> Snapshot:
+    """The committed FDC Snapshot, loaded on first use and shared after."""
+    return load_snapshot()
 
 
 def write_snapshot(snapshot: Snapshot, directory: Path) -> Path:

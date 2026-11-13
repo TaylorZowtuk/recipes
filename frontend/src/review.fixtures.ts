@@ -26,12 +26,16 @@ export const parse = (name: string, confirmed = false, unit: string | null = nul
   optional: false,
 });
 
+// Real FDC Snapshot foods, as the seed uses: butter by the tablespoon, garlic by the clove.
+export const BUTTER = { fdcId: 173410, tbsp: 92457, cup: 92458 };
+export const GARLIC = { fdcId: 169230, clove: 84480 };
+
 export const per100g = { kcal: 700, protein_g: 1, fat_g: 80, carbs_g: 0, sodium_mg: 600 };
 export const conversion = (confirmed: boolean, fields: object) => ({
   ...stamp(confirmed),
   provenance: "fdc" as const,
   confidence: 0.8,
-  fdc_id: 1001,
+  fdc_id: BUTTER.fdcId,
   dataset: "sr_legacy" as const,
   release: "2018-04",
   density_g_per_ml: null,
@@ -44,12 +48,12 @@ export const conversion = (confirmed: boolean, fields: object) => ({
 
 export const NEW_CANONICAL = "01K7TESTCANON0000000000001";
 export const KNOWN_CANONICAL = "01K7TESTCANON0000000000002";
-export const match = (canonical_id: string, confirmed: boolean) => ({
-  ...stamp(confirmed),
-  canonical_id,
-  fdc_id: 1001,
-  portion_id: null,
-});
+export const match = (
+  canonical_id: string,
+  confirmed: boolean,
+  fdc_id = BUTTER.fdcId,
+  portion_id: number | null = BUTTER.tbsp,
+) => ({ ...stamp(confirmed), canonical_id, fdc_id, portion_id });
 
 // A synthetic recipe Awaiting Review: i1 flagged on its match to a new Canonical Ingredient, i2
 // confirmed, i3 and its substitutions unchecked, i4 with no facts, s1 unchecked, and a suggestion.
@@ -90,8 +94,11 @@ export const recipe = (fields: Partial<Recipe> = {}): Recipe =>
         },
         i2: {
           parse: parse("garlic", true, "cloves"),
-          match: match(KNOWN_CANONICAL, true),
-          conversion: conversion(true, { refused: "no weight per clove in FDC" }),
+          match: match(KNOWN_CANONICAL, true, GARLIC.fdcId, GARLIC.clove),
+          conversion: conversion(true, {
+            fdc_id: GARLIC.fdcId,
+            refused: "no weight per clove in FDC",
+          }),
           substitutions: null,
         },
         i3: {
