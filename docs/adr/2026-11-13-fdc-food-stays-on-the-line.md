@@ -18,7 +18,7 @@ Many lines are bought as one thing but need different FDC foods. These lines are
 | *chickpeas* | "2 cups chickpeas, cooked", "1 can chickpeas, drained" | *chickpeas*, "cooked"; *chickpeas*, "drained" | home-cooked and canned |
 | *thyme* | "3 sprigs thyme", "1/2 tsp thyme" | *thyme*, none; *thyme*, none | fresh and dried |
 
-The difference is not small. In the FDC Snapshot, *Rice, white, long-grain, regular, raw, enriched* is 365 kcal per 100 g and 185 g a cup, about 675 kcal a cup; *Rice, white, long-grain, regular, enriched, cooked* is 130 kcal per 100 g and 158 g a cup, about 205 kcal a cup. A cup of cooked rice given the dry food would show more than three times its calories, as the [food picks spread by preparation ADR](2026-11-12-food-picks-spread-by-preparation.md) found.
+The difference is not small. In the FDC Snapshot, *Rice, white, long-grain, regular, raw, enriched* is 365 kcal per 100 g and 185 g a cup, about 675 kcal a cup; *Rice, white, long-grain, regular, enriched, cooked* is 130 kcal per 100 g and 158 g a cup, about 205 kcal a cup. A cup of cooked rice given the dry food would show more than three times its calories: the mirror of what the [food picks spread by preparation ADR](2026-11-12-food-picks-spread-by-preparation.md) found, where a dry-rice line given the cooked food showed about a third.
 
 With one FDC food per Canonical Ingredient, each pair would need two Canonical Ingredients (*lemon juice* and *lemon*, *cooked rice* and *rice*). Each would be its own Grocery Item and its own chip in the Fridge, though you buy lemons and rice.
 
@@ -31,7 +31,7 @@ Storing the food in one place would also save nothing and break other decisions:
 ## Consequences
 
 - The same Canonical Ingredient can have different FDC foods in different recipes, and in one recipe, by design.
-- Drift between recipes is limited, not prevented: of the lines already matched to the Canonical Ingredient, an editor's food pick reaches only those with the same wording and exactly the same preparation ([food picks spread by preparation ADR](2026-11-12-food-picks-spread-by-preparation.md)). Two lines with no preparation share a food pick, so "3 sprigs thyme" and "1/2 tsp thyme" still need an editor to tell them apart.
+- Drift between recipes is limited, not prevented: of the lines already matched to the Canonical Ingredient, an editor's food pick reaches only those with the same wording and exactly the same preparation ([food picks spread by preparation ADR](2026-11-12-food-picks-spread-by-preparation.md)). Lines with the same wording and no preparation always share one FDC food, so "3 sprigs thyme" and "1/2 tsp thyme" can't hold fresh and dried thyme until an editor gives one of them a preparation ("1/2 tsp thyme, dried") or a wording ("1/2 tsp dried thyme") of its own.
 - The picker's default FDC food still comes from another line, as the [editors pick FDC foods ADR](2026-11-11-editors-pick-fdc-foods.md) says: after an editor matches a line to an existing Canonical Ingredient, the FDC food search's `default_fdc_id` is the food of a line anywhere in the Collection matched to it, a Confirmed one first, so an unconfirmed food is offered only when no Confirmed line has one. It ignores preparation, so a cooked-rice line may be offered dry rice, and the editor checks it.
 
 ## Considered options
