@@ -1169,10 +1169,14 @@ def edit_fact(
 
     A line's new Canonical Ingredient, or new FDC food or portion, fixes the line's wording: the
     Wording Cache confirms it, and every recipe with a line of that wording is matched to it too,
-    each at its own version. Every such line takes the food, and the portion only where it fits
-    the line's written unit: else the food's portion that does, or none and an open Enrichment
-    Issue asking for one. Once the edited recipe is saved, the edit never fails: a recipe that
-    kept changing is listed in `not_updated`, and one the match would make too big in `too_big`.
+    each at its own version. Every such line takes the Canonical Ingredient. A line prepared
+    exactly the same way, or with no match yet, takes the food, and the portion only where it
+    fits the line's written unit: else the food's portion that does, or none and an open
+    Enrichment Issue asking for one. A line prepared another way keeps its own food, unconfirmed,
+    when its Canonical Ingredient changes, and is left alone when it doesn't. It, and a line
+    prepared another way with no match yet, gets an open Enrichment Issue asking for its food.
+    Once the edited recipe is saved, the edit never fails: a recipe that kept changing is listed
+    in `not_updated`, and one the match would make too big in `too_big`.
     Picking the same Canonical Ingredient again retries them. A line saved with its Canonical
     Ingredient, food and portion unchanged reaches no other recipe.
     """

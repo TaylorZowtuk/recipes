@@ -4,8 +4,9 @@ An edit saves its facts Confirmed with provenance `editor`, in no Confirm Batch,
 reverses it. A line's new Canonical Ingredient or FDC food fixes its wording: the Wording Cache
 confirms it, and every line in the Collection with that wording takes its Canonical Ingredient.
 Only a line with exactly the same preparation takes the food, with the portion that fits its own
-written unit; a line prepared another way keeps its food and, if its Canonical Ingredient changed,
-is asked for one.
+written unit; a line prepared another way keeps its food, unconfirmed, and is asked for one when its
+Canonical Ingredient changed. A line with no match takes the food, and is asked too if prepared
+another way.
 """
 
 from __future__ import annotations
@@ -193,6 +194,21 @@ def _checked[F: Fact](fact: F | None, now: datetime) -> F | None:
     return fact.model_copy(update=_confirmed(now))
 
 
+def _unconfirmed[F: Fact](fact: F, **changes: object) -> F:
+    """The fact as it was, apart from `changes`, and no longer Confirmed: an editor saw none of
+    it, so none of it is theirs.
+    """
+    return fact.model_copy(
+        update={
+            "confirmed": False,
+            "confirmed_by": None,
+            "confirmed_at": None,
+            "confirm_batch": None,
+            **changes,
+        }
+    )
+
+
 def _preparation(parse: ParseFact) -> str:
     """The line's preparation as a food pick compares it: as a wording is normalized, and empty
     for none.
@@ -260,9 +276,10 @@ class SharedMatch:
         the editor picked the food on, or None if it has none. A line with the preparation takes
         the food, its open issues on its match and conversion are resolved, and if no portion of
         the food fits it, an open issue asks an editor to pick one. A line with another
-        preparation takes the Canonical Ingredient, keeps its own food (or takes the food if it
-        had none), its open issues on its match are resolved, and an open issue asks an editor to
-        pick its food.
+        preparation takes the Canonical Ingredient and keeps its own food, unconfirmed since
+        nobody confirmed that food for the new Canonical Ingredient (or takes the food if it had
+        none); its open issues on its match are resolved, and an open issue asks an editor to pick
+        its food.
         """
         lines = self.lines(recipe)
         if not lines:
@@ -287,7 +304,7 @@ class SharedMatch:
                 if not fits:
                     asks.append(self._ask(line_id, line.parse))
             else:
-                line.match = _by_editor(line.match, self.now, canonical_id=self.canonical_id)
+                line.match = _unconfirmed(line.match, canonical_id=self.canonical_id)
             if not takes_food:
                 asks.append(self._ask_food(line_id, line.parse))
         issues = [*resolve(recipe, lambda fact_id: fact_id in fixed), *asks]
@@ -323,18 +340,17 @@ class SharedMatch:
         )
 
     def _ask_food(self, line_id: str, parse: ParseFact) -> EnrichmentIssue:
-        """An open issue asking an editor to check the FDC food of a line whose Canonical
-        Ingredient changed but whose preparation differs from the line the food was picked on.
-        Like the ask for a portion, it proposes no correction.
+        """An open issue asking an editor to check the FDC food of a line prepared another way
+        than the line the food was picked on: one whose Canonical Ingredient changed, or one with
+        no match until now. Like the ask for a portion, it proposes no correction.
         """
-        preparation = f'"{parse.preparation}"' if parse.preparation else "none"
-        picked_on = f'"{self.preparation}"' if self.preparation else "none"
+        picked_on = f'prepared "{self.preparation}"' if self.preparation else "with no preparation"
+        this = f'is prepared "{parse.preparation}"' if parse.preparation else "has no preparation"
         return EnrichmentIssue(
             id=new_ulid(),
             fact_id=f"{line_id}.match",
-            reason=f"An editor matched {self.wording} to another Canonical Ingredient and picked "
-            f"{self.food.description} on a line whose preparation is {picked_on}. This line's "
-            f"preparation is {preparation}, which may need another FDC food: pick one for it.",
+            reason=f"An editor picked {self.food.description} for {self.wording} on a line "
+            f"{picked_on}. This line {this}, so it may need another FDC food: pick one for it.",
         )
 
 
@@ -348,7 +364,9 @@ class Edited:
     learned: list[Wording] = field(default_factory=list[Wording])
     fixed: list[Wording] = field(default_factory=list[Wording])
     shared: SharedMatch | None = None
-    others: list[str] = field(default_factory=list[str])  # other recipes with the wording
+    # Other recipes the match changes: with the wording, prepared the same way or needing the
+    # Canonical Ingredient.
+    others: list[str] = field(default_factory=list[str])
 
 
 def edit_recipe(
@@ -425,7 +443,7 @@ def _edit_line(
             ]
             recipes = store.recipes()
             result.others = [o.id for o in recipes if o.id != recipe.id and shared.lines(o)]
-            # The recipe's other lines with the same wording take the food too.
+            # The recipe's other lines with the wording take the match too, as other recipes'.
             base = shared.apply(recipe.model_copy(update={"facts": facts}), edit.line_id) or base
             facts = base.facts
             line = facts.ingredients[edit.line_id]

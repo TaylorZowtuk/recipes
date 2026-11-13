@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from conftest import EDITOR, SNAPSHOT
 from test_enrichment_review import BEEF, CONFIRMED, awaiting
-from test_review_edits import PORK, beef_line, edit, other
+from test_review_edits import PORK, TO_PORK, beef_line, edit, frob_line, line_edit, other
 
 from recipes import fdc
 from recipes.models import Per100g, Recipe
@@ -178,6 +178,19 @@ def test_a_canonical_ingredient_no_line_is_matched_to_has_no_default_food(
     assert [food["fdc_id"] for food in found["foods"]] == [
         food.fdc_id for food in SNAPSHOT.candidates("zorbleberries", 10)
     ]
+
+
+def test_a_food_kept_under_a_new_canonical_ingredient_is_not_preferred_to_a_confirmed_one(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # The whipped line keeps its own food when its wording moves to pork, but nobody confirmed
+    # that food as pork's, so the picker starts from the pork shoulder line's.
+    recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
+    other(api_store, 2, frob_line("knobs", "whipped", fdc_id=2004, **CONFIRMED))
+    other(api_store, 3, beef_line("pork shoulder", canonical_id=PORK.id, fdc_id=2007, **CONFIRMED))
+    assert edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009)).status_code == 200
+
+    assert search(editor_client, canonical=PORK.id)["default_fdc_id"] != 2004
 
 
 def test_a_named_food_comes_first_so_the_picker_can_name_it(editor_client: TestClient) -> None:

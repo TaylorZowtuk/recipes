@@ -685,7 +685,7 @@ def test_a_canonical_change_asks_for_the_food_of_a_line_with_another_preparation
     # "cream" moves from ice cream to cream: "2 tbsp cream, whipped" takes cream, keeps its food
     # and asks an editor to pick one.
     recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
-    whipped = other(api_store, 2, frob_line("knobs", "whipped"))
+    whipped = other(api_store, 2, frob_line("knobs", "whipped", **CONFIRMED))
     to_pork: dict[str, Any] = {**FROB, "canonical": {"kind": "existing", "id": PORK.id}}
 
     response = edit(editor_client, recipe, **line_edit(**to_pork, fdc_id=2009, portion_id=611))
@@ -699,6 +699,10 @@ def test_a_canonical_change_asks_for_the_food_of_a_line_with_another_preparation
         1001,
         None,
     )
+    # Nobody confirmed the old food under the new Canonical Ingredient: the match keeps its
+    # provenance and confidence, unconfirmed.
+    assert unconfirmed(matched)
+    assert (matched["provenance"], matched["confidence"]) == ("llm", 0.8)
     assert fact(after, "i1.conversion") == fact(whipped, "i1.conversion")
     (opened,) = [issue for issue in after.issues if issue.status == "open"]
     assert opened.fact_id == "i1.match"
@@ -726,25 +730,133 @@ def test_an_unmatched_line_with_another_preparation_takes_the_food_and_is_asked_
     )
     (opened,) = [issue for issue in after.issues if issue.status == "open"]
     assert opened.fact_id == "i1.match"
+    # The pick kept the Canonical Ingredient, so the ask mustn't say it changed.
+    assert "Canonical Ingredient" not in opened.reason
+
+
+def unconfirmed(found: dict[str, Any]) -> bool:
+    return not found["confirmed"] and not any(
+        found[key] for key in ("confirmed_by", "confirmed_at", "confirm_batch")
+    )
+
+
+def open_issues(recipe: Recipe) -> list[str]:
+    return [issue.fact_id for issue in recipe.issues if issue.status == "open"]
+
+
+TO_PORK: dict[str, Any] = {**FROB, "canonical": {"kind": "existing", "id": PORK.id}}
 
 
 def test_picking_the_food_settles_the_ask(editor_client: TestClient, api_store: Store) -> None:
     recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
     whipped = other(api_store, 2, frob_line("knobs", "whipped"))
-    to_pork: dict[str, Any] = {**FROB, "canonical": {"kind": "existing", "id": PORK.id}}
-    edit(editor_client, recipe, **line_edit(**to_pork, fdc_id=2009, portion_id=611))
+    edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
     asked = stored(api_store, whipped.id)
+    assert open_issues(asked) == ["i1.match"]
+    assert unconfirmed(fact(asked, "i1.match"))
 
     response = edit(
         editor_client,
         asked,
-        **line_edit(**to_pork, preparation="whipped", fdc_id=2009, portion_id=611),
+        **line_edit(**TO_PORK, preparation="whipped", fdc_id=2009, portion_id=611),
     )
 
     assert response.status_code == 200
     answered = stored(api_store, whipped.id)
     assert not [issue for issue in answered.issues if issue.status == "open"]
     assert fact(answered, "i1.match")["fdc_id"] == 2009
+
+
+def test_saving_the_asked_line_unchanged_settles_the_ask(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
+    whipped = other(api_store, 2, frob_line("knobs", "whipped"))
+    edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
+    asked = stored(api_store, whipped.id)
+
+    # The editor checks the kept food and saves the line as it stands.
+    response = edit(
+        editor_client,
+        asked,
+        **line_edit(name="frob root", unit="knobs", preparation="whipped", fdc_id=1001),
+    )
+
+    assert response.status_code == 200
+    answered = stored(api_store, whipped.id)
+    assert open_issues(answered) == []
+    matched = fact(answered, "i1.match")
+    assert (matched["canonical_id"], matched["fdc_id"]) == (PORK.id, 1001)
+    assert matched["confirmed"]
+
+
+def test_a_food_pick_reaches_the_edited_recipes_own_lines_by_preparation(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    line = frob_line("knobs").ingredients["i1"]
+    whipped = frob_line("knobs", "whipped").ingredients["i1"]
+    facts = RecipeFacts(ingredients={"i1": line, "i2": line, "i3": whipped})
+    recipe = awaiting(api_store, facts=facts, issues=[], canonicals=(BEEF, PORK))
+
+    response = edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
+
+    assert response.status_code == 200
+    saved = stored(api_store, recipe.id)
+    same = fact(saved, "i2.match")
+    assert (same["canonical_id"], same["fdc_id"], same["portion_id"]) == (PORK.id, 2009, 611)
+    assert edited(same)
+    other_way = fact(saved, "i3.match")
+    assert (other_way["canonical_id"], other_way["fdc_id"]) == (PORK.id, 1001)
+    assert unconfirmed(other_way)
+    assert open_issues(saved) == ["i3.match"]
+
+
+def test_a_ready_recipe_asked_for_a_food_stays_ready_and_flagged(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
+    whipped = other(api_store, 2, frob_line("knobs", "whipped", **CONFIRMED))
+    ready = api_store.update_recipe(whipped.model_copy(update={"status": "ready"}))
+
+    response = edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
+
+    assert response.status_code == 200
+    after = stored(api_store, ready.id)
+    assert open_issues(after) == ["i1.match"]
+    assert after.status == "ready"
+    assert card(api_store, ready.id)["needs_review"]["flagged"] == 1
+
+
+def test_a_line_prepared_another_way_already_matched_to_the_canonical_ingredient_is_left(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
+    whipped = other(api_store, 2, frob_line("knobs", "whipped", canonical_id=PORK.id))
+
+    response = edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
+
+    assert response.status_code == 200
+    assert response.json()["also_updated"] == []
+    assert stored(api_store, whipped.id) == whipped
+
+
+def test_changing_the_canonical_ingredient_back_leaves_one_ask(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs"), canonicals=(BEEF, PORK))
+    whipped = other(api_store, 2, frob_line("knobs", "whipped"))
+    edit(editor_client, recipe, **line_edit(**TO_PORK, fdc_id=2009, portion_id=611))
+
+    response = edit(
+        editor_client,
+        stored(api_store, recipe.id),
+        **line_edit(**FROB, fdc_id=2009, portion_id=611),
+    )
+
+    assert response.status_code == 200
+    after = stored(api_store, whipped.id)
+    assert fact(after, "i1.match")["canonical_id"] == BEEF.id
+    assert open_issues(after) == ["i1.match"]
 
 
 def test_a_picked_clove_never_reaches_a_spoonful_of_garlic(

@@ -14,8 +14,9 @@ Until now, an editor who picked "Rice, white, cooked" for one cooked-rice line g
 
 - **The Canonical Ingredient goes to every line with the wording,** as before: the Wording Cache maps a wording to one Canonical Ingredient.
 - **The food goes to a line with exactly the same preparation:** compared as a wording is (lowercase, spacing collapsed, surrounding punctuation stripped), and a line with no preparation matches only another with none. That line takes the food and the portion that fits it, as the earlier ADR says.
-- **A line prepared another way keeps its own food,** and is left as it is when its Canonical Ingredient doesn't change, so a food pick that keeps the Canonical Ingredient reaches only lines prepared the same way.
+- **A line prepared another way keeps its own food,** and is left as it is when its Canonical Ingredient doesn't change, so a food pick that keeps the Canonical Ingredient reaches, of the lines with a match, only those prepared the same way. It still reaches a line prepared another way that has no match yet, or that is matched to another Canonical Ingredient.
 - **When its Canonical Ingredient changes,** such a line takes the new Canonical Ingredient, keeps its food, portion and conversion, and gets an open Enrichment Issue on its match asking an editor to pick its food, since a food picked for the old Canonical Ingredient may be wrong ("cream" moved from *ice cream* to *cream* leaves "2 tbsp cream, whipped" with an ice cream until someone picks). A line with no match yet takes the picked food, with the same ask. Like the ask for a portion, the issue proposes no correction, so only an edit of the line settles it, and the recipe stays flagged until then.
+- **The match it keeps is unconfirmed,** with its old provenance and confidence, not Confirmed by an editor: nobody confirmed that food for the new Canonical Ingredient, and an editor's confirmation is in no Confirm Batch, so no undo would ever take back one nobody gave. Unconfirmed, it doesn't outrank a Confirmed line's food when the picker offers a default food for the Canonical Ingredient, and the line counts as still to check.
 
 ## Consequences
 
