@@ -8,7 +8,7 @@ A wording is the line's parsed name, and the parser puts a cooking state or a pa
 - "3 cups cooked rice" and "1 cup rice" are both *rice*, cooked and dry.
 - "2 cups chickpeas, cooked" and "1 can chickpeas, drained" are both *chickpeas*, home-cooked and canned.
 
-Until now, an editor who picked "Rice, white, cooked" for one cooked-rice line gave it, Confirmed, to every dry-rice line with the wording, which then weighed about a third of what it should. The Canonical Ingredient is right for all of them: cooked rice and dry rice are bought as one Grocery Item, and lemon juice is bought as lemons.
+Until now, an editor who picked "Rice, white, cooked" for one cooked-rice line gave it, Confirmed, to every dry-rice line with the wording, which then showed about a third of the calories it should. The Canonical Ingredient is right for all of them: cooked rice and dry rice are bought as one Grocery Item, and lemon juice is bought as lemons.
 
 ## The rule
 
@@ -16,7 +16,7 @@ Until now, an editor who picked "Rice, white, cooked" for one cooked-rice line g
 - **The food goes to a line with exactly the same preparation:** compared as a wording is (lowercase, spacing collapsed, surrounding punctuation stripped), and a line with no preparation matches only another with none. That line takes the food and the portion that fits it, as the earlier ADR says.
 - **A line prepared another way keeps its own food,** and is left as it is when its Canonical Ingredient doesn't change, so a food pick that keeps the Canonical Ingredient reaches, of the lines with a match, only those prepared the same way. It still reaches a line prepared another way that has no match yet, or that is matched to another Canonical Ingredient.
 - **When its Canonical Ingredient changes,** such a line takes the new Canonical Ingredient, keeps its food, portion and conversion, and gets an open Enrichment Issue on its match asking an editor to pick its food, since a food picked for the old Canonical Ingredient may be wrong ("cream" moved from *ice cream* to *cream* leaves "2 tbsp cream, whipped" with an ice cream until someone picks). A line with no match yet takes the picked food, with the same ask. Like the ask for a portion, the issue proposes no correction, so only an edit of the line settles it, and the recipe stays flagged until then.
-- **The match it keeps is unconfirmed,** with its old provenance and confidence, not Confirmed by an editor: nobody confirmed that food for the new Canonical Ingredient, and an editor's confirmation is in no Confirm Batch, so no undo would ever take back one nobody gave. Unconfirmed, it doesn't outrank a Confirmed line's food when the picker offers a default food for the Canonical Ingredient, and the line counts as still to check.
+- **The match it keeps is unconfirmed,** with its old provenance and confidence, not Confirmed by an editor: nobody confirmed that food for the new Canonical Ingredient, and an editor's confirmation is in no Confirm Batch, so no undo would ever take back one nobody gave. Unconfirmed, it doesn't outrank a Confirmed line's food when the picker offers a default food for the Canonical Ingredient, and the line counts as still to check. For the same reason, the food a line prepared another way with no match yet takes is stored unconfirmed too, its conversion with it.
 
 ## Consequences
 

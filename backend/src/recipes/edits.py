@@ -277,9 +277,9 @@ class SharedMatch:
         the food, its open issues on its match and conversion are resolved, and if no portion of
         the food fits it, an open issue asks an editor to pick one. A line with another
         preparation takes the Canonical Ingredient and keeps its own food, unconfirmed since
-        nobody confirmed that food for the new Canonical Ingredient (or takes the food if it had
-        none); its open issues on its match are resolved, and an open issue asks an editor to pick
-        its food.
+        nobody confirmed that food for the new Canonical Ingredient (or takes the food,
+        unconfirmed too, if it had none); its open issues on its match are resolved, and an open
+        issue asks an editor to pick its food.
         """
         lines = self.lines(recipe)
         if not lines:
@@ -301,6 +301,10 @@ class SharedMatch:
             if takes_food or line.match is None:
                 portion_id, fits = self._portion_for(line.parse)
                 line.match, line.conversion = self.picked(portion_id)
+                if not takes_food:
+                    # Picked for another preparation: nobody confirmed the food for this line.
+                    line.match = _unconfirmed(line.match)
+                    line.conversion = _unconfirmed(line.conversion)
                 if not fits:
                     asks.append(self._ask(line_id, line.parse))
             else:
