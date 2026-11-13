@@ -715,9 +715,11 @@ function FoodPicker({
             {misfit}
           </p>
           <p className="field-hint">
-            Without a portion, the line has no weight or nutrition. Every line worded like this one,
-            in every recipe, gets this food, and this portion where it fits that line’s unit; a line
-            no portion fits gets an Enrichment Issue asking for one.
+            Without a portion, the line has no weight or nutrition. Every line worded and prepared
+            like this one, in every recipe, gets this food, and this portion where it fits that
+            line’s unit; a line no portion fits gets an Enrichment Issue asking for one. A matched
+            line prepared another way (cooked, juiced) keeps its own food, and if its Canonical
+            Ingredient changes, gets an Enrichment Issue asking for one.
           </p>
         </fieldset>
       )}

@@ -1,5 +1,7 @@
 # Editors pick FDC foods; the FDC Snapshot ships in the Lambda
 
+Superseded in part by [A food pick reaches only lines prepared the same way](2026-11-12-food-picks-spread-by-preparation.md): the FDC food goes only to lines with the wording and exactly the same preparation. A line prepared another way keeps its food, and is asked for one when its Canonical Ingredient changes.
+
 This supersedes part of the [editing ADR](2026-11-11-editing-review-facts.md): a line an editor matches no longer copies the FDC food, portion and conversion of another line matched to the same Canonical Ingredient, and a match no longer goes without an FDC food (`fdc_id` is required again). Everything else in that ADR stands.
 
 Until now the API couldn't look up an FDC food, because the Lambda zip left the FDC Snapshot out. So a line an editor matched to a new Canonical Ingredient had no FDC food, and so no weight or nutrition, and enrichment never filled them in because the match was Confirmed. A line matched to an existing Canonical Ingredient copied another line's portion, which may not fit its own unit: a clove's weight copied onto "1 tbsp garlic". And an editor couldn't change a line's FDC food at all.

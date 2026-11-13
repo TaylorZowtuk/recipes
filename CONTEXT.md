@@ -116,7 +116,7 @@ Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiti
 _Avoid_: Processing state
 
 **Enrichment Issue**:
-Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An issue can also mark a line that an editor's FDC food pick on another line with its wording left without a portion that fits its unit: that one proposes no correction (it has no before or after) and is settled by editing the line.
+Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An editor's FDC food pick on another line with its wording can also leave an issue that proposes no correction (it has no before or after) and is settled by editing the line: on a line that took the food but no FDC portion fits its unit, asking for one, or on a line prepared another way, asking for its FDC food.
 _Avoid_: Warning, error
 
 **Work Packet**:
@@ -188,7 +188,7 @@ The single name that every wording of an ingredient maps to, e.g. "boneless chic
 _Avoid_: Normalized ingredient, food item
 
 **Wording Cache**:
-What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it. An editor who changes a line's Canonical Ingredient, or its FDC food or portion, fixes its wording: the cache confirms the Canonical Ingredient, and every recipe with a line of that wording is matched to it and its FDC food, each line taking a portion that fits its own unit.
+What enrichment has learned about which Canonical Ingredient each wording of an ingredient means, keyed by the wording in lowercase with its spacing and surrounding punctuation tidied ("Stewing  Beef." is *stewing beef*). Enrichment offers a cached wording's Canonical Ingredient first and the model still checks it; once an editor confirms the wording, it is the only one offered and enrichment never changes it. An editor who changes a line's Canonical Ingredient, or its FDC food or portion, fixes its wording: the cache confirms the Canonical Ingredient, and every line of that wording in the Collection takes it. A line prepared exactly the same way also takes the FDC food, with an FDC portion that fits its own unit; a line prepared another way with no match yet takes it too, its food unconfirmed, and is asked for an FDC food; a line prepared another way keeps its own FDC food and is left as it is, unless its Canonical Ingredient changed: then it takes the new one, its food unconfirmed, and is asked for an FDC food.
 _Avoid_: Alias table, synonym list
 
 **Pantry Staple**:

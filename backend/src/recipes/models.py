@@ -412,9 +412,10 @@ class RecipeFacts(Model):
 
 
 class EnrichmentIssue(Model):
-    """Something enrichment corrected or was unsure about, on the fact `fact_id` names, or a line
-    an editor's FDC food pick left without a portion that fits its unit. That one proposes no
-    correction (no `before` or `after`) and is settled by editing the line.
+    """Something enrichment corrected or was unsure about, on the fact `fact_id` names, or what an
+    editor's FDC food pick on another line left to check: a line no portion of the food fits
+    (on its conversion), or a line prepared another way that may need another food (on its match).
+    Those propose no correction (no `before` or `after`) and are settled by editing the line.
     """
 
     id: Ulid
