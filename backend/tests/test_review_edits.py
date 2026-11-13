@@ -739,6 +739,7 @@ def test_an_unmatched_line_with_another_preparation_takes_the_food_and_is_asked_
     )
     # Picked for another preparation, the food is nobody's confirmed choice for this line.
     assert unconfirmed(matched)
+    assert (matched["provenance"], matched["confidence"]) == ("editor", 1)
     assert unconfirmed(fact(after, "i1.conversion"))
     (opened,) = [issue for issue in after.issues if issue.status == "open"]
     assert opened.fact_id == "i1.match"

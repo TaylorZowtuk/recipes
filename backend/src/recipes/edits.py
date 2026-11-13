@@ -5,8 +5,8 @@ reverses it. A line's new Canonical Ingredient or FDC food fixes its wording: th
 confirms it, and every line in the Collection with that wording takes its Canonical Ingredient.
 Only a line with exactly the same preparation takes the food, with the portion that fits its own
 written unit; a line prepared another way keeps its food, unconfirmed, and is asked for one when its
-Canonical Ingredient changed. A line with no match takes the food, and is asked too if prepared
-another way.
+Canonical Ingredient changed. A line with no match takes the food, unconfirmed if prepared
+another way, and is asked for its food too.
 """
 
 from __future__ import annotations
