@@ -805,6 +805,73 @@ def test_saving_the_asked_line_unchanged_settles_the_ask(
     assert matched["confirmed"]
 
 
+# The line keeps its Canonical Ingredient: only its FDC portion is picked.
+SAME_FOOD: dict[str, Any] = {"name": "frob root", "unit": "knobs"}
+
+
+def test_picking_another_fdc_portion_of_the_current_food_stores_its_conversion(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs", fdc_id=2009, portion_id=611))
+
+    response = edit(editor_client, recipe, **line_edit(**SAME_FOOD, fdc_id=2009, portion_id=612))
+
+    assert response.status_code == 200
+    saved = stored(api_store, recipe.id)
+    matched = fact(saved, "i1.match")
+    assert (matched["fdc_id"], matched["portion_id"]) == (2009, 612)
+    assert edited(matched)
+    assert converted(saved) == numbers(2009, 612)
+    assert edited(fact(saved, "i1.conversion"))
+
+
+def test_picking_another_fdc_portion_of_the_current_food_spreads_by_preparation(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=frob_line("knobs", fdc_id=2009, portion_id=611))
+    same = other(api_store, 2, frob_line("knobs"))
+    whipped = other(api_store, 3, frob_line("knobs", "whipped"))
+
+    response = edit(editor_client, recipe, **line_edit(**SAME_FOOD, fdc_id=2009, portion_id=612))
+
+    assert response.status_code == 200
+    assert response.json()["also_updated"] == [same.id]
+    after = stored(api_store, same.id)
+    matched = fact(after, "i1.match")
+    # The FDC portion counted in this line's own word, not the one picked.
+    assert (matched["fdc_id"], matched["portion_id"]) == (2009, 611)
+    assert edited(matched)
+    assert converted(after) == numbers(2009, 611)
+    assert stored(api_store, whipped.id) == whipped
+
+
+def test_picking_another_fdc_portion_of_the_current_food_settles_the_ask(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # The line has the food 2009 and nobody has confirmed it: an editor is asked to pick one.
+    asked = awaiting(
+        api_store,
+        facts=frob_line("knobs", "whipped", fdc_id=2009, portion_id=611),
+        issues=[issue(5, "i1.match")],
+    )
+    assert open_issues(asked) == ["i1.match"]
+    assert unconfirmed(fact(asked, "i1.match"))
+
+    # The editor keeps the food and picks its other FDC portion.
+    response = edit(
+        editor_client,
+        asked,
+        **line_edit(**SAME_FOOD, preparation="whipped", fdc_id=2009, portion_id=612),
+    )
+
+    assert response.status_code == 200, response.text
+    answered = stored(api_store, asked.id)
+    assert open_issues(answered) == []
+    matched = fact(answered, "i1.match")
+    assert (matched["fdc_id"], matched["portion_id"]) == (2009, 612)
+    assert edited(matched)
+
+
 def test_a_food_pick_reaches_the_edited_recipes_own_lines_by_preparation(
     editor_client: TestClient, api_store: Store
 ) -> None:
