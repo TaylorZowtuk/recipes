@@ -1,6 +1,6 @@
 # A stack's backups (backup ADR): the backup bucket, and the snapshot Lambda that writes a Backup
 # Snapshot of the table (a paced Scan, gzipped JSON Lines) and copies new images into the bucket.
-# EventBridge runs it each night; the prod deploy job runs it before each release
+# EventBridge runs it each night; the prod deploy job starts it before each release
 # (scripts/backup-snapshot.sh). The API reads the bucket through the stack's data policy, to presign
 # `backup pull`'s download links.
 terraform {
@@ -45,7 +45,7 @@ variable "images_bucket_arn" {
 }
 
 variable "read_units" {
-  description = "The read capacity the Scan paces itself to: half the table's, so the app keeps the rest."
+  description = "The read capacity the Scan paces itself to."
   type        = number
 }
 
@@ -176,9 +176,10 @@ resource "aws_lambda_function" "this" {
   handler          = "recipes.backup.handler"
   filename         = var.zip_path
   source_code_hash = filebase64sha256(var.zip_path)
-  # A paced Scan of prod is a few minutes; Lambda's limit is 15. Nightly at 256 MB, a full 15
-  # minutes is 225 GB-s, far inside the free 400,000 GB-s a month.
-  memory_size = 256
+  # A paced Scan of prod is a few minutes; Lambda's limit is 15. Nightly at 512 MB, a full 15
+  # minutes is 450 GB-s, far inside the free 400,000 GB-s a month. The snapshot is written to /tmp
+  # first, and the default 512 MB of it holds a few-MB gzip with room to spare.
+  memory_size = 512
   timeout     = 900
 
   environment {
@@ -196,6 +197,13 @@ resource "aws_lambda_function" "this" {
   }
 
   depends_on = [aws_iam_role_policy.this]
+}
+
+# No retries of an asynchronous invocation (the nightly rule's and `make backup-snapshot`'s): a
+# failed snapshot is one paced Scan, not three, and its error is in the function's logs.
+resource "aws_lambda_function_event_invoke_config" "this" {
+  function_name          = aws_lambda_function.this.function_name
+  maximum_retry_attempts = 0
 }
 
 # An EventBridge rule, not EventBridge Scheduler, so no role is needed to invoke the function.

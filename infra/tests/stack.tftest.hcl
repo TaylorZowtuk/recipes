@@ -323,10 +323,10 @@ run "backup" {
     condition = (
       aws_lambda_function.this.handler == "recipes.backup.handler" &&
       aws_lambda_function.this.layers == null &&
-      aws_lambda_function.this.timeout == 900 && aws_lambda_function.this.memory_size == 256 &&
+      aws_lambda_function.this.timeout == 900 && aws_lambda_function.this.memory_size == 512 &&
       one(aws_lambda_function.this.architectures) == "arm64"
     )
-    error_message = "The snapshot runs the plain Python handler from the API's zip, on arm64, for up to 15 minutes at 256 MB."
+    error_message = "The snapshot runs the plain Python handler from the API's zip, on arm64, for up to 15 minutes at 512 MB."
   }
   assert {
     condition = output.wiring.environment == tomap({
@@ -388,6 +388,13 @@ run "backup" {
       aws_lambda_permission.nightly.source_arn == "arn:aws:events:us-west-2:123456789012:rule/plateful-test-backup"
     )
     error_message = "Only the nightly rule may invoke the snapshot through EventBridge."
+  }
+  assert {
+    condition = (
+      aws_lambda_function_event_invoke_config.this.function_name == "plateful-test-backup" &&
+      aws_lambda_function_event_invoke_config.this.maximum_retry_attempts == 0
+    )
+    error_message = "An asynchronous snapshot (nightly or pre-release) is never retried: a failure is one paced Scan, not three."
   }
 }
 
@@ -522,9 +529,9 @@ run "staging" {
     condition = (
       module.stack.backup_function_name == "plateful-staging-backup" &&
       module.stack.backup.environment["BACKUP_BUCKET"] == "plateful-staging-backup-123456789012" &&
-      module.stack.backup.environment["SNAPSHOT_READ_UNITS"] == "2.5"
+      module.stack.backup.environment["SNAPSHOT_READ_UNITS"] == "5"
     )
-    error_message = "Staging has its own snapshot and backup bucket, paced at half its 5 RCU."
+    error_message = "Staging has its own snapshot and backup bucket, paced at all of its 5 RCU, so a prod-sized Scan fits in 15 minutes."
   }
   assert {
     condition     = module.stack.api_environment["BACKUP_BUCKET"] == "plateful-staging-backup-123456789012"

@@ -87,7 +87,9 @@ jobs:
     needs: [build, staging] # staging's job runs its smoke, kill switch and e2e tests
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Up to 16 minutes for the pre-release snapshot, then the apply (CloudFront can take a while)
+    # and the smoke test.
+    timeout-minutes: 60
     # The prod environment's required reviewer is the approval gate.
     environment:
       name: prod
