@@ -609,7 +609,9 @@ test("a visitor plans a Demo week that a reload resets, and sends nothing", asyn
   await page.goto("/week");
   await expect(page.getByRole("heading", { level: 1, name: "Week Plan" })).toBeVisible();
   await expect(page.getByText(DEMO)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
+  const signIn = page.getByRole("link", { name: "Sign in" });
+  await expect(signIn).toHaveAttribute("href", "/sign-in");
+  expect((await signIn.boundingBox())?.height).toBeGreaterThanOrEqual(50);
   await expect(page.getByRole("region")).toHaveCount(7);
   await expect(page.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
   const generated = await plannedDays(page);

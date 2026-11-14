@@ -28,12 +28,15 @@ export function WeekPlanScreen() {
       ) : (
         <>
           <div className="demo-banner">
-            <p>
-              <strong>Demo — changes aren’t saved</strong>
-            </p>
-            <p>
-              <Link to="/sign-in">Sign in</Link> to plan the household’s week.
-            </p>
+            <div>
+              <p>
+                <strong>Demo — changes aren’t saved</strong>
+              </p>
+              <p>Sign in to plan the household’s week.</p>
+            </div>
+            <Link to="/sign-in" className="button">
+              Sign in
+            </Link>
           </div>
           <WeekPlanner key="demo" demo />
         </>
