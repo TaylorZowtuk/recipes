@@ -51,7 +51,7 @@ output "backup_bucket" {
 }
 
 output "backup_function_name" {
-  description = "make backup-snapshot invokes it before each prod release."
+  description = "The nightly snapshot function; make backup-snapshot STACK=staging starts one by hand."
   value       = module.stack.backup_function_name
 }
 

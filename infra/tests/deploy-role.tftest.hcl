@@ -192,10 +192,30 @@ run "deploy_policy" {
   }
   assert {
     condition = (
-      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Schedule.Action]) == ["events:*"] &&
+      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Schedule.Action])) == toset([
+        "events:PutRule", "events:DeleteRule", "events:DescribeRule", "events:EnableRule", "events:DisableRule",
+        "events:RemoveTargets", "events:ListTargetsByRule", "events:TagResource", "events:UntagResource", "events:ListTagsForResource",
+      ]) &&
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Schedule.Resource == "arn:aws:events:us-west-2:123456789012:rule/plateful-staging-*"
     )
-    error_message = "The deploy role manages EventBridge rules, and their targets, with the stack's prefix only."
+    error_message = "The deploy role makes the AWS provider's calls for EventBridge rules with the stack's prefix, and no others."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Action]) == ["events:PutTargets"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Resource == "arn:aws:events:us-west-2:123456789012:rule/plateful-staging-*" &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Condition == {
+        ArnLike = { "events:TargetArn" = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-*" }
+      }
+    )
+    error_message = "The deploy role may point the stack's rules only at the stack's own functions."
+  }
+  # Unconditioned, PutTargets would let a rule invoke anything in the account.
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !anytrue([
+      for a in flatten([s.Action]) : can(regex("^${replace(lower(a), "*", ".*")}$", "events:puttargets"))
+    ]) if s.Sid != "ScheduleTarget"])
+    error_message = "Only the target-checked statement grants events:PutTargets, wildcards included."
   }
   assert {
     condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(

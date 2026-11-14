@@ -96,7 +96,7 @@ kill-switch-test: ## Trip STACK's kill switch with a test SNS message, then rese
 kill-switch-reset: ## Re-enable STACK's API after its kill switch tripped (check the bill first)
 	$(RUN_AWS) make kill-switch-reset STACK='$(STACK)'
 
-backup-snapshot: ## Take a pre-release Backup Snapshot of STACK and wait for it (AWS credentials in your env)
+backup-snapshot: ## Take a pre-release Backup Snapshot of STACK and wait for it to land in the backup bucket (AWS credentials in your env)
 	$(RUN_AWS) make backup-snapshot STACK='$(STACK)'
 
 dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging

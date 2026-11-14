@@ -22,6 +22,11 @@ variable "write_capacity" {
   type = number
 }
 
+variable "snapshot_read_units" {
+  description = "The read capacity a Backup Snapshot's Scan paces itself to, at most the table's read_capacity."
+  type        = number
+}
+
 variable "deletion_protection" {
   type = bool
 }
@@ -113,17 +118,16 @@ module "kill_switch" {
 }
 
 module "backup" {
-  source            = "../backup"
-  name              = module.access.backup_name
-  bucket            = module.access.backup_bucket
-  zip_path          = var.lambda_zip
-  runtime           = local.lambda_runtime
-  table_name        = module.store.table_name
-  table_arn         = module.store.table_arn
-  images_bucket     = module.store.images_bucket
-  images_bucket_arn = module.store.images_bucket_arn
-  # Half the table's read capacity, so the app keeps the other half while a snapshot runs.
-  read_units               = var.read_capacity / 2
+  source                   = "../backup"
+  name                     = module.access.backup_name
+  bucket                   = module.access.backup_bucket
+  zip_path                 = var.lambda_zip
+  runtime                  = local.lambda_runtime
+  table_name               = module.store.table_name
+  table_arn                = module.store.table_arn
+  images_bucket            = module.store.images_bucket
+  images_bucket_arn        = module.store.images_bucket_arn
+  read_units               = var.snapshot_read_units
   permissions_boundary_arn = module.access.boundary_arn
 }
 

@@ -202,12 +202,36 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["arn:aws:sns:${local.region}:${local.acct}:${local.prefix}-*"]
   }
 
-  # The nightly Backup Snapshot's EventBridge rule and its target. The target invokes a Lambda,
-  # which needs no role, so no PassRole to events.
+  # The nightly Backup Snapshot's EventBridge rule and its target: the calls the AWS provider makes
+  # for them, and no more, since staging's role deploys without a reviewer. PutTargets is its own
+  # statement, so its condition (a target may only be one of the stack's functions) doesn't block
+  # the calls that carry no events:TargetArn. A Lambda target needs no role, so no PassRole to events.
   statement {
-    sid       = "Schedule"
-    actions   = ["events:*"]
+    sid = "Schedule"
+    actions = [
+      "events:PutRule",
+      "events:DeleteRule",
+      "events:DescribeRule",
+      "events:EnableRule",
+      "events:DisableRule",
+      "events:RemoveTargets",
+      "events:ListTargetsByRule",
+      "events:TagResource",
+      "events:UntagResource",
+      "events:ListTagsForResource",
+    ]
     resources = ["arn:aws:events:${local.region}:${local.acct}:rule/${local.prefix}-*"]
+  }
+
+  statement {
+    sid       = "ScheduleTarget"
+    actions   = ["events:PutTargets"]
+    resources = ["arn:aws:events:${local.region}:${local.acct}:rule/${local.prefix}-*"]
+    condition {
+      test     = "ArnLike"
+      variable = "events:TargetArn"
+      values   = ["arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-*"]
+    }
   }
 
   statement {
