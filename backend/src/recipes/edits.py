@@ -46,6 +46,7 @@ from recipes.models import (
     Segment,
     StepFacts,
     StepUse,
+    Substitution,
     Ulid,
     UsesFact,
     Wording,
@@ -138,13 +139,17 @@ SubstituteIndex = Annotated[int, Field(ge=0, lt=MAX_SUBSTITUTES)]
 
 
 class EditSubstitution(BaseModel):
-    """The ratio and note of the line's substitute at `index`."""
+    """The ratio, note, FDC food and FDC portion (none chosen is allowed) of the line's substitute
+    at `index`. The API copies a new food's numbers from the FDC Snapshot.
+    """
 
     kind: Literal["substitution"]
     line_id: Label
     index: SubstituteIndex
     ratio: Ratio
     note: Label
+    fdc_id: int
+    portion_id: int | None
 
 
 class RemoveSubstitution(BaseModel):
@@ -376,7 +381,8 @@ class Edited:
 def edit_recipe(
     store: Store, recipe: Recipe, edit: FactEdit, snapshot: Callable[[], fdc.Snapshot]
 ) -> Edited:
-    """The recipe with the edit applied, loading the FDC Snapshot only to pick a line's food.
+    """The recipe with the edit applied, loading the FDC Snapshot only to pick a line's or a
+    substitute's food.
     Raises a 422 for an edit it can't take.
     """
     now = datetime.now(UTC)
@@ -386,7 +392,7 @@ def edit_recipe(
         case EditStep():
             return Edited(_edit_step(recipe, edit, now))
         case EditSubstitution() | RemoveSubstitution():
-            return Edited(_edit_substitution(recipe, edit, now))
+            return Edited(_edit_substitution(recipe, edit, snapshot, now))
         case EditDifficulty():
             return Edited(_edit_difficulty(recipe, edit, now))
 
@@ -617,7 +623,10 @@ def overused(steps: Mapping[str, StepFacts]) -> list[str]:
 
 
 def _edit_substitution(
-    recipe: Recipe, edit: EditSubstitution | RemoveSubstitution, now: datetime
+    recipe: Recipe,
+    edit: EditSubstitution | RemoveSubstitution,
+    snapshot: Callable[[], fdc.Snapshot],
+    now: datetime,
 ) -> Recipe:
     facts = recipe.facts.model_copy(deep=True)
     line = facts.ingredients.get(edit.line_id)
@@ -626,15 +635,32 @@ def _edit_substitution(
         raise HTTPException(422, f"Line {edit.line_id} has no substitute {edit.index}")
     items = list(swaps.items)
     if isinstance(edit, EditSubstitution):
-        items[edit.index] = items[edit.index].model_copy(
-            update={"ratio": edit.ratio, "note": edit.note}
-        )
+        items[edit.index] = _substitute(items[edit.index], edit, snapshot)
     else:
         del items[edit.index]
     line.substitutions = _by_editor(swaps, now, items=items, estimated=False) if items else None
     item = f"{edit.line_id}.substitutions"
     issues = resolve(recipe, lambda fact_id: fact_id == item)
     return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
+
+
+def _substitute(
+    current: Substitution, edit: EditSubstitution, snapshot: Callable[[], fdc.Snapshot]
+) -> Substitution:
+    """The substitute with the editor's ratio and note. Its numbers stay as stored for the same
+    food and FDC portion, and else come from the FDC Snapshot: a 422 naming the substitute for a
+    food it doesn't have or an FDC portion that isn't the food's. It reaches no other line.
+    """
+    changes: dict[str, object] = {"ratio": edit.ratio, "note": edit.note}
+    if (current.fdc_id, current.portion_id) != (edit.fdc_id, edit.portion_id):
+        try:
+            numbers = fdc.numbers(snapshot(), edit.fdc_id, edit.portion_id)
+        except fdc.NotInSnapshot as refused:
+            raise HTTPException(
+                422, f"Line {edit.line_id}'s substitute {edit.index}: {refused}"
+            ) from None
+        changes |= {"fdc_id": edit.fdc_id, "portion_id": edit.portion_id, "fdc": numbers}
+    return current.model_copy(update=changes)
 
 
 def _edit_difficulty(recipe: Recipe, edit: EditDifficulty, now: datetime) -> Recipe:

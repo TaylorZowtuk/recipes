@@ -1252,6 +1252,20 @@ def with_swaps(*wordings: str) -> RecipeFacts:
     return FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": line}})
 
 
+def swap_edit(index: int = 0, **fields: Any) -> dict[str, Any]:
+    """An edit of the stew's beef line's substitute, keeping its food and FDC portion."""
+    return {
+        "kind": "substitution",
+        "line_id": "i1",
+        "index": index,
+        "ratio": SWAP["ratio"],
+        "note": SWAP["note"],
+        "fdc_id": SWAP["fdc_id"],
+        "portion_id": SWAP["portion_id"],
+        **fields,
+    }
+
+
 def test_editing_a_substitution_sets_its_ratio_and_note(
     editor_client: TestClient, api_store: Store
 ) -> None:
@@ -1264,11 +1278,7 @@ def test_editing_a_substitution_sets_its_ratio_and_note(
     response = edit(
         editor_client,
         recipe,
-        kind="substitution",
-        line_id="i1",
-        index=1,
-        ratio=0.75,
-        note="lamb is richer",
+        **swap_edit(index=1, ratio=0.75, note="lamb is richer"),
     )
 
     assert response.status_code == 200
@@ -1281,6 +1291,84 @@ def test_editing_a_substitution_sets_its_ratio_and_note(
     assert edited(swaps)
     assert not swaps["estimated"]
     assert saved.issues[0].status == "resolved"
+
+
+def test_changing_a_substitutes_food_and_fdc_portion_stores_the_snapshots_numbers(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=with_swaps("beef chuck", "glimmer oil"))
+
+    response = edit(editor_client, recipe, **swap_edit(index=1, fdc_id=2004, portion_id=606))
+
+    assert response.status_code == 200
+    swaps = fact(stored(api_store, recipe.id), "i1.substitutions")
+    changed = swaps["items"][1]
+    assert (changed["fdc_id"], changed["portion_id"]) == (2004, 606)
+    assert changed["fdc"] == fdc.numbers(SNAPSHOT, 2004, 606).model_dump()
+    assert swaps["items"][0] == SWAP
+    assert edited(swaps)
+
+
+def test_a_substitutes_food_with_no_fdc_portion_stores_no_portion_chosen(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=with_swaps("glimmer oil"))
+
+    response = edit(editor_client, recipe, **swap_edit(fdc_id=2004, portion_id=None))
+
+    assert response.status_code == 200
+    changed = fact(stored(api_store, recipe.id), "i1.substitutions")["items"][0]
+    assert changed["portion_id"] is None
+    assert changed["fdc"] == fdc.numbers(SNAPSHOT, 2004, None).model_dump()
+    assert changed["fdc"]["refused"] == "no portion chosen"
+
+
+def test_a_substitutes_unchanged_food_and_fdc_portion_keep_their_stored_numbers(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # Numbers the FDC Snapshot wouldn't give food 1002, so a refresh would show.
+    recipe = awaiting(api_store, facts=with_swaps("beef chuck"))
+
+    response = edit(editor_client, recipe, **swap_edit(note="brown it first"))
+
+    assert response.status_code == 200
+    kept = fact(stored(api_store, recipe.id), "i1.substitutions")["items"][0]
+    assert kept == {**SWAP, "note": "brown it first"}
+    assert kept["fdc"] != fdc.numbers(SNAPSHOT, 1002, None).model_dump()
+
+
+@pytest.mark.parametrize(
+    ("fdc_id", "portion_id"),
+    [(9999, None), (2004, 501)],
+    ids=["unknown food", "another food's FDC portion"],
+)
+def test_a_substitutes_food_or_fdc_portion_not_in_the_snapshot_is_refused_naming_it(
+    editor_client: TestClient, api_store: Store, fdc_id: int, portion_id: int | None
+) -> None:
+    recipe = awaiting(api_store, facts=with_swaps("beef chuck", "glimmer oil"))
+
+    response = edit(
+        editor_client, recipe, **swap_edit(index=1, fdc_id=fdc_id, portion_id=portion_id)
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("Line i1's substitute 1: ")
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_a_substitutes_food_reaches_no_other_line_or_recipe(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, facts=with_swaps("beef chuck", "beef chuck"))
+    sharing = other(api_store, 2, with_swaps("beef chuck"))
+
+    response = edit(editor_client, recipe, **swap_edit(fdc_id=2004, portion_id=606))
+
+    assert response.status_code == 200
+    assert shared(response) == ([], [], [])
+    items = fact(stored(api_store, recipe.id), "i1.substitutions")["items"]
+    assert items[1] == SWAP
+    assert stored(api_store, sharing.id) == sharing
 
 
 def test_removing_the_last_substitution_leaves_none(
