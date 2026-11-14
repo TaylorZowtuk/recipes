@@ -590,7 +590,17 @@ function weekRequests(page: Page): string[] {
 }
 
 const DEMO = "Demo — changes aren’t saved";
-const plannedDays = (page: Page) => page.getByRole("region").allInnerTexts();
+// Each day's planned recipes and their scales, without the dates, which differ every week anyway.
+const plannedDays = (page: Page) =>
+  page
+    .getByRole("region")
+    .evaluateAll((days) =>
+      days.map((day) =>
+        [...day.querySelectorAll(".week-entries li")].map((entry) =>
+          [".week-entry-title", ".week-scale"].map((part) => entry.querySelector(part)?.textContent),
+        ),
+      ),
+    );
 
 test("a visitor plans a Demo week that a reload resets, and sends nothing", async ({ page }) => {
   const sent = weekRequests(page);
