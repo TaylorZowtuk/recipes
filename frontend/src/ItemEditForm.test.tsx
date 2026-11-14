@@ -820,6 +820,36 @@ describe("an edit form, as an editor uses it", () => {
     ]);
   });
 
+  it("keeps a substitute's own food and FDC portion to choose when the search fails", async () => {
+    search.mockRejectedValue(new TypeError("offline"));
+    const r = recipe();
+    const i3 = r.facts.ingredients.i3;
+    if (!i3?.substitutions) throw new Error("fixture");
+    const [rice] = i3.substitutions.items;
+    if (!rice) throw new Error("fixture");
+    const portioned = recipe({
+      facts: {
+        ...r.facts,
+        ingredients: {
+          ...r.facts.ingredients,
+          i3: {
+            ...i3,
+            substitutions: { ...i3.substitutions, items: [{ ...rice, portion_id: 9001 }] },
+          },
+        },
+      },
+    });
+    open("i3.substitutions", { r: portioned });
+    await settle();
+    expect(host.textContent).toContain("Couldn’t search the FDC foods. Check you’re online.");
+    expect(checked()).toEqual([
+      "The substitute’s current FDC food (its name loads when you’re online)",
+      "The substitute’s current portion",
+    ]);
+    await click(button("Save rice flour"));
+    expect(saved()).toEqual([expect.objectContaining({ fdc_id: 2, portion_id: 9001 })]);
+  });
+
   it("says why a substitute's Save and Remove are off, beside them", () => {
     open("i3.substitutions", { note: "You’re offline." });
     expect(host.querySelector(".sheet-actions")?.textContent).toContain("You’re offline.");
