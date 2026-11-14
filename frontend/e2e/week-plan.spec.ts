@@ -597,7 +597,9 @@ const plannedDays = (page: Page) =>
     .evaluateAll((days) =>
       days.map((day) =>
         [...day.querySelectorAll(".week-entries li")].map((entry) =>
-          [".week-entry-title", ".week-scale"].map((part) => entry.querySelector(part)?.textContent),
+          [".week-entry-title", ".week-scale"].map(
+            (part) => entry.querySelector(part)?.textContent,
+          ),
         ),
       ),
     );
