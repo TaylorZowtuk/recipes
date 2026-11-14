@@ -4,6 +4,27 @@
  */
 
 export interface paths {
+    "/api/backup/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backup Links
+         * @description Short-lived download links to the latest Backup Snapshot and every backed-up image, for
+         *     `backup pull`. Never cached, like every API response that doesn't say otherwise.
+         */
+        get: operations["get_backup_links_api_backup_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/canonical-ingredients/{canonical_id}": {
         parameters: {
             query?: never;
@@ -598,6 +619,24 @@ export interface components {
              * @enum {string}
              */
             op: "add";
+        };
+        /** BackupLink */
+        BackupLink: {
+            /** Key */
+            key: string;
+            /** Url */
+            url: string;
+        };
+        /**
+         * BackupLinks
+         * @description Download links into the backup bucket, each good for `expires_in` seconds.
+         */
+        BackupLinks: {
+            /** Expires In */
+            expires_in: number;
+            /** Images */
+            images: components["schemas"]["BackupLink"][];
+            snapshot: components["schemas"]["BackupLink"] | null;
         };
         /**
          * CanonicalIngredient
@@ -2588,6 +2627,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_backup_links_api_backup_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupLinks"];
+                };
+            };
+        };
+    };
     patch_canonical_ingredient_api_canonical_ingredients__canonical_id__patch: {
         parameters: {
             query?: never;
