@@ -13,8 +13,9 @@ export interface paths {
         };
         /**
          * Get Backup Links
-         * @description Short-lived download links to the latest Backup Snapshot and every backed-up image, for
-         *     `backup pull`. Never cached, like every API response that doesn't say otherwise.
+         * @description Short-lived download links to the latest Backup Snapshot and a page of the backed-up
+         *     images whose keys sort after `after`, for `backup pull`. Never cached, like every API
+         *     response that doesn't say otherwise.
          */
         get: operations["get_backup_links_api_backup_links_get"];
         put?: never;
@@ -629,14 +630,18 @@ export interface components {
         };
         /**
          * BackupLinks
-         * @description Download links into the backup bucket, each good for `expires_in` seconds.
+         * @description Download links into the backup bucket, each good for `expires_in` seconds: the latest
+         *     Backup Snapshot and one page of images. `next` is the `after` for the next page, or None on
+         *     the last.
          */
         BackupLinks: {
+            backup_snapshot: components["schemas"]["BackupLink"] | null;
             /** Expires In */
             expires_in: number;
             /** Images */
             images: components["schemas"]["BackupLink"][];
-            snapshot: components["schemas"]["BackupLink"] | null;
+            /** Next */
+            next: string | null;
         };
         /**
          * CanonicalIngredient
@@ -2629,7 +2634,9 @@ export type $defs = Record<string, never>;
 export interface operations {
     get_backup_links_api_backup_links_get: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2643,6 +2650,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupLinks"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
