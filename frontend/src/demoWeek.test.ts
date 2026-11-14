@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyDemoOperations, demoWeek } from "./demoWeek";
 
 const MONDAY = "2026-11-02";
@@ -9,14 +9,25 @@ const cards = ["A", "B", "C", "D", "E", "F", "G", "H"].map((letter) => ({
 }));
 
 const entries = (plan: ReturnType<typeof demoWeek>) => plan.days.flat();
+// The recipes on each day, without the entry ids, which name the week anyway.
+const recipes = (plan: ReturnType<typeof demoWeek>) =>
+  plan.days.map((day) => day.map((e) => e.recipe_id));
 
 describe("demoWeek", () => {
-  it("is the same plan for the same week", () => {
-    expect(demoWeek(MONDAY, cards)).toEqual(demoWeek(MONDAY, cards));
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is the same plan for the same week, whenever it's made", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 2, 9));
+    const first = demoWeek(MONDAY, cards);
+    vi.setSystemTime(new Date(2026, 10, 5, 18));
+    expect(demoWeek(MONDAY, cards)).toEqual(first);
   });
 
   it("differs from one week to the next", () => {
-    expect(demoWeek("2026-11-09", cards).days).not.toEqual(demoWeek(MONDAY, cards).days);
+    expect(recipes(demoWeek("2026-11-09", cards))).not.toEqual(recipes(demoWeek(MONDAY, cards)));
   });
 
   it("doesn't depend on the Collection's order", () => {
