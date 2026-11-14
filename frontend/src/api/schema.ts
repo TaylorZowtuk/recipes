@@ -1082,8 +1082,8 @@ export interface components {
         };
         /**
          * EditSubstitution
-         * @description The ratio, note, FDC food and FDC portion (none chosen is allowed) of the line's substitute
-         *     at `index`. The API copies a new food's numbers from the FDC Snapshot.
+         * @description The ratio, note, FDC food and FDC portion (which may be none) of the line's substitute at
+         *     `index`. The API copies a new food's numbers from the FDC Snapshot.
          */
         EditSubstitution: {
             /** Fdc Id */

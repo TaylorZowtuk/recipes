@@ -858,8 +858,9 @@ def test_picking_another_fdc_portion_of_the_current_food_settles_the_ask(
                 "i1.match",
                 before=None,
                 after=None,
-                reason="An editor picked Frob root for frob root on a line with no preparation. This "
-                'line is prepared "whipped", so it may need another FDC food: pick one for it.',
+                reason="An editor picked Frob root for frob root on a line with no preparation. "
+                'This line is prepared "whipped", so it may need another FDC food: '
+                "pick one for it.",
             )
         ],
     )
