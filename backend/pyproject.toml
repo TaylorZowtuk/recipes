@@ -62,8 +62,10 @@ ignore = [
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
+"src/recipes/backup.py" = ["PLR0913"] # a snapshot names its table, buckets, kind and pacing
+"src/recipes/api.py" = ["PLR0913"] # create_app takes each of the stack's resources, which tests fake
 "src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
-"src/recipes/enrich.py" = ["S105"] # names the service token's variable, which isn't the token
+"src/recipes/client.py" = ["S105"] # names the service token's variable, which isn't the token
 "src/recipes/dev.py" = ["TC001"] # FastAPI reads a route's annotations at runtime
 "src/recipes/fallback.py" = ["BLE001"] # whatever fails on one Source, the others still go on
 "src/recipes/fdc.py" = [

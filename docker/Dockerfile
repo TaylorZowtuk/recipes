@@ -19,7 +19,7 @@ FROM amazon/aws-cli:2.37.5 AS awscli
 # The browsers only work with their own Playwright release, so the tag follows the lockfile.
 FROM mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble AS toolchain
 
-RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends make jq && rm -rf /var/lib/apt/lists/*
 
 # Node from .nvmrc replaces the image's own Node.
 COPY --from=node /usr/local/bin/node /usr/local/bin/

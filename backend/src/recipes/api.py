@@ -23,6 +23,7 @@ from pydantic import (
 from recipes import fdc
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
+from recipes.backup import BackupBucket, BackupLinks
 from recipes.edits import (
     CONFIRMED_BY,
     FactEdit,
@@ -515,6 +516,10 @@ def _images(request: Request) -> ImageStore:
     return request.app.state.images
 
 
+def _backups(request: Request) -> BackupBucket:
+    return request.app.state.backups
+
+
 def _snapshot(request: Request) -> Callable[[], fdc.Snapshot]:
     return request.app.state.snapshot
 
@@ -522,6 +527,7 @@ def _snapshot(request: Request) -> Callable[[], fdc.Snapshot]:
 StoreDep = Annotated[Store, Depends(_store)]
 FetcherDep = Annotated[Fetcher, Depends(_fetcher)]
 ImagesDep = Annotated[ImageStore, Depends(_images)]
+BackupsDep = Annotated[BackupBucket, Depends(_backups)]
 # How a route loads the FDC Snapshot: only when it looks a food up, so reads never load it.
 SnapshotDep = Annotated["Callable[[], fdc.Snapshot]", Depends(_snapshot)]
 EDITORS_ONLY = [Depends(require_editor)]
@@ -732,6 +738,15 @@ def post_image(body: PhotoUrl, fetcher: FetcherDep, images: ImagesDep) -> Image:
         raise HTTPException(422, "That isn't a photo") from None
     except IngestFailed as failed:
         raise HTTPException(502, f"That photo couldn't be fetched ({failed.reason})") from None
+
+
+@router.get("/backup/links", dependencies=EDITORS_ONLY)
+def get_backup_links(backups: BackupsDep, after: str | None = None) -> BackupLinks:
+    """Short-lived download links to the latest Backup Snapshot and a page of the backed-up
+    images whose keys sort after `after`, for `backup pull`. Never cached, like every API
+    response that doesn't say otherwise.
+    """
+    return backups.links(after)
 
 
 @router.post(
@@ -1098,7 +1113,7 @@ def _fdc_food(
         422: {"description": "q isn't 2 to 60 characters, or canonical isn't an id"},
     },
 )
-def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
+def search_fdc_foods(
     *,
     q: FdcQuery,
     snapshot: SnapshotDep,
@@ -1840,10 +1855,12 @@ def create_app(
     auth: Callable[[], Auth] = Auth.from_env,
     fetcher: Callable[[], Fetcher] = PoliteFetcher,
     images: Callable[[], ImageStore] = ImageStore.from_env,
+    backups: Callable[[], BackupBucket] = BackupBucket.from_env,
     snapshot: Callable[[], fdc.Snapshot] = fdc.snapshot,
 ) -> FastAPI:
     """The API on the table `store` opens, signing editors in with `auth`, fetching websites
-    with `fetcher` and keeping photos in the bucket `images` opens. On startup it bootstraps the
+    with `fetcher`, keeping photos in the bucket `images` opens and linking to the Backup
+    Snapshots in the bucket `backups` opens. On startup it bootstraps the
     table, or refuses to start on another schema. Sign-in reads its settings on first need.
     """
 
@@ -1855,6 +1872,7 @@ def create_app(
         app.state.auth = auth()
         app.state.fetcher = fetcher()
         app.state.images = images()
+        app.state.backups = backups()
         # Called only by the routes that look a food up, so reads never load the FDC Snapshot.
         app.state.snapshot = snapshot
         yield

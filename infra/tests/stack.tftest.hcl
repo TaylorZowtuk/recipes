@@ -4,7 +4,9 @@
 # distribution-wide error responses, noindex.js on every behaviour, spa.js on the default one
 # only, and the bootstrap-made OAC on every origin. Also the spend guard:
 # the API's reserved concurrency, the WAF rate limit, the kill switch's wiring in each stack, and
-# bootstrap's subscription of each stack's kill switch to the account's spend alarm topic.
+# bootstrap's subscription of each stack's kill switch to the account's spend alarm topic. And the
+# backups: the backup bucket's lifecycle rules, the snapshot function's grants, its nightly
+# schedule, its stale backup alarm, and the API's read of the backup bucket.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -36,6 +38,9 @@ mock_provider "aws" {
   }
   mock_resource "aws_sns_topic" {
     defaults = { arn = "arn:aws:sns:us-west-2:123456789012:mock" }
+  }
+  mock_resource "aws_cloudwatch_event_rule" {
+    defaults = { arn = "arn:aws:events:us-west-2:123456789012:rule/mock" }
   }
   mock_resource "aws_lambda_function_url" {
     defaults = { function_url = "https://abc.lambda-url.us-west-2.on.aws/" }
@@ -254,6 +259,187 @@ run "kill_switch" {
   }
 }
 
+run "backup" {
+  command = apply
+
+  module {
+    source = "../modules/backup"
+  }
+
+  variables {
+    name                     = "plateful-test-backup"
+    bucket                   = "plateful-test-backup-123456789012"
+    zip_path                 = "main.tf"
+    runtime                  = "python3.14"
+    table_name               = "plateful-test"
+    table_arn                = "arn:aws:dynamodb:us-west-2:123456789012:table/plateful-test"
+    images_bucket            = "plateful-test-images"
+    images_bucket_arn        = "arn:aws:s3:::plateful-test-images"
+    read_units               = 2.5
+    permissions_boundary_arn = "arn:aws:iam::123456789012:policy/plateful-test-boundary"
+  }
+
+  override_resource {
+    target = module.bucket.aws_s3_bucket.this
+    values = { id = "plateful-test-backup-123456789012", arn = "arn:aws:s3:::plateful-test-backup-123456789012" }
+  }
+  override_resource {
+    target = aws_lambda_function.this
+    values = { arn = "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-backup" }
+  }
+  override_resource {
+    target = aws_cloudwatch_event_rule.nightly
+    values = { arn = "arn:aws:events:us-west-2:123456789012:rule/plateful-test-backup" }
+  }
+  override_resource {
+    target = aws_cloudwatch_log_group.this
+    values = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:/aws/lambda/plateful-test-backup" }
+  }
+  override_resource {
+    target = aws_sns_topic.alarm
+    values = { arn = "arn:aws:sns:us-west-2:123456789012:plateful-test-backup" }
+  }
+
+  assert {
+    condition = (
+      { for r in aws_s3_bucket_lifecycle_configuration.this.rule : r.filter[0].prefix => r.expiration[0].days
+        if length(r.expiration) > 0 } == {
+        "snapshots/nightly/"     = 30
+        "snapshots/pre-release/" = 30
+        "snapshots/monthly/"     = 365
+      } &&
+      alltrue([for r in aws_s3_bucket_lifecycle_configuration.this.rule : r.status == "Enabled"])
+    )
+    error_message = "Nightly and pre-release snapshots expire after 30 days, monthly ones after 365."
+  }
+  assert {
+    condition = alltrue([for r in aws_s3_bucket_lifecycle_configuration.this.rule :
+      length(r.expiration) == 0 || startswith(coalesce(r.filter[0].prefix, ""), "snapshots/")
+    ])
+    error_message = "Only snapshots expire: no rule expires images/ or the whole bucket."
+  }
+  assert {
+    condition = anytrue([for r in aws_s3_bucket_lifecycle_configuration.this.rule :
+    length(r.abort_incomplete_multipart_upload) == 1 && r.abort_incomplete_multipart_upload[0].days_after_initiation == 1])
+    error_message = "Incomplete multipart uploads are aborted after a day."
+  }
+  assert {
+    condition = (
+      aws_lambda_function.this.handler == "recipes.backup.handler" &&
+      aws_lambda_function.this.layers == null &&
+      aws_lambda_function.this.timeout == 900 && aws_lambda_function.this.memory_size == 512 &&
+      one(aws_lambda_function.this.architectures) == "arm64"
+    )
+    error_message = "The snapshot runs the plain Python handler from the API's zip, on arm64, for up to 15 minutes at 512 MB."
+  }
+  assert {
+    condition = output.wiring.environment == tomap({
+      TABLE_NAME          = "plateful-test"
+      IMAGES_BUCKET       = "plateful-test-images"
+      BACKUP_BUCKET       = "plateful-test-backup-123456789012"
+      SNAPSHOT_READ_UNITS = "2.5"
+    })
+    error_message = "The snapshot gets the table, both buckets and its read pace."
+  }
+  assert {
+    condition     = aws_iam_role.this.permissions_boundary == "arn:aws:iam::123456789012:policy/plateful-test-boundary"
+    error_message = "The snapshot's role carries the stack's permissions boundary."
+  }
+  assert {
+    condition = output.wiring.grants == {
+      Table = {
+        actions   = toset(["dynamodb:Scan"])
+        resources = toset(["arn:aws:dynamodb:us-west-2:123456789012:table/plateful-test"])
+      }
+      ImagesList = {
+        actions   = toset(["s3:ListBucket"])
+        resources = toset(["arn:aws:s3:::plateful-test-images"])
+      }
+      ImagesRead = {
+        actions   = toset(["s3:GetObject"])
+        resources = toset(["arn:aws:s3:::plateful-test-images/*"])
+      }
+      BackupList = {
+        actions   = toset(["s3:ListBucket"])
+        resources = toset(["arn:aws:s3:::plateful-test-backup-123456789012"])
+      }
+      BackupObjects = {
+        actions   = toset(["s3:GetObject", "s3:PutObject"])
+        resources = toset(["arn:aws:s3:::plateful-test-backup-123456789012/*"])
+      }
+      Logs = {
+        actions   = toset(["logs:CreateLogStream", "logs:PutLogEvents"])
+        resources = toset(["arn:aws:logs:us-west-2:123456789012:log-group:/aws/lambda/plateful-test-backup:*"])
+      }
+    }
+    error_message = "The snapshot may only scan the table, read the images, read and write the backup bucket, and log: no deletes, no other writes."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_event_rule.nightly.name == "plateful-test-backup" &&
+      aws_cloudwatch_event_rule.nightly.schedule_expression == "cron(0 10 * * ? *)" &&
+      aws_cloudwatch_event_target.nightly.rule == "plateful-test-backup" &&
+      aws_cloudwatch_event_target.nightly.arn == "arn:aws:lambda:us-west-2:123456789012:function:plateful-test-backup" &&
+      jsondecode(aws_cloudwatch_event_target.nightly.input) == { kind = "nightly" }
+    )
+    error_message = "An EventBridge rule runs the snapshot at 10:00 UTC each day with {\"kind\": \"nightly\"}."
+  }
+  assert {
+    condition = (
+      aws_lambda_permission.nightly.principal == "events.amazonaws.com" &&
+      aws_lambda_permission.nightly.action == "lambda:InvokeFunction" &&
+      aws_lambda_permission.nightly.function_name == "plateful-test-backup" &&
+      aws_lambda_permission.nightly.source_arn == "arn:aws:events:us-west-2:123456789012:rule/plateful-test-backup"
+    )
+    error_message = "Only the nightly rule may invoke the snapshot through EventBridge."
+  }
+  assert {
+    condition = (
+      aws_lambda_function_event_invoke_config.this.function_name == "plateful-test-backup" &&
+      aws_lambda_function_event_invoke_config.this.maximum_retry_attempts == 0
+    )
+    error_message = "An asynchronous snapshot (nightly or pre-release) is never retried: a failure is one paced Scan, not three."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.stale.alarm_name == "plateful-test-backup" &&
+      aws_cloudwatch_metric_alarm.stale.namespace == "Plateful" &&
+      aws_cloudwatch_metric_alarm.stale.metric_name == "NightlyBackupSnapshots" &&
+      aws_cloudwatch_metric_alarm.stale.dimensions == tomap({ FunctionName = "plateful-test-backup" }) &&
+      aws_cloudwatch_metric_alarm.stale.statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.stale.period == 86400 &&
+      aws_cloudwatch_metric_alarm.stale.evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.stale.threshold == 1 &&
+      aws_cloudwatch_metric_alarm.stale.comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.stale.treat_missing_data == "breaching"
+    )
+    error_message = "The stale backup alarm fires when a day's count of completed nightly snapshots (recipes.backup's metric, by function) is under 1, or missing."
+  }
+  assert {
+    condition = (
+      length(one(aws_cloudwatch_metric_alarm.stale.evaluation_window).wall_clock_window) == 1 &&
+      one(aws_cloudwatch_metric_alarm.stale.evaluation_window[0].wall_clock_window).timezone == null
+    )
+    error_message = "The alarm evaluates the last whole UTC day, not a sliding window, which would borrow older datapoints to fill a missing day."
+  }
+  assert {
+    condition = (
+      one(aws_cloudwatch_metric_alarm.stale.warm_up_configuration).warm_up_period_duration_in_minutes == 2880 &&
+      one(aws_cloudwatch_metric_alarm.stale.warm_up_configuration).only_start_evaluating_after_warm_up_period_ends
+    )
+    error_message = "A new alarm waits two days, until a whole UTC day with a nightly in it has passed, before it evaluates."
+  }
+  assert {
+    condition = (
+      aws_sns_topic.alarm.name == "plateful-test-backup" &&
+      aws_cloudwatch_metric_alarm.stale.alarm_actions == toset(["arn:aws:sns:us-west-2:123456789012:plateful-test-backup"]) &&
+      aws_cloudwatch_metric_alarm.stale.ok_actions == toset(["arn:aws:sns:us-west-2:123456789012:plateful-test-backup"]) &&
+      length(coalesce(aws_cloudwatch_metric_alarm.stale.insufficient_data_actions, [])) == 0
+    )
+    error_message = "The alarm and its recovery go to the stack's own backup alarm topic, never the spend alarm's, which trips the kill switches."
+  }
+}
+
 run "store" {
   command = apply
 
@@ -339,6 +525,19 @@ run "prod" {
     condition     = module.stack.kill_switch.topic_arns["account"] == "arn:aws:sns:us-east-1:123456789012:plateful-spend-alarm"
     error_message = "The account's spend alarm topic, from bootstrap's state, may invoke prod's kill switch."
   }
+  assert {
+    condition = (
+      module.stack.backup_function_name == "plateful-prod-backup" &&
+      module.stack.backup.environment["TABLE_NAME"] == "plateful-prod" &&
+      module.stack.backup.environment["BACKUP_BUCKET"] == "plateful-prod-backup-123456789012" &&
+      module.stack.backup.environment["SNAPSHOT_READ_UNITS"] == "5"
+    )
+    error_message = "Prod's snapshot, plateful-prod-backup, scans prod's table at half its 10 RCU into plateful-prod-backup-<account>."
+  }
+  assert {
+    condition     = module.stack.api_environment["BACKUP_BUCKET"] == "plateful-prod-backup-123456789012"
+    error_message = "The API knows prod's backup bucket, to presign backup pull's links."
+  }
 }
 
 run "staging" {
@@ -367,6 +566,18 @@ run "staging" {
   assert {
     condition     = module.stack.kill_switch.api_function_name == "plateful-staging-api"
     error_message = "Staging's kill switch throttles staging's API."
+  }
+  assert {
+    condition = (
+      module.stack.backup_function_name == "plateful-staging-backup" &&
+      module.stack.backup.environment["BACKUP_BUCKET"] == "plateful-staging-backup-123456789012" &&
+      module.stack.backup.environment["SNAPSHOT_READ_UNITS"] == "5"
+    )
+    error_message = "Staging has its own snapshot and backup bucket, paced at all of its 5 RCU, so a prod-sized Scan fits in 15 minutes."
+  }
+  assert {
+    condition     = module.stack.api_environment["BACKUP_BUCKET"] == "plateful-staging-backup-123456789012"
+    error_message = "The API knows staging's backup bucket."
   }
 }
 

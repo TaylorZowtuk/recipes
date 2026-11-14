@@ -6,8 +6,8 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
-	kill-switch-reset dev browser browser-run browser-stop shell enrich fallback clean \
-	gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
+	kill-switch-reset backup-snapshot dev browser browser-run browser-stop shell enrich fallback backup \
+	clean gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
@@ -96,6 +96,9 @@ kill-switch-test: ## Trip STACK's kill switch with a test SNS message, then rese
 kill-switch-reset: ## Re-enable STACK's API after its kill switch tripped (check the bill first)
 	$(RUN_AWS) make kill-switch-reset STACK='$(STACK)'
 
+backup-snapshot: ## Take a pre-release Backup Snapshot of STACK and wait for it to land in the backup bucket (AWS credentials in your env)
+	$(RUN_AWS) make backup-snapshot STACK='$(STACK)'
+
 dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
 	$(COMPOSE) $(if $(STAGING_PROFILE),-f compose.yaml -f compose.staging.yaml) up --build api web
@@ -114,6 +117,7 @@ shell: ## A shell in the toolchain container, with dependencies installed
 
 enrich: ## Run the enrich CLI with ARGS (argv, file paths relative to backend/), without a TTY
 fallback: ## Run the fallback CLI with ARGS (argv, file paths relative to backend/), without a TTY
+backup: ## Run the backup CLI with ARGS (argv, file paths relative to backend/), without a TTY
 # stdin and stdout are only the CLI's, and only these runs see PLATEFUL_SERVICE_TOKEN. ARGS stays
 # unexpanded: make neither exports it nor expands it, refuses it with a newline, and the host shell
 # splits it at spaces into words, unglobbed, each reaching the CLI as one argument, never as shell.
@@ -122,8 +126,8 @@ define newline
 
 endef
 unexport ARGS
-enrich fallback: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
-enrich fallback:
+enrich fallback backup: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
+enrich fallback backup:
 	$(if $(findstring $(newline),$(value ARGS)),$(error ARGS must be one line))
 	@set -f && args='$(subst ','\'',$(value ARGS))' && $(RUN) bash -c 'make --no-print-directory \
 		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$@ "$$@"' \
@@ -192,6 +196,12 @@ kill-switch-test kill-switch-reset: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HO
 kill-switch-test kill-switch-reset:
 	mkdir -p $$TF_PLUGIN_CACHE_DIR
 	scripts/kill-switch.sh $(patsubst kill-switch-%,%,$@) '$(STACK)'
+
+# No deps, like deploy: the stack's backup_function_name output names the function.
+backup-snapshot: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+backup-snapshot:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	scripts/backup-snapshot.sh '$(STACK)'
 
 smoke:
 	scripts/smoke.sh '$(URL)'

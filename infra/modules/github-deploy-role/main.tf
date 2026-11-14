@@ -47,8 +47,9 @@ locals {
   state_key = "${var.stack}/terraform.tfstate"
 }
 
-# The boundary: the most any role or user the stack makes may ever do (its data, its logs, and
-# throttling its own API, which the stack's kill switch does when the spend alarm fires).
+# The boundary: the most any role or user the stack makes may ever do (its data, its logs,
+# throttling its own API, which the stack's kill switch does when the spend alarm fires, and
+# writing its backups, which the snapshot function does).
 data "aws_iam_policy_document" "boundary" {
   source_policy_documents = [module.access.data_policy_json]
 
@@ -62,6 +63,13 @@ data "aws_iam_policy_document" "boundary" {
     sid       = "KillSwitch"
     actions   = ["lambda:PutFunctionConcurrency", "lambda:GetFunctionConcurrency"]
     resources = ["arn:aws:lambda:${local.region}:${local.acct}:function:${module.access.function_name}"]
+  }
+
+  # The data policy only reads the backup bucket; the snapshot function's role adds this.
+  statement {
+    sid       = "BackupWrite"
+    actions   = ["s3:PutObject"]
+    resources = ["${module.access.backup_bucket_arn}/*"]
   }
 }
 
@@ -135,7 +143,7 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid     = "Buckets"
     actions = ["s3:*"]
-    resources = flatten([for b in [module.access.pwa_bucket, module.access.images_bucket] : [
+    resources = flatten([for b in [module.access.pwa_bucket, module.access.images_bucket, module.access.backup_bucket] : [
       "arn:aws:s3:::${b}", "arn:aws:s3:::${b}/*",
     ]])
   }
@@ -192,6 +200,58 @@ data "aws_iam_policy_document" "deploy" {
       "sns:Publish",
     ]
     resources = ["arn:aws:sns:${local.region}:${local.acct}:${local.prefix}-*"]
+  }
+
+  # The nightly Backup Snapshot's EventBridge rule and its target: the calls the AWS provider makes
+  # for them, and no more, since staging's role deploys without a reviewer. PutTargets is its own
+  # statement, so its condition (a target may only be one of the stack's functions) doesn't block
+  # the calls that carry no events:TargetArn. A Lambda target needs no role, so no PassRole to events.
+  statement {
+    sid = "Schedule"
+    actions = [
+      "events:PutRule",
+      "events:DeleteRule",
+      "events:DescribeRule",
+      "events:EnableRule",
+      "events:DisableRule",
+      "events:RemoveTargets",
+      "events:ListTargetsByRule",
+      "events:TagResource",
+      "events:UntagResource",
+      "events:ListTagsForResource",
+    ]
+    resources = ["arn:aws:events:${local.region}:${local.acct}:rule/${local.prefix}-*"]
+  }
+
+  statement {
+    sid       = "ScheduleTarget"
+    actions   = ["events:PutTargets"]
+    resources = ["arn:aws:events:${local.region}:${local.acct}:rule/${local.prefix}-*"]
+    # ForAllValues passes when the key is absent, so the Null condition requires it.
+    condition {
+      test     = "ForAllValues:ArnLike"
+      variable = "events:TargetArn"
+      values   = ["arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-*"]
+    }
+    condition {
+      test     = "Null"
+      variable = "events:TargetArn"
+      values   = ["false"]
+    }
+  }
+
+  # The stale backup alarm: the calls the AWS provider makes for a metric alarm with tags.
+  # DescribeAlarms is in Describe, since it may not take a resource.
+  statement {
+    sid = "Alarm"
+    actions = [
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+      "cloudwatch:ListTagsForResource",
+    ]
+    resources = ["arn:aws:cloudwatch:${local.region}:${local.acct}:alarm:${local.prefix}-*"]
   }
 
   statement {
@@ -336,7 +396,7 @@ data "aws_iam_policy_document" "deploy" {
 
   statement {
     sid       = "Describe"
-    actions   = ["logs:DescribeLogGroups", "ssm:DescribeParameters", "dynamodb:ListTables"]
+    actions   = ["logs:DescribeLogGroups", "ssm:DescribeParameters", "dynamodb:ListTables", "cloudwatch:DescribeAlarms"]
     resources = ["*"]
   }
 }

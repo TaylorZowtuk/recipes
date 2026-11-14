@@ -32,9 +32,13 @@ locals {
   function_name = "${local.prefix}-api"
   # The kill switch's function, role, log group and SNS topic.
   kill_switch_name = "${local.prefix}-kill-switch"
+  # The Backup Snapshot's function, role, log group and nightly EventBridge rule, and its bucket.
+  backup_name   = "${local.prefix}-backup"
+  backup_bucket = "${local.prefix}-backup-${var.account_id}"
 
   table_arn         = "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.table_name}"
   images_bucket_arn = "arn:aws:s3:::${local.images_bucket}"
+  backup_bucket_arn = "arn:aws:s3:::${local.backup_bucket}"
   ssm_path_arn      = "arn:aws:ssm:${var.region}:${var.account_id}:parameter/plateful/${var.stack}"
   boundary_name     = "${local.prefix}-boundary"
   oac_names = {
@@ -50,7 +54,9 @@ locals {
 }
 
 # What the API, and staging's dev user, may do: read and write the table and the images bucket,
-# and read the stack's SSM parameters.
+# read the backup bucket (the API presigns its download links for `backup pull`), and read the
+# stack's SSM parameters. Only the snapshot function writes backups: its role adds that, and the
+# boundary (modules/github-deploy-role) allows it.
 data "aws_iam_policy_document" "data" {
   statement {
     sid = "Table"
@@ -79,6 +85,18 @@ data "aws_iam_policy_document" "data" {
     sid       = "ImagesObjects"
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["${local.images_bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "BackupList"
+    actions   = ["s3:ListBucket"]
+    resources = [local.backup_bucket_arn]
+  }
+
+  statement {
+    sid       = "BackupRead"
+    actions   = ["s3:GetObject"]
+    resources = ["${local.backup_bucket_arn}/*"]
   }
 
   statement {
@@ -130,6 +148,19 @@ output "kill_switch_name" {
 
 output "kill_switch_arn" {
   value = "arn:aws:lambda:${var.region}:${var.account_id}:function:${local.kill_switch_name}"
+}
+
+output "backup_name" {
+  description = "The snapshot function's, its role's, log group's and nightly rule's name."
+  value       = local.backup_name
+}
+
+output "backup_bucket" {
+  value = local.backup_bucket
+}
+
+output "backup_bucket_arn" {
+  value = local.backup_bucket_arn
 }
 
 output "boundary_name" {

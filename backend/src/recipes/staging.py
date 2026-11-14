@@ -1,6 +1,6 @@
-"""The API as `make dev STAGING_PROFILE=…` runs it: on staging's table and images bucket, and
-serving the bucket's images at `/images/*`, as CloudFront does on a stack. Lambda runs
-`recipes.api:app`, which has no such route.
+"""The API as `make dev STAGING_PROFILE=…` runs it: on staging's table, images bucket and backup
+bucket, and serving the images bucket's images at `/images/*`, as CloudFront does on a stack.
+Lambda runs `recipes.api:app`, which has no such route.
 """
 
 from recipes.api import create_app

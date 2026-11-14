@@ -26,14 +26,14 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from recipes.browser import BrowserFetcher
-from recipes.enrich import (
+from recipes.client import (
     SERVICE_TOKEN_ENV,
     SameOriginSession,
     Send,
     checked_base_url,
-    read_answer,
     send_with,
 )
+from recipes.enrich import read_answer
 from recipes.ingest import (
     BROWSER_EXTRACTOR,
     LLM_EXTRACTOR,

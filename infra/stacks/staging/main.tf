@@ -67,9 +67,12 @@ module "stack" {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
   }
-  stack               = local.stack
-  read_capacity       = 5
-  write_capacity      = 5
+  stack          = local.stack
+  read_capacity  = 5
+  write_capacity = 5
+  # All of it: at half, a prod-sized Scan would outrun the function's 15 minutes, and nothing else
+  # reads staging at the nightly's 10:00 UTC (the table's burst capacity covers the odd e2e run).
+  snapshot_read_units = 5
   deletion_protection = false
   lambda_zip          = var.lambda_zip
 
