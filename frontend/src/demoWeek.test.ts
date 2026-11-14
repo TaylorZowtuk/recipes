@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyDemoOperations, demoWeek } from "./demoWeek";
+import { addDays } from "./weekDates";
 
 const MONDAY = "2026-11-02";
 
@@ -45,6 +46,14 @@ describe("demoWeek", () => {
       expect(entry.entry_id).toMatch(/^demo-2026-11-02-/);
     }
     expect(new Set(entries(plan).map((e) => e.entry_id)).size).toBe(entries(plan).length);
+  });
+
+  it("plans four to six days of every week in a year", () => {
+    for (let week = 0; week < 52; week++) {
+      const planned = demoWeek(addDays(MONDAY, week * 7), cards).days.filter((d) => d.length > 0);
+      expect(planned.length).toBeGreaterThanOrEqual(4);
+      expect(planned.length).toBeLessThanOrEqual(6);
+    }
   });
 
   it("is an empty week for an empty Collection", () => {

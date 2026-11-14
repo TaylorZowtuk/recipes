@@ -16,15 +16,24 @@ function random(seed: string): () => number {
 
 const ODD_SCALES: Factor[] = [0.5, 1.5, 2];
 
-// The Demo Week Plan for the week starting `monday`: most days one recipe, some free, now and
-// then a second, mostly at 1×. Recipes go round in a shuffled order, so a week rarely repeats one.
+// A Fisher–Yates shuffle drawing from `next`, so the same seed gives the same order.
+function shuffle<T>(items: T[], next: () => number): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j] as T, out[i] as T];
+  }
+  return out;
+}
+
+// The Demo Week Plan for the week starting `monday`: one to three days free, the others one
+// recipe, now and then two, mostly at 1×. Recipes go round in a shuffled order, so a week rarely
+// repeats one.
 export function demoWeek(monday: string, cards: DemoCard[]): WeekPlan {
   const next = random(monday);
-  const order = [...cards].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  for (let i = order.length - 1; i > 0; i--) {
-    const j = Math.floor(next() * (i + 1));
-    [order[i], order[j]] = [order[j] as DemoCard, order[i] as DemoCard];
-  }
+  const sorted = [...cards].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const order = shuffle(sorted, next);
+  const free = new Set(shuffle([0, 1, 2, 3, 4, 5, 6], next).slice(0, 1 + Math.floor(next() * 3)));
   let count = 0;
   const entry = (): WeekPlanEntry => {
     const card = order[count % order.length] as DemoCard;
@@ -36,8 +45,8 @@ export function demoWeek(monday: string, cards: DemoCard[]): WeekPlan {
       amount: { kind: "scale", factor },
     };
   };
-  const days = Array.from({ length: 7 }, () => {
-    if (order.length === 0 || next() < 0.35) return [];
+  const days = Array.from({ length: 7 }, (_, day) => {
+    if (order.length === 0 || free.has(day)) return [];
     return next() < 0.15 ? [entry(), entry()] : [entry()];
   });
   return { schema_version: 1, week_start: monday, version: 0, grocery_ticks: [], days };
