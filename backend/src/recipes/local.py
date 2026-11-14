@@ -20,6 +20,7 @@ from moto import mock_aws
 from recipes import seed
 from recipes.api import create_app
 from recipes.auth import Auth, AuthSettings, Claims, InvalidIdToken
+from recipes.backup import BackupBucket
 from recipes.dev import dev_images
 from recipes.images import ImageStore
 from recipes.ingest import FetchRefused, IngestFailed, Page, PageNotFound
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 TABLE_NAME = "plateful-local"
 IMAGES_BUCKET = "plateful-local-images"
+BACKUP_BUCKET = "plateful-local-backup"
 EDITOR = "editor@example.com"
 GOOGLE_CLIENT_ID = "local-dev-client"
 SERVICE_TOKEN = "local-dev-service-token"
@@ -167,11 +169,17 @@ region = cast("BucketLocationConstraintType", os.environ["AWS_DEFAULT_REGION"])
 images.client.create_bucket(
     Bucket=IMAGES_BUCKET, CreateBucketConfiguration={"LocationConstraint": region}
 )
+# Empty, so the backup download links list nothing: no snapshot is taken locally.
+backups = BackupBucket(BACKUP_BUCKET)
+backups.client.create_bucket(
+    Bucket=BACKUP_BUCKET, CreateBucketConfiguration={"LocationConstraint": region}
+)
 app = create_app(
     store=lambda: seeded_store(images),
     auth=fake_auth,
     fetcher=FakeWebsite,
     images=lambda: images,
+    backups=lambda: backups,
 )
 app.include_router(dev_images)
 

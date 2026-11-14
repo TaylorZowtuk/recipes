@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 def stack_env(monkeypatch: pytest.MonkeyPatch, table: str, images: ImageStore) -> None:
     monkeypatch.setenv("TABLE_NAME", table)
     monkeypatch.setenv("IMAGES_BUCKET", images.bucket)
+    monkeypatch.setenv("BACKUP_BUCKET", "plateful-test-backup")
     monkeypatch.setenv("SSM_PREFIX", "/plateful/test/")
 
 

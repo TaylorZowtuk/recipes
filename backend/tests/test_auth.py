@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from fastapi.dependencies.models import Dependant
     from httpx2 import Response
 
+    from recipes.backup import BackupBucket
     from recipes.images import ImageStore
 
 CLIENT_ID = "test-client.apps.googleusercontent.com"
@@ -96,9 +97,16 @@ def settings() -> Settings:
 
 
 @pytest.fixture
-def app(table: str, images: ImageStore, settings: Settings, clock: Clock) -> FastAPI:
+def app(
+    table: str, images: ImageStore, backups: BackupBucket, settings: Settings, clock: Clock
+) -> FastAPI:
     auth = Auth(settings=settings, verifier=fake_verifier, clock=clock)
-    app = create_app(store=lambda: Store(table), auth=lambda: auth, images=lambda: images)
+    app = create_app(
+        store=lambda: Store(table),
+        auth=lambda: auth,
+        images=lambda: images,
+        backups=lambda: backups,
+    )
 
     @app.get("/api/test-editors-only")
     def editors_only(editor: EditorDep) -> Editor:  # pyright: ignore[reportUnusedFunction]
@@ -363,16 +371,42 @@ def test_no_service_token_matches_an_unset_hash(client: TestClient, settings: Se
     assert client.get("/api/session", headers=headers).json()["editor"] is False
 
 
+# Backup download links
+
+
+def test_only_an_editor_gets_backup_download_links_and_they_are_never_cached(
+    client: TestClient,
+) -> None:
+    links = "/api/backup/links"
+    assert client.get(links).status_code == 403
+    assert client.get(links, headers={SERVICE_TOKEN_HEADER: "synthetic-wrong"}).status_code == 403
+
+    by_token = client.get(links, headers={SERVICE_TOKEN_HEADER: SERVICE_TOKEN})
+    by_cookie = client.get(links, headers=with_cookie(cookie_value(sign_in(client))))
+
+    for response in (by_token, by_cookie):
+        assert response.status_code == 200
+        assert response.headers["Cache-Control"] == "no-store"
+        assert response.json() == {"snapshot": None, "images": [], "expires_in": 900}
+
+
 # CurrentEditor and EditorDep
 
 
-def test_a_visitor_never_reads_the_settings(table: str, images: ImageStore, clock: Clock) -> None:
+def test_a_visitor_never_reads_the_settings(
+    table: str, images: ImageStore, backups: BackupBucket, clock: Clock
+) -> None:
     def unreachable() -> AuthSettings:
         msg = "a visitor's request read the settings"
         raise AssertionError(msg)
 
     auth = Auth(settings=unreachable, verifier=fake_verifier, clock=clock)
-    app = create_app(store=lambda: Store(table), auth=lambda: auth, images=lambda: images)
+    app = create_app(
+        store=lambda: Store(table),
+        auth=lambda: auth,
+        images=lambda: images,
+        backups=lambda: backups,
+    )
 
     @app.get("/api/test-who")
     def who(editor: CurrentEditor) -> bool:  # pyright: ignore[reportUnusedFunction]

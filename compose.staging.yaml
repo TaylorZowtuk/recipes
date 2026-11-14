@@ -1,6 +1,6 @@
-# `make dev STAGING_PROFILE=<staging dev profile>` adds this: the API serves staging's table and
-# images (recipes.staging) in place of the seeded fake, reading that profile from ~/.aws, mounted
-# read-only. The profile must use static keys, since SSO would need to write its cache.
+# `make dev STAGING_PROFILE=<staging dev profile>` adds this: the API serves staging's table,
+# images and backup links (recipes.staging) in place of the seeded fake, reading that profile from
+# ~/.aws, mounted read-only. The profile must use static keys, since SSO would need to write its cache.
 services:
   api:
     environment:
@@ -11,6 +11,7 @@ services:
       # Staging's resources, named as infra/modules/stack-access names them. make sets the account ID.
       TABLE_NAME: plateful-staging
       IMAGES_BUCKET: plateful-staging-images-${STAGING_ACCOUNT_ID:?set STAGING_ACCOUNT_ID or run scripts/aws-setup.sh}
+      BACKUP_BUCKET: plateful-staging-backup-${STAGING_ACCOUNT_ID:?set STAGING_ACCOUNT_ID or run scripts/aws-setup.sh}
       SSM_PREFIX: /plateful/staging/
     volumes:
       - type: bind
