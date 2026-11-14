@@ -205,7 +205,8 @@ run "deploy_policy" {
       flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Action]) == ["events:PutTargets"] &&
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Resource == "arn:aws:events:us-west-2:123456789012:rule/plateful-staging-*" &&
       ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).ScheduleTarget.Condition == {
-        ArnLike = { "events:TargetArn" = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-*" }
+        "ForAllValues:ArnLike" = { "events:TargetArn" = "arn:aws:lambda:us-west-2:123456789012:function:plateful-staging-*" }
+        Null                   = { "events:TargetArn" = "false" }
       }
     )
     error_message = "The deploy role may point the stack's rules only at the stack's own functions."

@@ -227,10 +227,16 @@ data "aws_iam_policy_document" "deploy" {
     sid       = "ScheduleTarget"
     actions   = ["events:PutTargets"]
     resources = ["arn:aws:events:${local.region}:${local.acct}:rule/${local.prefix}-*"]
+    # ForAllValues passes when the key is absent, so the Null condition requires it.
     condition {
-      test     = "ArnLike"
+      test     = "ForAllValues:ArnLike"
       variable = "events:TargetArn"
       values   = ["arn:aws:lambda:${local.region}:${local.acct}:function:${local.prefix}-*"]
+    }
+    condition {
+      test     = "Null"
+      variable = "events:TargetArn"
+      values   = ["false"]
     }
   }
 

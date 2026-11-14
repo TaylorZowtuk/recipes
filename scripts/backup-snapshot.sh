@@ -38,6 +38,8 @@ AWS_MAX_ATTEMPTS=1 aws lambda invoke --function-name "$fn" --invocation-type Eve
   --cli-binary-format raw-in-base64-out --payload '{"kind":"pre-release"}' /dev/null >/dev/null
 say "started $fn for a pre-release snapshot; watching $bucket for it (up to 16 minutes)."
 
+# The snapshot file is the check: image copies are retried by every nightly, and the stale backup
+# alarm reports a nightly that does not complete.
 deadline=$((SECONDS + 16 * 60))
 while ((SECONDS < deadline)); do
   sleep 15

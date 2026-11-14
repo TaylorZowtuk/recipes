@@ -3,6 +3,7 @@ images the backup bucket doesn't hold yet."""
 
 import gzip
 import json
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
@@ -311,6 +312,7 @@ def test_a_nightly_snapshot_counts_toward_the_stale_backup_alarm(
     table: str, s3: S3Client, capsys: pytest.CaptureFixture[str]
 ) -> None:
     seed(table)
+    before_ms = int(time.time() * 1000)
 
     backup.handler({"kind": "nightly"}, None)
 
@@ -322,7 +324,7 @@ def test_a_nightly_snapshot_counts_toward_the_stale_backup_alarm(
             "Metrics": [{"Name": "NightlyBackupSnapshots", "Unit": "Count"}],
         }
     ]
-    assert isinstance(line["_aws"]["Timestamp"], int)
+    assert before_ms <= line["_aws"]["Timestamp"] <= int(time.time() * 1000)
     assert line["FunctionName"] == FUNCTION_NAME
     assert line["NightlyBackupSnapshots"] == 1
 
@@ -345,6 +347,23 @@ def test_a_failed_nightly_snapshot_doesnt_count_toward_the_alarm(
     monkeypatch.setenv("TABLE_NAME", "plateful-test-missing")
 
     with pytest.raises(ClientError):
+        backup.handler({"kind": "nightly"}, None)
+
+    assert metric_lines(capsys.readouterr().out) == []
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_a_nightly_whose_image_copy_fails_doesnt_count_toward_the_alarm(
+    table: str, s3: S3Client, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(table)
+
+    def fail(*_args: object) -> int:
+        raise RuntimeError
+
+    monkeypatch.setattr(backup, "copy_new_images", fail)
+
+    with pytest.raises(RuntimeError):
         backup.handler({"kind": "nightly"}, None)
 
     assert metric_lines(capsys.readouterr().out) == []
@@ -658,6 +677,46 @@ def test_pull_downloads_each_page_of_links_before_asking_for_the_next(
     ]
     for key in keys:
         assert (tmp_path / key).is_file()
+
+
+@pytest.mark.parametrize("failure", ["status", "unreachable"])
+def test_pull_fails_when_a_later_page_of_links_cant_be_had(
+    table: str, backups: BackupBucket, send: Send, tmp_path: Path, failure: str
+) -> None:
+    seed(table)
+    take(table, "nightly", NOV_13)
+    put_images(backups.client, image_keys(2))
+    backups.images_per_page = 2
+    asked: list[str] = []
+
+    def second_page_fails(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        asked.append(url)
+        if len(asked) == 1:
+            return send(method, url, body)
+        if failure == "unreachable":
+            raise requests.ConnectionError(url)
+        return 503, {"detail": "Unavailable"}
+
+    assert pull(second_page_fails, Downloads(), tmp_path) is True
+    assert len(asked) == 2
+
+
+def test_pull_reports_links_that_arent_as_expected_without_showing_them(
+    downloads: Downloads, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = "https://synthetic.example/key?X-Amz-Signature=synthetic-secret"
+    body = {
+        "backup_snapshot": {"key": "snapshots/nightly/x.jsonl.gz", "url": secret},
+        "next": None,
+        "expires_in": 900,
+    }
+
+    def malformed(_method: str, _url: str, _body: bytes | None) -> tuple[int, Any]:
+        return 200, body
+
+    assert pull(malformed, downloads, tmp_path) is True
+
+    assert capsys.readouterr().err == "The download links aren't as expected: images\n"
 
 
 def test_pull_reports_an_unreachable_api_in_one_line(
