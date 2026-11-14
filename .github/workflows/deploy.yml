@@ -108,6 +108,10 @@ jobs:
           role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
+      # A snapshot of prod as it is before the release; a failed one stops the release.
+      - run: make backup-snapshot STACK=prod
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       - id: deploy
         run: |
           make deploy STACK=prod

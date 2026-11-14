@@ -180,6 +180,47 @@ run "deploy_policy" {
     ])])
     error_message = "No statement grants sns:AddPermission or sns:RemovePermission, wildcards included."
   }
+  # Backups: the role manages the stack's backup bucket (its lifecycle rules too) and its nightly
+  # EventBridge rule; the boundary lets the snapshot's role write backups, and lets the API's role
+  # (through the data policy) only read them.
+  assert {
+    condition = (
+      contains(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Buckets.Resource]), "arn:aws:s3:::plateful-staging-backup-123456789012") &&
+      contains(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Buckets.Resource]), "arn:aws:s3:::plateful-staging-backup-123456789012/*")
+    )
+    error_message = "The deploy role manages the stack's backup bucket, lifecycle configuration included."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Schedule.Action]) == ["events:*"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Schedule.Resource == "arn:aws:events:us-west-2:123456789012:rule/plateful-staging-*"
+    )
+    error_message = "The deploy role manages EventBridge rules, and their targets, with the stack's prefix only."
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:events:us-west-2:123456789012:rule/plateful-prod-backup"))]) &&
+      anytrue([for a in flatten([s.Action]) : a == "*" || startswith(lower(a), "events:")])
+    )])
+    error_message = "No statement grants EventBridge calls on the other stack's rule, wildcards included."
+  }
+  assert {
+    condition = (
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).BackupWrite.Action]) == ["s3:PutObject"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).BackupWrite.Resource == "arn:aws:s3:::plateful-staging-backup-123456789012/*" &&
+      flatten([({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).BackupRead.Action]) == ["s3:GetObject"] &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.boundary.json).Statement : s.Sid => s }).BackupList.Resource == "arn:aws:s3:::plateful-staging-backup-123456789012"
+    )
+    error_message = "The boundary lets the stack's roles list, read and write its backup bucket."
+  }
+  # The data policy (the API's and staging's dev user's) may read backups but never change them.
+  assert {
+    condition = alltrue([for s in jsondecode(module.access.data_policy_json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : can(regex("^${replace(r, "*", ".*")}$", "arn:aws:s3:::plateful-staging-backup-123456789012/snapshots/nightly/x.jsonl.gz"))]) &&
+      anytrue([for a in flatten([s.Action]) : anytrue([for op in ["putobject", "deleteobject"] : can(regex("^${replace(lower(a), "*", ".*")}$", "s3:${op}"))])])
+    )])
+    error_message = "The data policy only reads the backup bucket: no PutObject or DeleteObject on it, wildcards included."
+  }
   # The account's spend alarm topic and its subscriptions belong to infra/bootstrap. SNS can't scope
   # a subscription call to one stack's subscription, so any grant there would let one stack
   # unsubscribe the other's kill switch; publishing would trip every stack. No statement may grant

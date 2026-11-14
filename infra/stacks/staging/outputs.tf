@@ -46,6 +46,15 @@ output "table_name" {
   value = module.stack.table_name
 }
 
+output "backup_bucket" {
+  value = module.stack.backup_bucket
+}
+
+output "backup_function_name" {
+  description = "make backup-snapshot invokes it before each prod release."
+  value       = module.stack.backup_function_name
+}
+
 output "deploy_role_arn" {
   value = module.stack.deploy_role_arn
 }

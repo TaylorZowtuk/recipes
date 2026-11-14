@@ -25,6 +25,15 @@ Each root's S3 backend leaves out the bucket, so init with `terraform init -back
 - A deploy keeps a tripped kill switch tripped: before `apply`, it asks Lambda for the API's reserved concurrency, and while that is 0 it applies with `kill_switch_tripped=true` and says so.
 - A deploy that needs a new kind of AWS call needs a matching grant in `modules/github-deploy-role`, applied by a human through `bootstrap/`.
 
+## Backups
+
+The [backup ADR](../docs/adr/2026-09-27-dynamodb-source-of-truth-and-backups.md)'s snapshots, in each stack (`modules/backup`).
+
+- **Bucket:** `plateful-<stack>-backup-<account id>`, private like the others. Its lifecycle rules expire `snapshots/nightly/` and `snapshots/pre-release/` after 30 days and `snapshots/monthly/` after 365; `images/` never expires. Incomplete multipart uploads are aborted after a day.
+- **Snapshot function:** `plateful-<stack>-backup` (`recipes.backup.handler` from the API's zip, 15 minutes, 256 MB). It Scans the table at `SNAPSHOT_READ_UNITS`, half the table's read capacity, so the app keeps the rest. Its role may only Scan the table, read the images bucket and read and write the backup bucket; it can't delete. The API's role reads the backup bucket through the data policy (to presign `backup pull`'s links), and the boundary adds the snapshot's writes.
+- **When it runs:** an EventBridge rule (`plateful-<stack>-backup`) invokes it at 10:00 UTC each night with `{"kind":"nightly"}`, and the prod deploy job runs `make backup-snapshot STACK=prod` (`{"kind":"pre-release"}`) before `make deploy`, so a failed snapshot stops the release. The snapshot of a stack deployed before the function existed is skipped.
+- **Bootstrap first:** the bucket, the rule and the snapshot's role need deploy-role and boundary grants from `modules/github-deploy-role`, so re-apply `bootstrap/` (re-run the wizard, which plans it and applies any changes) before the first deploy that adds them.
+
 ## Spend guard
 
 The [hosting ADR](../docs/adr/2026-09-26-aws-hosting-fastapi-react.md)'s $1-a-month guard, for the whole account.

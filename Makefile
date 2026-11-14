@@ -6,7 +6,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
-	kill-switch-reset dev browser browser-run browser-stop shell enrich fallback clean \
+	kill-switch-reset backup-snapshot dev browser browser-run browser-stop shell enrich fallback clean \
 	gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
@@ -95,6 +95,9 @@ kill-switch-test: ## Trip STACK's kill switch with a test SNS message, then rese
 
 kill-switch-reset: ## Re-enable STACK's API after its kill switch tripped (check the bill first)
 	$(RUN_AWS) make kill-switch-reset STACK='$(STACK)'
+
+backup-snapshot: ## Take a pre-release Backup Snapshot of STACK and wait for it (AWS credentials in your env)
+	$(RUN_AWS) make backup-snapshot STACK='$(STACK)'
 
 dev: ## FastAPI (seeded fake table) + Vite with hot reload on localhost:$DEV_PORT (5173); STAGING_PROFILE=<profile> for staging
 	$(PREPARE)
@@ -192,6 +195,12 @@ kill-switch-test kill-switch-reset: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HO
 kill-switch-test kill-switch-reset:
 	mkdir -p $$TF_PLUGIN_CACHE_DIR
 	scripts/kill-switch.sh $(patsubst kill-switch-%,%,$@) '$(STACK)'
+
+# No deps, like deploy: the stack's backup_function_name output names the function.
+backup-snapshot: export TF_PLUGIN_CACHE_DIR := $(XDG_CACHE_HOME)/terraform-plugins
+backup-snapshot:
+	mkdir -p $$TF_PLUGIN_CACHE_DIR
+	scripts/backup-snapshot.sh '$(STACK)'
 
 smoke:
 	scripts/smoke.sh '$(URL)'

@@ -1,4 +1,4 @@
-# One whole stack: its data (store), the API, its kill switch and the CloudFront site. stacks/prod and
+# One whole stack: its data (store), the API, its kill switch, its backups and the CloudFront site. stacks/prod and
 # stacks/staging call this with their own values; infra/bootstrap must already have made the
 # stack's deploy role, permissions boundary and CloudFront OACs.
 terraform {
@@ -97,6 +97,7 @@ module "api" {
     TABLE_NAME    = module.store.table_name
     IMAGES_BUCKET = module.store.images_bucket
     SSM_PREFIX    = module.store.ssm_prefix
+    BACKUP_BUCKET = module.access.backup_bucket
   }
 }
 
@@ -108,6 +109,21 @@ module "kill_switch" {
   api_function_name        = module.api.function_name
   api_function_arn         = module.api.function_arn
   account_topic_arn        = data.terraform_remote_state.bootstrap.outputs.spend_alarm_topic_arn
+  permissions_boundary_arn = module.access.boundary_arn
+}
+
+module "backup" {
+  source            = "../backup"
+  name              = module.access.backup_name
+  bucket            = module.access.backup_bucket
+  zip_path          = var.lambda_zip
+  runtime           = local.lambda_runtime
+  table_name        = module.store.table_name
+  table_arn         = module.store.table_arn
+  images_bucket     = module.store.images_bucket
+  images_bucket_arn = module.store.images_bucket_arn
+  # Half the table's read capacity, so the app keeps the other half while a snapshot runs.
+  read_units               = var.read_capacity / 2
   permissions_boundary_arn = module.access.boundary_arn
 }
 
@@ -188,6 +204,23 @@ output "kill_switch_topic_arn" {
 
 output "table_name" {
   value = module.store.table_name
+}
+
+output "backup_bucket" {
+  value = module.backup.bucket
+}
+
+output "backup_function_name" {
+  value = module.backup.function_name
+}
+
+output "backup" {
+  value = module.backup.wiring
+}
+
+output "api_environment" {
+  description = "The API's app settings, for infra/tests."
+  value       = module.api.environment
 }
 
 output "table_capacity" {
