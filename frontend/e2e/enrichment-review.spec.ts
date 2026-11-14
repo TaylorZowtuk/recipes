@@ -468,9 +468,9 @@ function matchedTo(data: ReturnType<typeof enrichment>, fdcId: number, portionId
 test("an editor picks another FDC portion of a line's food and sees its new weight", async ({
   page,
 }, testInfo) => {
-  const path = `plum-pilaf-${attempt(testInfo)}`;
+  const path = `date-pilaf-${attempt(testInfo)}`;
   const id = await addRecipe(page, path);
-  const rice = `plum rice ${attempt(testInfo)}`;
+  const rice = `date rice ${attempt(testInfo)}`;
   const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
     headers: SERVICE_TOKEN,
     data: matchedTo(enrichment(rice), COUSCOUS.fdcId, COUSCOUS.cooked),
