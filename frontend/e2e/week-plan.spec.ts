@@ -562,36 +562,84 @@ test("signing out forgets the week", async ({ page }, testInfo) => {
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(cardButton(page)).toHaveCount(0);
 
-  // Nothing is left to show after signing in again, until the week has loaded afresh.
+  // Nothing is left to show after signing in again, until the week has loaded afresh: this device
+  // shows the Demo, and asks for no week.
+  const weeks = weekRequests(page);
   const signedIn = await page.request.post("/api/session", {
     data: { credential: "fake:editor@example.com" },
   });
   expect(signedIn.ok()).toBe(true);
   await page.getByRole("link", { name: "Week", exact: true }).click();
+  await expect(page.getByText(DEMO)).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
-  await expect(page.getByText(NOODLES)).toHaveCount(0);
+  await expect(page.getByRole("region")).toHaveCount(7);
+  expect(weeks).toEqual([]);
 });
 
-test("a visitor sees a prompt to sign in, and asks for no week", async ({ page }) => {
-  const weeks: string[] = [];
+// Every request a visitor's Demo must never make: a week read, or any write at all.
+function weekRequests(page: Page): string[] {
+  const sent: string[] = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname.startsWith("/api/weeks")) weeks.push(request.url());
+    const { pathname } = new URL(request.url());
+    if (!pathname.startsWith("/api/")) return;
+    if (pathname.startsWith("/api/weeks") || request.method() !== "GET") {
+      sent.push(`${request.method()} ${pathname}`);
+    }
   });
+  return sent;
+}
+
+const DEMO = "Demo — changes aren’t saved";
+const plannedDays = (page: Page) => page.getByRole("region").allInnerTexts();
+
+test("a visitor plans a Demo week that a reload resets, and sends nothing", async ({ page }) => {
+  const sent = weekRequests(page);
+  await page.clock.setFixedTime(new Date(2030, 0, 9, 12));
 
   await page.goto("/week");
   await expect(page.getByRole("heading", { level: 1, name: "Week Plan" })).toBeVisible();
-  await expect(page.getByText("Sign in to plan the household’s week.")).toBeVisible();
+  await expect(page.getByText(DEMO)).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
-  await expect(page.getByRole("region")).toHaveCount(0);
+  await expect(page.getByRole("region")).toHaveCount(7);
+  await expect(page.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
+  const generated = await plannedDays(page);
 
+  // Placing goes at the end of the day, so the new entry is Thursday's last.
+  const thursday = day(page, "Thu");
+  const before = await remove(thursday).count();
+  await pick(page, thursday);
+  await expect(remove(thursday)).toHaveCount(before + 1);
+  await expect(scale(thursday).last()).toHaveText("1×");
+  await scale(thursday).last().click();
+  await page
+    .getByRole("dialog", { name: new RegExp(NOODLES) })
+    .getByRole("button", { name: "2×" })
+    .click();
+  await expect(scale(thursday).last()).toHaveText("2×");
+
+  const removes = page.getByRole("button", { name: /^Remove / });
+  const entries = await removes.count();
+  await removes.first().click();
+  await expect(removes).toHaveCount(entries - 1);
+
+  // Each week has its own Demo.
+  await page.getByRole("button", { name: "Next week" }).click();
+  await expect(page.getByText("Next week", { exact: true })).toBeVisible();
+  await expect.poll(() => plannedDays(page)).not.toEqual(generated);
+
+  await page.reload();
+  await expect(page.getByText(DEMO)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
+  expect(await plannedDays(page)).toEqual(generated);
+
+  // The rest of the app stays read-only for a visitor.
   await page.goto("/recipes");
   await expect(page.getByRole("link", { name: new RegExp(NOODLES) })).toBeVisible();
   await expect(cardButton(page)).toHaveCount(0);
-
   await page.goto(NOODLES_PATH);
   await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Ingredients" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add to a day" })).toHaveCount(0);
 
-  expect(weeks).toEqual([]);
+  expect(sent).toEqual([]);
 });

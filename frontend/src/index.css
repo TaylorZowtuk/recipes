@@ -2379,6 +2379,24 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   padding-bottom: calc(var(--space) * 6);
 }
 
+/* Above a visitor's Demo, saying it isn't the household's and isn't kept. */
+.demo-banner {
+  max-width: 640px;
+  margin: 0 auto calc(var(--space) * 4);
+  padding: calc(var(--space) * 3) calc(var(--space) * 4);
+  border-radius: var(--radius-button);
+  background: var(--warning);
+  color: var(--warning-text);
+}
+
+.demo-banner p {
+  margin: 0;
+}
+
+.demo-banner a {
+  color: inherit;
+}
+
 /* The week's label between ‹ and ›, on the Week tab and in the day sheet. */
 .week-nav {
   display: flex;
