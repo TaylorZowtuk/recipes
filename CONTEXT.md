@@ -184,7 +184,7 @@ _Avoid_: Bookmark, source (a source is where particular recipes came from)
 ### Cooking and shopping
 
 **Canonical Ingredient**:
-The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Each one belongs to a **family**, a lowercase word that groups canonical ingredients, e.g. *chicken* for *chicken thigh* and *chicken breast*, and to a Store Category. Enrichment creates them, and an editor confirms them or creates one while editing a line.
+The single name that every wording of an ingredient maps to, e.g. "boneless chicken thighs" maps to *chicken thigh*. Each one belongs to a **family**, a lowercase word that groups canonical ingredients, e.g. *chicken* for *chicken thigh* and *chicken breast*, and to a Store Category. Enrichment creates them, and an editor confirms them or creates one while editing a line. It names what is bought, so it has no FDC food: each line's match holds its own, and lines of one Canonical Ingredient may have different ones ("1 cup rice" and "3 cups cooked rice").
 _Avoid_: Normalized ingredient, food item
 
 **Wording Cache**:
