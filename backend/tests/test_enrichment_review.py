@@ -757,6 +757,10 @@ def test_the_seed_has_a_recipe_awaiting_review_with_something_flagged(
     assert fact(recipe, "i2.conversion")["density_g_per_ml"] is not None
     assert [(i.fact_id, i.status) for i in recipe.issues] == [("i2.match", "open")]
     assert canonical(store, BUTTER.id).confirmed is False
+    # Its substitute has a Canonical Ingredient of its own, as enrichment's must.
+    (swap,) = fact(recipe, "i2.substitutions")["items"]
+    assert swap["canonical_id"] != BUTTER.id
+    assert canonical(store, swap["canonical_id"]).name == "unsalted butter"
     assert card(store, REVIEW_RECIPE_ID)["needs_review"] == {
         "open_issues": 1,
         "unconfirmed": 4,

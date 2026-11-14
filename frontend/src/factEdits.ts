@@ -152,11 +152,13 @@ export function canChooseWeight(recipe: Recipe, lineId: string, draft: LineDraft
   );
 }
 
-// Why the chosen portion gives the line no weight, when the API's search said it doesn't fit the
-// line's unit (`unit`, as the search sent it). Null when it fits, and when the search didn't say.
+// Why the chosen portion gives the line, or its substitute, no weight, when the API's search said
+// it doesn't fit the line's unit (`unit`, as the search sent it). A substitute stands in for the
+// line's amount in that unit. Null when it fits, and when the search didn't say.
 export function portionMisfit(
   unit: string | null,
   portion: Pick<FdcPortion, "density_g_per_ml" | "grams_per_count" | "count_unit" | "fits">,
+  of: "line" | "substitute" = "line",
 ): string | null {
   if (portion.fits !== false) return null;
   const is =
@@ -166,7 +168,7 @@ export function portionMisfit(
         ? `counted in ${portion.count_unit}`
         : "neither a volume nor a count";
   const line = unit ? `in ${unit}` : "a count with no unit";
-  return `This portion is ${is}, but the line is ${line}, so the line gets no weight.`;
+  return `This portion is ${is}, but the line is ${line}, so the ${of} gets no weight.`;
 }
 
 // The food as the draft saves it: the one chosen for its pick, else the pick's default.
@@ -375,17 +377,27 @@ export function stepEdit(stepId: string, draft: StepDraft): Built {
   return { edit: { kind: "step", step_id: stepId, portions: portions as number[], durations } };
 }
 
+// The API copies the numbers of a new FDC food and FDC portion from the FDC Snapshot.
 export function substitutionEdit(
   lineId: string,
   index: number,
   ratio: string,
   note: string,
+  food: { fdcId: number; portionId: number | null },
 ): Built {
   const value = readNumber(ratio);
   if (value === undefined || value <= 0 || value > 10)
     return { problem: "Give the ratio as a number above 0 and at most 10.", field: "Ratio" };
   return {
-    edit: { kind: "substitution", line_id: lineId, index, ratio: value, note: note.trim() },
+    edit: {
+      kind: "substitution",
+      line_id: lineId,
+      index,
+      ratio: value,
+      note: note.trim(),
+      fdc_id: food.fdcId,
+      portion_id: food.portionId,
+    },
   };
 }
 

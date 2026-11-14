@@ -412,6 +412,9 @@ export interface paths {
          *     in `not_updated`, and one the match would make too big in `too_big`.
          *     Picking the same Canonical Ingredient again retries them. A line saved with its Canonical
          *     Ingredient, food and portion unchanged reaches no other recipe.
+         *
+         *     A substitute's new FDC food or FDC portion takes its numbers from the FDC Snapshot, never
+         *     from the request, and reaches no other line or recipe; unchanged, its numbers stay as stored.
          */
         post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
         delete?: never;
@@ -1079,9 +1082,12 @@ export interface components {
         };
         /**
          * EditSubstitution
-         * @description The ratio and note of the line's substitute at `index`.
+         * @description The ratio, note, FDC food and FDC portion (which may be none) of the line's substitute at
+         *     `index`. The API copies a new food's numbers from the FDC Snapshot.
          */
         EditSubstitution: {
+            /** Fdc Id */
+            fdc_id: number;
             /** Index */
             index: number;
             /**
@@ -1093,6 +1099,8 @@ export interface components {
             line_id: string;
             /** Note */
             note: string;
+            /** Portion Id */
+            portion_id: number | null;
             /** Ratio */
             ratio: number;
         };
@@ -3530,7 +3538,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but no Canonical Ingredient, the line's FDC food isn't in the FDC Snapshot or its portion isn't the food's, the line has no weight to keep or convert or no portion to convert it by, or the edited recipe is too big to store */
+            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC Snapshot or its FDC portion isn't the food's, the line has no weight to keep or convert or no portion to convert it by, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

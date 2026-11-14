@@ -2,6 +2,8 @@
 
 Superseded in part by [Editors pick FDC foods; the FDC Snapshot ships in the Lambda](2026-11-11-editors-pick-fdc-foods.md): a line matched to a Canonical Ingredient no longer copies another line's FDC food, portion and conversion, and a match always has an FDC food (`fdc_id` is never null). The editor picks the food, which is no longer left for later, even for a new Canonical Ingredient. A change to a line's FDC food or portion also fixes its wording, so it reaches other recipes even with the Canonical Ingredient unchanged. And every line with the wording takes the food, but not the same conversion: each takes the portion that fits its own written unit.
 
+Superseded in part by [An editor picks a substitute's FDC food and FDC portion](2026-11-13-editors-pick-a-substitutes-fdc-food.md): a substitution edit also sets the substitute's FDC food and FDC portion, with numbers from the FDC Snapshot, and the pick reaches no other line or recipe.
+
 The [Wording Cache ADR](2026-10-28-wording-cache-learns-unconfirmed.md) says the store refuses to overwrite a confirmed wording. This supersedes that point for editors: an editor who changes a line's Canonical Ingredient overwrites the wording, even a confirmed one. Enrichment still never replaces a confirmed wording. Everything else in that ADR, and in the [Review Items and Confirm Batches ADR](2026-11-03-review-items-and-confirm-batches.md), stands.
 
 We chose this because confirming only says "this is right". When it's wrong, the editor needs to correct it from the same sheet, and a wrong mapping such as "cream" → *ice cream* should be fixed once, not in every recipe that says "cream".

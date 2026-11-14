@@ -322,6 +322,16 @@ const pages: Shot[] = [
     shows: "The name’s wording changed, so choose its Canonical Ingredient.",
   },
   {
+    name: "recipe-review-edit-substitute-food",
+    path: REVIEW_RECIPE,
+    ready: "Garlic Butter Green Beans",
+    loaded: "3 to check, incl. 1 flagged",
+    editor: true,
+    click: [/unsalted butter ≈ ×1 for butter$/, "Edit"],
+    shows: "Butter, without salt · SR Legacy",
+    choose: "1 cup (227 g)",
+  },
+  {
     name: "recipe-review-edit-offline",
     path: REVIEW_RECIPE,
     ready: "Garlic Butter Green Beans",

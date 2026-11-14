@@ -1154,9 +1154,9 @@ def search_fdc_foods(  # noqa: PLR0913 - each query parameter is an argument
             "and timers don't fit it or use more than all of a line, the line's wording changes "
             "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
             "doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but "
-            "no Canonical Ingredient, the line's FDC food isn't in the FDC Snapshot or its "
-            "portion isn't the food's, the line has no weight to keep or convert or no portion "
-            "to convert it by, or the edited recipe is too big to store"
+            "no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC "
+            "Snapshot or its FDC portion isn't the food's, the line has no weight to keep or "
+            "convert or no portion to convert it by, or the edited recipe is too big to store"
         },
     },
 )
@@ -1180,6 +1180,9 @@ def edit_fact(
     in `not_updated`, and one the match would make too big in `too_big`.
     Picking the same Canonical Ingredient again retries them. A line saved with its Canonical
     Ingredient, food and portion unchanged reaches no other recipe.
+
+    A substitute's new FDC food or FDC portion takes its numbers from the FDC Snapshot, never
+    from the request, and reaches no other line or recipe; unchanged, its numbers stay as stored.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":
