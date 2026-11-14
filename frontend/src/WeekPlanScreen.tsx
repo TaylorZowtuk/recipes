@@ -9,45 +9,55 @@ import { Plate } from "./Plate";
 import { PAUSED, useEditBlock } from "./RecipeFields";
 import { Screen } from "./Screen";
 import { Sheet } from "./Sheet";
-import { EditorOnly } from "./session";
+import { useIsEditor } from "./session";
 import { recipePath } from "./slug";
 import { Toast } from "./Toast";
 import { byTitle, titleMatches } from "./titleSearch";
 import { addDays, DAY_NAMES, dayLabel, isPast, mondayOf, weekLabel } from "./weekDates";
 import { SCALES, scaleLabel } from "./weekPlan";
-import { useToday, useWeek, useWeekEdit } from "./weeks";
+import { useDemoWeek, useToday, useWeek, useWeekEdit } from "./weeks";
 
-// The Week tab. A visitor gets a prompt and no week is requested: Week Plans are the household's.
+// The Week tab. A visitor gets a Demo instead of the household's Week Plans, and no week is
+// requested: Week Plans are the household's.
 export function WeekPlanScreen() {
+  const editor = useIsEditor();
   return (
     <Screen title="Week Plan">
-      <EditorOnly
-        fallback={
-          <div className="prompt">
-            <p>Sign in to plan the household’s week.</p>
+      {editor ? (
+        <WeekPlanner key="household" demo={false} />
+      ) : (
+        <>
+          <div className="demo-banner">
+            <div>
+              <p>
+                <strong>Demo — changes aren’t saved</strong>
+              </p>
+              <p>Sign in to plan the household’s week.</p>
+            </div>
             <Link to="/sign-in" className="button">
               Sign in
             </Link>
           </div>
-        }
-      >
-        <WeekPlanner />
-      </EditorOnly>
+          <WeekPlanner key="demo" demo />
+        </>
+      )}
     </Screen>
   );
 }
 
 // One week, Monday to Sunday, with ‹ and › to the others. Past days stay editable, since the
 // household corrects its record of what it cooked. Writes are never queued, so edits are off while
-// offline or paused.
-function WeekPlanner() {
+// offline or paused, except in a Demo, which lives on this device.
+function WeekPlanner({ demo }: { demo: boolean }) {
   const today = useToday();
   const [offset, setOffset] = useState(0);
   const monday = addDays(mondayOf(today), offset * 7);
-  const { plan, failed, writing, retry } = useWeek(monday);
-  const { edit, busy, toast, dismiss } = useWeekEdit(monday);
   const collection = useCollection();
-  const blocked = useEditBlock();
+  const household = { ...useWeek(demo ? null : monday), ...useWeekEdit(monday) };
+  const demoWeek = useDemoWeek(monday, collection);
+  const { plan, failed, writing, retry, edit, busy, toast, dismiss } = demo ? demoWeek : household;
+  const editBlock = useEditBlock();
+  const blocked = demo ? null : editBlock;
   const status = useRef<HTMLParagraphElement>(null);
   const [picking, setPicking] = useState<number | null>(null);
   const [scaling, setScaling] = useState<WeekPlanEntry | null>(null);

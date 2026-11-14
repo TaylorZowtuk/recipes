@@ -181,9 +181,9 @@ test("focus stays put when a navigation replaces the screen", async ({ page }) =
 });
 
 test("moving focus to the new screen's title doesn't scroll the window", async ({ page }) => {
-  // Week, Fridge and sign-in are empty for now, so they are equally long. A filler outside the app
-  // keeps every screen long, so the route change leaves the scroll alone.
-  await page.goto("/week");
+  // A filler outside the app keeps every screen long. Sign-in and Fridge are equally long for a
+  // visitor; a screen of another height would move the filler, and scroll anchoring the window.
+  await page.goto("/sign-in");
   // On phones the top bar scrolls away above it and the click scrolls back, so each click logs where
   // the window sat when it landed, before the navigation and the focus.
   await page.evaluate(() => {

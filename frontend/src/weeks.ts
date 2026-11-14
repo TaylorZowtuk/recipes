@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { api, type WeekOperation } from "./api/client";
-import { forgetCollection } from "./collection";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { api, type Collection, type WeekOperation, type WeekPlan } from "./api/client";
+import { forgetCollection, type Loaded } from "./collection";
+import { applyDemoOperations, demoWeek } from "./demoWeek";
 import { session } from "./session";
 import type { ToastMessage } from "./Toast";
 import { isoDate } from "./weekDates";
@@ -51,4 +52,37 @@ export function useWeekEdit(monday: string) {
   const busy = useCallback(() => setToast(writeToast({ kind: "busy" })), []);
   const dismiss = useCallback(() => setToast(null), []);
   return { edit, busy, toast, dismiss };
+}
+
+// A visitor's changes to the Demo, in memory only, so a reload brings back each week as generated.
+const demos = new Map<string, WeekPlan>();
+const demoListeners = new Set<() => void>();
+const subscribeDemos = (listener: () => void) => {
+  demoListeners.add(listener);
+  return () => void demoListeners.delete(listener);
+};
+const noop = () => {};
+
+// The Demo Week Plan, with the same shape as useWeek and useWeekEdit together. It's built on this
+// device from the Collection, so nothing is ever sent to the API.
+export function useDemoWeek(monday: string, collection: Loaded<Collection>) {
+  const edited = useSyncExternalStore(subscribeDemos, () => demos.get(monday));
+  const cards = collection.state === "ready" ? collection.value.cards : undefined;
+  const generated = useMemo(() => cards && demoWeek(monday, cards), [monday, cards]);
+  const plan = edited ?? generated;
+  const edit = async (operations: WeekOperation[]) => {
+    if (!plan || !cards) return;
+    demos.set(monday, applyDemoOperations(plan, operations, cards));
+    for (const listener of demoListeners) listener();
+  };
+  return {
+    plan,
+    failed: collection.state === "failed",
+    writing: false,
+    retry: collection.state === "failed" ? collection.retry : noop,
+    edit,
+    busy: noop,
+    toast: null,
+    dismiss: noop,
+  };
 }
