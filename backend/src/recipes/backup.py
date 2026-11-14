@@ -5,7 +5,9 @@ A scheduled Lambda runs it nightly and before every release, with a plain Python
 first nightly of each UTC month is also kept as that month's snapshot.
 
 Line 1 of a snapshot is a header; every other line is one item exactly as DynamoDB's low-level
-client returns it, so sets and numbers load unchanged into another stack's table.
+client returns it, so sets and numbers load unchanged into another stack's table. Each page of the
+Scan is written to a gzipped file under the temp folder as it arrives, so the snapshot is never
+all in memory, then uploaded.
 
 Once a month an editor pulls the latest snapshot and the images not yet saved to a folder the
 household controls, through the API's short-lived download links:
@@ -20,11 +22,13 @@ import logging
 import os
 import random
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from urllib.parse import urlencode
 
 import boto3
 import requests
@@ -41,6 +45,7 @@ if TYPE_CHECKING:
     from types_boto3_dynamodb import DynamoDBClient
     from types_boto3_dynamodb.type_defs import ScanInputTypeDef, ScanOutputTypeDef
     from types_boto3_s3 import S3Client
+    from types_boto3_s3.type_defs import ListObjectsV2RequestTypeDef
 
     from recipes.client import Send
     from recipes.store import Item
@@ -61,11 +66,13 @@ BACKOFF_SECONDS = 0.5
 THROTTLED = {"ProvisionedThroughputExceededException", "ThrottlingException"}
 IMAGES = "images/"
 LINK_SECONDS = 15 * 60
+# A presigned link is about 1.7 KB, so a page stays well under Lambda's 6 MB response limit.
+IMAGE_LINKS_PER_PAGE = 500
 CHUNK_BYTES = 64 * 1024
 
 
 class Summary(TypedDict):
-    snapshot: str
+    backup_snapshot: str
     monthly: str | None
     items: int
     images_copied: int
@@ -75,19 +82,18 @@ def snapshot_key(kind: str, at: datetime) -> str:
     return f"snapshots/{kind}/{at.astimezone(UTC):%Y-%m-%dT%H%M%SZ}.jsonl.gz"
 
 
-def scan_table(
+def scan_pages(
     client: DynamoDBClient,
     table: str,
     read_units: float,
     *,
     sleep: Callable[[float], None] = time.sleep,
     page_items: int | None = None,
-) -> list[Item]:
-    """Every item, eventually consistent, in pages of about one second's reads (or
-    `page_items`), sleeping after each page so the average read rate stays at or under
+) -> Iterator[list[Item]]:
+    """Every item, eventually consistent, a page at a time: pages of about one second's reads
+    (or `page_items`), sleeping after each page so the average read rate stays at or under
     `read_units` per second.
     """
-    items: list[Item] = []
     request: ScanInputTypeDef = {
         "TableName": table,
         "Limit": page_items or max(1, int(read_units * ITEMS_PER_READ_UNIT)),
@@ -95,10 +101,10 @@ def scan_table(
     }
     while True:
         page = _scan_page(client, request, sleep)
-        items += page["Items"]
+        yield page["Items"]
         sleep(page.get("ConsumedCapacity", {}).get("CapacityUnits", 0) / read_units)
         if "LastEvaluatedKey" not in page:
-            return items
+            return
         request["ExclusiveStartKey"] = page["LastEvaluatedKey"]
 
 
@@ -117,11 +123,9 @@ def _scan_page(
     raise AssertionError  # unreachable: the last attempt returns or raises
 
 
-def _schema_version(items: list[Item]) -> int | None:
-    for item in items:
-        if item["PK"] == SCHEMA_KEY["PK"] and item["SK"] == SCHEMA_KEY["SK"]:
-            return int(item["schema_version"]["N"])
-    return None
+def _schema_version(client: DynamoDBClient, table: str) -> int | None:
+    item = client.get_item(TableName=table, Key=SCHEMA_KEY).get("Item")
+    return None if item is None else int(item["schema_version"].get("N", ""))
 
 
 def take_snapshot(
@@ -130,7 +134,7 @@ def take_snapshot(
     *,
     table: str,
     bucket: str,
-    images_bucket: str | None,
+    images_bucket: str,
     kind: str,
     read_units: float,
     now: datetime,
@@ -140,21 +144,25 @@ def take_snapshot(
     """Write a `kind` snapshot of `table` taken at `now`, keep it as the monthly one if it's the
     month's first nightly, then copy the images `bucket` is missing from `images_bucket`.
     """
-    items = scan_table(dynamodb, table, read_units, sleep=sleep, page_items=page_items)
     header = {
         "format": FORMAT,
         "version": VERSION,
-        "schema_version": _schema_version(items),
+        "schema_version": _schema_version(dynamodb, table),
         "table": table,
         "kind": kind,
         "taken_at": f"{now.astimezone(UTC):%Y-%m-%dT%H:%M:%SZ}",
-        "items": len(items),
     }
-    lines = [json.dumps(line, separators=(",", ":")) for line in [header, *items]]
-    body = gzip.compress(("\n".join(lines) + "\n").encode(), mtime=0)
     key = snapshot_key(kind, now)
-    s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/gzip")
-    logger.info("Wrote %s: %d items", key, len(items))
+    items = 0
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "snapshot.jsonl.gz"
+        with path.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as file:
+            file.write(_line(header))
+            for page in scan_pages(dynamodb, table, read_units, sleep=sleep, page_items=page_items):
+                file.writelines(_line(item) for item in page)
+                items += len(page)
+        s3.upload_file(str(path), bucket, key, ExtraArgs={"ContentType": "application/gzip"})
+    logger.info("Wrote %s: %d items", key, items)
 
     monthly = None
     month = f"snapshots/monthly/{now.astimezone(UTC):%Y-%m}-"
@@ -166,8 +174,12 @@ def take_snapshot(
         s3.copy_object(Bucket=bucket, Key=monthly, CopySource={"Bucket": bucket, "Key": key})
         logger.info("Kept %s as the monthly snapshot", key)
 
-    copied = 0 if images_bucket is None else copy_new_images(s3, images_bucket, bucket)
-    return {"snapshot": key, "monthly": monthly, "items": len(items), "images_copied": copied}
+    copied = copy_new_images(s3, images_bucket, bucket)
+    return {"backup_snapshot": key, "monthly": monthly, "items": items, "images_copied": copied}
+
+
+def _line(value: object) -> bytes:
+    return json.dumps(value, separators=(",", ":")).encode() + b"\n"
 
 
 def _keys(s3: S3Client, bucket: str, prefix: str) -> Iterator[str]:
@@ -202,10 +214,14 @@ class BackupLink(BaseModel):
 
 
 class BackupLinks(BaseModel):
-    """Download links into the backup bucket, each good for `expires_in` seconds."""
+    """Download links into the backup bucket, each good for `expires_in` seconds: the latest
+    Backup Snapshot and one page of images. `next` is the `after` for the next page, or None on
+    the last.
+    """
 
-    snapshot: BackupLink | None
+    backup_snapshot: BackupLink | None
     images: list[BackupLink]
+    next: str | None
     expires_in: int
 
 
@@ -214,6 +230,7 @@ class BackupBucket:
 
     def __init__(self, bucket: str, client: S3Client | None = None) -> None:
         self.bucket = bucket
+        self.images_per_page = IMAGE_LINKS_PER_PAGE
         # Signature Version 4, which every region accepts, on the bucket's regional endpoint.
         self.client: S3Client = client or boto3.client(
             "s3", config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"})
@@ -223,8 +240,10 @@ class BackupBucket:
     def from_env(cls) -> BackupBucket:
         return cls(os.environ["BACKUP_BUCKET"])
 
-    def links(self) -> BackupLinks:
-        """Links to the latest snapshot and every backed-up image."""
+    def links(self, after: str | None = None) -> BackupLinks:
+        """Links to the latest snapshot and a page of the backed-up images whose keys sort
+        after `after`.
+        """
 
         def link(key: str) -> BackupLink:
             url = self.client.generate_presigned_url(
@@ -235,9 +254,19 @@ class BackupBucket:
             return BackupLink(key=key, url=url)
 
         latest = latest_snapshot_key(self.client, self.bucket)
+        request: ListObjectsV2RequestTypeDef = {
+            "Bucket": self.bucket,
+            "Prefix": IMAGES,
+            "MaxKeys": self.images_per_page,
+        }
+        if after is not None:
+            request["StartAfter"] = after
+        page = self.client.list_objects_v2(**request)
+        keys = [listed.get("Key", "") for listed in page.get("Contents", [])]
         return BackupLinks(
-            snapshot=None if latest is None else link(latest),
-            images=[link(key) for key in _keys(self.client, self.bucket, IMAGES)],
+            backup_snapshot=None if latest is None else link(latest),
+            images=[link(key) for key in keys],
+            next=keys[-1] if page.get("IsTruncated") and keys else None,
             expires_in=LINK_SECONDS,
         )
 
@@ -246,38 +275,71 @@ type Saved = Literal["saved", "present", "failed"]
 
 
 def pull(base_url: str, send: Send, download: requests.Session, to: Path) -> bool:
-    """Save the latest snapshot and each image not already in `to`, at its key under `to`.
+    """Save the latest snapshot and each image not already in `to`, at its key under `to`,
+    downloading each page of links before asking for the next, so no link goes stale.
     `download` never carries the service token. True if anything failed.
     """
-    status, body = send("GET", f"{base_url}/api/backup/links", None)
-    if status != HTTPStatus.OK:
-        print(f"Couldn't get the download links: {status} {body}", file=sys.stderr)
-        return True
     try:
-        links = BackupLinks.model_validate(body)
-    except ValidationError as error:
-        print(f"The download links aren't as expected: {error}", file=sys.stderr)
+        to.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        print(f"Couldn't make the folder {to}: {error.strerror}", file=sys.stderr)
+        return True
+    links = _links(base_url, send, None)
+    if links is None:
         return True
 
-    failed = False
-    if links.snapshot is None:
-        print("No Backup Snapshot to save yet")
-    else:
-        match _save(download, links.snapshot, to):
-            case "saved":
-                print(f"Saved the Backup Snapshot {links.snapshot.key}")
-            case "present":
-                print(f"Already have the Backup Snapshot {links.snapshot.key}")
-            case "failed":
-                failed = True
+    failed = not _save_snapshot(download, links.backup_snapshot, to)
     counts = {"saved": 0, "present": 0, "failed": 0}
-    for image in links.images:
-        counts[_save(download, image, to)] += 1
+    while True:
+        for image in links.images:
+            counts[_save(download, image, to)] += 1
+        if links.next is None:
+            break
+        links = _links(base_url, send, links.next)
+        if links is None:
+            failed = True
+            break
     print(
-        f"Downloaded {counts['saved']} images, {counts['present']} already here, "
+        f"Images: {counts['saved']} downloaded, {counts['present']} already here, "
         f"{counts['failed']} failed"
     )
     return failed or counts["failed"] > 0
+
+
+def _save_snapshot(download: requests.Session, link: BackupLink | None, to: Path) -> bool:
+    """Save the Backup Snapshot at `link`, if there is one. False if that failed."""
+    if link is None:
+        print("No Backup Snapshot to save yet")
+        return True
+    match _save(download, link, to):
+        case "saved":
+            print(f"Saved the Backup Snapshot {link.key}")
+        case "present":
+            print(f"Already have the Backup Snapshot {link.key}")
+        case "failed":
+            return False
+    return True
+
+
+def _links(base_url: str, send: Send, after: str | None) -> BackupLinks | None:
+    """A page of download links, or None (having said why) if there are none to be had."""
+    query = "" if after is None else f"?{urlencode({'after': after})}"
+    try:
+        status, body = send("GET", f"{base_url}/api/backup/links{query}", None)
+    except requests.RequestException as error:
+        # Only the error's kind: its message holds the URL.
+        print(f"Couldn't get the download links: {type(error).__name__}", file=sys.stderr)
+        return None
+    if status != HTTPStatus.OK:
+        print(f"Couldn't get the download links: {status} {body}", file=sys.stderr)
+        return None
+    try:
+        return BackupLinks.model_validate(body)
+    except ValidationError as error:
+        # Only where: the input in its message holds the links.
+        wrong = ", ".join(".".join(map(str, e["loc"])) or "the body" for e in error.errors())
+        print(f"The download links aren't as expected: {wrong}", file=sys.stderr)
+        return None
 
 
 def _local_path(to: Path, key: str) -> Path | None:
@@ -302,9 +364,9 @@ def _save(download: requests.Session, link: BackupLink, to: Path) -> Saved:
         return "failed"
     if path.exists():
         return "present"
-    path.parent.mkdir(parents=True, exist_ok=True)
     part = path.with_name(f".{path.name}.part")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with download.get(link.url, stream=True, timeout=60) as response:
             if response.status_code != HTTPStatus.OK:
                 print(f"Couldn't download {link.key}: {response.status_code}", file=sys.stderr)

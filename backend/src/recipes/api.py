@@ -741,11 +741,12 @@ def post_image(body: PhotoUrl, fetcher: FetcherDep, images: ImagesDep) -> Image:
 
 
 @router.get("/backup/links", dependencies=EDITORS_ONLY)
-def get_backup_links(backups: BackupsDep) -> BackupLinks:
-    """Short-lived download links to the latest Backup Snapshot and every backed-up image, for
-    `backup pull`. Never cached, like every API response that doesn't say otherwise.
+def get_backup_links(backups: BackupsDep, after: str | None = None) -> BackupLinks:
+    """Short-lived download links to the latest Backup Snapshot and a page of the backed-up
+    images whose keys sort after `after`, for `backup pull`. Never cached, like every API
+    response that doesn't say otherwise.
     """
-    return backups.links()
+    return backups.links(after)
 
 
 @router.post(

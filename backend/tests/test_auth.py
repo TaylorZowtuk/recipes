@@ -387,7 +387,12 @@ def test_only_an_editor_gets_backup_download_links_and_they_are_never_cached(
     for response in (by_token, by_cookie):
         assert response.status_code == 200
         assert response.headers["Cache-Control"] == "no-store"
-        assert response.json() == {"snapshot": None, "images": [], "expires_in": 900}
+        assert response.json() == {
+            "backup_snapshot": None,
+            "images": [],
+            "next": None,
+            "expires_in": 900,
+        }
 
 
 # CurrentEditor and EditorDep

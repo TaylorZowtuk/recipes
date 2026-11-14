@@ -10,12 +10,14 @@ from urllib.parse import parse_qs, urlsplit
 import boto3
 import pytest
 import requests
-from conftest import BACKUP_BUCKET, EDITOR
+from botocore.exceptions import ClientError
+from conftest import BACKUP_BUCKET, EDITOR, IMAGES_BUCKET, SERVICE_TOKEN
 from requests.adapters import HTTPAdapter
 from test_enrich import Adapter, api, through
 
 from recipes import backup
 from recipes.auth import SERVICE_TOKEN_HEADER
+from recipes.client import SERVICE_TOKEN_ENV, SameOriginSession
 from recipes.store import SCHEMA_KEY, Store
 
 if TYPE_CHECKING:
@@ -35,8 +37,8 @@ DEC_1 = datetime(2026, 12, 1, 3, 30, 5, tzinfo=UTC)
 
 
 @pytest.fixture
-def s3(backups: BackupBucket) -> S3Client:
-    """The client on fake AWS, with an empty backup bucket."""
+def s3(backups: BackupBucket, images: ImageStore) -> S3Client:
+    """The client on fake AWS, with an empty backup bucket and an empty images bucket."""
     return backups.client
 
 
@@ -61,13 +63,13 @@ def no_sleep(_seconds: float) -> None:
     pass
 
 
-def take(table: str, kind: str, at: datetime, images_bucket: str | None = None) -> backup.Summary:
+def take(table: str, kind: str, at: datetime) -> backup.Summary:
     return backup.take_snapshot(
         boto3.client("dynamodb"),
         boto3.client("s3"),
         table=table,
         bucket=BACKUP_BUCKET,
-        images_bucket=images_bucket,
+        images_bucket=IMAGES_BUCKET,
         kind=kind,
         read_units=1000.0,
         now=at,
@@ -90,8 +92,8 @@ def test_a_snapshot_holds_every_item_exactly_as_dynamodb_has_it(table: str, s3: 
 
     summary = take(table, "nightly", NOV_13)
 
-    assert summary["snapshot"] == "snapshots/nightly/2026-11-13T033005Z.jsonl.gz"
-    header, *lines = read_lines(s3, summary["snapshot"])
+    assert summary["backup_snapshot"] == "snapshots/nightly/2026-11-13T033005Z.jsonl.gz"
+    header, *lines = read_lines(s3, summary["backup_snapshot"])
     schema = next(i for i in items if i["PK"] == SCHEMA_KEY["PK"])
     assert header == {
         "format": "plateful-backup",
@@ -100,7 +102,6 @@ def test_a_snapshot_holds_every_item_exactly_as_dynamodb_has_it(table: str, s3: 
         "table": table,
         "kind": "nightly",
         "taken_at": "2026-11-13T03:30:05Z",
-        "items": len(items),
     }
     assert summary["items"] == len(items)
 
@@ -111,7 +112,7 @@ def test_a_snapshot_holds_every_item_exactly_as_dynamodb_has_it(table: str, s3: 
     tick = next(line for line in lines if line["PK"] == {"S": "TEST#3"})
     assert set(tick["ticks"]["SS"]) == {"synthetic-a", "synthetic-3"}
     assert tick["count"] == {"N": "1.50"}
-    assert s3.head_object(Bucket=BACKUP_BUCKET, Key=summary["snapshot"])["ContentType"] == (
+    assert s3.head_object(Bucket=BACKUP_BUCKET, Key=summary["backup_snapshot"])["ContentType"] == (
         "application/gzip"
     )
 
@@ -119,9 +120,8 @@ def test_a_snapshot_holds_every_item_exactly_as_dynamodb_has_it(table: str, s3: 
 def test_an_empty_table_has_no_schema_version(table: str, s3: S3Client) -> None:
     summary = take(table, "pre-release", NOV_13)
 
-    header, *lines = read_lines(s3, summary["snapshot"])
+    header, *lines = read_lines(s3, summary["backup_snapshot"])
     assert header["schema_version"] is None
-    assert header["items"] == 0
     assert lines == []
 
 
@@ -145,7 +145,7 @@ def test_the_scan_is_paced_to_the_read_units(table: str, s3: S3Client) -> None:
         s3,
         table=table,
         bucket=BACKUP_BUCKET,
-        images_bucket=None,
+        images_bucket=IMAGES_BUCKET,
         kind="nightly",
         read_units=2.0,
         now=NOV_13,
@@ -155,7 +155,7 @@ def test_the_scan_is_paced_to_the_read_units(table: str, s3: S3Client) -> None:
 
     assert len(consumed) >= 4
     assert sum(consumed) > 0
-    assert sum(slept) >= sum(consumed) / 2.0
+    assert sum(slept) == pytest.approx(sum(consumed) / 2.0)
 
 
 @pytest.mark.parametrize(("read_units", "limit"), [(5.0, 10), (2.0, 4), (0.2, 1)])
@@ -176,7 +176,7 @@ def test_a_page_reads_about_one_second_of_the_pace(
 
     client.scan = recording_scan  # type: ignore[method-assign]
 
-    backup.scan_table(client, table, read_units, sleep=no_sleep)
+    list(backup.scan_pages(client, table, read_units, sleep=no_sleep))
 
     assert set(limits) == {limit}
 
@@ -196,10 +196,28 @@ def test_throttled_pages_are_retried(table: str, s3: S3Client) -> None:
 
     client.scan = throttling_scan  # type: ignore[method-assign]
 
-    items = backup.scan_table(client, table, 1000.0, sleep=no_sleep, page_items=3)
+    pages = list(backup.scan_pages(client, table, 1000.0, sleep=no_sleep, page_items=3))
 
     assert throttles == []
-    assert len(items) == len(scan(TableName=table)["Items"])
+    assert sum(len(page) for page in pages) == len(scan(TableName=table)["Items"])
+
+
+def test_any_other_scan_error_fails_at_once(table: str) -> None:
+    client = boto3.client("dynamodb")
+    calls: list[dict[str, Any]] = []
+
+    def failing_scan(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        raise ClientError({"Error": {"Code": "ValidationException"}}, "Scan")
+
+    client.scan = failing_scan  # type: ignore[method-assign]
+    slept: list[float] = []
+
+    with pytest.raises(ClientError):
+        list(backup.scan_pages(client, table, 1000.0, sleep=slept.append))
+
+    assert len(calls) == 1
+    assert slept == []
 
 
 def test_the_first_nightly_of_a_month_is_kept_as_the_monthly(table: str, s3: S3Client) -> None:
@@ -217,7 +235,7 @@ def test_the_first_nightly_of_a_month_is_kept_as_the_monthly(table: str, s3: S3C
     assert first["monthly"] == "snapshots/monthly/2026-11-13T033005Z.jsonl.gz"
     assert december["monthly"] == "snapshots/monthly/2026-12-01T043005Z.jsonl.gz"
     monthly = read_lines(s3, "snapshots/monthly/2026-11-13T033005Z.jsonl.gz")
-    assert monthly == read_lines(s3, first["snapshot"])
+    assert monthly == read_lines(s3, first["backup_snapshot"])
 
 
 def test_only_missing_images_are_copied(table: str, images: ImageStore, s3: S3Client) -> None:
@@ -226,8 +244,8 @@ def test_only_missing_images_are_copied(table: str, images: ImageStore, s3: S3Cl
     s3.put_object(Bucket=images.bucket, Key="other/not-an-image", Body=b"synthetic")
     s3.put_object(Bucket=BACKUP_BUCKET, Key=f"images/{0:032x}.webp", Body=b"synthetic")
 
-    first = take(table, "nightly", NOV_13, images_bucket=images.bucket)
-    second = take(table, "nightly", NOV_14, images_bucket=images.bucket)
+    first = take(table, "nightly", NOV_13)
+    second = take(table, "nightly", NOV_14)
 
     assert first["images_copied"] == 2
     assert second["images_copied"] == 0
@@ -239,11 +257,12 @@ def test_the_latest_snapshot_is_the_newest_across_kinds(table: str, s3: S3Client
     assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) is None
 
     take(table, "nightly", NOV_13)
-    take(table, "pre-release", NOV_14)
-    take(table, "nightly", NOV_14.replace(hour=1))
+    take(table, "pre-release", NOV_14.replace(hour=1))
+    take(table, "nightly", NOV_14)
 
+    # The newest is a nightly, whose whole key sorts before the older pre-release one.
     assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) == (
-        "snapshots/pre-release/2026-11-14T033005Z.jsonl.gz"
+        "snapshots/nightly/2026-11-14T033005Z.jsonl.gz"
     )
 
 
@@ -264,10 +283,10 @@ def test_the_handler_backs_up_the_stack_from_its_environment(
 
     summary = backup.handler({"kind": "pre-release"}, None)
 
-    assert summary["snapshot"].startswith("snapshots/pre-release/")
+    assert summary["backup_snapshot"].startswith("snapshots/pre-release/")
     assert summary["items"] > 7
     assert summary["images_copied"] == 1
-    assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) == summary["snapshot"]
+    assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) == summary["backup_snapshot"]
     assert keys(s3, "snapshots/monthly/") == []
 
 
@@ -288,7 +307,12 @@ def test_an_empty_backup_bucket_has_no_links(editor_client: TestClient, s3: S3Cl
     response = editor_client.get("/api/backup/links", headers=EDITOR)
 
     assert response.status_code == 200
-    assert response.json() == {"snapshot": None, "images": [], "expires_in": 900}
+    assert response.json() == {
+        "backup_snapshot": None,
+        "images": [],
+        "next": None,
+        "expires_in": 900,
+    }
 
 
 def test_links_are_to_the_latest_snapshot_and_every_backed_up_image(
@@ -296,22 +320,44 @@ def test_links_are_to_the_latest_snapshot_and_every_backed_up_image(
 ) -> None:
     seed(table)
     take(table, "nightly", NOV_13)
-    latest = take(table, "pre-release", NOV_14)["snapshot"]
+    latest = take(table, "pre-release", NOV_14)["backup_snapshot"]
     put_images(s3, image_keys(2))
 
     links = editor_client.get("/api/backup/links", headers=EDITOR).json()
 
     assert links["expires_in"] == 900
-    assert links["snapshot"]["key"] == latest
+    assert links["backup_snapshot"]["key"] == latest
     assert [image["key"] for image in links["images"]] == image_keys(2)
-    for link in [links["snapshot"], *links["images"]]:
+    assert links["next"] is None
+    for link in [links["backup_snapshot"], *links["images"]]:
         url = urlsplit(str(link["url"]))
         assert url.scheme == "https"
         assert (url.hostname or "").startswith(f"{BACKUP_BUCKET}.s3.")
         assert url.path == f"/{link['key']}"
         assert parse_qs(url.query)["X-Amz-Expires"] == ["900"]
-    downloaded = requests.get(links["snapshot"]["url"], timeout=10)
+    downloaded = requests.get(links["backup_snapshot"]["url"], timeout=10)
     assert downloaded.content == s3.get_object(Bucket=BACKUP_BUCKET, Key=latest)["Body"].read()
+
+
+def test_image_links_come_in_pages(
+    table: str, s3: S3Client, backups: BackupBucket, editor_client: TestClient
+) -> None:
+    seed(table)
+    latest = take(table, "nightly", NOV_13)["backup_snapshot"]
+    put_images(s3, image_keys(2))
+    backups.images_per_page = 2
+
+    first = editor_client.get("/api/backup/links", headers=EDITOR)
+    second = editor_client.get(
+        "/api/backup/links", params={"after": first.json()["next"]}, headers=EDITOR
+    ).json()
+
+    assert first.headers["cache-control"] == "no-store"
+    assert [image["key"] for image in first.json()["images"]] == image_keys(2)[:2]
+    assert first.json()["next"] == image_keys(2)[1]
+    assert [image["key"] for image in second["images"]] == image_keys(2)[2:]
+    assert second["next"] is None
+    assert first.json()["backup_snapshot"]["key"] == second["backup_snapshot"]["key"] == latest
 
 
 # backup pull
@@ -353,7 +399,7 @@ def test_pull_saves_the_latest_snapshot_and_then_only_whats_missing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     seed(table)
-    snapshot = take(table, "nightly", NOV_13)["snapshot"]
+    snapshot = take(table, "nightly", NOV_13)["backup_snapshot"]
     put_images(s3, image_keys(2))
     downloads = Downloads()
 
@@ -370,7 +416,7 @@ def test_pull_saves_the_latest_snapshot_and_then_only_whats_missing(
 
     printed = capsys.readouterr().out
     assert f"Already have the Backup Snapshot {snapshot}" in printed
-    assert "Downloaded 2 images, 4 already here" in printed
+    assert "Images: 2 downloaded, 4 already here, 0 failed" in printed
     assert len(downloads.requests) == 7
     assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == sorted(
         [snapshot.rsplit("/", 1)[1], *(key.removeprefix("images/") for key in image_keys(3))]
@@ -417,7 +463,7 @@ def test_pull_refuses_a_key_outside_its_folder(
     link = {"key": key, "url": f"https://{BACKUP_BUCKET}.s3.amazonaws.com/escaped"}
 
     def send(_method: str, _url: str, _body: bytes | None) -> tuple[int, Any]:
-        return 200, {"snapshot": None, "images": [link], "expires_in": 900}
+        return 200, {"backup_snapshot": None, "images": [link], "next": None, "expires_in": 900}
 
     to = tmp_path / "backups"
     to.mkdir()
@@ -429,28 +475,23 @@ def test_pull_refuses_a_key_outside_its_folder(
     assert f"Refused {key!r}" in capsys.readouterr().err
 
 
-def test_an_interrupted_download_leaves_no_file_to_skip_next_time(
-    s3: S3Client, send: Send, tmp_path: Path
-) -> None:
-    keys = image_keys(1)
-    put_images(s3, keys)
+def broken_session(error: BaseException) -> requests.Session:
+    """A download session whose every response gives its first bytes, then raises `error`."""
 
     class Broken:
-        """Gives the first bytes, then the connection drops."""
-
         def __init__(self) -> None:
             self.reads = 0
 
         def read(self, *_args: Any, **_kwargs: Any) -> bytes:
             self.reads += 1
             if self.reads > 1:
-                raise OSError
+                raise error
             return b"synthetic part"
 
         def close(self) -> None:
             pass
 
-    def cut_off(request: PreparedRequest) -> tuple[int, dict[str, str], bytes]:
+    def cut_off(_request: PreparedRequest) -> tuple[int, dict[str, str], bytes]:
         return 200, {}, b""
 
     broken = Adapter(cut_off)
@@ -462,8 +503,17 @@ def test_an_interrupted_download_leaves_no_file_to_skip_next_time(
         return response
 
     broken.send = send_broken  # type: ignore[method-assign]
-    with requests.Session() as session:
-        session.mount("https://", broken)
+    session = requests.Session()
+    session.mount("https://", broken)
+    return session
+
+
+def test_an_interrupted_download_leaves_no_file_to_skip_next_time(
+    s3: S3Client, send: Send, tmp_path: Path
+) -> None:
+    put_images(s3, image_keys(1))
+
+    with broken_session(OSError()) as session:
         assert backup.pull("http://testserver", send, session, tmp_path) is True
 
     assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
@@ -471,3 +521,186 @@ def test_an_interrupted_download_leaves_no_file_to_skip_next_time(
     downloads = Downloads()
     assert pull(send, downloads, tmp_path) is False
     assert len(downloads.requests) == 2
+
+
+def test_a_download_stopped_mid_write_leaves_no_file_at_its_key(
+    s3: S3Client, send: Send, tmp_path: Path
+) -> None:
+    keys = image_keys(1)
+    put_images(s3, keys)
+
+    with broken_session(KeyboardInterrupt()) as session, pytest.raises(KeyboardInterrupt):
+        backup.pull("http://testserver", send, session, tmp_path)
+
+    assert not (tmp_path / keys[0]).exists()
+    downloads = Downloads()
+    assert pull(send, downloads, tmp_path) is False
+    assert (tmp_path / keys[0]).read_bytes() == f"synthetic {keys[0]}".encode()
+
+
+def test_a_refused_download_saves_nothing_and_is_retried_next_time(
+    s3: S3Client, send: Send, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    keys = image_keys(1)
+    put_images(s3, keys)
+
+    def refuse(_request: PreparedRequest) -> tuple[int, dict[str, str], bytes]:
+        return 403, {"content-type": "application/xml"}, b"<Error>AccessDenied</Error>"
+
+    with requests.Session() as session:
+        session.mount("https://", Adapter(refuse))
+        assert backup.pull("http://testserver", send, session, tmp_path) is True
+
+    assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
+    assert "Images: 0 downloaded, 0 already here, 2 failed" in capsys.readouterr().out
+    downloads = Downloads()
+    assert pull(send, downloads, tmp_path) is False
+    assert len(downloads.requests) == 2
+    for key in keys:
+        assert (tmp_path / key).read_bytes() == f"synthetic {key}".encode()
+
+
+def test_pull_downloads_each_page_of_links_before_asking_for_the_next(
+    table: str,
+    s3: S3Client,
+    backups: BackupBucket,
+    editor_client: TestClient,
+    tmp_path: Path,
+) -> None:
+    seed(table)
+    snapshot = take(table, "nightly", NOV_13)["backup_snapshot"]
+    put_images(s3, image_keys(2))
+    backups.images_per_page = 3
+    to_api = api(editor_client)
+    events: list[str] = []
+    asks = to_api.handle
+
+    def ask(request: PreparedRequest) -> tuple[int, dict[str, str], bytes]:
+        events.append(f"links {urlsplit(request.url or '').query}")
+        return asks(request)
+
+    to_api.handle = ask
+
+    class Recording(Downloads):
+        def send(self, request: PreparedRequest, *args: Any, **kwargs: Any) -> Response:
+            events.append(urlsplit(request.url or "").path.removeprefix("/"))
+            return super().send(request, *args, **kwargs)
+
+    assert pull(through(to_api), Recording(), tmp_path) is False
+
+    keys = image_keys(2)
+    assert events == [
+        "links ",
+        snapshot,
+        *keys[:3],
+        f"links after={keys[2].replace('/', '%2F')}",
+        keys[3],
+    ]
+    for key in keys:
+        assert (tmp_path / key).is_file()
+
+
+def test_pull_reports_an_unreachable_api_in_one_line(
+    downloads: Downloads, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def unreachable(_method: str, url: str, _body: bytes | None) -> tuple[int, Any]:
+        raise requests.ConnectionError(url)
+
+    assert pull(unreachable, downloads, tmp_path) is True
+
+    assert capsys.readouterr().err == "Couldn't get the download links: ConnectionError\n"
+
+
+def test_pull_reports_a_folder_it_cant_make(
+    s3: S3Client,
+    send: Send,
+    downloads: Downloads,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    put_images(s3, image_keys(1))
+    (tmp_path / "a-file").write_text("synthetic")
+    to = tmp_path / "a-file" / "backups"
+
+    assert pull(send, downloads, to) is True
+
+    err = capsys.readouterr().err
+    assert err.startswith(f"Couldn't make the folder {to}: ")
+    assert len(err.splitlines()) == 1
+    assert downloads.requests == []
+
+
+# backup pull's exit code
+
+
+def run_main(monkeypatch: pytest.MonkeyPatch, to_api: Adapter, to: Path) -> object:
+    """`main`'s exit code (or message), with `to_api` answering for the API."""
+
+    def session() -> SameOriginSession:
+        session = SameOriginSession()
+        session.mount("https://plateful.test", to_api)
+        return session
+
+    monkeypatch.setattr(backup, "SameOriginSession", session)
+    with pytest.raises(SystemExit) as exited:
+        backup.main(["pull", "https://plateful.test", "--to", str(to)])
+    return exited.value.code
+
+
+def answer(status: int, body: object) -> Adapter:
+    """The API, answering every request with `status` and `body`."""
+    encoded = json.dumps(body).encode()
+    return Adapter(lambda _request: (status, {"content-type": "application/json"}, encoded))
+
+
+def test_main_needs_the_service_token(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv(SERVICE_TOKEN_ENV, raising=False)
+    to_api = answer(200, {})
+
+    code = run_main(monkeypatch, to_api, tmp_path)
+
+    assert code == f"Set {SERVICE_TOKEN_ENV} to the stack's service token"
+    assert to_api.requests == []
+
+
+def test_main_exits_0_once_everything_is_saved(
+    table: str,
+    s3: S3Client,
+    editor_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(SERVICE_TOKEN_ENV, SERVICE_TOKEN)
+    seed(table)
+    snapshot = take(table, "nightly", NOV_13)["backup_snapshot"]
+
+    assert run_main(monkeypatch, api(editor_client), tmp_path) == 0
+    assert (tmp_path / snapshot).is_file()
+
+
+def test_main_exits_1_when_the_snapshot_cant_be_downloaded(
+    s3: S3Client, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(SERVICE_TOKEN_ENV, SERVICE_TOKEN)
+    key = "snapshots/nightly/2026-11-13T033005Z.jsonl.gz"
+    missing = s3.generate_presigned_url(
+        "get_object", Params={"Bucket": BACKUP_BUCKET, "Key": key}, ExpiresIn=900
+    )
+    links: dict[str, Any] = {
+        "backup_snapshot": {"key": key, "url": missing},
+        "images": [],
+        "next": None,
+        "expires_in": 900,
+    }
+
+    assert run_main(monkeypatch, answer(200, links), tmp_path) == 1
+    assert not (tmp_path / key).exists()
+
+
+def test_main_exits_1_when_the_links_are_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv(SERVICE_TOKEN_ENV, SERVICE_TOKEN)
+
+    assert run_main(monkeypatch, answer(403, {"detail": "Editors only"}), tmp_path) == 1
+    assert "Couldn't get the download links: 403" in capsys.readouterr().err
