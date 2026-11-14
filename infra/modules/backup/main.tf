@@ -2,7 +2,8 @@
 # Snapshot of the table (a paced Scan, gzipped JSON Lines) and copies new images into the bucket.
 # EventBridge runs it each night; the prod deploy job starts it before each release
 # (scripts/backup-snapshot.sh). The API reads the bucket through the stack's data policy, to presign
-# `backup pull`'s download links.
+# `backup pull`'s download links. A stale backup alarm emails the household when a UTC day passes
+# without a completed nightly snapshot.
 terraform {
   required_providers {
     aws = { source = "hashicorp/aws" }
@@ -226,6 +227,46 @@ resource "aws_lambda_permission" "nightly" {
   function_name = aws_lambda_function.this.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.nightly.arn
+}
+
+# The stale backup alarm's topic. The household's email addresses are subscribed by hand
+# (scripts/aws-setup.sh), as for the spend alarm: an email subscription stays pending until it's
+# confirmed, and the repo is public. Not the spend alarm's topic: that one trips the kill switches.
+# SNS's default topic policy lets the account's own alarms publish.
+resource "aws_sns_topic" "alarm" {
+  name = var.name
+}
+
+# The handler counts each completed nightly snapshot (recipes.backup.NIGHTLY_METRIC). The wall clock
+# window evaluates exactly the last whole UTC day, and missing data is breaching, so a day with no
+# count alarms whether the snapshot failed or the schedule never fired: the household hears by
+# 00:00 UTC after a 10:00 UTC nightly fails, about 14 hours later. A sliding window would instead
+# borrow an older datapoint to fill the gap and stay OK for days. The warm-up keeps a new alarm
+# quiet until a whole day with a nightly in it has passed. OK actions report the recovery, and the
+# first evaluation after the warm-up, which confirms the alarm works.
+resource "aws_cloudwatch_metric_alarm" "stale" {
+  alarm_name          = var.name
+  alarm_description   = "A whole UTC day passed without a completed nightly Backup Snapshot from ${var.name}: check its logs."
+  namespace           = "Plateful"
+  metric_name         = "NightlyBackupSnapshots"
+  dimensions          = { FunctionName = aws_lambda_function.this.function_name }
+  statistic           = "Sum"
+  period              = 86400
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = [aws_sns_topic.alarm.arn]
+  ok_actions          = [aws_sns_topic.alarm.arn]
+
+  evaluation_window {
+    wall_clock_window {}
+  }
+
+  warm_up_configuration {
+    warm_up_period_duration_in_minutes              = 2880
+    only_start_evaluating_after_warm_up_period_ends = true
+  }
 }
 
 output "function_name" {

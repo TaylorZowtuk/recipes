@@ -271,15 +271,31 @@ def test_the_handler_rejects_an_unknown_kind(table: str, s3: S3Client) -> None:
         backup.handler({"kind": "monthly"}, None)
 
 
-def test_the_handler_backs_up_the_stack_from_its_environment(
-    table: str, images: ImageStore, s3: S3Client, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    seed(table)
-    s3.put_object(Bucket=images.bucket, Key=f"images/{1:032x}.webp", Body=b"synthetic")
+FUNCTION_NAME = "plateful-test-backup"
+
+
+@pytest.fixture
+def lambda_env(table: str, images: ImageStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The snapshot function's environment, as the backup module and Lambda set it."""
     monkeypatch.setenv("TABLE_NAME", table)
     monkeypatch.setenv("IMAGES_BUCKET", images.bucket)
     monkeypatch.setenv("BACKUP_BUCKET", BACKUP_BUCKET)
     monkeypatch.setenv("SNAPSHOT_READ_UNITS", "1000")
+    monkeypatch.setenv("AWS_LAMBDA_FUNCTION_NAME", FUNCTION_NAME)
+
+
+def metric_lines(out: str) -> list[dict[str, Any]]:
+    """The Embedded Metric Format lines among the handler's output."""
+    lines = [json.loads(line) for line in out.splitlines() if line.startswith("{")]
+    return [line for line in lines if "_aws" in line]
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_the_handler_backs_up_the_stack_from_its_environment(
+    table: str, images: ImageStore, s3: S3Client
+) -> None:
+    seed(table)
+    s3.put_object(Bucket=images.bucket, Key=f"images/{1:032x}.webp", Body=b"synthetic")
 
     summary = backup.handler({"kind": "pre-release"}, None)
 
@@ -288,6 +304,50 @@ def test_the_handler_backs_up_the_stack_from_its_environment(
     assert summary["images_copied"] == 1
     assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) == summary["backup_snapshot"]
     assert keys(s3, "snapshots/monthly/") == []
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_a_nightly_snapshot_counts_toward_the_stale_backup_alarm(
+    table: str, s3: S3Client, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(table)
+
+    backup.handler({"kind": "nightly"}, None)
+
+    [line] = metric_lines(capsys.readouterr().out)
+    assert line["_aws"]["CloudWatchMetrics"] == [
+        {
+            "Namespace": "Plateful",
+            "Dimensions": [["FunctionName"]],
+            "Metrics": [{"Name": "NightlyBackupSnapshots", "Unit": "Count"}],
+        }
+    ]
+    assert isinstance(line["_aws"]["Timestamp"], int)
+    assert line["FunctionName"] == FUNCTION_NAME
+    assert line["NightlyBackupSnapshots"] == 1
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_a_pre_release_snapshot_doesnt_count_toward_the_alarm(
+    table: str, s3: S3Client, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seed(table)
+
+    backup.handler({"kind": "pre-release"}, None)
+
+    assert metric_lines(capsys.readouterr().out) == []
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_a_failed_nightly_snapshot_doesnt_count_toward_the_alarm(
+    s3: S3Client, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("TABLE_NAME", "plateful-test-missing")
+
+    with pytest.raises(ClientError):
+        backup.handler({"kind": "nightly"}, None)
+
+    assert metric_lines(capsys.readouterr().out) == []
 
 
 # Download links

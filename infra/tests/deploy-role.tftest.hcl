@@ -233,6 +233,28 @@ run "deploy_policy" {
     )
     error_message = "The boundary lets the stack's roles list, read and write its backup bucket."
   }
+  assert {
+    condition = (
+      toset(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Alarm.Action])) == toset([
+        "cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource",
+        "cloudwatch:ListTagsForResource",
+      ]) &&
+      ({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Alarm.Resource == "arn:aws:cloudwatch:us-west-2:123456789012:alarm:plateful-staging-*" &&
+      contains(flatten([({ for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : s.Sid => s }).Describe.Action]), "cloudwatch:DescribeAlarms")
+    )
+    error_message = "The deploy role manages CloudWatch alarms with the stack's prefix, such as its stale backup alarm, and reads alarms."
+  }
+  assert {
+    condition = alltrue([for s in jsondecode(data.aws_iam_policy_document.deploy.json).Statement : !(
+      anytrue([for r in flatten([s.Resource]) : anytrue([for arn in [
+        "arn:aws:cloudwatch:us-west-2:123456789012:alarm:plateful-prod-backup",
+        "arn:aws:cloudwatch:us-east-1:123456789012:alarm:plateful-spend-alarm",
+      ] : can(regex("^${replace(r, "*", ".*")}$", arn))])]) &&
+      anytrue([for a in flatten([s.Action]) : anytrue([for op in ["putmetricalarm", "deletealarms", "tagresource", "untagresource"] :
+      can(regex("^${replace(lower(a), "*", ".*")}$", "cloudwatch:${op}"))])])
+    )])
+    error_message = "No statement lets the role change the other stack's alarms or the spend alarm, wildcards included."
+  }
   # The data policy (the API's and staging's dev user's) may read backups but never change them.
   assert {
     condition = alltrue([for s in jsondecode(module.access.data_policy_json).Statement : !(

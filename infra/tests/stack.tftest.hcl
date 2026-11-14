@@ -6,7 +6,7 @@
 # the API's reserved concurrency, the WAF rate limit, the kill switch's wiring in each stack, and
 # bootstrap's subscription of each stack's kill switch to the account's spend alarm topic. And the
 # backups: the backup bucket's lifecycle rules, the snapshot function's grants, its nightly
-# schedule, and the API's read of the backup bucket.
+# schedule, its stale backup alarm, and the API's read of the backup bucket.
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -295,6 +295,10 @@ run "backup" {
     target = aws_cloudwatch_log_group.this
     values = { arn = "arn:aws:logs:us-west-2:123456789012:log-group:/aws/lambda/plateful-test-backup" }
   }
+  override_resource {
+    target = aws_sns_topic.alarm
+    values = { arn = "arn:aws:sns:us-west-2:123456789012:plateful-test-backup" }
+  }
 
   assert {
     condition = (
@@ -395,6 +399,44 @@ run "backup" {
       aws_lambda_function_event_invoke_config.this.maximum_retry_attempts == 0
     )
     error_message = "An asynchronous snapshot (nightly or pre-release) is never retried: a failure is one paced Scan, not three."
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.stale.alarm_name == "plateful-test-backup" &&
+      aws_cloudwatch_metric_alarm.stale.namespace == "Plateful" &&
+      aws_cloudwatch_metric_alarm.stale.metric_name == "NightlyBackupSnapshots" &&
+      aws_cloudwatch_metric_alarm.stale.dimensions == tomap({ FunctionName = "plateful-test-backup" }) &&
+      aws_cloudwatch_metric_alarm.stale.statistic == "Sum" &&
+      aws_cloudwatch_metric_alarm.stale.period == 86400 &&
+      aws_cloudwatch_metric_alarm.stale.evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.stale.threshold == 1 &&
+      aws_cloudwatch_metric_alarm.stale.comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.stale.treat_missing_data == "breaching"
+    )
+    error_message = "The stale backup alarm fires when a day's count of completed nightly snapshots (recipes.backup's metric, by function) is under 1, or missing."
+  }
+  assert {
+    condition = (
+      length(one(aws_cloudwatch_metric_alarm.stale.evaluation_window).wall_clock_window) == 1 &&
+      one(aws_cloudwatch_metric_alarm.stale.evaluation_window[0].wall_clock_window).timezone == null
+    )
+    error_message = "The alarm evaluates the last whole UTC day, not a sliding window, which would borrow older datapoints to fill a missing day."
+  }
+  assert {
+    condition = (
+      one(aws_cloudwatch_metric_alarm.stale.warm_up_configuration).warm_up_period_duration_in_minutes == 2880 &&
+      one(aws_cloudwatch_metric_alarm.stale.warm_up_configuration).only_start_evaluating_after_warm_up_period_ends
+    )
+    error_message = "A new alarm waits two days, until a whole UTC day with a nightly in it has passed, before it evaluates."
+  }
+  assert {
+    condition = (
+      aws_sns_topic.alarm.name == "plateful-test-backup" &&
+      aws_cloudwatch_metric_alarm.stale.alarm_actions == toset(["arn:aws:sns:us-west-2:123456789012:plateful-test-backup"]) &&
+      aws_cloudwatch_metric_alarm.stale.ok_actions == toset(["arn:aws:sns:us-west-2:123456789012:plateful-test-backup"]) &&
+      length(coalesce(aws_cloudwatch_metric_alarm.stale.insufficient_data_actions, [])) == 0
+    )
+    error_message = "The alarm and its recovery go to the stack's own backup alarm topic, never the spend alarm's, which trips the kill switches."
   }
 }
 

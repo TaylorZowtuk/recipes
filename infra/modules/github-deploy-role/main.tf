@@ -234,6 +234,20 @@ data "aws_iam_policy_document" "deploy" {
     }
   }
 
+  # The stale backup alarm: the calls the AWS provider makes for a metric alarm with tags.
+  # DescribeAlarms is in Describe, since it may not take a resource.
+  statement {
+    sid = "Alarm"
+    actions = [
+      "cloudwatch:PutMetricAlarm",
+      "cloudwatch:DeleteAlarms",
+      "cloudwatch:TagResource",
+      "cloudwatch:UntagResource",
+      "cloudwatch:ListTagsForResource",
+    ]
+    resources = ["arn:aws:cloudwatch:${local.region}:${local.acct}:alarm:${local.prefix}-*"]
+  }
+
   statement {
     sid       = "AdapterLayer"
     actions   = ["lambda:GetLayerVersion"]
@@ -376,7 +390,7 @@ data "aws_iam_policy_document" "deploy" {
 
   statement {
     sid       = "Describe"
-    actions   = ["logs:DescribeLogGroups", "ssm:DescribeParameters", "dynamodb:ListTables"]
+    actions   = ["logs:DescribeLogGroups", "ssm:DescribeParameters", "dynamodb:ListTables", "cloudwatch:DescribeAlarms"]
     resources = ["*"]
   }
 }

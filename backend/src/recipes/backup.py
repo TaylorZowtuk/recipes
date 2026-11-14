@@ -69,6 +69,10 @@ LINK_SECONDS = 15 * 60
 # A presigned link is about 1.7 KB, so a page stays well under Lambda's 6 MB response limit.
 IMAGE_LINKS_PER_PAGE = 500
 CHUNK_BYTES = 64 * 1024
+# The metric the stack's stale backup alarm watches (modules/backup): one per completed nightly
+# snapshot, by function. Pre-release runs don't count, so they can't hide a schedule that stopped.
+METRIC_NAMESPACE = "Plateful"
+NIGHTLY_METRIC = "NightlyBackupSnapshots"
 
 
 class Summary(TypedDict):
@@ -409,7 +413,7 @@ def handler(event: dict[str, Any], _context: object) -> Summary:
     if kind not in INVOKED_KINDS:
         msg = f"A snapshot is {' or '.join(INVOKED_KINDS)}, not {kind}"
         raise ValueError(msg)
-    return take_snapshot(
+    summary = take_snapshot(
         boto3.client("dynamodb"),
         boto3.client("s3"),
         table=os.environ["TABLE_NAME"],
@@ -419,6 +423,31 @@ def handler(event: dict[str, Any], _context: object) -> Summary:
         read_units=float(os.environ["SNAPSHOT_READ_UNITS"]),
         now=datetime.now(UTC),
     )
+    if kind == "nightly":
+        _count_nightly(os.environ["AWS_LAMBDA_FUNCTION_NAME"])
+    return summary
+
+
+def _count_nightly(function_name: str) -> None:
+    """Count a completed nightly snapshot, its images copied too, in the Embedded Metric Format:
+    CloudWatch Logs turns this one JSON line on stdout into the metric, so the function needs no
+    PutMetricData. A logger line wouldn't do: Lambda's text format puts a prefix before it.
+    """
+    line = {
+        "_aws": {
+            "Timestamp": int(time.time() * 1000),
+            "CloudWatchMetrics": [
+                {
+                    "Namespace": METRIC_NAMESPACE,
+                    "Dimensions": [["FunctionName"]],
+                    "Metrics": [{"Name": NIGHTLY_METRIC, "Unit": "Count"}],
+                }
+            ],
+        },
+        "FunctionName": function_name,
+        NIGHTLY_METRIC: 1,
+    }
+    print(json.dumps(line, separators=(",", ":")), flush=True)
 
 
 if __name__ == "__main__":
