@@ -71,7 +71,8 @@ const pages: Shot[] = [
     loaded: "Sesame Noodles with Crispy Tofu",
     click: "Filters",
   },
-  { name: "week", path: "/week", ready: "Week Plan" },
+  // A visitor's Demo, which the stopped clock keeps the same week.
+  { name: "week", path: "/week", ready: "Week Plan", loaded: "Mon 2", stubWeek: true },
   {
     name: "week-editor",
     path: "/week",

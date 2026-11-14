@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type Route, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
@@ -562,36 +562,111 @@ test("signing out forgets the week", async ({ page }, testInfo) => {
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(cardButton(page)).toHaveCount(0);
 
-  // Nothing is left to show after signing in again, until the week has loaded afresh.
+  // Nothing is left to show after signing in again, until the week has loaded afresh: this device
+  // shows the Demo, and asks for no week.
+  const weeks = weekRequests(page);
   const signedIn = await page.request.post("/api/session", {
     data: { credential: "fake:editor@example.com" },
   });
   expect(signedIn.ok()).toBe(true);
   await page.getByRole("link", { name: "Week", exact: true }).click();
+  await expect(page.getByText(DEMO)).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
-  await expect(page.getByText(NOODLES)).toHaveCount(0);
+  await expect(page.getByRole("region")).toHaveCount(7);
+  expect(weeks).toEqual([]);
 });
 
-test("a visitor sees a prompt to sign in, and asks for no week", async ({ page }) => {
-  const weeks: string[] = [];
+// Every request a visitor's Demo must never make: a week read, or any write at all.
+function weekRequests(page: Page): string[] {
+  const sent: string[] = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname.startsWith("/api/weeks")) weeks.push(request.url());
+    const { pathname } = new URL(request.url());
+    if (!pathname.startsWith("/api/")) return;
+    if (pathname.startsWith("/api/weeks") || request.method() !== "GET") {
+      sent.push(`${request.method()} ${pathname}`);
+    }
   });
+  return sent;
+}
+
+// Other tests add recipes to the run's one Collection meanwhile, and a Demo week follows the
+// Collection, so every sync and Collection read gets the page's first answer to it.
+async function pinCollection(page: Page) {
+  const first = new Map<string, ReturnType<Route["fetch"]>>();
+  await page.route(/\/api\/(sync|v\/collection\/)/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const key = new URL(route.request().url()).pathname.startsWith("/api/sync") ? "sync" : "bundle";
+    if (!first.has(key)) first.set(key, route.fetch());
+    await route.fulfill({ response: await first.get(key) });
+  });
+}
+
+const DEMO = "Demo — changes aren’t saved";
+// Each day's planned recipes and their scales, without the dates, which differ every week anyway.
+const plannedDays = (page: Page) =>
+  page
+    .getByRole("region")
+    .evaluateAll((days) =>
+      days.map((day) =>
+        [...day.querySelectorAll(".week-entries li")].map((entry) =>
+          [".week-entry-title", ".week-scale"].map(
+            (part) => entry.querySelector(part)?.textContent,
+          ),
+        ),
+      ),
+    );
+
+test("a visitor plans a Demo week that a reload resets, and sends nothing", async ({ page }) => {
+  const sent = weekRequests(page);
+  await pinCollection(page);
+  await page.clock.setFixedTime(new Date(2030, 0, 9, 12));
 
   await page.goto("/week");
   await expect(page.getByRole("heading", { level: 1, name: "Week Plan" })).toBeVisible();
-  await expect(page.getByText("Sign in to plan the household’s week.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/sign-in");
-  await expect(page.getByRole("region")).toHaveCount(0);
+  await expect(page.getByText(DEMO)).toBeVisible();
+  const signIn = page.getByRole("link", { name: "Sign in" });
+  await expect(signIn).toHaveAttribute("href", "/sign-in");
+  expect((await signIn.boundingBox())?.height).toBeGreaterThanOrEqual(50);
+  await expect(page.getByRole("region")).toHaveCount(7);
+  await expect(page.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
+  const generated = await plannedDays(page);
 
+  // Placing goes at the end of the day, so the new entry is Thursday's last.
+  const thursday = day(page, "Thu");
+  const before = await remove(thursday).count();
+  await pick(page, thursday);
+  await expect(remove(thursday)).toHaveCount(before + 1);
+  await expect(scale(thursday).last()).toHaveText("1×");
+  await scale(thursday).last().click();
+  await page
+    .getByRole("dialog", { name: new RegExp(NOODLES) })
+    .getByRole("button", { name: "2×" })
+    .click();
+  await expect(scale(thursday).last()).toHaveText("2×");
+
+  const removes = page.getByRole("button", { name: /^Remove / });
+  const entries = await removes.count();
+  await removes.first().click();
+  await expect(removes).toHaveCount(entries - 1);
+
+  // Each week has its own Demo.
+  await page.getByRole("button", { name: "Next week" }).click();
+  await expect(page.getByText("Next week", { exact: true })).toBeVisible();
+  await expect.poll(() => plannedDays(page)).not.toEqual(generated);
+
+  await page.reload();
+  await expect(page.getByText(DEMO)).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Remove / }).first()).toBeVisible();
+  expect(await plannedDays(page)).toEqual(generated);
+
+  // The rest of the app stays read-only for a visitor.
   await page.goto("/recipes");
   await expect(page.getByRole("link", { name: new RegExp(NOODLES) })).toBeVisible();
   await expect(cardButton(page)).toHaveCount(0);
-
   await page.goto(NOODLES_PATH);
   await expect(page.getByRole("heading", { level: 1, name: NOODLES })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Ingredients" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add to a day" })).toHaveCount(0);
 
-  expect(weeks).toEqual([]);
+  expect(sent).toEqual([]);
 });
