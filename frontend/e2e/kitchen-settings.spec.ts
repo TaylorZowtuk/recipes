@@ -149,7 +149,10 @@ const draftNames = (page: Page) =>
     .evaluateAll((fields) => fields.map((field) => (field as HTMLInputElement).value));
 const ingredients = (page: Page) =>
   page.getByRole("list", { name: "Canonical Ingredients" }).getByRole("listitem");
-const ingredientRow = (page: Page, name: string) => ingredients(page).filter({ hasText: name });
+const ingredientRow = (page: Page, name: string) =>
+  ingredients(page).filter({
+    has: page.locator(".queued-site").getByText(name, { exact: true }),
+  });
 const staple = (page: Page, name: string) =>
   page.getByRole("button", { name: `Pantry Staple ${name}` });
 const search = (page: Page) =>

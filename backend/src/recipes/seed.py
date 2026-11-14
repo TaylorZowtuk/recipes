@@ -78,7 +78,16 @@ BUTTER = CanonicalIngredient(
 # the end-to-end tests look foods up in.
 BUTTER_FDC_ID = 173410  # Butter, salted (SR Legacy)
 BUTTER_TBSP = 92457
-# The butter line's substitute: Butter, without salt (SR Legacy) by the tablespoon.
+# The butter line's substitute, its own new Canonical Ingredient as a substitute must be: Butter,
+# without salt (SR Legacy) by the tablespoon.
+UNSALTED_BUTTER = CanonicalIngredient(
+    id="01K7SEED0000000000000000C6",
+    name="unsalted butter",
+    family="butter",
+    store_category_id="dairy",
+    version=1,
+    schema_version=SCHEMA_VERSION,
+)
 UNSALTED_FDC_ID = 173430
 UNSALTED_TBSP = 92512
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
@@ -528,7 +537,7 @@ RECIPES = [
                             items=[
                                 Substitution(
                                     wording="unsalted butter",
-                                    canonical_id=BUTTER.id,
+                                    canonical_id=UNSALTED_BUTTER.id,
                                     ratio=1,
                                     note="add a pinch more salt",
                                     fdc_id=UNSALTED_FDC_ID,
@@ -613,7 +622,7 @@ def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
         if added.id == REVIEW_RECIPE_ID:
-            store.enrich_recipe(added, [BUTTER, *PANTRY], [BUTTER_WORDING])
+            store.enrich_recipe(added, [BUTTER, UNSALTED_BUTTER, *PANTRY], [BUTTER_WORDING])
     store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))
 
 
