@@ -42,6 +42,12 @@ const BROWN_RICE = {
     "Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program)",
 };
 
+// More FDC Snapshot foods: cooked couscous, whose cup weighs 157 g cooked and 528 g as the dry cup
+// it yields, and cooked quinoa and millet by the cup, for a substitute.
+const COUSCOUS = { fdcId: 169700, cooked: 85372 };
+const QUINOA = { fdcId: 168917, cup: 83990 };
+const MILLET = { fdcId: 168871, cup: 83921 };
+
 // What the enrich CLI might find in the fake web's recipe (2 cups cooked rice, 1 tbsp olive oil,
 // 1 tsp kosher salt; Warm the oil in a pan; Add the rice and salt, and stir until hot): a parse of
 // each line, the rice matched to a new Canonical Ingredient with a weight, both steps' uses, the
@@ -449,6 +455,121 @@ test("an editor picks a food and portion on a line and sees its weight", async (
   await ingredients.getByRole("button", { name: new RegExp(`^Confirmed: ${rice}`) }).click();
   await expect(sheet).toContainText(/Weight\s*0\.85\d* g\/ml/);
   await expect(sheet).toContainText(`FDC ${BROWN_RICE.fdcId}`);
+});
+
+// The enrichment, with its rice line matched to another food and FDC portion.
+function matchedTo(data: ReturnType<typeof enrichment>, fdcId: number, portionId: number) {
+  const { i1 } = data.facts.ingredients;
+  i1.match = { ...i1.match, fdc_id: fdcId, portion_id: portionId };
+  i1.conversion = { ...i1.conversion, fdc_id: fdcId };
+  return data;
+}
+
+test("an editor picks another FDC portion of a line's food and sees its new weight", async ({
+  page,
+}, testInfo) => {
+  const path = `plum-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const rice = `plum rice ${attempt(testInfo)}`;
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: matchedTo(enrichment(rice), COUSCOUS.fdcId, COUSCOUS.cooked),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: new RegExp(`^Flagged: ${rice}`) }).click();
+  const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await expect(sheet.getByRole("radio", { name: "Couscous, cooked · SR Legacy" })).toBeChecked();
+  await expect(sheet.getByRole("radio", { name: "1 cup, cooked (157 g)" })).toBeChecked();
+  const choice = (name: string) =>
+    sheet.locator("label", { has: page.getByRole("radio", { name, exact: true }) });
+  await choice("1 cup, dry, yields (528 g)").click();
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+
+  // 528 g in a cup of 236.6 ml.
+  await ingredients.getByRole("button", { name: new RegExp(`^Confirmed: ${rice}`) }).click();
+  await expect(sheet).toContainText(/Weight\s*2\.23\d* g\/ml/);
+  await expect(sheet).toContainText(`FDC ${COUSCOUS.fdcId}`);
+});
+
+test("an editor changes a substitute's FDC food and FDC portion", async ({ page }, testInfo) => {
+  const path = `fig-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const rice = `fig rice ${attempt(testInfo)}`;
+  const data = enrichment(rice);
+  const { i1 } = data.facts.ingredients;
+  // A substitute is another Canonical Ingredient than its line's, new like the line's.
+  const [riceCanonical] = data.canonical_ingredients;
+  const quinoaCanonical = { ...riceCanonical, id: ulid(), name: `fig quinoa ${attempt(testInfo)}` };
+  const quinoa = {
+    wording: "quinoa",
+    canonical_id: quinoaCanonical.id,
+    ratio: 1,
+    note: "",
+    fdc_id: QUINOA.fdcId,
+    portion_id: QUINOA.cup,
+    fdc: {
+      dataset: "sr_legacy",
+      release: "sr_legacy-2018-04",
+      density_g_per_ml: 0.78,
+      grams_per_count: null,
+      count_unit: null,
+      refused: null,
+      per_100g: { kcal: 120, protein_g: 4.4, fat_g: 1.9, carbs_g: 21, sodium_mg: 7 },
+    },
+  };
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: {
+      ...data,
+      canonical_ingredients: [riceCanonical, quinoaCanonical],
+      facts: {
+        ...data.facts,
+        ingredients: {
+          ...data.facts.ingredients,
+          i1: { ...i1, substitutions: { ...stamp("llm", true), items: [quinoa] } },
+        },
+      },
+    },
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  const substitutes = ingredients.getByRole("button", { name: /quinoa ≈ ×1 for/ });
+  await substitutes.click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  const choice = (name: string) =>
+    sheet.locator("label", { has: page.getByRole("radio", { name, exact: true }) });
+  // It starts with the substitute's own food and FDC portion, and no Weight choice.
+  await expect(sheet.getByRole("radio", { name: "Quinoa, cooked · SR Legacy" })).toBeChecked();
+  await expect(sheet.getByRole("radio", { name: "1 cup (185 g)" })).toBeChecked();
+  await expect(sheet.getByRole("group", { name: "Weight" })).toHaveCount(0);
+  await sheet.getByRole("textbox", { name: "Find an FDC food" }).fill("millet cooked");
+  await choice("Millet, cooked · SR Legacy").click();
+  await choice("1 cup (174 g)").click();
+  const saved = page.waitForResponse((r) => r.url().endsWith(`/api/recipes/${id}/edit`));
+  await sheet.getByRole("button", { name: "Save quinoa" }).click();
+  const answer = await (await saved).json();
+  expect(answer.recipe.facts.ingredients.i1.substitutions.items[0]).toMatchObject({
+    wording: "quinoa",
+    fdc_id: MILLET.fdcId,
+    portion_id: MILLET.cup,
+  });
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+
+  // Nothing else shows a substitute's food, so its form, opened again, does.
+  await substitutes.click();
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  await expect(sheet.getByRole("radio", { name: "Millet, cooked · SR Legacy" })).toBeChecked();
+  await expect(sheet.getByRole("radio", { name: "1 cup (174 g)" })).toBeChecked();
 });
 
 // The seed's Garlic Butter Green Beans matches its butter to Butter, salted, so choosing butter

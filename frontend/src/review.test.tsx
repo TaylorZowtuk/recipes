@@ -802,6 +802,10 @@ describe("editing a Review Item", () => {
     expect(portionMisfit("cup", { ...ounce, fits: false })).toBe(
       "This portion is neither a volume nor a count, but the line is in cup, so the line gets no weight.",
     );
+    // A substitute stands in for the line's amount in the line's unit, so its portion fits that.
+    expect(portionMisfit("tbsp", { ...clove, fits: false }, "substitute")).toBe(
+      "This portion is counted in clove, but the line is in tbsp, so the substitute gets no weight.",
+    );
   });
 
   it("searches the FDC foods by the Canonical Ingredient's name, else the line's", () => {
@@ -895,10 +899,22 @@ describe("editing a Review Item", () => {
   });
 
   it("saves or removes a substitute, and saves the Difficulty", () => {
-    expect(substitutionEdit("i3", 0, "0.5", " half as much ")).toEqual({
-      edit: { kind: "substitution", line_id: "i3", index: 0, ratio: 0.5, note: "half as much" },
+    const food = { fdcId: 2, portionId: 7 };
+    expect(substitutionEdit("i3", 0, "0.5", " half as much ", food)).toEqual({
+      edit: {
+        kind: "substitution",
+        line_id: "i3",
+        index: 0,
+        ratio: 0.5,
+        note: "half as much",
+        fdc_id: 2,
+        portion_id: 7,
+      },
     });
-    expect(substitutionEdit("i3", 0, "11", "")).toEqual({
+    expect(substitutionEdit("i3", 0, "1", "", { fdcId: 3, portionId: null })).toEqual({
+      edit: expect.objectContaining({ fdc_id: 3, portion_id: null }),
+    });
+    expect(substitutionEdit("i3", 0, "11", "", food)).toEqual({
       problem: "Give the ratio as a number above 0 and at most 10.",
       field: "Ratio",
     });
