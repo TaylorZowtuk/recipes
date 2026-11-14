@@ -5,9 +5,9 @@ giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
 "sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
 enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Canonical Ingredient,
-a conversion and an open Enrichment Issue. PANTRY holds Canonical Ingredients no recipe uses, for
-Kitchen settings' tests to change freely. Its Favorite Sites are on reserved domains, and the
-first is on example.com, so it counts the website recipes.
+a conversion, an open Enrichment Issue and a confirmed substitute for its butter. PANTRY holds
+Canonical Ingredients no recipe uses, for Kitchen settings' tests to change freely. Its Favorite
+Sites are on reserved domains, and the first is on example.com, so it counts the website recipes.
 """
 
 import io
@@ -45,6 +45,8 @@ from recipes.models import (
     Step,
     StepFacts,
     StepUse,
+    Substitution,
+    SubstitutionsFact,
     TemperatureSegment,
     TextSegment,
     UsesFact,
@@ -76,6 +78,9 @@ BUTTER = CanonicalIngredient(
 # the end-to-end tests look foods up in.
 BUTTER_FDC_ID = 173410  # Butter, salted (SR Legacy)
 BUTTER_TBSP = 92457
+# The butter line's substitute: Butter, without salt (SR Legacy) by the tablespoon.
+UNSALTED_FDC_ID = 173430
+UNSALTED_TBSP = 92512
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -511,6 +516,26 @@ RECIPES = [
                             estimated=True,
                             fdc_id=BUTTER_FDC_ID,
                             **fdc.numbers(fdc.snapshot(), BUTTER_FDC_ID, BUTTER_TBSP).model_dump(),
+                        ),
+                        # Confirmed, so the recipe has as much to check as without it.
+                        "substitutions": SubstitutionsFact(
+                            provenance="llm",
+                            confidence=0.7,
+                            estimated=False,
+                            confirmed=True,
+                            confirmed_by="editor@example.com",
+                            confirmed_at=CAPTURED_AT,
+                            items=[
+                                Substitution(
+                                    wording="unsalted butter",
+                                    canonical_id=BUTTER.id,
+                                    ratio=1,
+                                    note="add a pinch more salt",
+                                    fdc_id=UNSALTED_FDC_ID,
+                                    portion_id=UNSALTED_TBSP,
+                                    fdc=fdc.numbers(fdc.snapshot(), UNSALTED_FDC_ID, UNSALTED_TBSP),
+                                )
+                            ],
                         ),
                     }
                 ),
