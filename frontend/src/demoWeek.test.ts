@@ -46,7 +46,11 @@ describe("applyDemoOperations", () => {
   const [noodles, oats] = cards as [(typeof cards)[0], (typeof cards)[0]];
 
   it("places a recipe at the end of its day, with a new entry and the card's title", () => {
-    const once = applyDemoOperations(empty, [{ op: "place", day: 2, recipe_id: noodles.id }], cards);
+    const once = applyDemoOperations(
+      empty,
+      [{ op: "place", day: 2, recipe_id: noodles.id }],
+      cards,
+    );
     const twice = applyDemoOperations(
       once,
       [{ op: "place", day: 2, recipe_id: oats.id, amount: { kind: "scale", factor: 2 } }],
@@ -61,7 +65,11 @@ describe("applyDemoOperations", () => {
   });
 
   it("rescales and removes an entry by its id", () => {
-    const placed = applyDemoOperations(empty, [{ op: "place", day: 0, recipe_id: noodles.id }], cards);
+    const placed = applyDemoOperations(
+      empty,
+      [{ op: "place", day: 0, recipe_id: noodles.id }],
+      cards,
+    );
     const entryId = placed.days[0]?.[0]?.entry_id ?? "";
     const scaled = applyDemoOperations(
       placed,
