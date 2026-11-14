@@ -5,9 +5,9 @@ giving the recipes in PHOTOS a generated placeholder photo. The end-to-end tests
 E2E_RECIPE_ID and E2E_RECIPE_TITLE: a Ready recipe with components, whose slug is
 "sesame-noodles-with-crispy-tofu", and on Tomato Lentil Soup, whose only Difficulty is
 enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Canonical Ingredient,
-a conversion and an open Enrichment Issue. PANTRY holds Canonical Ingredients no recipe uses, for
-Kitchen settings' tests to change freely. Its Favorite Sites are on reserved domains, and the
-first is on example.com, so it counts the website recipes.
+a conversion, an open Enrichment Issue and a confirmed substitute for its butter. PANTRY holds
+Canonical Ingredients no recipe uses, for Kitchen settings' tests to change freely. Its Favorite
+Sites are on reserved domains, and the first is on example.com, so it counts the website recipes.
 """
 
 import io
@@ -45,6 +45,8 @@ from recipes.models import (
     Step,
     StepFacts,
     StepUse,
+    Substitution,
+    SubstitutionsFact,
     TemperatureSegment,
     TextSegment,
     UsesFact,
@@ -76,6 +78,18 @@ BUTTER = CanonicalIngredient(
 # the end-to-end tests look foods up in.
 BUTTER_FDC_ID = 173410  # Butter, salted (SR Legacy)
 BUTTER_TBSP = 92457
+# The butter line's substitute, its own new Canonical Ingredient as a substitute must be: Butter,
+# without salt (SR Legacy) by the tablespoon.
+UNSALTED_BUTTER = CanonicalIngredient(
+    id="01K7SEED0000000000000000C6",
+    name="unsalted butter",
+    family="butter",
+    store_category_id="dairy",
+    version=1,
+    schema_version=SCHEMA_VERSION,
+)
+UNSALTED_FDC_ID = 173430
+UNSALTED_TBSP = 92512
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -512,6 +526,26 @@ RECIPES = [
                             fdc_id=BUTTER_FDC_ID,
                             **fdc.numbers(fdc.snapshot(), BUTTER_FDC_ID, BUTTER_TBSP).model_dump(),
                         ),
+                        # Confirmed, so the recipe has as much to check as without it.
+                        "substitutions": SubstitutionsFact(
+                            provenance="llm",
+                            confidence=0.7,
+                            estimated=False,
+                            confirmed=True,
+                            confirmed_by="editor@example.com",
+                            confirmed_at=CAPTURED_AT,
+                            items=[
+                                Substitution(
+                                    wording="unsalted butter",
+                                    canonical_id=UNSALTED_BUTTER.id,
+                                    ratio=1,
+                                    note="add a pinch more salt",
+                                    fdc_id=UNSALTED_FDC_ID,
+                                    portion_id=UNSALTED_TBSP,
+                                    fdc=fdc.numbers(fdc.snapshot(), UNSALTED_FDC_ID, UNSALTED_TBSP),
+                                )
+                            ],
+                        ),
                     }
                 ),
                 "i3": _parse(3, "cloves", "count", "garlic", "minced"),
@@ -588,7 +622,7 @@ def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
         if added.id == REVIEW_RECIPE_ID:
-            store.enrich_recipe(added, [BUTTER, *PANTRY], [BUTTER_WORDING])
+            store.enrich_recipe(added, [BUTTER, UNSALTED_BUTTER, *PANTRY], [BUTTER_WORDING])
     store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))
 
 

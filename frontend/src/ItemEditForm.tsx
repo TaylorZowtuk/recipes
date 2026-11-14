@@ -340,6 +340,7 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
         <FoodPicker
           // A new Canonical Ingredient pick starts the food's search afresh.
           key={pickedFor}
+          of="line"
           current={lineDraft(recipe, lineId).food}
           food={foodOf(recipe, lineId, saved)}
           startQuery={foodQuery(recipe, lineId, saved.canonical, collection)}
@@ -575,10 +576,11 @@ const portionLabel = (p: FdcPortion) =>
 
 const converts = (p: FdcPortion) => p.density_g_per_ml !== null || p.grams_per_count !== null;
 
-// The line's FDC food (required, the closest where none fits) and portion (optional; without one,
-// or with one that doesn't fit the line's unit, the line has no weight), searched from the
-// Canonical Ingredient's name, then `children`, the Weight choice the portion gives.
+// The FDC food (required, the closest where none fits) and FDC portion (optional; without one, or
+// with one that doesn't fit the line's unit, there's no weight) of a line or of its substitute,
+// searched from `startQuery`, then `children`, the line's Weight choice the portion gives.
 function FoodPicker({
+  of,
   current,
   food,
   startQuery,
@@ -589,6 +591,7 @@ function FoodPicker({
   onPick,
   children,
 }: {
+  of: "line" | "substitute";
   current: FoodPick;
   food: FoodPick;
   startQuery: string;
@@ -624,12 +627,12 @@ function FoodPicker({
   const chosen = food && known.get(food.fdcId);
   const portion = chosen?.food.portions.find((p) => p.id === food?.portionId);
   // Only a search for the line's unit and amount as they now are says whether the portion fits it.
-  const misfit = portion && chosen?.line === line && portionMisfit(unit, portion);
+  const misfit = portion && chosen?.line === line && portionMisfit(unit, portion, of);
   const named = (id: number) => {
     const found = known.get(id)?.food;
     return found
       ? `${found.description} · ${DATASETS[found.dataset]}`
-      : "The line’s current FDC food (its name loads when you’re online)";
+      : `The ${of}’s current FDC food (its name loads when you’re online)`;
   };
   // FDC describes some foods alike, so those carry their FDC ids too.
   const label = (id: number) =>
@@ -700,7 +703,7 @@ function FoodPicker({
                 ))
               : food.portionId !== null && (
                   <Choice group={portions} checked onChange={() => {}}>
-                    The line’s current portion
+                    The {of}’s current portion
                   </Choice>
                 )}
             <Choice
@@ -714,13 +717,20 @@ function FoodPicker({
           <p role="status" className={misfit ? "review-note" : "visually-hidden"}>
             {misfit}
           </p>
-          <p className="field-hint">
-            Without a portion, the line has no weight or nutrition. Every line worded and prepared
-            like this one, in every recipe, gets this food, and this portion where it fits that
-            line’s unit; a line no portion fits gets an Enrichment Issue asking for one. A matched
-            line prepared another way (cooked, juiced) keeps its own food, and if its Canonical
-            Ingredient changes, gets an Enrichment Issue asking for one.
-          </p>
+          {of === "line" ? (
+            <p className="field-hint">
+              Without a portion, the line has no weight or nutrition. Every line worded and prepared
+              like this one, in every recipe, gets this food, and this portion where it fits that
+              line’s unit; a line no portion fits gets an Enrichment Issue asking for one. A matched
+              line prepared another way (cooked, juiced) keeps its own food, and if its Canonical
+              Ingredient changes, gets an Enrichment Issue asking for one.
+            </p>
+          ) : (
+            <p className="field-hint">
+              Without a portion, the substitute has no weight or nutrition. This changes only this
+              substitute.
+            </p>
+          )}
         </fieldset>
       )}
       {children}
@@ -813,7 +823,14 @@ function SubstitutionsForm({
   onSave,
   onCancel,
 }: FormProps & { lineId: string }) {
-  const items = recipe.facts.ingredients[lineId]?.substitutions?.items ?? [];
+  const { parse, substitutions } = recipe.facts.ingredients[lineId] ?? {};
+  const items = substitutions?.items ?? [];
+  // A substitute stands in for the line's amount in the line's unit, so its FDC portion fits that.
+  const line = {
+    unit: parse?.unit ?? null,
+    unitKind: parse?.unit_kind ?? null,
+    hasAmount: !!parse?.quantity,
+  };
   const first = useRef<HTMLDivElement>(null);
   const noteId = useId();
   useEffect(() => {
@@ -832,6 +849,12 @@ function SubstitutionsForm({
           wording={sub.wording}
           ratio={sub.ratio}
           note={sub.note}
+          food={{
+            fdcId: sub.fdc_id,
+            portionId: sub.portion_id,
+            converts: sub.fdc.density_g_per_ml !== null || sub.fdc.grams_per_count !== null,
+          }}
+          line={line}
           disabled={disabled}
           noteId={note ? noteId : undefined}
           onSave={onSave}
@@ -853,6 +876,8 @@ function Substitute({
   wording,
   ratio,
   note,
+  food: stored,
+  line,
   disabled,
   noteId,
   onSave,
@@ -862,11 +887,14 @@ function Substitute({
   wording: string;
   ratio: number;
   note: string;
+  food: NonNullable<FoodPick>;
+  line: { unit: string | null; unitKind: FoodLine["unit_kind"]; hasAmount: boolean };
   disabled: boolean;
   noteId?: string;
   onSave: SaveEdit;
 }) {
   const [typed, setTyped] = useState({ ratio: String(ratio), note });
+  const [food, setFood] = useState(stored);
   const { problem, shown, saving, save } = useSave(onSave);
   return (
     <ProblemOf value={problem}>
@@ -875,7 +903,7 @@ function Substitute({
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          save(substitutionEdit(lineId, index, typed.ratio, typed.note));
+          save(substitutionEdit(lineId, index, typed.ratio, typed.note, food));
         }}
       >
         <fieldset className="sheet-section">
@@ -891,6 +919,17 @@ function Substitute({
             label="Note"
             value={typed.note}
             onChange={(value) => setTyped((was) => ({ ...was, note: value }))}
+          />
+          <FoodPicker
+            of="substitute"
+            current={stored}
+            food={food}
+            startQuery={wording}
+            defaultFrom={undefined}
+            unit={line.unit}
+            unitKind={line.unitKind}
+            hasAmount={line.hasAmount}
+            onPick={(picked) => picked && setFood(picked)}
           />
           {shown}
           <div className="site-actions">

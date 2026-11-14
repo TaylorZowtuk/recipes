@@ -61,6 +61,19 @@ const RAW_GARLIC: FdcFood = {
   dataset: "sr_legacy" as const,
   portions: [counted(GARLIC.clove, "clove", 3)],
 };
+// The fixture's rice flour substitute's food, and another flour a substitute may take instead.
+const RICE_FLOUR: FdcFood = {
+  fdc_id: 2,
+  description: "Rice flour, white",
+  dataset: "sr_legacy" as const,
+  portions: [portion(9001, 1, "cup", 158)],
+};
+const OAT_FLOUR: FdcFood = {
+  fdc_id: 3,
+  description: "Oat flour, partially debranned",
+  dataset: "sr_legacy" as const,
+  portions: [portion(9002, 1, "cup", 104), counted(9003, "scoop", 30)],
+};
 // Two foods FDC describes alike.
 const salt = (fdc_id: number): FdcFood => ({
   fdc_id,
@@ -74,8 +87,9 @@ const FOUND: Record<string, FdcFood[]> = {
   ghee: [GHEE],
   garlic: [],
   salt: [salt(746775), salt(746776)],
+  "rice flour": [RICE_FLOUR, OAT_FLOUR],
 };
-const BY_ID = new Map([SALTED, UNSALTED, GHEE, RAW_GARLIC].map((f) => [f.fdc_id, f]));
+const BY_ID = new Map([SALTED, UNSALTED, GHEE, RAW_GARLIC, RICE_FLOUR].map((f) => [f.fdc_id, f]));
 type Query = {
   q: string;
   canonical?: string;
@@ -85,7 +99,7 @@ type Query = {
   amount?: boolean;
 };
 // The units the API says a portion fits, where it fits only some: the pat portion only pats.
-const FITS_ONLY: Record<number, string[]> = { 92459: ["pats"] };
+const FITS_ONLY: Record<number, string[]> = { 92459: ["pats"], 9003: ["scoops"] };
 // What the API answers: a line matched to garlic elsewhere in the Collection gives its food as
 // garlic's default, first, then the named food, then what the search found, each portion saying
 // whether it fits the line's unit when the search names one. Any portion fits a line with no amount.
@@ -756,9 +770,84 @@ describe("an edit form, as an editor uses it", () => {
     await click(button("Save oat flour"));
     await click(button("Remove oat flour"));
     expect(saved()).toEqual([
-      { kind: "substitution", line_id: "i3", index: 1, ratio: 1.5, note: "" },
+      {
+        kind: "substitution",
+        line_id: "i3",
+        index: 1,
+        ratio: 1.5,
+        note: "",
+        fdc_id: 2,
+        portion_id: null,
+      },
       { kind: "remove_substitution", line_id: "i3", index: 1 },
     ]);
+  });
+
+  it("starts a substitute's FDC food search from its wording, with its food and FDC portion chosen", async () => {
+    open("i3.substitutions");
+    expect(field("Find an FDC food").value).toBe("rice flour");
+    await settle();
+    // Its own food named first, its FDC portions fitting the line's unit; no Canonical Ingredient's
+    // default food.
+    expect(queries()).toEqual([{ q: "rice flour", fdc_id: 2, unit: "cups" }]);
+    expect(checked()).toEqual(["Rice flour, white · SR Legacy", "No portion"]);
+    // A substitute's food never reaches other lines, and it has no Weight choice.
+    expect(host.textContent).not.toContain("Every line worded and prepared like this one");
+    expect(host.textContent).toContain("This changes only this substitute.");
+    expect(host.textContent).not.toContain("Weight");
+  });
+
+  it("saves the FDC food and FDC portion an editor picks for a substitute", async () => {
+    open("i3.substitutions");
+    await settle();
+    await click(choice("Oat flour, partially debranned · SR Legacy") as HTMLInputElement);
+    await click(choice("1 scoop (30 g)") as HTMLInputElement);
+    expect(host.textContent).toContain(
+      "This portion is counted in scoop, but the line is in cups, so the substitute gets no weight.",
+    );
+    await click(choice("1 cup (104 g)") as HTMLInputElement);
+    await click(button("Save rice flour"));
+    expect(saved()).toEqual([
+      {
+        kind: "substitution",
+        line_id: "i3",
+        index: 0,
+        ratio: 0.75,
+        note: "use a little less",
+        fdc_id: 3,
+        portion_id: 9002,
+      },
+    ]);
+  });
+
+  it("keeps a substitute's own food and FDC portion to choose when the search fails", async () => {
+    search.mockRejectedValue(new TypeError("offline"));
+    const r = recipe();
+    const i3 = r.facts.ingredients.i3;
+    if (!i3?.substitutions) throw new Error("fixture");
+    const [rice] = i3.substitutions.items;
+    if (!rice) throw new Error("fixture");
+    const portioned = recipe({
+      facts: {
+        ...r.facts,
+        ingredients: {
+          ...r.facts.ingredients,
+          i3: {
+            ...i3,
+            substitutions: { ...i3.substitutions, items: [{ ...rice, portion_id: 9001 }] },
+          },
+        },
+      },
+    });
+    open("i3.substitutions", { r: portioned });
+    await settle();
+    expect(host.textContent).toContain("Couldn’t search the FDC foods. Check you’re online.");
+    expect(checked()).toEqual([
+      "The substitute’s current FDC food (its name loads when you’re online)",
+      "The substitute’s current portion",
+    ]);
+    await click(button("Save rice flour"));
+    expect(saved()).toEqual([expect.objectContaining({ fdc_id: 2, portion_id: 9001 })]);
   });
 
   it("says why a substitute's Save and Remove are off, beside them", () => {

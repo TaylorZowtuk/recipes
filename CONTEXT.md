@@ -96,7 +96,7 @@ Structured facts added to a recipe once, after it is ingested, and stored with i
 _Avoid_: AI processing, augmentation
 
 **Substitution**:
-A substitute for an ingredient line that the recipe itself states, such as "butter or margarine", with an estimated ratio and the FDC numbers for the substitute. Enrichment records only what the recipe states, as unconfirmed, and a household's own substitutions go in Our Version. Only a Confirmed substitution is used: fridge matching then shows a **swap**. The stored fact is a Substitution; "swap" is only how fridge matching shows one.
+A substitute for an ingredient line that the recipe itself states, such as "butter or margarine", with an estimated ratio and the FDC numbers for the substitute. Enrichment records only what the recipe states, as unconfirmed, and a household's own substitutions go in Our Version. Only a Confirmed substitution is used: fridge matching then shows a **swap**. The stored fact is a Substitution; "swap" is only how fridge matching shows one. An editor can change a substitute's FDC food and FDC portion; unlike a line's, that reaches no other line or recipe.
 _Avoid_: Swap (for the stored fact), alternative, replacement
 
 **Fact**:

@@ -7,7 +7,17 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from conftest import EDITOR, SNAPSHOT
 from test_enrichment_review import BEEF, CONFIRMED, awaiting
-from test_review_edits import PORK, TO_PORK, beef_line, edit, frob_line, line_edit, other
+from test_review_edits import (
+    PORK,
+    TO_PORK,
+    beef_line,
+    edit,
+    frob_line,
+    line_edit,
+    other,
+    swap_edit,
+    with_swaps,
+)
 
 from recipes import fdc
 from recipes.models import Per100g, Recipe
@@ -130,12 +140,16 @@ COUNTED = Counted()
 def test_reads_and_other_edits_never_load_the_snapshot(
     editor_client: TestClient, api_store: Store
 ) -> None:
-    recipe = awaiting(api_store)
+    recipe = awaiting(api_store, facts=with_swaps("beef chuck"))
 
     assert editor_client.get("/api/sync", headers=EDITOR).status_code == 200
     assert editor_client.get(f"/api/recipes/{recipe.id}", headers=EDITOR).status_code in {200, 307}
     difficulty = edit(editor_client, recipe, kind="difficulty", prep=1, cook=2, cleanup=3)
     assert difficulty.status_code == 200
+    # A substitute's food and FDC portion unchanged keep their stored numbers.
+    version = difficulty.json()["recipe"]["version"]
+    swap = edit(editor_client, recipe, version, **swap_edit(ratio=0.5))
+    assert swap.status_code == 200
     assert COUNTED.loads == 0
 
 
