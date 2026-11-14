@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
+import { expect, type Locator, type Page, type Route, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in and fake web (backend/src/recipes/local.py) aren't on a deployed stack.
 test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in and fake web");
@@ -589,6 +589,18 @@ function weekRequests(page: Page): string[] {
   return sent;
 }
 
+// Other tests add recipes to the run's one Collection meanwhile, and a Demo week follows the
+// Collection, so every sync and Collection read gets the page's first answer to it.
+async function pinCollection(page: Page) {
+  const first = new Map<string, ReturnType<Route["fetch"]>>();
+  await page.route(/\/api\/(sync|v\/collection\/)/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const key = new URL(route.request().url()).pathname.startsWith("/api/sync") ? "sync" : "bundle";
+    if (!first.has(key)) first.set(key, route.fetch());
+    await route.fulfill({ response: await first.get(key) });
+  });
+}
+
 const DEMO = "Demo — changes aren’t saved";
 // Each day's planned recipes and their scales, without the dates, which differ every week anyway.
 const plannedDays = (page: Page) =>
@@ -606,6 +618,7 @@ const plannedDays = (page: Page) =>
 
 test("a visitor plans a Demo week that a reload resets, and sends nothing", async ({ page }) => {
   const sent = weekRequests(page);
+  await pinCollection(page);
   await page.clock.setFixedTime(new Date(2030, 0, 9, 12));
 
   await page.goto("/week");
