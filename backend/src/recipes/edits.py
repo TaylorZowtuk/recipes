@@ -139,8 +139,8 @@ SubstituteIndex = Annotated[int, Field(ge=0, lt=MAX_SUBSTITUTES)]
 
 
 class EditSubstitution(BaseModel):
-    """The ratio, note, FDC food and FDC portion (none chosen is allowed) of the line's substitute
-    at `index`. The API copies a new food's numbers from the FDC Snapshot.
+    """The ratio, note, FDC food and FDC portion (which may be none) of the line's substitute at
+    `index`. The API copies a new food's numbers from the FDC Snapshot.
     """
 
     kind: Literal["substitution"]
@@ -657,7 +657,7 @@ def _substitute(
             numbers = fdc.numbers(snapshot(), edit.fdc_id, edit.portion_id)
         except fdc.NotInSnapshot as refused:
             raise HTTPException(
-                422, f"Line {edit.line_id}'s substitute {edit.index}: {refused}"
+                422, f"Line {edit.line_id}'s substitute {current.wording}: {refused}"
             ) from None
         changes |= {"fdc_id": edit.fdc_id, "portion_id": edit.portion_id, "fdc": numbers}
     return current.model_copy(update=changes)
