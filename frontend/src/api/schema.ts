@@ -440,18 +440,18 @@ export interface paths {
          *     come from the API's own FDC Snapshot, whose release the recipe records.
          *
          *     Refused unless it was enriched against the API's FDC Snapshot release, every match and
-         *     substitute names an FDC food the Snapshot has and no FDC portion or one of the food's, every
-         *     fact is for one of the recipe's lines or steps, every step's segments are its text exactly and
-         *     name only its lines, as do its uses, no step uses a line twice, every duration or temperature
-         *     segment is one code finds in its step's text, a step with segments has uses that are exactly its
-         *     segments' Step Portions summed per line, each line's `portion`s across the steps add up to at
-         *     most 1, every Enrichment Issue is on one of their facts and arrives open with no Confirm Batch,
-         *     substitutions and a suggested Difficulty arrive from the LLM, estimated and unconfirmed, no
-         *     substitute is its line's own match, every wording is the normalized name of one of the parsed
-         *     lines, it learns at most MAX_LEARNED items, every match, substitute and wording names a
-         *     Canonical Ingredient that exists or is new here, every new one's Store Category exists, every
-         *     new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the enriched
-         *     recipe is at most MAX_RECIPE_BYTES as JSON.
+         *     substitute names an FDC food the FDC Snapshot has and either no FDC portion or one of that
+         *     food's, every fact is for one of the recipe's lines or steps, every step's segments are its text
+         *     exactly and name only its lines, as do its uses, no step uses a line twice, every duration or
+         *     temperature segment is one code finds in its step's text, a step with segments has uses that are
+         *     exactly its segments' Step Portions summed per line, each line's `portion`s across the steps add
+         *     up to at most 1, every Enrichment Issue is on one of their facts and arrives open with no
+         *     Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated and
+         *     unconfirmed, no substitute is its line's own match, every wording is the normalized name of one
+         *     of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
+         *     names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
+         *     every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
+         *     enriched recipe is at most MAX_RECIPE_BYTES as JSON.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -3573,7 +3573,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description It was enriched against another FDC Snapshot release, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description The request names another FDC Snapshot release than the API's, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
