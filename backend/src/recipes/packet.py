@@ -37,14 +37,16 @@ from recipes.models import (
     SCHEMA_VERSION,
     Amount,
     CanonicalIngredient,
-    ConversionFact,
     Dataset,
     Difficulty,
     DifficultyFact,
     DurationSegment,
     Enrichment,
+    EnrichmentFacts,
     EnrichmentIssue,
-    IngredientFacts,
+    EnrichmentLineFacts,
+    EnrichmentSubstitution,
+    EnrichmentSubstitutionsFact,
     IngredientSegment,
     Label,
     Line,
@@ -53,15 +55,12 @@ from recipes.models import (
     Quantity,
     Ratio,
     Recipe,
-    RecipeFacts,
     Segment,
     SegmentsFact,
     StatedTimes,
     StepFacts,
     StepUse,
     StoreCategory,
-    Substitution,
-    SubstitutionsFact,
     TextSegment,
     UsesFact,
     Wording,
@@ -188,7 +187,7 @@ def mentions(text: str, name: str) -> bool:
     return re.search(f"{before}{re.escape(name)}{after}", text, re.IGNORECASE) is not None
 
 
-def default_uses(recipe: Recipe, facts: RecipeFacts) -> dict[str, list[StepUse]]:
+def default_uses(recipe: Recipe, facts: EnrichmentFacts) -> dict[str, list[StepUse]]:
     """Each step's default uses: each parsed line all used in the first step whose text mentions
     its short name or name, ignoring case.
     """
@@ -207,19 +206,19 @@ def default_uses(recipe: Recipe, facts: RecipeFacts) -> dict[str, list[StepUse]]
     return uses
 
 
-def facts_for(recipe: Recipe) -> RecipeFacts:
+def facts_for(recipe: Recipe) -> EnrichmentFacts:
     """A parse fact for each of the Original's lines, across all its Components. A line the parser
     fails on is left without one, and the Ingredients tab shows its text as written.
     """
-    ingredients: dict[str, IngredientFacts] = {}
+    ingredients: dict[str, EnrichmentLineFacts] = {}
     for line in recipe.original.ingredients:
         try:
-            ingredients[line.id] = IngredientFacts(parse=parse_line(line.text))
+            ingredients[line.id] = EnrichmentLineFacts(parse=parse_line(line.text))
         except Exception as error:
             print(
                 f"{recipe.original.title}: left line {line.id} unparsed: {error!r}", file=sys.stderr
             )
-    return RecipeFacts(ingredients=ingredients)
+    return EnrichmentFacts(ingredients=ingredients)
 
 
 class Strict(BaseModel):
@@ -480,7 +479,7 @@ class Work:
         return recipe[0].original.title if recipe else recipe_id
 
     def _offer(
-        self, recipe: Recipe, facts: RecipeFacts, quoted: dict[str, list[str]]
+        self, recipe: Recipe, facts: EnrichmentFacts, quoted: dict[str, list[str]]
     ) -> PacketRecipe:
         lines: list[PacketLine] = []
         for line in recipe.original.ingredients:
@@ -622,7 +621,7 @@ class Work:
         return Enrichment(
             enrichment_version=ENRICHMENT_VERSION,
             fdc_release=self.snapshot.release,
-            facts=RecipeFacts(
+            facts=EnrichmentFacts(
                 ingredients=recipe.ingredients,
                 steps=recipe.steps,
                 difficulty=DifficultyFact(
@@ -653,7 +652,7 @@ class _Answering:
     learns.
     """
 
-    def __init__(self, work: Work, facts: RecipeFacts, model: str, line_ids: set[str]) -> None:
+    def __init__(self, work: Work, facts: EnrichmentFacts, model: str, line_ids: set[str]) -> None:
         self.work = work
         self.model = model
         self.line_ids = line_ids
@@ -711,20 +710,18 @@ class _Answering:
         confidence = parse.confidence if parse else 0
         if answered.doubts:
             confidence = min(confidence, DOUBTED_CONFIDENCE)
-        numbers = fdc.numbers(self.work.snapshot, food.fdc_id, answered.portion_id)
         substitutions = [
-            Substitution(
+            EnrichmentSubstitution(
                 wording=s.wording,
                 canonical_id=s.canonical_id,
                 ratio=s.ratio,
                 note=s.note,
                 fdc_id=s.fdc_id,
                 portion_id=s.portion_id,
-                fdc=fdc.numbers(self.work.snapshot, s.fdc_id, s.portion_id),
             )
             for s in answered.substitutions
         ]
-        self.ingredients[line.line_id] = IngredientFacts(
+        self.ingredients[line.line_id] = EnrichmentLineFacts(
             parse=parse,
             match=MatchFact(
                 provenance="llm",
@@ -734,14 +731,7 @@ class _Answering:
                 fdc_id=food.fdc_id,
                 portion_id=answered.portion_id,
             ),
-            conversion=ConversionFact(
-                provenance="fdc",
-                confidence=confidence,
-                estimated=True,
-                fdc_id=food.fdc_id,
-                **numbers.model_dump(),
-            ),
-            substitutions=SubstitutionsFact(
+            substitutions=EnrichmentSubstitutionsFact(
                 provenance="llm", confidence=confidence, estimated=True, items=substitutions
             )
             if substitutions

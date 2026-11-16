@@ -265,7 +265,7 @@ def test_a_confirmed_wording_offers_only_its_canonical() -> None:
     assert oil.wording_confirmed
 
 
-def test_an_answer_within_the_offers_gives_a_match_and_a_conversion_from_the_snapshot() -> None:
+def test_an_answer_within_the_offers_gives_a_match_naming_the_fdc_food_and_portion() -> None:
     enrichment = enrich(work(), answer())
 
     assert enrichment.fdc_release == SNAPSHOT.release
@@ -278,13 +278,9 @@ def test_an_answer_within_the_offers_gives_a_match_and_a_conversion_from_the_sna
     assert oil.match is not None
     assert (oil.match.provenance, oil.match.canonical_id) == ("llm", GLIMMER_ID)
     assert (oil.match.fdc_id, oil.match.portion_id) == (2004, 606)
-    conversion = oil.conversion
-    assert conversion is not None
-    assert (conversion.provenance, conversion.estimated) == ("fdc", True)
-    assert (conversion.dataset, conversion.release) == ("sr_legacy", SNAPSHOT.release)
-    assert conversion.density_g_per_ml == pytest.approx(13.5 / 14.78676478125)
-    assert conversion.per_100g.model_dump() == SNAPSHOT.food(2004).per_100g.model_dump()
-    assert conversion.confidence == oil.parse.confidence
+    assert oil.match.confidence == oil.parse.confidence
+    # The API fills in the conversion from its own FDC Snapshot.
+    assert "conversion" not in oil.model_dump()
     assert enrichment.issues == []
     assert enrichment.canonical_ingredients == []
     # The wording maps to the same canonical already, so there's nothing to learn.
@@ -305,10 +301,7 @@ def test_a_new_canonical_ingredient_is_created_learned_and_raised_as_an_issue() 
     assert (created.confirmed, created.version, created.schema_version) == (False, 1, 1)
     match = enrichment.facts.ingredients["i1"].match
     assert match is not None
-    assert match.canonical_id == created.id
-    conversion = enrichment.facts.ingredients["i1"].conversion
-    assert conversion is not None
-    assert (conversion.grams_per_count, conversion.count_unit) == (50, "large")
+    assert (match.canonical_id, match.fdc_id, match.portion_id) == (created.id, 1002, 503)
     assert [(w.wording, w.canonical_id, w.confirmed) for w in enrichment.wordings] == [
         ("quill eggs", created.id, False)
     ]
@@ -571,7 +564,7 @@ def test_the_same_quantity_as_the_parse_changes_nothing() -> None:
     assert enrichment.issues == []
 
 
-def test_a_doubt_raises_an_issue_and_lowers_the_conversions_confidence() -> None:
+def test_a_doubt_raises_an_issue_and_lowers_the_matchs_confidence() -> None:
     doubted = line(doubts=["Glimmer oil might be the toasted kind"])
 
     enrichment = enrich(work(), answer(doubted))
@@ -579,9 +572,9 @@ def test_a_doubt_raises_an_issue_and_lowers_the_conversions_confidence() -> None
     (issue,) = enrichment.issues
     assert (issue.fact_id, issue.before, issue.after) == ("i2.match", None, "glimmer oil")
     assert issue.reason == "Glimmer oil might be the toasted kind"
-    conversion = enrichment.facts.ingredients["i2"].conversion
-    assert conversion is not None
-    assert conversion.confidence <= 0.5
+    match = enrichment.facts.ingredients["i2"].match
+    assert match is not None
+    assert match.confidence <= 0.5
 
 
 def test_a_line_with_more_than_five_doubts_is_refused() -> None:
@@ -1121,7 +1114,7 @@ def test_a_quoted_substitute_with_an_amount_is_offered_its_cached_canonical_firs
     ]
 
 
-def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_with_fdc_numbers() -> None:
+def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_naming_fdc_ids() -> None:
     enrichment = enrich(offering(), answer(line(substitutions=[substitution()])))
 
     oil = enrichment.facts.ingredients["i2"]
@@ -1129,8 +1122,7 @@ def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_with_fdc_numb
     assert fact is not None
     assert (fact.provenance, fact.estimated, fact.confirmed) == ("llm", True, False)
     assert oil.match is not None
-    assert oil.conversion is not None
-    assert fact.confidence == oil.conversion.confidence
+    assert fact.confidence == oil.match.confidence
     (item,) = fact.items
     assert (item.wording, item.canonical_id, item.ratio, item.note) == (
         "zorbleberry oil",
@@ -1139,13 +1131,7 @@ def test_accepted_substitutions_are_one_unconfirmed_estimated_fact_with_fdc_numb
         "use twice as much",
     )
     assert (item.fdc_id, item.portion_id) == (1001, 501)
-    food = SNAPSHOT.food(1001)
-    assert item.fdc.model_dump() == {
-        "dataset": food.dataset,
-        "release": SNAPSHOT.release,
-        **fdc.convert(food, 501).model_dump(),
-        "per_100g": food.per_100g.model_dump(),
-    }
+    assert "fdc" not in item.model_dump()
 
 
 def test_an_offered_substitute_the_answer_leaves_out_is_not_written() -> None:

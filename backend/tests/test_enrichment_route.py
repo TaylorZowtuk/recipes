@@ -1,17 +1,19 @@
 """The enrich CLI writes a Pending recipe's parse facts, which moves its Enrichment Status."""
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from conftest import EDITOR
+from conftest import EDITOR, SNAPSHOT
 
+from recipes import fdc
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.ingest import BROWSER_EXTRACTOR, EXTRACTOR, LLM_EXTRACTOR, PASTED_EXTRACTOR
 from recipes.models import (
     MAX_LABEL,
     MAX_RECIPE_BYTES,
     CanonicalIngredient,
+    Enrichment,
     EnrichmentIssue,
     Step,
     Wording,
@@ -71,7 +73,7 @@ def enrich(
     facts: dict[str, Any] = FACTS,
     headers: dict[str, str] = EDITOR,
 ) -> Response:
-    body = {"enrichment_version": 1, "facts": facts}
+    body = {"enrichment_version": 1, "fdc_release": SNAPSHOT.release, "facts": facts}
     return editor_client.put(f"/api/recipes/{recipe_id}/enrichment", json=body, headers=headers)
 
 
@@ -250,29 +252,11 @@ BEEF = {
     "schema_version": 1,
 }
 LLM = {"provenance": "llm", "confidence": 0.8, "estimated": False}
-FDC = {"provenance": "fdc", "confidence": 0.8, "estimated": True}
 MATCHED = {
     "ingredients": {
         "i1": {
             **FACTS["ingredients"]["i1"],
             "match": {**LLM, "canonical_id": BEEF_ID, "fdc_id": 1001, "portion_id": None},
-            "conversion": {
-                **FDC,
-                "fdc_id": 1001,
-                "dataset": "sr_legacy",
-                "release": "foundation-2026-04-01+sr_legacy-2018-04",
-                "density_g_per_ml": None,
-                "grams_per_count": None,
-                "count_unit": None,
-                "refused": "The line is already a weight",
-                "per_100g": {
-                    "kcal": 150.0,
-                    "protein_g": 20.0,
-                    "fat_g": 7.0,
-                    "carbs_g": 0.0,
-                    "sodium_mg": None,
-                },
-            },
         }
     }
 }
@@ -299,7 +283,7 @@ def issue(n: int, status: str = "open") -> dict[str, Any]:
 def enrich_matched(editor_client: TestClient, recipe_id: str, **fields: object) -> Response:
     body = {
         "enrichment_version": 2,
-        "fdc_release": "foundation-2026-04-01+sr_legacy-2018-04",
+        "fdc_release": SNAPSHOT.release,
         "facts": MATCHED,
         "issues": [issue(1)],
         "canonical_ingredients": [BEEF],
@@ -323,12 +307,9 @@ def test_a_match_writes_its_new_canonical_ingredient_and_wording_with_the_recipe
 
     assert response.status_code == 200
     stored = fetch(editor_client, recipe.id)
-    assert stored["fdc_release"] == "foundation-2026-04-01+sr_legacy-2018-04"
+    assert stored["fdc_release"] == SNAPSHOT.release
     assert stored["issues"] == [issue(1)]
-    beef = stored["facts"]["ingredients"]["i1"]
-    assert beef["match"]["canonical_id"] == BEEF_ID
-    assert beef["conversion"]["per_100g"]["kcal"] == 150
-    assert beef["conversion"]["refused"] == "The line is already a weight"
+    assert stored["facts"]["ingredients"]["i1"]["match"]["canonical_id"] == BEEF_ID
     collection = bundle(editor_client)
     assert collection["collection_version"] == before + 1
     assert collection["canonical_ingredients"] == [
@@ -771,12 +752,12 @@ SWAP = {
     "note": "simmer a little longer",
     "fdc_id": 1002,
     "portion_id": None,
-    "fdc": {
-        key: MATCHED["ingredients"]["i1"]["conversion"][key]
-        for key in ("dataset", "release", "density_g_per_ml", "grams_per_count", "count_unit")
-    }
-    | {"refused": None, "per_100g": MATCHED["ingredients"]["i1"]["conversion"]["per_100g"]},
 }
+
+
+def numbers(fdc_id: int, portion_id: int | None) -> dict[str, Any]:
+    """The fixture FDC Snapshot's numbers for a food and FDC portion, as the API stores them."""
+    return fdc.numbers(SNAPSHOT, fdc_id, portion_id).model_dump(mode="json")
 
 
 def suggesting(
@@ -809,7 +790,7 @@ def test_substitutions_and_a_suggested_difficulty_are_stored_with_the_recipe(
     assert response.status_code == 200
     stored = fetch(editor_client, recipe.id)["facts"]
     swap = stored["ingredients"]["i1"]["substitutions"]
-    assert swap["items"] == [SWAP]
+    assert swap["items"] == [{**SWAP, "fdc": numbers(1002, None)}]
     assert (swap["provenance"], swap["estimated"], swap["confirmed"]) == ("llm", True, False)
     assert stored["difficulty"] == {**SUGGESTION, "prep": 1, "cook": 2, "cleanup": 3} | {
         "confirmed": False,
@@ -916,3 +897,111 @@ def test_an_issue_on_a_suggestion_is_accepted(
     )
 
     assert response.status_code == 200
+
+
+UNCONFIRMED = {
+    "confirmed": False,
+    "confirmed_by": None,
+    "confirmed_at": None,
+    "confirm_batch": None,
+}
+
+
+def test_the_api_fills_in_the_fdc_numbers_from_its_own_fdc_snapshot(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    facts = suggesting()
+    facts["ingredients"]["i2"] = {
+        "match": {
+            **LLM,
+            "confidence": 0.7,
+            "canonical_id": BEEF_ID,
+            "fdc_id": 1001,
+            "portion_id": 501,
+        }
+    }
+
+    response = enrich_matched(
+        editor_client, recipe.id, facts=facts, canonical_ingredients=[BEEF, CHUCK]
+    )
+
+    assert response.status_code == 200
+    stored = fetch(editor_client, recipe.id)
+    assert stored["fdc_release"] == SNAPSHOT.release
+    lines = stored["facts"]["ingredients"]
+    for line_id, portion_id, confidence in [("i1", None, 0.8), ("i2", 501, 0.7)]:
+        assert lines[line_id]["conversion"] == {
+            "provenance": "fdc",
+            "confidence": confidence,
+            "estimated": True,
+            **UNCONFIRMED,
+            "fdc_id": 1001,
+            **numbers(1001, portion_id),
+        }
+    assert lines["i1"]["conversion"]["refused"] == fdc.NO_PORTION
+    assert lines["i1"]["substitutions"]["items"] == [{**SWAP, "fdc": numbers(1002, None)}]
+
+
+def matched_to(fdc_id: int, portion_id: int | None) -> dict[str, Any]:
+    facts = suggesting()
+    match = facts["ingredients"]["i1"]["match"]
+    facts["ingredients"]["i1"]["match"] = {**match, "fdc_id": fdc_id, "portion_id": portion_id}
+    return facts
+
+
+OTHER_RELEASE = "foundation-2026-04-30+sr_legacy-2018-04"
+
+
+@pytest.mark.parametrize(
+    ("fields", "detail"),
+    [
+        (
+            {"fdc_release": OTHER_RELEASE},
+            (
+                f"Enriched against release {OTHER_RELEASE}, the API has {SNAPSHOT.release}: "
+                "pull and enrich again"
+            ),
+        ),
+        ({"facts": matched_to(9999, None)}, "Line i1: FDC food 9999 isn't in the FDC Snapshot"),
+        ({"facts": matched_to(1001, 503)}, "Line i1: portion 503 isn't one of FDC food 1001's"),
+        (
+            {"facts": suggesting(substitutions={"items": [{**SWAP, "fdc_id": 9999}]})},
+            "Line i1's substitute beef chuck: FDC food 9999 isn't in the FDC Snapshot",
+        ),
+        (
+            {"facts": suggesting(substitutions={"items": [{**SWAP, "portion_id": 501}]})},
+            "Line i1's substitute beef chuck: portion 501 isn't one of FDC food 1002's",
+        ),
+    ],
+)
+def test_another_release_or_an_fdc_food_or_portion_not_in_the_snapshot_is_refused(
+    editor_client: TestClient, api_store: Store, fields: dict[str, Any], detail: str
+) -> None:
+    recipe = add(api_store)
+
+    response = enrich_matched(
+        editor_client, recipe.id, canonical_ingredients=[BEEF, CHUCK], **fields
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == detail
+    assert_nothing_written(editor_client, recipe)
+
+
+def test_the_enrichment_request_carries_no_fdc_numbers() -> None:
+    schema = Enrichment.model_json_schema()
+    properties: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            properties.update(cast("dict[str, Any]", node).get("properties", {}))
+            for value in cast("dict[str, Any]", node).values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in cast("list[Any]", node):
+                walk(value)
+
+    walk(schema)
+    assert properties.isdisjoint({"conversion", "fdc", "per_100g", "density_g_per_ml"})
+    assert schema["$defs"].keys().isdisjoint({"FdcNumbers", "Per100g", "ConversionFact"})

@@ -57,11 +57,14 @@ from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
     Card,
+    ConversionFact,
     Dataset,
     Difficulty,
     DurationSegment,
     Enrichment,
+    EnrichmentLineFacts,
     EnrichmentStatus,
+    EnrichmentSubstitution,
     EntryAmount,
     Fact,
     FavoriteSite,
@@ -85,6 +88,7 @@ from recipes.models import (
     StepFacts,
     StoreCategory,
     Substitution,
+    SubstitutionsFact,
     TemperatureSegment,
     Ulid,
     WebsiteSource,
@@ -783,7 +787,9 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
             "Ingredient's id is taken, or an editor confirmed a wording"
         },
         422: {
-            "description": "A fact or Enrichment Issue is for a line or step the recipe doesn't "
+            "description": "It was enriched against another FDC Snapshot release, a line or "
+            "substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that "
+            "isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't "
             "have, a step's segments aren't its text, its segments or uses name a line the recipe "
             "doesn't have, a line's portions add up to more than 1, an issue isn't open, "
             "substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a "
@@ -794,28 +800,41 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
         },
     },
 )
-def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep) -> Recipe:
+def put_enrichment(
+    recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep, snapshot: SnapshotDep
+) -> Recipe:
     """Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
     create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
     any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
+    Enrichment sends only FDC ids: each matched line's conversion and each substitute's numbers
+    come from the API's own FDC Snapshot, whose release the recipe records.
 
-    Refused unless every fact is for one of the recipe's lines or steps, every step's segments
-    are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
-    duration or temperature segment is one code finds in its step's text, a step with segments has
-    uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
-    the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-    with no Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
-    and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
-    one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
-    wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
-    exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
-    the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+    Refused unless it was enriched against the API's FDC Snapshot release, every match and
+    substitute names an FDC food the Snapshot has and no FDC portion or one of the food's, every
+    fact is for one of the recipe's lines or steps, every step's segments are its text exactly and
+    name only its lines, as do its uses, no step uses a line twice, every duration or temperature
+    segment is one code finds in its step's text, a step with segments has uses that are exactly its
+    segments' Step Portions summed per line, each line's `portion`s across the steps add up to at
+    most 1, every Enrichment Issue is on one of their facts and arrives open with no Confirm Batch,
+    substitutions and a suggested Difficulty arrive from the LLM, estimated and unconfirmed, no
+    substitute is its line's own match, every wording is the normalized name of one of the parsed
+    lines, it learns at most MAX_LEARNED items, every match, substitute and wording names a
+    Canonical Ingredient that exists or is new here, every new one's Store Category exists, every
+    new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the enriched
+    recipe is at most MAX_RECIPE_BYTES as JSON.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
         raise HTTPException(404, "No such recipe")
     if recipe.status != "pending":
         raise HTTPException(409, "Only a Pending recipe can be enriched")
+    foods = snapshot()
+    if body.fdc_release != foods.release:
+        raise HTTPException(
+            422,
+            f"Enriched against release {body.fdc_release}, the API has {foods.release}: "
+            "pull and enrich again",
+        )
     _check_lines(body, recipe)
     _check_steps(body, recipe)
     _check_suggestions(body)
@@ -826,9 +845,9 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
     _check_canonical_ingredients(body, store)
     enriched = recipe.model_copy(
         update={
-            "facts": body.facts,
+            "facts": _filled(body, foods),
             "enrichment_version": body.enrichment_version,
-            "fdc_release": body.fdc_release,
+            "fdc_release": foods.release,
             "issues": body.issues,
             "status": _enriched_status(recipe),
         }
@@ -841,6 +860,50 @@ def put_enrichment(recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: 
         raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
     except WordingConfirmed:
         raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+def _filled(body: Enrichment, snapshot: fdc.Snapshot) -> RecipeFacts:
+    """The facts to store: each matched line gets the conversion its match's FDC food and FDC
+    portion give, the FDC Snapshot's estimate at the match's confidence, and each substitute its
+    numbers. A 422 names the line or substitute whose food or FDC portion the Snapshot lacks.
+    """
+    ingredients: dict[str, IngredientFacts] = {}
+    for line_id, facts in body.facts.ingredients.items():
+        conversion = None
+        if match := facts.match:
+            try:
+                numbers = fdc.numbers(snapshot, match.fdc_id, match.portion_id)
+            except fdc.NotInSnapshot as refused:
+                raise HTTPException(422, f"Line {line_id}: {refused}") from None
+            conversion = ConversionFact(
+                provenance="fdc",
+                confidence=match.confidence,
+                estimated=True,
+                fdc_id=match.fdc_id,
+                **numbers.model_dump(),
+            )
+        substitutions = None
+        if facts.substitutions:
+            items = [_with_numbers(line_id, item, snapshot) for item in facts.substitutions.items]
+            substitutions = SubstitutionsFact(
+                **facts.substitutions.model_dump(exclude={"items"}), items=items
+            )
+        ingredients[line_id] = IngredientFacts(
+            parse=facts.parse, match=facts.match, conversion=conversion, substitutions=substitutions
+        )
+    return RecipeFacts(
+        ingredients=ingredients, steps=body.facts.steps, difficulty=body.facts.difficulty
+    )
+
+
+def _with_numbers(
+    line_id: str, item: EnrichmentSubstitution, snapshot: fdc.Snapshot
+) -> Substitution:
+    try:
+        numbers = fdc.numbers(snapshot, item.fdc_id, item.portion_id)
+    except fdc.NotInSnapshot as refused:
+        raise HTTPException(422, f"Line {line_id}'s substitute {item.wording}: {refused}") from None
+    return Substitution(**item.model_dump(), fdc=numbers)
 
 
 def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
@@ -1369,7 +1432,7 @@ def _check_suggestions(body: Enrichment) -> None:
             raise HTTPException(422, "A substitute isn't its line's own Canonical Ingredient")
 
 
-def _substitutes(facts: IngredientFacts) -> list[Substitution]:
+def _substitutes(facts: EnrichmentLineFacts) -> list[EnrichmentSubstitution]:
     return facts.substitutions.items if facts.substitutions else []
 
 
