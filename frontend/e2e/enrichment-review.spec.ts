@@ -61,7 +61,8 @@ const MILLET = { fdcId: 168871, cup: 83921 };
 // What the enrich CLI might find in the fake web's recipe (2 cups cooked rice, 1 tbsp olive oil,
 // 1 tsp kosher salt; Warm the oil in a pan; Add the rice and salt, and stir until hot): a parse of
 // each line, the rice matched to a new Canonical Ingredient and FDC portion (the API fills in its
-// weight and nutrition), both steps' uses, the first step's segments, a suggested Difficulty, and one open Enrichment Issue on the rice's match.
+// weight and nutrition), both steps' uses, the first step's segments, a suggested Difficulty, and
+// one open Enrichment Issue on the rice's match.
 function enrichment(rice: string) {
   const canonicalId = ulid();
   return {
