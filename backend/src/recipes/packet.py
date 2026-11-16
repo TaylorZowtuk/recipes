@@ -81,7 +81,8 @@ ENRICHMENT_VERSION = 4
 MAX_CANDIDATES = 8
 # The most doubts a line's answer may raise, so a steered model can't swell the recipe.
 MAX_DOUBTS = 5
-# A doubted line's match and conversion are at most this confident, so an editor checks them.
+# A doubted line's match, and the conversion the API builds from it, are at most this confident,
+# so an editor checks them.
 DOUBTED_CONFIDENCE = 0.5
 # A suggested Difficulty is a guess from the text, so an editor checks it.
 DIFFICULTY_CONFIDENCE = 0.5
@@ -572,11 +573,11 @@ class Work:
         return canonicals[:MAX_CANDIDATES], foods
 
     def enrich(self, answered: AnsweredRecipe, model: str) -> Enrichment:
-        """The enrichment a model's answer gives one recipe: every line's parse, and a match and
-        conversion for each answered line, with the Enrichment Issues, new Canonical Ingredients
-        and wordings that come of it. Raises Rejected, with every error, when the recipe's offer
-        changed since the answer's packet, any line chose something it wasn't offered, or the
-        enrichment is more than one write holds.
+        """The enrichment a model's answer gives one recipe: every line's parse, and a match for
+        each answered line (the API fills in its conversion), with the Enrichment Issues, new
+        Canonical Ingredients and wordings that come of it. Raises Rejected, with every error, when
+        the recipe's offer changed since the answer's packet, any line chose something it wasn't
+        offered, or the enrichment is more than one write holds.
         """
         try:
             return self._enrich(answered, model)
