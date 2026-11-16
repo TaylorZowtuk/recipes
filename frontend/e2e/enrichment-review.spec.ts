@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { expect, type Locator, type Page, type TestInfo, test } from "@playwright/test";
 
 // The local API's fake sign-in, fake web and service token (backend/src/recipes/local.py) aren't
@@ -6,6 +8,14 @@ test.skip(!!process.env.E2E_BASE_URL, "needs the local API's fake sign-in, fake 
 
 // In Playwright's WebKit, page.route stops seeing requests once the app registers a service worker.
 test.use({ serviceWorkers: "block" });
+
+// The request names the FDC Snapshot release the model's ids came from, which must be the API's:
+// the committed snapshot's file name in backend/src/recipes/data, minus its extension.
+const FDC_DIR = fileURLToPath(new URL("../../backend/src/recipes/data", import.meta.url));
+const FDC_RELEASE = (readdirSync(FDC_DIR).find((f) => f.endsWith(".json.gz")) ?? "").replace(
+  ".json.gz",
+  "",
+);
 
 const SERVICE_TOKEN = { "x-plateful-service-token": "local-dev-service-token" };
 
@@ -50,13 +60,13 @@ const MILLET = { fdcId: 168871, cup: 83921 };
 
 // What the enrich CLI might find in the fake web's recipe (2 cups cooked rice, 1 tbsp olive oil,
 // 1 tsp kosher salt; Warm the oil in a pan; Add the rice and salt, and stir until hot): a parse of
-// each line, the rice matched to a new Canonical Ingredient with a weight, both steps' uses, the
-// first step's segments, a suggested Difficulty, and one open Enrichment Issue on the rice's match.
+// each line, the rice matched to a new Canonical Ingredient and FDC portion (the API fills in its
+// weight and nutrition), both steps' uses, the first step's segments, a suggested Difficulty, and one open Enrichment Issue on the rice's match.
 function enrichment(rice: string) {
   const canonicalId = ulid();
   return {
     enrichment_version: 1,
-    fdc_release: "sr_legacy-2018-04",
+    fdc_release: FDC_RELEASE,
     facts: {
       ingredients: {
         i1: {
@@ -66,17 +76,6 @@ function enrichment(rice: string) {
             canonical_id: canonicalId,
             fdc_id: WHITE_RICE.fdcId,
             portion_id: WHITE_RICE.cup,
-          },
-          conversion: {
-            ...stamp("fdc", true),
-            fdc_id: WHITE_RICE.fdcId,
-            dataset: "sr_legacy",
-            release: "sr_legacy-2018-04",
-            density_g_per_ml: 0.66,
-            grams_per_count: null,
-            count_unit: null,
-            refused: null,
-            per_100g: { kcal: 130, protein_g: 2.7, fat_g: 0.3, carbs_g: 28, sodium_mg: 1 },
           },
         },
         i2: { parse: parse(1, "tbsp", "olive oil") },
@@ -461,7 +460,6 @@ test("an editor picks a food and portion on a line and sees its weight", async (
 function matchedTo(data: ReturnType<typeof enrichment>, fdcId: number, portionId: number) {
   const { i1 } = data.facts.ingredients;
   i1.match = { ...i1.match, fdc_id: fdcId, portion_id: portionId };
-  i1.conversion = { ...i1.conversion, fdc_id: fdcId };
   return data;
 }
 
@@ -513,15 +511,6 @@ test("an editor changes a substitute's FDC food and FDC portion", async ({ page 
     note: "",
     fdc_id: QUINOA.fdcId,
     portion_id: QUINOA.cup,
-    fdc: {
-      dataset: "sr_legacy",
-      release: "sr_legacy-2018-04",
-      density_g_per_ml: 0.78,
-      grams_per_count: null,
-      count_unit: null,
-      refused: null,
-      per_100g: { kcal: 120, protein_g: 4.4, fat_g: 1.9, carbs_g: 21, sodium_mg: 7 },
-    },
   };
   const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
     headers: SERVICE_TOKEN,
