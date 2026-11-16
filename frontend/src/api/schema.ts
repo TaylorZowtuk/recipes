@@ -436,18 +436,22 @@ export interface paths {
          * @description Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
          *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
          *     any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
+         *     Enrichment sends only FDC ids: each matched line's conversion and each substitute's numbers
+         *     come from the API's own FDC Snapshot, whose release the recipe records.
          *
-         *     Refused unless every fact is for one of the recipe's lines or steps, every step's segments
-         *     are its text exactly and name only its lines, as do its uses, no step uses a line twice, every
-         *     duration or temperature segment is one code finds in its step's text, a step with segments has
-         *     uses that are exactly its segments' Step Portions summed per line, each line's `portion`s across
-         *     the steps add up to at most 1, every Enrichment Issue is on one of their facts and arrives open
-         *     with no Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated
-         *     and unconfirmed, no substitute is its line's own match, every wording is the normalized name of
-         *     one of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and
-         *     wording names a Canonical Ingredient that exists or is new here, every new one's Store Category
-         *     exists, every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and
-         *     the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+         *     Refused unless it was enriched against the API's FDC Snapshot release, every match and
+         *     substitute names an FDC food the Snapshot has and no FDC portion or one of the food's, every
+         *     fact is for one of the recipe's lines or steps, every step's segments are its text exactly and
+         *     name only its lines, as do its uses, no step uses a line twice, every duration or temperature
+         *     segment is one code finds in its step's text, a step with segments has uses that are exactly its
+         *     segments' Step Portions summed per line, each line's `portion`s across the steps add up to at
+         *     most 1, every Enrichment Issue is on one of their facts and arrives open with no Confirm Batch,
+         *     substitutions and a suggested Difficulty arrive from the LLM, estimated and unconfirmed, no
+         *     substitute is its line's own match, every wording is the normalized name of one of the parsed
+         *     lines, it learns at most MAX_LEARNED items, every match, substitute and wording names a
+         *     Canonical Ingredient that exists or is new here, every new one's Store Category exists, every
+         *     new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the enriched
+         *     recipe is at most MAX_RECIPE_BYTES as JSON.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -750,51 +754,7 @@ export interface components {
          * ConversionFact
          * @description How the line converts to grams, with its FDC food's numbers copied from the FDC Snapshot.
          */
-        "ConversionFact-Input": {
-            /** Confidence */
-            confidence: number;
-            /** Confirm Batch */
-            confirm_batch?: string | null;
-            /**
-             * Confirmed
-             * @default false
-             */
-            confirmed: boolean;
-            /** Confirmed At */
-            confirmed_at?: string | null;
-            /** Confirmed By */
-            confirmed_by?: string | null;
-            /** Count Unit */
-            count_unit: string | null;
-            /**
-             * Dataset
-             * @enum {string}
-             */
-            dataset: "foundation" | "sr_legacy";
-            /** Density G Per Ml */
-            density_g_per_ml: number | null;
-            /** Estimated */
-            estimated: boolean;
-            /** Fdc Id */
-            fdc_id: number;
-            /** Grams Per Count */
-            grams_per_count: number | null;
-            per_100g: components["schemas"]["Per100g"];
-            /**
-             * Provenance
-             * @enum {string}
-             */
-            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
-            /** Refused */
-            refused: string | null;
-            /** Release */
-            release: string;
-        };
-        /**
-         * ConversionFact
-         * @description How the line converts to grams, with its FDC food's numbers copied from the FDC Snapshot.
-         */
-        "ConversionFact-Output": {
+        ConversionFact: {
             /** Confidence */
             confidence: number;
             /** Confirm Batch */
@@ -1125,7 +1085,8 @@ export interface components {
         /**
          * Enrichment
          * @description What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
-         *     Canonical Ingredients it creates and the wordings it learns.
+         *     Canonical Ingredients it creates and the wordings it learns. `fdc_release` is the FDC
+         *     Snapshot release it chose FDC foods and FDC portions from, which must be the API's.
          */
         Enrichment: {
             /**
@@ -1135,9 +1096,9 @@ export interface components {
             canonical_ingredients: components["schemas"]["CanonicalIngredient-Input"][];
             /** Enrichment Version */
             enrichment_version: number;
-            facts: components["schemas"]["RecipeFacts-Input"];
+            facts: components["schemas"]["EnrichmentFacts"];
             /** Fdc Release */
-            fdc_release?: string | null;
+            fdc_release: string;
             /**
              * Issues
              * @default []
@@ -1148,6 +1109,27 @@ export interface components {
              * @default []
              */
             wordings: components["schemas"]["Wording-Input"][];
+        };
+        /**
+         * EnrichmentFacts
+         * @description A recipe's facts as enrichment sends them, without any FDC numbers.
+         */
+        EnrichmentFacts: {
+            difficulty?: components["schemas"]["DifficultyFact-Input"] | null;
+            /**
+             * Ingredients
+             * @default {}
+             */
+            ingredients: {
+                [key: string]: components["schemas"]["EnrichmentLineFacts"];
+            };
+            /**
+             * Steps
+             * @default {}
+             */
+            steps: {
+                [key: string]: components["schemas"]["StepFacts-Input"];
+            };
         };
         /**
          * EnrichmentIssue
@@ -1206,6 +1188,63 @@ export interface components {
              * @enum {string}
              */
             status: "open" | "resolved";
+        };
+        /**
+         * EnrichmentLineFacts
+         * @description A line's facts as enrichment sends them: the API builds its conversion from its match.
+         */
+        EnrichmentLineFacts: {
+            match?: components["schemas"]["MatchFact-Input"] | null;
+            parse?: components["schemas"]["ParseFact-Input"] | null;
+            substitutions?: components["schemas"]["EnrichmentSubstitutionsFact"] | null;
+        };
+        /**
+         * EnrichmentSubstitution
+         * @description Something the recipe says may stand in for the line, quoted as the recipe words it, with
+         *     its Canonical Ingredient, how much to use, and its FDC food and FDC portion, as enrichment
+         *     sends it: the API fills in the numbers.
+         */
+        EnrichmentSubstitution: {
+            /** Canonical Id */
+            canonical_id: string;
+            /** Fdc Id */
+            fdc_id: number;
+            /** Note */
+            note: string;
+            /** Portion Id */
+            portion_id: number | null;
+            /** Ratio */
+            ratio: number;
+            /** Wording */
+            wording: string;
+        };
+        /**
+         * EnrichmentSubstitutionsFact
+         * @description A line's substitutions as enrichment sends them, without their FDC numbers.
+         */
+        EnrichmentSubstitutionsFact: {
+            /** Confidence */
+            confidence: number;
+            /** Confirm Batch */
+            confirm_batch?: string | null;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
+            /** Estimated */
+            estimated: boolean;
+            /** Items */
+            items: components["schemas"]["EnrichmentSubstitution"][];
+            /**
+             * Provenance
+             * @enum {string}
+             */
+            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
         };
         /**
          * ExistingCanonical
@@ -1350,18 +1389,11 @@ export interface components {
             source: components["schemas"]["WebsiteSource-Output"];
         };
         /** IngredientFacts */
-        "IngredientFacts-Input": {
-            conversion?: components["schemas"]["ConversionFact-Input"] | null;
-            match?: components["schemas"]["MatchFact-Input"] | null;
-            parse?: components["schemas"]["ParseFact-Input"] | null;
-            substitutions?: components["schemas"]["SubstitutionsFact-Input"] | null;
-        };
-        /** IngredientFacts */
-        "IngredientFacts-Output": {
-            conversion: components["schemas"]["ConversionFact-Output"] | null;
+        IngredientFacts: {
+            conversion: components["schemas"]["ConversionFact"] | null;
             match: components["schemas"]["MatchFact-Output"] | null;
             parse: components["schemas"]["ParseFact-Output"] | null;
-            substitutions: components["schemas"]["SubstitutionsFact-Output"] | null;
+            substitutions: components["schemas"]["SubstitutionsFact"] | null;
         };
         /** IngredientLine */
         "IngredientLine-Input": {
@@ -1794,7 +1826,7 @@ export interface components {
              *       "steps": {}
              *     }
              */
-            facts: components["schemas"]["RecipeFacts-Output"];
+            facts: components["schemas"]["RecipeFacts"];
             /** Fdc Release */
             fdc_release: string | null;
             /** Id */
@@ -1847,36 +1879,14 @@ export interface components {
          * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
          *     `ingredients["i3"].parse`, `s2.uses` is `steps["s2"].uses`, and `difficulty` is `difficulty`.
          */
-        "RecipeFacts-Input": {
-            difficulty?: components["schemas"]["DifficultyFact-Input"] | null;
-            /**
-             * Ingredients
-             * @default {}
-             */
-            ingredients: {
-                [key: string]: components["schemas"]["IngredientFacts-Input"];
-            };
-            /**
-             * Steps
-             * @default {}
-             */
-            steps: {
-                [key: string]: components["schemas"]["StepFacts-Input"];
-            };
-        };
-        /**
-         * RecipeFacts
-         * @description A recipe's facts, kept apart from its Original. A fact's path is its id: `i3.parse` is
-         *     `ingredients["i3"].parse`, `s2.uses` is `steps["s2"].uses`, and `difficulty` is `difficulty`.
-         */
-        "RecipeFacts-Output": {
+        RecipeFacts: {
             difficulty: components["schemas"]["DifficultyFact-Output"] | null;
             /**
              * Ingredients
              * @default {}
              */
             ingredients: {
-                [key: string]: components["schemas"]["IngredientFacts-Output"];
+                [key: string]: components["schemas"]["IngredientFacts"];
             };
             /**
              * Steps
@@ -2257,8 +2267,7 @@ export interface components {
         };
         /**
          * Substitution
-         * @description Something the recipe says may stand in for the line, quoted as the recipe words it, with
-         *     its Canonical Ingredient, how much to use, and its FDC food's numbers.
+         * @description A substitute as stored, with its FDC food's numbers copied from the FDC Snapshot.
          */
         Substitution: {
             /** Canonical Id */
@@ -2279,35 +2288,7 @@ export interface components {
          * SubstitutionsFact
          * @description A line's substitutions, which an editor confirms together in one tap.
          */
-        "SubstitutionsFact-Input": {
-            /** Confidence */
-            confidence: number;
-            /** Confirm Batch */
-            confirm_batch?: string | null;
-            /**
-             * Confirmed
-             * @default false
-             */
-            confirmed: boolean;
-            /** Confirmed At */
-            confirmed_at?: string | null;
-            /** Confirmed By */
-            confirmed_by?: string | null;
-            /** Estimated */
-            estimated: boolean;
-            /** Items */
-            items: components["schemas"]["Substitution"][];
-            /**
-             * Provenance
-             * @enum {string}
-             */
-            provenance: "source" | "parser" | "fdc" | "llm" | "editor";
-        };
-        /**
-         * SubstitutionsFact
-         * @description A line's substitutions, which an editor confirms together in one tap.
-         */
-        "SubstitutionsFact-Output": {
+        SubstitutionsFact: {
             /** Confidence */
             confidence: number;
             /** Confirm Batch */
@@ -3592,7 +3573,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description It was enriched against another FDC Snapshot release, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
