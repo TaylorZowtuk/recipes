@@ -15,6 +15,8 @@ from recipes.models import (
     CanonicalIngredient,
     Enrichment,
     EnrichmentIssue,
+    FdcNumbers,
+    Per100g,
     Step,
     Wording,
 )
@@ -782,16 +784,18 @@ def test_substitutions_and_a_suggested_difficulty_are_stored_with_the_recipe(
     editor_client: TestClient, api_store: Store
 ) -> None:
     recipe = add(api_store)
+    facts = suggesting()
 
     response = enrich_matched(
-        editor_client, recipe.id, facts=suggesting(), canonical_ingredients=[BEEF, CHUCK]
+        editor_client, recipe.id, facts=facts, canonical_ingredients=[BEEF, CHUCK]
     )
 
     assert response.status_code == 200
     stored = fetch(editor_client, recipe.id)["facts"]
     swap = stored["ingredients"]["i1"]["substitutions"]
-    assert swap["items"] == [{**SWAP, "fdc": numbers(1002, None)}]
-    assert (swap["provenance"], swap["estimated"], swap["confirmed"]) == ("llm", True, False)
+    assert swap.pop("items") == [{**SWAP, "fdc": numbers(1002, None)}]
+    sent = {k: v for k, v in facts["ingredients"]["i1"]["substitutions"].items() if k != "items"}
+    assert swap == sent | UNCONFIRMED
     assert stored["difficulty"] == {**SUGGESTION, "prep": 1, "cook": 2, "cleanup": 3} | {
         "confirmed": False,
         "confirmed_by": None,
@@ -989,6 +993,54 @@ def test_another_release_or_an_fdc_food_or_portion_not_in_the_snapshot_is_refuse
     assert_nothing_written(editor_client, recipe)
 
 
+def test_a_missing_fdc_release_is_refused(editor_client: TestClient, api_store: Store) -> None:
+    recipe = add(api_store)
+    body = {
+        "enrichment_version": 2,
+        "facts": MATCHED,
+        "issues": [issue(1)],
+        "canonical_ingredients": [BEEF],
+        "wordings": [],
+    }
+
+    response = editor_client.put(f"/api/recipes/{recipe.id}/enrichment", json=body, headers=EDITOR)
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "fdc_release"]
+    assert_nothing_written(editor_client, recipe)
+
+
+def test_an_old_clients_conversion_and_fdc_numbers_are_ignored(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store)
+    sent = suggesting()
+    line = sent["ingredients"]["i1"]
+    kcal = {"kcal": 999.0}
+    line["conversion"] = {
+        "provenance": "fdc",
+        "confidence": 0.9,
+        "estimated": True,
+        "confirmed": True,
+        "fdc_id": 1001,
+        **numbers(1001, None),
+        "per_100g": {**numbers(1001, None)["per_100g"], **kcal},
+    }
+    line["substitutions"]["items"] = [{**SWAP, "fdc": {**numbers(1002, None), "per_100g": kcal}}]
+
+    response = enrich_matched(
+        editor_client, recipe.id, facts=sent, canonical_ingredients=[BEEF, CHUCK]
+    )
+
+    assert response.status_code == 200
+    stored = fetch(editor_client, recipe.id)["facts"]["ingredients"]["i1"]
+    assert {k: stored["conversion"][k] for k in ("per_100g", "density_g_per_ml")} == {
+        k: numbers(1001, None)[k] for k in ("per_100g", "density_g_per_ml")
+    }
+    assert stored["conversion"]["confirmed"] is False
+    assert stored["substitutions"]["items"] == [{**SWAP, "fdc": numbers(1002, None)}]
+
+
 def test_the_enrichment_request_carries_no_fdc_numbers() -> None:
     schema = Enrichment.model_json_schema()
     properties: set[str] = set()
@@ -1003,5 +1055,6 @@ def test_the_enrichment_request_carries_no_fdc_numbers() -> None:
                 walk(value)
 
     walk(schema)
-    assert properties.isdisjoint({"conversion", "fdc", "per_100g", "density_g_per_ml"})
+    numbers = {"conversion", "fdc"} | FdcNumbers.model_fields.keys() | Per100g.model_fields.keys()
+    assert properties.isdisjoint(numbers)
     assert schema["$defs"].keys().isdisjoint({"FdcNumbers", "Per100g", "ConversionFact"})
