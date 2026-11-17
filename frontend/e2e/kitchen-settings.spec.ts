@@ -60,9 +60,46 @@ function applied(categories: Category[], { op, ...fields }: Operation): Category
   }
 }
 
+// The real API moves the Collection version on every write, and the PWA reads a bundle only at a
+// version it doesn't hold. So `/api/sync`'s version moves whenever `state()` changes or `move()` is
+// called, and the bundle at any such version is the real one with `patch` applied.
+async function stubCollection(
+  page: Page,
+  state: () => unknown,
+  patch: (collection: Record<string, unknown>) => Record<string, unknown>,
+  paused: () => boolean,
+) {
+  const MOVES = 1000;
+  let moves = 0;
+  let seen = JSON.stringify(state());
+  await page.route("**/api/sync", async (route) => {
+    const now = JSON.stringify(state());
+    if (now !== seen) [seen, moves] = [now, moves + 1];
+    const response = await route.fetch();
+    const sync = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...sync,
+        collection_version: sync.collection_version * MOVES + moves,
+        read_only: sync.read_only || paused(),
+      },
+    });
+  });
+  await page.route("**/api/v/collection/*", async (route) => {
+    const url = new URL(route.request().url());
+    const version = Number(url.pathname.split("/").at(-1));
+    url.pathname = `/api/v/collection/${Math.floor(version / MOVES)}`;
+    const response = await route.fetch({ url: url.toString() });
+    const collection = await response.json();
+    await route.fulfill({ response, json: { ...patch(collection), collection_version: version } });
+  });
+  return { move: () => (moves += 1) };
+}
+
 // Serves `categories` and `ingredients` in the Collection bundle, in place of the shared items, and
 // answers both PATCHes from them, with a 409 at a stale version. `refuse` makes the next Kitchen
-// settings PATCH answer that, instead of saving.
+// settings PATCH answer that, instead of saving; `paused` pauses editing.
 async function stubKitchen(page: Page, categories: Category[], ingredients = INGREDIENTS) {
   const stub = {
     categories,
@@ -71,30 +108,29 @@ async function stubKitchen(page: Page, categories: Category[], ingredients = ING
     edits: [] as Edit[],
     staples: [] as { id: string; edit: Edit }[],
     refuse: undefined as { status: number; detail: string } | undefined,
+    paused: false,
   };
   const settings = () => ({
     version: stub.version,
     schema_version: 1,
     store_categories: stub.categories,
   });
-  await page.route("**/api/v/collection/*", async (route) => {
-    const response = await route.fetch();
-    const collection = await response.json();
-    await route.fulfill({
-      response,
-      json: {
-        ...collection,
-        kitchen_settings: settings(),
-        canonical_ingredients: stub.ingredients.map((c) => ({
-          family: c.name,
-          confirmed: false,
-          confirm_batch: null,
-          schema_version: 1,
-          ...c,
-        })),
-      },
-    });
-  });
+  const { move } = await stubCollection(
+    page,
+    () => [stub.categories, stub.version, stub.ingredients],
+    (collection) => ({
+      ...collection,
+      kitchen_settings: settings(),
+      canonical_ingredients: stub.ingredients.map((c) => ({
+        family: c.name,
+        confirmed: false,
+        confirm_batch: null,
+        schema_version: 1,
+        ...c,
+      })),
+    }),
+    () => stub.paused,
+  );
   await page.route("**/api/kitchen-settings", async (route) => {
     const edit: Edit = route.request().postDataJSON();
     stub.edits.push(edit);
@@ -102,6 +138,7 @@ async function stubKitchen(page: Page, categories: Category[], ingredients = ING
       stub.refuse ??
       (edit.version === stub.version ? undefined : { status: 409, detail: "Version conflict" });
     stub.refuse = undefined;
+    if (refused?.status === 409) move();
     if (refused) return route.fulfill({ status: refused.status, json: { detail: refused.detail } });
     stub.categories = edit.operations.reduce(applied, stub.categories);
     stub.version += 1;
@@ -113,6 +150,7 @@ async function stubKitchen(page: Page, categories: Category[], ingredients = ING
     stub.staples.push({ id, edit });
     const before = stub.ingredients.find((c) => c.id === id) as Ingredient;
     if (edit.version !== before.version) {
+      move();
       return route.fulfill({ status: 409, json: { detail: "Version conflict" } });
     }
     const after = {
@@ -749,11 +787,8 @@ test("editing and toggling are off while offline, with the Draft kept", async ({
 });
 
 test("editing is off while Plateful is paused", async ({ page }) => {
-  await page.route("**/api/sync", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, json: { ...(await response.json()), read_only: true } });
-  });
-  await stubKitchen(page, [AISLES]);
+  const stub = await stubKitchen(page, [AISLES]);
+  stub.paused = true;
   await signIn(page.request);
   await page.goto("/kitchen-settings");
   await expect(editButton(page)).toBeDisabled();
