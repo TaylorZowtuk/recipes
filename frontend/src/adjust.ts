@@ -179,14 +179,21 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
     if (!inSet(m, SPOONS)) return inMetric(base(m.base), m.kind, false);
     if (scale !== 1) return tidy(base(m.base), SPOONS);
   }
-  if (m && choice === "metric" && m.metric && m.base >= 1)
+  if (m?.metric && m.base >= 1 && (choice === "metric" || (choice === "written" && scale !== 1)))
     return inMetric(base(m.base), m.kind, true);
   if (m && choice === "us" && m.metric) {
     return m.kind === "mass" ? us(base(m.base)) : tidy(base(m.base), SPOONS_AND_CUPS, true);
   }
   if (m && choice === "us" && m.base === OZ && q[1] >= 16) return us(base(m.base));
   if (m && scale !== 1 && inSet(m, SPOONS_AND_CUPS)) return tidy(base(m.base), SPOONS_AND_CUPS);
-  return fractions(q, parse.unit);
+  return fractions(q, m || scale === 1 ? parse.unit : counted(parse.unit, q[1]));
+}
+
+// A count unit made plural or singular as `amount` is, by one trailing "s".
+function counted(unit: string | null, amount: number): string | null {
+  if (!unit) return unit;
+  if (amount > 1) return unit.endsWith("s") ? unit : `${unit}s`;
+  return unit.endsWith("s") ? unit.slice(0, -1) : unit;
 }
 
 // The units a line can honestly take, in the order a tap cycles them: the unit system's, the

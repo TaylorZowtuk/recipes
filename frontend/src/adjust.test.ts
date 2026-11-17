@@ -173,8 +173,22 @@ describe("US", () => {
 
 describe("As written, scaled", () => {
   it("keeps the written unit", () => {
-    expect(show(line(1.5, "kg", "mass"), "written", 0.5)).toBe("¾ kg");
     expect(show(line(8, "oz", "mass"), "written", 2)).toBe("16 oz");
+  });
+
+  it("shows a metric unit as decimals, rescaled between g and kg, ml and l", () => {
+    expect(show(line(125, "g", "mass"), "written", 1.5)).toBe("188 g");
+    expect(show(line(1.5, "kg", "mass"), "written", 0.5)).toBe("750 g");
+    expect(show(line(5, "ml", "volume"), "written", 0.5)).toBe("2.5 ml");
+  });
+
+  it("makes a count unit plural or singular as the amount is, in every unit system", () => {
+    for (const units of ["written", "metric", "us"] as const) {
+      expect(show(line(1, "clove", "count"), units, 2)).toBe("2 cloves");
+      expect(show(line(2, "cloves", "count"), units, 0.5)).toBe("1 clove");
+      expect(show(line([1, 2], "cloves", "count"), units, 0.5)).toBe("½–1 clove");
+      expect(show(line([1, 2], "clove", "count"), units, 1.5)).toBe("1½–3 cloves");
+    }
   });
 });
 
