@@ -201,10 +201,16 @@ h1:focus {
     calc(var(--gutter) + env(safe-area-inset-left));
 }
 
-/* The editor's read-only banner: one slim line above the screen, nothing while empty. */
+/* The editor's read-only banner: one slim line above the screen, nothing while empty. In the
+   installed app it starts below the status bar and covers the top bar's own gap for it, which the
+   top bar still needs once the banner scrolls away and the bar sticks. Above the top bar, even
+   while its menu lifts it. */
 .sync-banner {
+  position: relative;
+  z-index: 4;
   margin: 0;
-  padding: var(--space) calc(var(--gutter) + env(safe-area-inset-right)) var(--space)
+  padding: calc(var(--space) + env(safe-area-inset-top))
+    calc(var(--gutter) + env(safe-area-inset-right)) var(--space)
     calc(var(--gutter) + env(safe-area-inset-left));
   background: var(--warning);
   color: var(--warning-text);
@@ -213,6 +219,10 @@ h1:focus {
 
 .sync-banner:empty {
   padding-block: 0;
+}
+
+.sync-banner:not(:empty) + .top-bar {
+  margin-top: calc(-1 * env(safe-area-inset-top));
 }
 
 .places {
