@@ -138,9 +138,15 @@ export function createSyncEngine({
     }
     const held = snapshot.collection;
     if ((held || full()) && held?.collection_version !== sync.collection_version)
-      update({ collection: await read<Collection>(collectionPath(sync.collection_version)) });
-    if (snapshot.collection && (snapshot.collection !== held || !passFinished)) void prefetch();
+      hold(await read<Collection>(collectionPath(sync.collection_version)));
+    else if (held && !passFinished) void prefetch();
     return sync;
+  }
+
+  // Keeps `collection` in memory, and brings the cache in line with it.
+  function hold(collection: Collection) {
+    update({ collection });
+    void prefetch();
   }
 
   /** Polls /api/sync, loads the new bundle if the Collection moved and one is wanted, and brings
@@ -240,14 +246,14 @@ export function createSyncEngine({
   async function loadCollection(): Promise<Collection> {
     try {
       const sync = snapshot.sync ?? (await poll());
-      const collection =
-        snapshot.collection ?? (await read<Collection>(collectionPath(sync.collection_version)));
-      update({ collection });
+      if (snapshot.collection) return snapshot.collection;
+      const collection = await read<Collection>(collectionPath(sync.collection_version));
+      hold(collection);
       return collection;
     } catch (error) {
       const cached = await newestCachedBundle();
       if (!cached) throw error;
-      update({ collection: cached });
+      hold(cached);
       return cached;
     }
   }

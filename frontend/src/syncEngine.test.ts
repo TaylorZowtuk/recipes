@@ -232,6 +232,20 @@ describe("prefetching", () => {
     expect(persist).toHaveBeenCalledTimes(1);
   });
 
+  it("starts a pass once a screen loads the Collection", async () => {
+    const { server, store, engine } = setup();
+    const mode = { full: false };
+    const device = engine(mode);
+    await device.poll();
+    mode.full = true;
+    await device.prefetch();
+    expect(server.took()).toEqual(["/api/sync"]);
+
+    await device.collection();
+    await device.settled();
+    expect(store.paths(DATA)).toHaveLength(3);
+  });
+
   it("starts the full prefetch when the device becomes full", async () => {
     const { store, engine } = setup();
     const mode = { full: false };
