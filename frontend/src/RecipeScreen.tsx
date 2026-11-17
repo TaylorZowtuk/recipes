@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { AS_WRITTEN } from "./adjust";
 import { formatAmount } from "./amount";
 import type { Collection, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
@@ -512,7 +513,7 @@ export function Steps({
                 }}
               />
             );
-          const pieces = stepText(step, facts, 1);
+          const pieces = stepText(step, facts, AS_WRITTEN);
           const shown = pieces.map((piece, n) => {
             if (typeof piece === "string") return piece;
             if ("t" in piece) return (!item && timer(piece, n)) || piece.written;

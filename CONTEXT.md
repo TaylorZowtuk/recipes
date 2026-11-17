@@ -207,6 +207,14 @@ _Avoid_: Meal plan, menu, schedule
 A countdown started from a duration in a step, one of several that can run at once in the dock while the app stays in the foreground. A range such as 8-10 minutes is one timer: it chimes at the low end, to say check it, and alarms at the high end until it is cancelled or given another minute. A single duration only alarms. A timer stays in the dock until it is cancelled, and can't be started again while it's there. It lives in the page and is never stored.
 _Avoid_: Countdown, stopwatch, reminder
 
+**Adjust choices**:
+How one recipe shows while cooking it: a scale (½× to 3×), a unit system (as written, metric or US) and, for any ingredient tapped, its own unit. They stay on the device and reset on leaving the recipe. Metric and US convert only within a kind, a weight to a weight and a volume to a volume; spoons stay spoons.
+_Avoid_: Settings, preferences
+
+**Confidence Threshold**:
+What a line's conversion must clear before a volume or count shows as a weight: confirmed, with a confidence of at least 0.8. Below it the line stays in its written unit. A weight it gives is marked "≈".
+_Avoid_: Cutoff
+
 **Grocery List**:
 The shared list of ingredients to buy, combined from the recipes in one Week Plan, plus any extras. Items ticked off are shared by the household.
 _Avoid_: Shopping list
