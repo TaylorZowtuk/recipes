@@ -99,6 +99,14 @@ describe("As written", () => {
     expect(show(line(1 / 3, "cup", "volume"), "written", 0.5)).toBe("2⅔ tbsp");
     expect(show(line(1, "tsp", "volume"), "written", 0.5)).toBe("½ tsp");
   });
+
+  it("tidies a range by its high end, in cups only as ¼, ⅓, ½, ⅔ or ¾", () => {
+    expect(show(line([0.5, 3], "tbsp", "volume"), "written", 1.5)).toBe("¾–4½ tbsp");
+    expect(show(line(2, "tbsp", "volume"), "written", 3)).toBe("6 tbsp");
+    expect(show(line([100, 500], "ml", "volume"), "us", 0.5)).toBe("¼–1 cup");
+    // A low end under ⅛ of the larger unit keeps the smaller one.
+    expect(show(line([1, 50], "ml", "volume"), "us")).toBe("¼–10⅛ tsp");
+  });
 });
 
 describe("Metric", () => {
