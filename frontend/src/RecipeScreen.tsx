@@ -90,6 +90,8 @@ function RecipePage() {
   const [edit, dispatch] = useReducer(editing, { draft: null });
   const { draft } = edit;
   const ready = card && recipe.state === "ready" ? recipe.value : undefined;
+  // A Pending recipe has no Facts, so nothing on it scales or converts: it shows as written.
+  const pending = recipe.state === "ready" && recipe.value.status === "pending";
   // The Adjust choices live only here, on this device, so they go when the recipe does.
   const [choices, setChoices] = useState<AdjustChoices>(() => ({
     scale: linkedScale(search),
@@ -171,7 +173,7 @@ function RecipePage() {
                       <TagList tags={card.tags} />
                       {ready && (
                         <div className="hero-actions">
-                          <AdjustButton choices={choices} onChange={setChoices} />
+                          <AdjustButton choices={choices} onChange={setChoices} pending={pending} />
                           <EditorOnly>
                             <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
                             <AddToDayButton recipe={card} />
@@ -216,7 +218,7 @@ function RecipePage() {
           recipe={recipe.value}
           collection={collection.value}
           newerLoading={!!recipe.newerLoading}
-          choices={choices}
+          choices={pending ? AS_WRITTEN : choices}
           onTap={(lineId, unit) =>
             setChoices((shown) => ({ ...shown, taps: { ...shown.taps, [lineId]: unit } }))
           }

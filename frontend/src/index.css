@@ -2408,6 +2408,21 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   margin-top: 0;
 }
 
+/* A Pending recipe's disabled Adjust, with the note saying why under it. */
+.adjust-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 32ch;
+}
+
+.adjust-note {
+  margin: calc(var(--space) * 1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  text-align: center;
+}
+
 /* Week Plan */
 
 .week-plan {

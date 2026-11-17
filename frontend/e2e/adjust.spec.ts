@@ -116,3 +116,14 @@ test("a scale that isn't one of the scales opens the recipe at 1×", async ({ pa
   await expect(amount(line(page, "firm tofu"))).toHaveText("400 g");
   await expect(adjust(page)).toHaveText("Adjust");
 });
+
+test("a Pending recipe's Adjust is disabled, saying why, and ignores a link's scale", async ({
+  page,
+}) => {
+  await page.goto("/recipes/01K7SEED000000000000000005?scale=2");
+  await expect(adjust(page)).toBeDisabled();
+  await expect(adjust(page)).toHaveText("Adjust");
+  await expect(adjust(page)).toHaveAccessibleDescription(
+    "Scaling and units are ready once this recipe is enriched",
+  );
+});

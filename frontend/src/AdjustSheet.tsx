@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { AdjustChoices, Units } from "./adjust";
 import type { Factor } from "./api/client";
 import { Sheet } from "./Sheet";
@@ -21,17 +21,37 @@ function adjustSummary({ scale, units }: AdjustChoices): string {
 }
 
 // The recipe page's Adjust button and its sheet: a scale and a unit system for this recipe, on
-// this device only. A new unit system clears the ingredients' own tapped units.
+// this device only. A new unit system clears the ingredients' own tapped units. A Pending recipe
+// has no Facts to scale or convert, so there the button is disabled with a note saying why.
 export function AdjustButton({
   choices,
   onChange,
+  pending,
 }: {
   choices: AdjustChoices;
   onChange: (choices: AdjustChoices) => void;
+  pending: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
+  const noteId = useId();
   const summary = adjustSummary(choices);
+  if (pending)
+    return (
+      <div className="adjust-pending">
+        <button
+          type="button"
+          className="button button-secondary adjust-open"
+          disabled
+          aria-describedby={noteId}
+        >
+          Adjust
+        </button>
+        <p id={noteId} className="adjust-note">
+          Scaling and units are ready once this recipe is enriched
+        </p>
+      </div>
+    );
   return (
     <>
       <button

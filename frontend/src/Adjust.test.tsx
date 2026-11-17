@@ -45,9 +45,9 @@ const card: Card = {
 
 // Butter (i1) weighs: its conversion is confirmed at the Confidence Threshold. Garlic (i2) has no
 // weight per clove. Flour (i3) is 2 cups. Step s1 melts the butter; s2 heats the oven to 425°F.
-function adjustRecipe(): Recipe {
+function adjustRecipe(status: Recipe["status"] = "ready"): Recipe {
   const r = reviewRecipe({
-    status: "ready",
+    status,
     issues: [],
     source: {
       kind: "website",
@@ -99,8 +99,8 @@ afterEach(() => {
   shown.editor = false;
 });
 
-function open(search = "") {
-  shown.recipe = adjustRecipe();
+function open(search = "", status: Recipe["status"] = "ready") {
+  shown.recipe = adjustRecipe(status);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -159,6 +159,29 @@ describe("the Adjust sheet", () => {
     expect(amount("flour")).toBe("2 cups");
     tap("As written");
     expect(button(/^Adjust/).textContent).toBe("Adjust");
+  });
+});
+
+describe("a Pending recipe", () => {
+  it("shows Adjust disabled, with a note saying why", () => {
+    open("", "pending");
+    const adjust = button(/^Adjust/);
+    expect(adjust.disabled).toBe(true);
+    const note = document.getElementById(adjust.getAttribute("aria-describedby") ?? "");
+    expect(note?.textContent).toBe("Scaling and units are ready once this recipe is enriched");
+  });
+
+  it("ignores a Week Plan link's scale", () => {
+    open("?scale=2", "pending");
+    expect(amount("flour")).toBe("2 cups");
+    expect(button(/^Adjust/).textContent).toBe("Adjust");
+  });
+
+  it("leaves Adjust as it is on an Awaiting Review recipe", () => {
+    open("?scale=2", "awaiting_review");
+    expect(button(/^Adjust/).disabled).toBe(false);
+    expect(button(/^Adjust/).getAttribute("aria-describedby")).toBeNull();
+    expect(amount("flour")).toBe("4 cups");
   });
 });
 
