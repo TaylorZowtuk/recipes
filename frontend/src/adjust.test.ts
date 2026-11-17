@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type AdjustChoices,
   CONFIDENCE_THRESHOLD,
-  lineAmount,
-  nextUnit,
+  lineView,
   temperature,
+  type UnitChoice,
   type Units,
-  unitOptions,
   weightRefusal,
 } from "./adjust";
 import type { ConversionFact, Factor, IngredientFacts, ParseFact } from "./api/client";
@@ -67,7 +66,20 @@ function line(
 
 const at = (units: Units, scale: Factor = 1): AdjustChoices => ({ scale, units });
 const show = (l: IngredientFacts, units: Units, scale: Factor = 1) =>
-  lineAmount(l, at(units, scale));
+  lineView(l, at(units, scale)).amount;
+const amountOf = (l: IngredientFacts, choices: AdjustChoices, tap?: UnitChoice) =>
+  lineView(l, choices, tap).amount;
+
+// The units taps cycle a line through, from the unit system's, following each view's next.
+function unitsCycled(l: IngredientFacts, choices: AdjustChoices): UnitChoice[] {
+  const seen: UnitChoice[] = [choices.units];
+  let next = lineView(l, choices).next;
+  while (next && next !== choices.units) {
+    seen.push(next);
+    next = lineView(l, choices, next).next;
+  }
+  return seen;
+}
 
 const flour = conversion({ density_g_per_ml: 0.5 }); // 1 cup ≈ 118 g
 const eggs = conversion({ grams_per_count: 50, count_unit: "large" });
@@ -215,47 +227,47 @@ describe("unit systems", () => {
     expect(show(line(null, null, null), "metric", 2)).toBe("");
     expect(show(line(null, "pinch", "count"), "us", 2)).toBe("pinch");
     expect(
-      lineAmount({ parse: null, match: null, conversion: null, substitutions: null }, at("us")),
+      amountOf({ parse: null, match: null, conversion: null, substitutions: null }, at("us")),
     ).toBe("");
   });
 });
 
-describe("unitOptions and nextUnit", () => {
+describe("a tap on a line", () => {
   it("cycles a volume through both systems' volumes, then ≈ g and ≈ oz", () => {
     const l = line(1, "cup", "volume", flour);
-    expect(unitOptions(l, at("written"))).toEqual(["written", "metric", "g", "oz"]);
-    expect(unitOptions(l, at("metric"))).toEqual(["metric", "us", "g", "oz"]);
-    expect(lineAmount(l, at("written"), "g")).toBe("≈ 118 g");
-    expect(lineAmount(l, at("written"), "oz")).toBe("≈ 4⅛ oz");
-    expect(nextUnit(l, at("written"))).toBe("metric");
-    expect(nextUnit(l, at("written"), "metric")).toBe("g");
-    expect(nextUnit(l, at("written"), "oz")).toBe("written");
+    expect(unitsCycled(l, at("written"))).toEqual(["written", "metric", "g", "oz"]);
+    expect(unitsCycled(l, at("metric"))).toEqual(["metric", "us", "g", "oz"]);
+    expect(amountOf(l, at("written"), "g")).toBe("≈ 118 g");
+    expect(amountOf(l, at("written"), "oz")).toBe("≈ 4⅛ oz");
+    expect(lineView(l, at("written")).next).toBe("metric");
+    expect(lineView(l, at("written"), "metric").next).toBe("g");
+    expect(lineView(l, at("written"), "oz").next).toBe("written");
   });
 
   it("never offers ml for spoons", () => {
     const l = line(1, "tbsp", "volume", flour);
-    expect(unitOptions(l, at("written"))).toEqual(["written", "g", "oz"]);
-    expect(unitOptions(line(1, "tbsp", "volume"), at("metric"))).toEqual(["metric"]);
+    expect(unitsCycled(l, at("written"))).toEqual(["written", "g", "oz"]);
+    expect(unitsCycled(line(1, "tbsp", "volume"), at("metric"))).toEqual(["metric"]);
   });
 
   it("cycles a weight between g and oz", () => {
-    expect(unitOptions(line(100, "g", "mass"), at("written"))).toEqual(["written", "us"]);
-    expect(unitOptions(line(8, "oz", "mass"), at("us"))).toEqual(["us", "metric"]);
+    expect(unitsCycled(line(100, "g", "mass"), at("written"))).toEqual(["written", "us"]);
+    expect(unitsCycled(line(8, "oz", "mass"), at("us"))).toEqual(["us", "metric"]);
   });
 
   it("cycles a count to ≈ g and ≈ oz when its count fits", () => {
     const egg = line(2, null, "count", eggs);
-    expect(unitOptions(egg, at("written"))).toEqual(["written", "g", "oz"]);
-    expect(lineAmount(egg, at("written", 2), "g")).toBe("≈ 200 g");
+    expect(unitsCycled(egg, at("written"))).toEqual(["written", "g", "oz"]);
+    expect(amountOf(egg, at("written", 2), "g")).toBe("≈ 200 g");
     const garlic = line(4, "cloves", "count", cloves);
-    expect(unitOptions(garlic, at("us"))).toEqual(["us", "g", "oz"]);
-    expect(lineAmount(garlic, at("us"), "g")).toBe("≈ 12 g");
+    expect(unitsCycled(garlic, at("us"))).toEqual(["us", "g", "oz"]);
+    expect(amountOf(garlic, at("us"), "g")).toBe("≈ 12 g");
     const can = line(1, "can", "count", cloves);
-    expect(unitOptions(can, at("us"))).toEqual(["us"]);
+    expect(unitsCycled(can, at("us"))).toEqual(["us"]);
   });
 
   it("counts as the API does: in the line's own unit, or a bare count for a line with none", () => {
-    const options = (amount: IngredientFacts) => unitOptions(amount, at("written"));
+    const options = (amount: IngredientFacts) => unitsCycled(amount, at("written"));
     expect(options(line(3, "Clove(s)", "count", cloves))).toContain("g");
     expect(options(line(3, "cloves", "count", cloves))).toContain("g");
     expect(
@@ -270,13 +282,39 @@ describe("unitOptions and nextUnit", () => {
   });
 
   it("has one option when nothing converts", () => {
-    expect(unitOptions(line(1, "cup", "volume"), at("written"))).toEqual(["written", "metric"]);
-    expect(unitOptions(line(3, "cloves", "count"), at("written"))).toEqual(["written"]);
-    expect(nextUnit(line(3, "cloves", "count"), at("written"))).toBe("written");
+    expect(unitsCycled(line(1, "cup", "volume"), at("written"))).toEqual(["written", "metric"]);
+    expect(unitsCycled(line(3, "cloves", "count"), at("written"))).toEqual(["written"]);
+    expect(lineView(line(3, "cloves", "count"), at("written")).next).toBeUndefined();
   });
 
   it("falls back to the system's unit for a choice no longer offered", () => {
-    expect(lineAmount(line(1, "cup", "volume"), at("written"), "g")).toBe("1 cup");
+    expect(lineView(line(1, "cup", "volume"), at("written"), "g")).toEqual({
+      amount: "1 cup",
+      next: "metric",
+      reason: "No weight known for this ingredient yet",
+    });
+  });
+
+  it("moves a line to another unit, says why it can't be a weight, or both", () => {
+    const none = "No weight known for this ingredient yet";
+    expect(lineView(line(1, "cup", "volume", flour), at("written"))).toEqual({
+      amount: "1 cup",
+      next: "metric",
+    });
+    expect(lineView(line(3, "cloves", "count"), at("written"))).toEqual({
+      amount: "3 cloves",
+      reason: none,
+    });
+    expect(lineView(line(1, "cup", "volume"), at("metric"), "us")).toEqual({
+      amount: "1 cup",
+      next: "metric",
+      reason: none,
+    });
+    expect(lineView(line(100, "g", "mass"), at("written"))).toEqual({
+      amount: "100 g",
+      next: "us",
+    });
+    expect(lineView(line(1, "tbsp", "volume"), at("metric")).next).toBeUndefined();
   });
 });
 
@@ -284,13 +322,13 @@ describe("a tiny amount", () => {
   const yeast = line(1 / 8, "tsp", "volume", conversion({ density_g_per_ml: 0.6 }));
 
   it("shows grams under 10 to one decimal place", () => {
-    expect(lineAmount(yeast, at("written"), "g")).toBe("≈ 0.4 g");
+    expect(amountOf(yeast, at("written"), "g")).toBe("≈ 0.4 g");
     expect(show(line(0.1, "oz", "mass"), "metric")).toBe("2.8 g");
     expect(show(line(0.35, "oz", "mass"), "metric")).toBe("9.9 g");
   });
 
   it("shows under ⅛ oz when it rounds below ⅛ oz", () => {
-    expect(lineAmount(yeast, at("written"), "oz")).toBe("≈ under ⅛ oz");
+    expect(amountOf(yeast, at("written"), "oz")).toBe("≈ under ⅛ oz");
     expect(show(line(200, "mg", "mass"), "us")).toBe("under ⅛ oz");
     expect(show(line(1, "g", "mass"), "us")).toBe("under ⅛ oz");
     expect(show(line(3, "g", "mass"), "us")).toBe("⅛ oz");
@@ -305,7 +343,7 @@ describe("a tiny amount", () => {
 describe("the Confidence Threshold", () => {
   it("is confirmed and a confidence of at least 0.8", () => {
     expect(CONFIDENCE_THRESHOLD).toBe(0.8);
-    const weighs = (c: ConversionFact) => unitOptions(line(1, "cup", "volume", c), at("written"));
+    const weighs = (c: ConversionFact) => unitsCycled(line(1, "cup", "volume", c), at("written"));
     expect(weighs(conversion({ density_g_per_ml: 0.5, confidence: 0.8 }))).toContain("g");
     expect(weighs(conversion({ density_g_per_ml: 0.5, confidence: 0.79 }))).not.toContain("g");
     expect(weighs(conversion({ density_g_per_ml: 0.5, confirmed: false }))).not.toContain("g");

@@ -215,11 +215,8 @@ function counted(unit: string | null, amount: number): string | null {
 
 // The units a line can honestly take, in the order a tap cycles them: the unit system's, the
 // other system's where it shows differently, then ≈ g and ≈ oz when its conversion clears the
-// Confidence Threshold. One option means a tap changes nothing.
-export function unitOptions(
-  line: Line,
-  { scale, units }: AdjustChoices,
-): [UnitChoice, ...UnitChoice[]] {
+// Confidence Threshold.
+function unitOptions(line: Line, { scale, units }: AdjustChoices): [UnitChoice, ...UnitChoice[]] {
   const parse = line.parse;
   if (!parse?.quantity) return [units];
   const metricUnit = measure(parse.unit)?.metric;
@@ -230,23 +227,25 @@ export function unitOptions(
   return options;
 }
 
-// The unit a tap moves a line to from `current` (the unit system's when none), wrapping round.
-export function nextUnit(line: Line, choices: AdjustChoices, current?: UnitChoice): UnitChoice {
-  const options = unitOptions(line, choices);
-  return options[(options.indexOf(current ?? options[0]) + 1) % options.length] ?? options[0];
-}
-
 // A line's amount × `portion` (a step's share of it) × the scale, in the tapped unit if the line
-// still offers it, else the unit system's. A line with no amount is its unit, or nothing.
-export function lineAmount(
+// still offers it, else the unit system's; the unit a tap moves it to, when it has another; and
+// why it can't be a weight, when it can't. A line with no amount is its unit, or nothing.
+export type LineView = { amount: string; next?: UnitChoice; reason?: string };
+export function lineView(
   line: Line,
   choices: AdjustChoices,
   tap?: UnitChoice,
   portion = 1,
-): string {
+): LineView {
   const options = unitOptions(line, choices);
-  const choice = tap && options.includes(tap) ? tap : options[0];
-  return render(line, choice, choices.scale, portion);
+  const at = Math.max(tap ? options.indexOf(tap) : 0, 0);
+  const view: LineView = {
+    amount: render(line, options[at] ?? options[0], choices.scale, portion),
+  };
+  if (options.length > 1) view.next = options[(at + 1) % options.length];
+  const reason = weightRefusal(line);
+  if (reason) view.reason = reason;
+  return view;
 }
 
 // A step's temperature as written when it's already in the unit system's scale (an F scale is

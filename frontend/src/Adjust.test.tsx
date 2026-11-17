@@ -15,7 +15,8 @@ vi.mock("./collection", () => ({
     state: "ready",
     value: {
       cards: [card, other],
-      canonical_ingredients: [], kitchen_settings: { store_categories: [] },
+      canonical_ingredients: [],
+      kitchen_settings: { store_categories: [] },
     },
   }),
   useRecipe: () => ({ state: "ready", value: shown.recipe }),
@@ -146,6 +147,10 @@ const amount = (name: string) =>
   [...host.querySelectorAll(".ingredients li")]
     .find((li) => li.querySelector(".ingredient-name")?.textContent?.startsWith(name))
     ?.querySelector(".ingredient-amount")?.textContent;
+const lineOf = (name: string) =>
+  [...host.querySelectorAll(".ingredients li")].find((li) =>
+    li.querySelector(".ingredient-name")?.textContent?.startsWith(name),
+  );
 const steps = () => [...host.querySelectorAll(".steps li")].map((li) => li.textContent);
 
 describe("the Adjust sheet", () => {
@@ -242,12 +247,22 @@ describe("a tap on an ingredient's amount", () => {
     expect(amount("butter")).toBe("2 tbsp");
   });
 
+  it("reads out the new amount", () => {
+    open();
+    tap(/^2 tbsp butter/);
+    const live = lineOf("butter")?.querySelector("[aria-live=polite]");
+    expect(live?.textContent).toBe("≈ 28 g");
+    expect(lineOf("butter")?.querySelector(".ingredient-why")).toBeNull();
+  });
+
   it("says why an ingredient with no weight stays in its unit", () => {
     open();
-    tap(/^2 cloves garlic/);
-    const reason = host.querySelector(".ingredient-reason");
-    expect(reason?.getAttribute("aria-live")).toBe("polite");
-    expect(reason?.textContent).toBe("No weight known for this ingredient yet");
+    tap("2 cloves garlic, why it stays in this unit");
+    const live = lineOf("garlic")?.querySelector("[aria-live=polite]");
+    expect(live?.textContent).toBe("2 cloves. No weight known for this ingredient yet");
+    expect(lineOf("garlic")?.querySelector(".ingredient-why")?.textContent).toBe(
+      "No weight known for this ingredient yet",
+    );
     expect(amount("garlic")).toBe("2 cloves");
   });
 
@@ -255,13 +270,10 @@ describe("a tap on an ingredient's amount", () => {
     open();
     tap(/^Adjust/);
     tap("Metric");
-    tap(/^.*flour, show in another unit/);
-    const li = [...host.querySelectorAll(".ingredients li")].find((l) =>
-      l.querySelector(".ingredient-name")?.textContent?.startsWith("flour"),
-    );
-    const reason = li?.querySelector(".ingredient-reason");
-    expect(reason?.getAttribute("aria-live")).toBe("polite");
-    expect(reason?.textContent).toBe("No weight known for this ingredient yet");
+    tap("473 ml flour, show in another unit");
+    expect(amount("flour")).toBe("2 cups");
+    const live = lineOf("flour")?.querySelector("[aria-live=polite]");
+    expect(live?.textContent).toBe("2 cups. No weight known for this ingredient yet");
   });
 
   it("is plain text in a Review Item, never a button in a button", () => {

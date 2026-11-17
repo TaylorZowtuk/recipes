@@ -890,7 +890,8 @@ h1:focus {
   text-align: right;
 }
 
-.ingredient-reason:not(:empty) {
+.ingredient-why {
+  display: block;
   margin-top: var(--space);
 }
 

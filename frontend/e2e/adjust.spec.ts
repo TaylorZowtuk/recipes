@@ -64,14 +64,16 @@ test("a tap shows an ingredient as a weight, or says why it has none", async ({ 
   await expect(amount(tahini)).toHaveText("3 tbsp");
   await page.getByRole("button", { name: "3 tbsp tahini, show in another unit" }).click();
   await expect(amount(tahini)).toHaveText("≈ 45 g");
+  await expect(tahini.locator("[aria-live=polite]")).toHaveText("≈ 45 g");
   await page.getByRole("button", { name: "≈ 45 g tahini, show in another unit" }).click();
   await expect(amount(tahini)).toHaveText(/^≈ [\d⅛¼⅜½⅝¾⅞]+ oz$/);
 
   const soy = line(page, "soy sauce");
   await page.getByRole("button", { name: "2 tbsp soy sauce, why it stays in this unit" }).click();
-  await expect(soy.locator(".ingredient-reason")).toHaveText(
-    "No weight known for this ingredient yet",
+  await expect(soy.locator("[aria-live=polite]")).toHaveText(
+    "2 tbsp. No weight known for this ingredient yet",
   );
+  await expect(soy.locator(".ingredient-why")).toBeVisible();
   await expect(amount(soy)).toHaveText("2 tbsp");
 
   // A new unit system starts every ingredient over in its units.

@@ -1,4 +1,4 @@
-import { type AdjustChoices, lineAmount, temperature } from "./adjust";
+import { type AdjustChoices, lineView, temperature } from "./adjust";
 import type { RecipeFacts, Step, StepFacts } from "./api/client";
 
 type Segment = NonNullable<StepFacts["segments"]>["segments"][number];
@@ -26,7 +26,7 @@ export function stepText(
     if (segment.t === "temperature") return temperature(segment, choices.units);
     const line = facts.ingredients[segment.ref];
     if (!line?.parse?.quantity) return segment.written;
-    const amount = lineAmount(line, choices, choices.taps?.[segment.ref], segment.portion);
+    const { amount } = lineView(line, choices, choices.taps?.[segment.ref], segment.portion);
     return { amount, name: line.parse.short_name ?? line.parse.name };
   });
 }

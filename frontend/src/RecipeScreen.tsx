@@ -9,24 +9,8 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { AdjustButton } from "./AdjustSheet";
-import {
-  type AdjustChoices,
-  AS_WRITTEN,
-  lineAmount,
-  nextUnit,
-  type UnitChoice,
-  unitOptions,
-  weightRefusal,
-} from "./adjust";
-import type {
-  Collection,
-  Factor,
-  IngredientFacts,
-  Original,
-  ParseFact,
-  Recipe,
-  RecipeFacts,
-} from "./api/client";
+import { type AdjustChoices, AS_WRITTEN, type LineView, lineView, type UnitChoice } from "./adjust";
+import type { Collection, Factor, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
@@ -454,14 +438,14 @@ export function Ingredients({
             parse?.quantity &&
             (onTap && !review ? (
               <TappableAmount
-                line={lineFacts}
+                view={lineView(lineFacts, choices, tapped)}
                 name={parse.name}
-                choices={choices}
-                tapped={tapped}
                 onTap={(unit) => onTap(line.id, unit)}
               />
             ) : (
-              <span className="ingredient-amount">{lineAmount(lineFacts, choices, tapped)}</span>
+              <span className="ingredient-amount">
+                {lineView(lineFacts, choices, tapped).amount}
+              </span>
             ));
           const shown = parse ? (
             <ParsedLine parse={parse} isNew={isNew} amount={amount} />
@@ -535,45 +519,40 @@ function Substitutions({
 }
 
 // An ingredient's amount with the Adjust choices, as a button when a tap shows it in another unit
-// (round its units and back), or says why it stays in its unit for want of a weight. A line with
-// nothing to show either way is plain text. The reason is read out politely when it shows.
+// (round its units and back), or says why it can't be a weight. A line with neither is plain text.
+// After a tap, the amount and any reason are read out politely, and the reason shows.
 function TappableAmount({
-  line,
+  view: { amount, next, reason },
   name,
-  choices,
-  tapped,
   onTap,
 }: {
-  line: IngredientFacts;
+  view: LineView;
   name: string;
-  choices: AdjustChoices;
-  tapped?: UnitChoice;
   onTap: (unit: UnitChoice) => void;
 }) {
-  const [why, setWhy] = useState(false);
-  const options = unitOptions(line, choices);
-  const current = tapped && options.includes(tapped) ? tapped : undefined;
-  const amount = lineAmount(line, choices, current);
-  const reason = weightRefusal(line);
-  if (options.length === 1 && !reason) return <span className="ingredient-amount">{amount}</span>;
+  const [tapped, setTapped] = useState(false);
+  if (!next && !reason) return <span className="ingredient-amount">{amount}</span>;
   return (
     <>
       <button
         type="button"
         className="ingredient-amount ingredient-tap"
-        aria-label={`${amount} ${name}, ${options.length === 1 ? "why it stays in this unit" : "show in another unit"}`}
+        aria-label={`${amount} ${name}, ${next ? "show in another unit" : "why it stays in this unit"}`}
         onClick={() => {
-          if (reason) setWhy(true);
-          if (options.length > 1) onTap(nextUnit(line, choices, current));
+          setTapped(true);
+          if (next) onTap(next);
         }}
       >
         {amount}
       </button>
-      {reason && (
-        <span aria-live="polite" className="ingredient-reason">
-          {why && reason}
-        </span>
-      )}
+      <span aria-live="polite" className="ingredient-reason">
+        {tapped && (
+          <>
+            <span className="visually-hidden">{reason ? `${amount}. ` : amount}</span>
+            {reason && <span className="ingredient-why">{reason}</span>}
+          </>
+        )}
+      </span>
     </>
   );
 }
