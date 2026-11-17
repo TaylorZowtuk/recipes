@@ -69,7 +69,9 @@ test("a tap shows an ingredient as a weight, or says why it has none", async ({ 
 
   const soy = line(page, "soy sauce");
   await page.getByRole("button", { name: "2 tbsp soy sauce, why it stays in this unit" }).click();
-  await expect(soy.getByRole("status")).toHaveText("No weight known for this ingredient yet");
+  await expect(soy.locator(".ingredient-reason")).toHaveText(
+    "No weight known for this ingredient yet",
+  );
   await expect(amount(soy)).toHaveText("2 tbsp");
 
   // A new unit system starts every ingredient over in its units.

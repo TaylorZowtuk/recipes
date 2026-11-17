@@ -570,7 +570,7 @@ function TappableAmount({
         {amount}
       </button>
       {reason && (
-        <span role="status" className="ingredient-reason">
+        <span aria-live="polite" className="ingredient-reason">
           {why && reason}
         </span>
       )}

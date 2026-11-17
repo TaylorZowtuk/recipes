@@ -210,7 +210,7 @@ describe("a tap on an ingredient's amount", () => {
     open();
     tap(/^2 cloves garlic/);
     const reason = host.querySelector(".ingredient-reason");
-    expect(reason?.getAttribute("role")).toBe("status");
+    expect(reason?.getAttribute("aria-live")).toBe("polite");
     expect(reason?.textContent).toBe("No weight known for this ingredient yet");
     expect(amount("garlic")).toBe("2 cloves");
   });
@@ -224,7 +224,7 @@ describe("a tap on an ingredient's amount", () => {
       l.querySelector(".ingredient-name")?.textContent?.startsWith("flour"),
     );
     const reason = li?.querySelector(".ingredient-reason");
-    expect(reason?.getAttribute("role")).toBe("status");
+    expect(reason?.getAttribute("aria-live")).toBe("polite");
     expect(reason?.textContent).toBe("No weight known for this ingredient yet");
   });
 
