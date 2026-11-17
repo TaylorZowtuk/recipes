@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import type { Card, Collection, Recipe, Sync } from "./api/client";
+import { type Card, type Collection, fetchRaw, type Recipe, type Sync } from "./api/client";
+import { reloadForSchema } from "./schemaReload";
 import { session } from "./session";
-import {
-  CARDS,
-  type CacheName,
-  createSyncEngine,
-  DATA,
-  NotAvailableOffline,
-  NotFound,
-  PHOTOS,
-  type Store,
-} from "./syncEngine";
+import { createSyncEngine, NotAvailableOffline, NotFound, type Store } from "./syncEngine";
 
 export { NotFound };
 
@@ -49,28 +41,13 @@ function prefetchesEverything(): boolean {
   return standalone || session.getSnapshot().isEditor;
 }
 
-// The API moved to a schema this build can't read: drop the cached data and reload, once per
-// schema version, so a page still served the old build can't reload forever.
-async function reloadForSchema(sync: Sync) {
-  const key = "plateful.reloadedForSchema";
-  try {
-    if (sessionStorage.getItem(key) === String(sync.schema_version)) return;
-    sessionStorage.setItem(key, String(sync.schema_version));
-  } catch {
-    return;
-  }
-  const names: CacheName[] = [DATA, CARDS, PHOTOS];
-  if (typeof caches !== "undefined") await Promise.all(names.map((name) => caches.delete(name)));
-  location.reload();
-}
-
 // The app's one sync engine: every screen reads the Collection and recipes through it.
 export const engine = createSyncEngine({
-  fetch: (path) => fetch(path),
+  fetch: fetchRaw,
   store: browserStore(),
   full: prefetchesEverything,
   persist: () => void globalThis.navigator?.storage?.persist?.(),
-  onSchemaChange: reloadForSchema,
+  onSchemaChange: (sync) => void reloadForSchema(sync.schema_version),
   storage: browserStorage(),
 });
 
