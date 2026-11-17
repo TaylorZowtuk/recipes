@@ -151,6 +151,7 @@ export function createSyncEngine({
       persisted = true;
       persist?.();
     }
+    await keep(DATA, collectionPath(collection.collection_version)).catch(() => {});
     const cachedRecipes = (await store.keys(DATA)).filter((path) => path.startsWith(RECIPES));
     const opened = new Set(cachedRecipes.map(recipeIdOf));
     for (const card of collection.cards) {
@@ -159,6 +160,8 @@ export function createSyncEngine({
       if (card.preview) await keep(CARDS, cardImageUrl(card.preview.image_id)).catch(() => {});
     }
 
+    // A newer Collection arrived meanwhile: the pass queued for it does the deletes.
+    if (snapshot.collection !== collection) return;
     const cards = new Map(collection.cards.map((card) => [card.id, card]));
     const data = await store.keys(DATA);
     const cached = new Set(data);

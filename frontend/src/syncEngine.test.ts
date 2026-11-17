@@ -21,9 +21,12 @@ function fakeServer() {
     photoBytes: 10,
     cards: [A, B],
     requests: [] as string[],
+    /** While set, recipe requests wait for it. */
+    holdRecipes: undefined as Promise<void> | undefined,
     async fetch(path: string): Promise<Response> {
       server.requests.push(path);
       if (server.offline) throw new TypeError("Failed to fetch");
+      if (server.holdRecipes && path.startsWith("/api/v/recipes/")) await server.holdRecipes;
       if (path === "/api/sync") {
         const sync: Sync = {
           collection_version: server.version,
@@ -232,6 +235,36 @@ describe("a new Collection version", () => {
       "/images/photo-a-card.webp",
     ]);
     expect(store.paths(DATA)).toEqual(["/api/v/collection/2", recipePath("recipe-a", 2)]);
+  });
+
+  it("keeps the newer bundle a poll cached while a pass over the older one was running", async () => {
+    const { server, store, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    let release = () => {};
+    server.holdRecipes = new Promise((resolve) => {
+      release = resolve;
+    });
+    const pass = installed.prefetch();
+
+    server.version = 2;
+    await installed.poll();
+    void installed.prefetch();
+    release();
+    await pass;
+
+    expect(store.paths(DATA)).toContain("/api/v/collection/2");
+    expect(store.paths(DATA)).not.toContain("/api/v/collection/1");
+  });
+
+  it("puts back the bundle in memory when the cache lost it", async () => {
+    const { store, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    await installed.prefetch();
+    await store.delete(DATA, "/api/v/collection/1");
+    await installed.prefetch();
+    expect(store.paths(DATA)).toContain("/api/v/collection/1");
   });
 
   it("drops deleted recipes, and keeps an old version whose new one couldn't be fetched", async () => {
