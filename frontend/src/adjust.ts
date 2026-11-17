@@ -1,5 +1,6 @@
 import { decimal, FRACTIONS, formatAmount } from "./amount";
 import type { ConversionFact, Factor, IngredientFacts, StepFacts } from "./api/client";
+import { EDITOR_KEPT } from "./factEdits";
 
 // The Confidence Threshold: a volume or count shows as a weight only when its conversion is
 // confirmed with at least this confidence.
@@ -21,8 +22,6 @@ type TemperatureSegment = Extract<Segment, { t: "temperature" }>;
 type Range = [number, number];
 type Measure = { kind: "mass" | "volume"; base: number; metric: boolean };
 
-// The refusal an editor's "keep in the written unit" stores (backend EDITOR_KEPT).
-const EDITOR_KEPT = "kept in the written unit by an editor";
 export const KEPT = "An editor kept this in the written unit";
 export const UNCHECKED = "This conversion hasn't been checked yet";
 export const NO_WEIGHT = "No weight known for this ingredient yet";
