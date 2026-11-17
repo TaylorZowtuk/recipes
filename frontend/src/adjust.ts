@@ -108,23 +108,36 @@ function isKitchen(value: number, size: number): boolean {
   return rest < 0.01 || rest > 0.99 || parts.some((part) => Math.abs(rest - part) < 0.01);
 }
 
-// A volume in ml tidied to the friendliest kitchen measure of `set`. A unit fits when the high end
-// reaches ¼ cup or 1 tbsp and the low end ⅛ of it (the smallest always fits). The largest fitting
-// unit in which both ends are whole or a kitchen fraction wins, exactly if any does (unless
-// `converted` from ml), else to the nearest ⅛.
-function tidy(ml: Range, set: [number, string][], converted = false): string {
-  const fits = set.filter(
-    ([size], i) =>
-      i === set.length - 1 || (ml[1] / size >= (size === CUP ? 1 / 4 : 1) && ml[0] / size >= 1 / 8),
+// A number of cups to the nearest cup part or whole cup, and never less than ¼; of a spoon, to
+// the nearest ⅛.
+function toKitchen(value: number, size: number): number {
+  if (size !== CUP) return eighths(value);
+  const whole = Math.floor(value);
+  const part = [0, ...CUP_PARTS, 1].reduce((best, p) =>
+    Math.abs(value - whole - p) < Math.abs(value - whole - best) ? p : best,
   );
-  for (const exact of converted ? [false] : [true, false]) {
+  return Math.max(whole + part, 1 / 4);
+}
+
+// A volume in ml in one kitchen unit of `set`: a spoon fits from 1 of it with a low end of ⅛ (tsp
+// always) but carries at most 1 cup when `set` has cups; cups fit from ¼ with a low end of ⅛, or
+// past 1 cup. The largest fitting unit exact in kitchen fractions wins (unless `converted`), else
+// the largest fitting unit, rounded.
+function tidy(ml: Range, set: [number, string][], converted = false): string {
+  const cups = set.some(([size]) => size === CUP);
+  const fits = set.filter(([size]) => {
+    if (size === CUP) return (ml[1] >= CUP / 4 && ml[0] >= CUP / 8) || ml[1] > CUP;
+    if (cups && ml[1] > CUP) return false;
+    return size === TSP || (ml[1] >= size && ml[0] >= size / 8);
+  });
+  if (!converted) {
     for (const [size, unit] of fits) {
-      const values = ml.map((v) => (exact ? v / size : eighths(v / size))) as Range;
+      const values = ml.map((v) => v / size) as Range;
       if (values.every((v) => isKitchen(v, size))) return fractions(values, unit);
     }
   }
-  const [size, unit] = fits[fits.length - 1] ?? [TSP, "tsp"];
-  return fractions(ml.map((v) => eighths(v / size)) as Range, unit);
+  const [size, unit] = fits[0] as [number, string];
+  return fractions(ml.map((v) => toKitchen(v / size, size)) as Range, unit);
 }
 
 const trusted = (c: ConversionFact) =>

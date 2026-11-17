@@ -119,6 +119,18 @@ describe("As written", () => {
     // A low end under ⅛ of the larger unit keeps the smaller one.
     expect(show(line([1, 50], "ml", "volume"), "us")).toBe("¼–10⅛ tsp");
   });
+
+  it("rounds a converted cup amount to the nearest ¼, ⅓, ½, ⅔ or ¾ cup", () => {
+    expect(show(line(500, "ml", "volume"), "us")).toBe("2 cups");
+    expect(show(line(4, "l", "volume"), "us")).toBe("17 cups");
+    expect(show(line(300, "ml", "volume"), "us")).toBe("1¼ cups");
+  });
+
+  it("shows a range past 1 cup in cups, with a low end of at least ¼ cup", () => {
+    expect(show(line([5, 250], "ml", "volume"), "us")).toBe("¼–1 cup");
+    expect(show(line([1 / 48, 2], "cup", "volume"), "written", 2)).toBe("¼–4 cups");
+    expect(show(line([1, 32], "tsp", "volume"), "written", 2)).toBe("¼–1⅓ cups");
+  });
 });
 
 describe("Metric", () => {
