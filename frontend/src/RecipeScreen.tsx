@@ -439,6 +439,7 @@ export function Ingredients({
             (onTap && !review ? (
               <TappableAmount
                 view={lineView(lineFacts, choices, tapped)}
+                adjusted={`${choices.scale} ${choices.units}`}
                 name={parse.name}
                 onTap={(unit) => onTap(line.id, unit)}
               />
@@ -520,17 +521,22 @@ function Substitutions({
 
 // An ingredient's amount with the Adjust choices, as a button when a tap shows it in another unit
 // (round its units and back), or says why it can't be a weight. A line with neither is plain text.
-// After a tap, the amount and any reason are read out politely, and the reason shows.
+// After a tap, the amount and any reason are read out politely, and the reason shows, until the
+// scale or units (`adjusted`) change. Each tap's text differs from the last, so a repeat is read.
 function TappableAmount({
   view: { amount, next, reason },
+  adjusted,
   name,
   onTap,
 }: {
   view: LineView;
+  adjusted: string;
   name: string;
   onTap: (unit: UnitChoice) => void;
 }) {
-  const [tapped, setTapped] = useState(false);
+  const [said, setSaid] = useState<{ at: string; taps: number }>({ at: adjusted, taps: 0 });
+  if (said.at !== adjusted) setSaid({ at: adjusted, taps: 0 });
+  const tapped = said.at === adjusted && said.taps > 0;
   if (!next && !reason) return <span className="ingredient-amount">{amount}</span>;
   return (
     <>
@@ -539,7 +545,7 @@ function TappableAmount({
         className="ingredient-amount ingredient-tap"
         aria-label={`${amount} ${name}, ${next ? "show in another unit" : "why it stays in this unit"}`}
         onClick={() => {
-          setTapped(true);
+          setSaid({ at: adjusted, taps: said.taps + 1 });
           if (next) onTap(next);
         }}
       >
@@ -548,7 +554,10 @@ function TappableAmount({
       <span aria-live="polite" className="ingredient-reason">
         {tapped && (
           <>
-            <span className="visually-hidden">{reason ? `${amount}. ` : amount}</span>
+            <span className="visually-hidden">
+              {reason ? `${amount}. ` : amount}
+              {said.taps % 2 === 0 && "\u200b"}
+            </span>
             {reason && <span className="ingredient-why">{reason}</span>}
           </>
         )}

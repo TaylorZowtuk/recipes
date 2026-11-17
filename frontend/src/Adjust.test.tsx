@@ -266,6 +266,29 @@ describe("a tap on an ingredient's amount", () => {
     expect(amount("garlic")).toBe("2 cloves");
   });
 
+  it("reads out nothing more once the Adjust choices change", () => {
+    open();
+    tap(/^2 tbsp butter/);
+    const live = () => lineOf("butter")?.querySelector("[aria-live=polite]")?.textContent;
+    expect(live()).toBe("≈ 28 g");
+    tap(/^Adjust/);
+    tap("US");
+    expect(live()).toBe("");
+    tap("2×");
+    expect(live()).toBe("");
+  });
+
+  it("reads out why again on a second tap", () => {
+    open();
+    const why = "2 cloves garlic, why it stays in this unit";
+    const live = () => lineOf("garlic")?.querySelector("[aria-live=polite]")?.textContent;
+    tap(why);
+    const first = live();
+    tap(why);
+    expect(live()).toContain("No weight known for this ingredient yet");
+    expect(live()).not.toBe(first);
+  });
+
   it("says why a volume with no weight can't be a weight, as it cycles", () => {
     open();
     tap(/^Adjust/);
