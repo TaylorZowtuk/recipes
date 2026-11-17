@@ -568,6 +568,22 @@ describe("polling", () => {
     expect(polls()).toBe(1);
   });
 
+  it("keeps polling when the page is hidden and shown again just after a poll", async () => {
+    const { polls } = started();
+    await vi.advanceTimersByTimeAsync(1_000);
+    polls();
+    doc.hidden = true;
+    fire(doc, "visibilitychange");
+    await vi.advanceTimersByTimeAsync(2_000);
+    doc.hidden = false;
+    fire(doc, "visibilitychange");
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(MINUTE - 3_000 - 1);
+    expect(polls()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(polls()).toBe(1);
+  });
+
   it("polls when the network comes back, even just after a poll", async () => {
     const { polls } = started();
     await vi.advanceTimersByTimeAsync(10_000);

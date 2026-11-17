@@ -346,7 +346,7 @@ export function createSyncEngine({
     // unless the network just came back: the poll before it likely failed.
     const tick = (event?: Event) => {
       if (doc.hidden) return schedule();
-      if (event?.type !== "online" && Date.now() - lastPoll < MIN_GAP) return;
+      if (event?.type !== "online" && Date.now() - lastPoll < MIN_GAP) return schedule();
       lastPoll = Date.now();
       poll().catch(() => {});
       schedule();
