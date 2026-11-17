@@ -31,6 +31,7 @@ export class NotFound extends Error {}
 export class NotAvailableOffline extends Error {}
 
 const MINUTE = 60_000;
+const MIN_GAP = 5_000;
 const IDLE = 5 * MINUTE;
 const INTERACTIONS = ["pointerdown", "pointermove", "keydown", "scroll", "touchstart"];
 const PHOTO_INDEX = "plateful.photos";
@@ -74,6 +75,7 @@ export function createSyncEngine({
   let loading: Promise<Collection> | undefined;
   let prefetching: Promise<void> | undefined;
   let prefetchAgain = false;
+  let passFinished = false;
   let schemaChanged = false;
   let persisted = false;
   const missing = new Set<string>();
@@ -137,10 +139,12 @@ export function createSyncEngine({
     const held = snapshot.collection;
     if ((held || full()) && held?.collection_version !== sync.collection_version)
       update({ collection: await read<Collection>(collectionPath(sync.collection_version)) });
+    if (snapshot.collection && (snapshot.collection !== held || !passFinished)) void prefetch();
     return sync;
   }
 
-  /** Polls /api/sync, and loads the new bundle if the Collection moved and one is wanted. */
+  /** Polls /api/sync, loads the new bundle if the Collection moved and one is wanted, and brings
+   * the cache in line when the Collection moved or the last pass didn't finish. */
   function poll(): Promise<Sync> {
     polling ??= fetchSync().finally(() => {
       polling = undefined;
@@ -186,7 +190,10 @@ export function createSyncEngine({
   async function tidy() {
     const collection = snapshot.collection;
     if (!collection) return;
-    await fill(collection).catch(() => {});
+    passFinished = await fill(collection).then(
+      () => true,
+      () => false,
+    );
 
     // A newer Collection arrived meanwhile: the pass queued for it does the deletes.
     if (snapshot.collection !== collection) return;
@@ -210,7 +217,8 @@ export function createSyncEngine({
       if (!shown.has(path)) await store.delete(CARDS, path);
   }
 
-  /** Brings the cache in line with the Collection in memory. One runs at a time. */
+  /** Brings the cache in line with the Collection in memory, as when the device starts
+   * prefetching everything. One runs at a time. */
   function prefetch(): Promise<void> {
     if (prefetching) {
       prefetchAgain = true;
@@ -305,10 +313,12 @@ export function createSyncEngine({
       const wait = lastPoll + (backedOff ? IDLE : MINUTE) - Date.now();
       timer = setTimeout(tick, Math.max(0, wait));
     };
+    // Coming back fires visibilitychange and focus together, so a tick just after a poll skips.
     const tick = () => {
       if (doc.hidden) return schedule();
+      if (Date.now() - lastPoll < MIN_GAP) return;
       lastPoll = Date.now();
-      poll().then(prefetch, () => {});
+      poll().catch(() => {});
       schedule();
     };
     const interacted = () => {
@@ -341,6 +351,8 @@ export function createSyncEngine({
     poll,
     refresh,
     prefetch,
+    /** Resolves once no prefetch pass is running. */
+    settled: () => prefetching ?? Promise.resolve(),
     collection,
     /** A recipe at its card's version, from the cache or else fetched and kept. */
     recipe: (card: Card): Promise<Recipe> => read<Recipe>(recipePath(card)),

@@ -55,7 +55,7 @@ export const engine = createSyncEngine({
 let wasEditor = session.getSnapshot().isEditor;
 session.subscribe(() => {
   const { isEditor } = session.getSnapshot();
-  if (isEditor && !wasEditor) engine.poll().then(engine.prefetch, () => {});
+  if (isEditor && !wasEditor) void engine.prefetch();
   wasEditor = isEditor;
 });
 
@@ -68,7 +68,7 @@ const recipeKey = (id: string, version: number) => `${id}@${version}`;
 // Polls again after this device changes the Collection, so screens switch to the new version
 // once it has loaded, keeping the old one on screen meanwhile.
 export function forgetCollection() {
-  engine.refresh().then(engine.prefetch, () => {});
+  engine.refresh().catch(() => {});
 }
 
 // Loads the Collection this device just changed, so the page shows the newer recipe at once.
@@ -78,10 +78,8 @@ export async function reloadCollection(): Promise<boolean> {
     .refresh()
     .then(engine.collection)
     .then(
-      (collection) => {
-        void engine.prefetch();
-        return collection.collection_version === engine.getSnapshot().sync?.collection_version;
-      },
+      (collection) =>
+        collection.collection_version === engine.getSnapshot().sync?.collection_version,
       () => false,
     );
 }

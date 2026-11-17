@@ -70,7 +70,7 @@ function card(id: string, recipe_version: number, image_id: string | null): Card
 const A = card("recipe-a", 1, "photo-a");
 const B = card("recipe-b", 1, "photo-b");
 
-function memoryStore(): Store & { paths: (cache: CacheName) => string[] } {
+function memoryStore(): Store & { paths: (cache: CacheName) => string[]; walks: number } {
   const caches = new Map<CacheName, Map<string, Response>>();
   const cache = (name: CacheName) => {
     const found = caches.get(name) ?? new Map<string, Response>();
@@ -78,13 +78,20 @@ function memoryStore(): Store & { paths: (cache: CacheName) => string[] } {
     return found;
   };
   const paths = (name: CacheName) => [...cache(name).keys()].sort();
-  return {
+  const store = {
     paths,
-    match: async (name, path) => cache(name).get(path)?.clone(),
-    put: async (name, path, response) => void cache(name).set(path, response.clone()),
-    delete: async (name, path) => void cache(name).delete(path),
-    keys: async (name) => paths(name),
+    /** How many times something listed a cache. */
+    walks: 0,
+    match: async (name: CacheName, path: string) => cache(name).get(path)?.clone(),
+    put: async (name: CacheName, path: string, response: Response) =>
+      void cache(name).set(path, response.clone()),
+    delete: async (name: CacheName, path: string) => void cache(name).delete(path),
+    keys: async (name: CacheName) => {
+      store.walks++;
+      return paths(name);
+    },
   };
+  return store;
 }
 
 const recipePath = (id: string, version: number) =>
@@ -196,33 +203,37 @@ describe("a failed prefetch request", () => {
   it.each([403, 429, 503])("ends the pass on a %i, and a later pass picks up from there", async (status) => {
     const { server, store, engine } = setup({ full: true });
     const installed = engine();
-    await installed.poll();
     server.status.set(recipePath("recipe-a", 1), status);
-    await installed.prefetch();
+    await installed.poll();
+    await installed.settled();
     expect(server.took()).toEqual(["/api/sync", "/api/v/collection/1", recipePath("recipe-a", 1)]);
 
     server.status.clear();
-    await installed.prefetch();
+    await installed.poll();
+    await installed.settled();
     expect(store.paths(DATA)).toHaveLength(3);
     expect(store.paths(CARDS)).toHaveLength(2);
   });
 
   it("ends the pass when the network fails", async () => {
-    const { server, engine } = setup({ full: true });
-    const installed = engine();
-    await installed.poll();
+    const { server, engine } = setup();
+    const mode = { full: false };
+    const device = engine(mode);
+    await device.collection();
+    await device.settled();
     server.took();
     server.offline = true;
-    await installed.prefetch();
+    mode.full = true;
+    await device.prefetch();
     expect(server.took()).toEqual([recipePath("recipe-a", 1)]);
   });
 
   it("asks for a missing image only once a session, and carries on past it", async () => {
     const { server, store, engine } = setup({ full: true });
     const installed = engine();
-    await installed.poll();
     server.status.set("/images/photo-a-card.webp", 404);
-    await installed.prefetch();
+    await installed.poll();
+    await installed.settled();
     await installed.prefetch();
     expect(server.took().filter((path) => path === "/images/photo-a-card.webp")).toHaveLength(1);
     expect(store.paths(CARDS)).toEqual(["/images/photo-b-card.webp"]);
@@ -234,13 +245,13 @@ describe("a new Collection version", () => {
     const { server, store, engine } = setup({ full: true });
     const installed = engine();
     await installed.poll();
-    await installed.prefetch();
+    await installed.settled();
     server.took();
 
     server.version = 2;
     server.cards = [card("recipe-a", 1, "photo-a"), card("recipe-b", 2, "photo-b2")];
     await installed.poll();
-    await installed.prefetch();
+    await installed.settled();
 
     expect(server.took()).toEqual([
       "/api/sync",
@@ -267,7 +278,7 @@ describe("a new Collection version", () => {
     server.version = 2;
     server.cards = [card("recipe-a", 2, "photo-a"), card("recipe-b", 2, "photo-b")];
     await visitor.poll();
-    await visitor.prefetch();
+    await visitor.settled();
 
     expect(server.took()).toEqual([
       "/api/sync",
@@ -296,6 +307,19 @@ describe("a new Collection version", () => {
 
     expect(store.paths(DATA)).toContain("/api/v/collection/2");
     expect(store.paths(DATA)).not.toContain("/api/v/collection/1");
+  });
+
+  it("leaves the cache alone on a poll that changes nothing after a pass that finished", async () => {
+    const { server, store, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    await installed.settled();
+    server.took();
+    store.walks = 0;
+    await installed.poll();
+    await installed.settled();
+    expect(server.took()).toEqual(["/api/sync"]);
+    expect(store.walks).toBe(0);
   });
 
   it("puts back the bundle in memory when the cache lost it", async () => {
@@ -420,6 +444,17 @@ describe("polling", () => {
 
     doc.hidden = false;
     fire(doc, "visibilitychange");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(polls()).toBe(1);
+  });
+
+  it("polls once when coming back fires both visibilitychange and focus", async () => {
+    const { polls } = started();
+    await vi.advanceTimersByTimeAsync(10_000);
+    polls();
+    fire(doc, "visibilitychange");
+    await vi.advanceTimersByTimeAsync(100);
+    fire(win, "focus");
     await vi.advanceTimersByTimeAsync(0);
     expect(polls()).toBe(1);
   });
