@@ -214,6 +214,34 @@ describe("As written, scaled", () => {
       expect(show(line([1, 2], "clove", "count"), units, 1.5)).toBe("1½–3 cloves");
     }
   });
+
+  it("makes a plural with es after s, sh, ch, x or z, and leaf leaves", () => {
+    expect(show(line(1, "pinch", "count"), "written", 2)).toBe("2 pinches");
+    expect(show(line(2, "pinches", "count"), "written", 0.5)).toBe("1 pinch");
+    expect(show(line(1, "bunch", "count"), "written", 2)).toBe("2 bunches");
+    expect(show(line(1, "glass", "count"), "written", 2)).toBe("2 glasses");
+    expect(show(line(2, "leaves", "count"), "written", 0.5)).toBe("1 leaf");
+    expect(show(line(1, "leaf", "count"), "written", 2)).toBe("2 leaves");
+    expect(show(line(2, "slices", "count"), "written", 0.5)).toBe("1 slice");
+    expect(show(line([1, 3], "cloves", "count"), "written", 0.5)).toBe("½–1½ cloves");
+  });
+
+  it("leaves an adjective or a unit with a parenthesis as it is", () => {
+    expect(show(line(1, "whole", "count"), "written", 2)).toBe("2 whole");
+    expect(show(line(1, "large", "count"), "written", 2)).toBe("2 large");
+    expect(show(line(1, "package (8 oz)", "count"), "written", 2)).toBe("2 package (8 oz)");
+  });
+
+  it("leaves the written unit at 1×", () => {
+    expect(show(line(1, "cloves", "count"), "written")).toBe("1 cloves");
+  });
+
+  it("follows a step's portion of the line, at 1× too", () => {
+    const portion = (l: IngredientFacts, share: number) =>
+      lineView(l, at("written"), undefined, share).amount;
+    expect(portion(line(2, "cloves", "count"), 0.5)).toBe("1 clove");
+    expect(portion(line(125, "g", "mass"), 1 / 3)).toBe("42 g");
+  });
 });
 
 describe("unit systems", () => {

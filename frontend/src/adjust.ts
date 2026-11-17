@@ -198,7 +198,8 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
   const parse = line.parse;
   if (!parse) return "";
   if (!parse.quantity) return parse.unit ?? "";
-  const q: Range = [parse.quantity.low * scale * portion, parse.quantity.high * scale * portion];
+  const factor = scale * portion;
+  const q: Range = [parse.quantity.low * factor, parse.quantity.high * factor];
   const m = measure(parse.unit);
   const base = (per: number) => q.map((v) => v * per) as Range;
   if (choice === "g" || choice === "oz") {
@@ -209,21 +210,28 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
     if (!inSet(m, SPOONS)) return inMetric(base(m.base), m.kind, false);
     if (scale !== 1) return tidy(base(m.base), SPOONS);
   }
-  if (m?.metric && m.base >= 1 && (choice === "metric" || (choice === "written" && scale !== 1)))
+  if (m?.metric && m.base >= 1 && (choice === "metric" || (choice === "written" && factor !== 1)))
     return inMetric(base(m.base), m.kind, true);
   if (m && choice === "us" && m.metric) {
     return m.kind === "mass" ? us(base(m.base)) : tidy(base(m.base), SPOONS_AND_CUPS, true);
   }
   if (m && choice === "us" && m.base === OZ && q[1] >= 16) return us(base(m.base));
   if (m && scale !== 1 && inSet(m, SPOONS_AND_CUPS)) return tidy(base(m.base), SPOONS_AND_CUPS);
-  return fractions(q, m || scale === 1 ? parse.unit : counted(parse.unit, q[1]));
+  return fractions(q, m || factor === 1 ? parse.unit : counted(parse.unit, q[1]));
 }
 
-// A count unit made plural or singular as `amount` is, by one trailing "s".
+// A count unit made plural or singular as `amount` is: "es" after s, sh, ch, x or z, leaf and
+// leaves, else "s". An adjective ("whole") or a unit with a parenthesis stays as written.
+const ADJECTIVES = new Set(["whole", "large", "medium", "small", "extra large", "jumbo"]);
 function counted(unit: string | null, amount: number): string | null {
-  if (!unit) return unit;
-  if (amount > 1) return unit.endsWith("s") ? unit : `${unit}s`;
-  return unit.endsWith("s") ? unit.slice(0, -1) : unit;
+  if (!unit || unit.includes("(") || ADJECTIVES.has(unit.toLowerCase())) return unit;
+  const singular = unit
+    .replace(/leaves$/i, "leaf")
+    .replace(/(ss|sh|ch|x|z)es$/i, "$1")
+    .replace(/(?<!s)s$/i, "");
+  if (amount <= 1) return singular;
+  if (/leaf$/i.test(singular)) return singular.replace(/f$/i, "ves");
+  return /(s|sh|ch|x|z)$/i.test(singular) ? `${singular}es` : `${singular}s`;
 }
 
 // The units a line can honestly take, in the order a tap cycles them: the unit system's, the
