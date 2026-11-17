@@ -109,8 +109,8 @@ function RecipePage() {
 
   useEffect(() => {
     if (card && shownSlug !== slug(card.title))
-      navigate({ pathname: recipePath(card), hash }, { replace: true });
-  }, [card, shownSlug, hash, navigate]);
+      navigate({ pathname: recipePath(card), search, hash }, { replace: true });
+  }, [card, shownSlug, search, hash, navigate]);
 
   const missing = collection.state === "ready" && !card;
   const loading = collection.state === "loading" || (card && recipe.state === "loading");

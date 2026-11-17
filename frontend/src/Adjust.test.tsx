@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Card, Recipe } from "./api/client";
 import { RecipeScreen } from "./RecipeScreen";
@@ -49,10 +49,13 @@ const card: Card = {
 
 const other: Card = { ...card, id: "01K7TEST000000000000000002", title: "Synthetic Other Beans" };
 
-// Moves the router the test renders, as a link would.
+// Moves the router the test renders, as a link would, and notes the location it is at.
 let go: (path: string) => void = () => {};
+let at = "";
 function Navigator() {
   const navigate = useNavigate();
+  const { pathname, search } = useLocation();
+  at = pathname + search;
   go = (path) => {
     navigate(path);
   };
@@ -115,14 +118,14 @@ afterEach(() => {
   shown.editor = false;
 });
 
-function open(search = "", status: Recipe["status"] = "ready") {
+function open(search = "", status: Recipe["status"] = "ready", slug = "synthetic-test-beans") {
   shown.recipe = adjustRecipe(status);
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   act(() =>
     root?.render(
-      <MemoryRouter initialEntries={[`/recipes/${card.id}/synthetic-test-beans${search}`]}>
+      <MemoryRouter initialEntries={[`/recipes/${card.id}/${slug}${search}`]}>
         <Navigator />
         <Routes>
           <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
@@ -312,6 +315,12 @@ describe("a Week Plan link's scale", () => {
     expect(amount("flour")).toBe("3 cups");
     tap(/^Adjust/);
     expect(button("1½×").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps its scale when an old title's address moves to the current one", () => {
+    open("?scale=1.5", "ready", "old-title");
+    expect(at).toBe(`/recipes/${card.id}/synthetic-test-beans?scale=1.5`);
+    expect(amount("flour")).toBe("3 cups");
   });
 
   it("starts at 1× when it isn't one of the scales", () => {
