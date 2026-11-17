@@ -281,6 +281,18 @@ describe("a tap on an ingredient's amount", () => {
     expect(live()).toBe("");
   });
 
+  it("stays silent when the Adjust choices change and change back", () => {
+    open();
+    tap(/^2 tbsp butter/);
+    const region = () => lineOf("butter")?.querySelector("[aria-live=polite]");
+    expect(region()?.getAttribute("aria-atomic")).toBe("true");
+    expect(region()?.textContent).toBe("≈ 28 g");
+    tap(/^Adjust/);
+    tap("US");
+    tap("As written");
+    expect(region()?.textContent).toBe("");
+  });
+
   it("reads out why again on a second tap", () => {
     open();
     const why = "2 cloves garlic, why it stays in this unit";

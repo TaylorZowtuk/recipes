@@ -222,17 +222,20 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
   return fractions(q, m || factor === 1 ? parse.unit : counted(parse.unit, q[1]));
 }
 
-// A count unit made plural or singular as `amount` is: "es" after s, sh, ch, x or z, leaf and
-// leaves, else "s". An adjective ("whole") or a unit with a parenthesis stays as written.
-const ADJECTIVES = new Set(["whole", "large", "medium", "small", "extra large", "jumbo"]);
+// A count unit made plural or singular as `amount` is: "es" after s, sh, ch, x or z, loaves and
+// loaf (also halves, leaves, shelves), berries and berry (a consonant before "ries"), else "s".
+// An adjective ("whole"), "dozen", a hyphenated unit or one with a parenthesis stays as written.
+const ADJECTIVES = new Set(["whole", "large", "medium", "small", "extra large", "jumbo", "dozen"]);
 function counted(unit: string | null, amount: number): string | null {
-  if (!unit || unit.includes("(") || ADJECTIVES.has(unit.toLowerCase())) return unit;
+  if (!unit || /[(-]/.test(unit) || ADJECTIVES.has(unit.toLowerCase())) return unit;
   const singular = unit
-    .replace(/leaves$/i, "leaf")
+    .replace(/(lea|loa|hal|shel)ves$/i, "$1f")
+    .replace(/([^aeiou])ries$/i, "$1ry")
     .replace(/(ss|sh|ch|x|z)es$/i, "$1")
     .replace(/(?<!s)s$/i, "");
   if (amount <= 1) return singular;
-  if (/leaf$/i.test(singular)) return singular.replace(/f$/i, "ves");
+  if (/(lea|loa|hal|shel)f$/i.test(singular)) return singular.replace(/f$/i, "ves");
+  if (/[^aeiou]ry$/i.test(singular)) return singular.replace(/y$/i, "ies");
   return /(s|sh|ch|x|z)$/i.test(singular) ? `${singular}es` : `${singular}s`;
 }
 

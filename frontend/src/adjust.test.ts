@@ -228,6 +228,17 @@ describe("As written, scaled", () => {
     expect(show(line([1, 3], "cloves", "count"), "written", 0.5)).toBe("½–1½ cloves");
   });
 
+  it("swaps ves and f, and ies and y, and leaves dozen and a hyphenated unit as written", () => {
+    expect(show(line(2, "loaves", "count"), "written", 0.5)).toBe("1 loaf");
+    expect(show(line(1, "loaf", "count"), "written", 2)).toBe("2 loaves");
+    expect(show(line(2, "berries", "count"), "written", 0.5)).toBe("1 berry");
+    expect(show(line(1, "berry", "count"), "written", 2)).toBe("2 berries");
+    expect(show(line(2, "halves", "count"), "written", 0.5)).toBe("1 half");
+    expect(show(line(1, "dozen", "count"), "written", 2)).toBe("2 dozen");
+    expect(show(line(1, "medium-sized", "count"), "written", 2)).toBe("2 medium-sized");
+    expect(show(line(2, "cloves", "count"), "written", 0.5)).toBe("1 clove");
+  });
+
   it("leaves an adjective or a unit with a parenthesis as it is", () => {
     expect(show(line(1, "whole", "count"), "written", 2)).toBe("2 whole");
     expect(show(line(1, "large", "count"), "written", 2)).toBe("2 large");

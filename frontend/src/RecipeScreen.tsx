@@ -551,7 +551,7 @@ function TappableAmount({
       >
         {amount}
       </button>
-      <span aria-live="polite" className="ingredient-reason">
+      <span aria-live="polite" aria-atomic="true" className="ingredient-reason">
         {tapped && (
           <>
             <span className="visually-hidden">
