@@ -84,6 +84,20 @@ function us(grams: Range): string {
   return fractions(oz, "oz");
 }
 
+// An amount already in a metric unit, in g or ml (or kg or l from 1000): whole from 10, else a
+// decimal, as a kitchen scale or jug reads, never a kitchen fraction.
+function metricAsDecimals(values: Range, small: string, large: string): string {
+  if (values[1] >= 1000)
+    return decimals(
+      values.map((v) => decimal(v / 1000)),
+      large,
+    );
+  return decimals(
+    values.map((v) => (v >= 10 ? String(Math.round(v)) : decimal(v))),
+    small,
+  );
+}
+
 const decimals = ([low, high]: string[], unit: string) =>
   `${low === high ? low : `${low}–${high}`} ${unit}`;
 const fractions = ([low, high]: Range, unit: string | null) => formatAmount({ low, high }, unit);
@@ -163,9 +177,15 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
     if (!inSet(m, SPOONS)) return metric(base(m.base), "ml", "l");
     if (scale !== 1) return tidy(base(m.base), SPOONS);
   }
+  if (m && choice === "metric" && m.metric && m.base >= 1) {
+    return m.kind === "mass"
+      ? metricAsDecimals(base(m.base), "g", "kg")
+      : metricAsDecimals(base(m.base), "ml", "l");
+  }
   if (m && choice === "us" && m.metric) {
     return m.kind === "mass" ? us(base(m.base)) : tidy(base(m.base), SPOONS_AND_CUPS, true);
   }
+  if (m && choice === "us" && m.base === OZ && q[1] >= 16) return us(base(m.base));
   if (m && scale !== 1 && inSet(m, SPOONS_AND_CUPS)) return tidy(base(m.base), SPOONS_AND_CUPS);
   return fractions(q, parse.unit);
 }

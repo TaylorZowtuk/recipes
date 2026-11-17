@@ -126,6 +126,14 @@ describe("Metric", () => {
     expect(show(line(4, "cloves", "count"), "metric", 2)).toBe("8 cloves");
     expect(show(line(250, "ml", "volume"), "metric")).toBe("250 ml");
   });
+
+  it("shows metric units as decimals, rescaled between g and kg, ml and l", () => {
+    expect(show(line(1.5, "kg", "mass"), "metric", 0.5)).toBe("750 g");
+    expect(show(line(600, "ml", "volume"), "metric", 2)).toBe("1.2 l");
+    expect(show(line(1.5, "kg", "mass"), "metric")).toBe("1.5 kg");
+    expect(show(line(2.5, "g", "mass"), "metric")).toBe("2.5 g");
+    expect(show(line(250, "g", "mass"), "metric", 1.5)).toBe("375 g");
+  });
 });
 
 describe("US", () => {
@@ -145,6 +153,20 @@ describe("US", () => {
   it("keeps US units", () => {
     expect(show(line(1, "lb", "mass"), "us")).toBe("1 lb");
     expect(show(line(1 / 3, "cup", "volume"), "us")).toBe("⅓ cup");
+  });
+
+  it("keeps US units in kitchen fractions, with oz to lb from 16 oz", () => {
+    expect(show(line(8, "oz", "mass"), "us", 2)).toBe("1 lb");
+    expect(show(line(12, "oz", "mass"), "us", 3)).toBe("2¼ lb");
+    expect(show(line(6, "oz", "mass"), "us", 0.5)).toBe("3 oz");
+    expect(show(line(1, "lb", "mass"), "us", 0.5)).toBe("½ lb");
+  });
+});
+
+describe("As written, scaled", () => {
+  it("keeps the written unit", () => {
+    expect(show(line(1.5, "kg", "mass"), "written", 0.5)).toBe("¾ kg");
+    expect(show(line(8, "oz", "mass"), "written", 2)).toBe("16 oz");
   });
 });
 
