@@ -24,12 +24,12 @@ function fakeServer() {
     requests: [] as string[],
     /** Paths answered with this status instead. */
     status: new Map<string, number>(),
-    /** While set, recipe requests wait for it. */
-    holdRecipes: undefined as Promise<void> | undefined,
+    /** While set, requests for paths starting with `prefix` wait for `until`. */
+    hold: undefined as { prefix: string; until: Promise<void> } | undefined,
     async fetch(path: string): Promise<Response> {
       server.requests.push(path);
       if (server.offline) throw new TypeError("Failed to fetch");
-      if (server.holdRecipes && path.startsWith("/api/v/recipes/")) await server.holdRecipes;
+      if (server.hold && path.startsWith(server.hold.prefix)) await server.hold.until;
       const status = server.status.get(path);
       if (status) return new Response(null, { status });
       if (path === "/api/sync") {
@@ -63,6 +63,16 @@ function fakeServer() {
     },
   };
   return server;
+}
+
+// Holds the server's answers to paths starting with `prefix` until the returned function is called.
+function held(server: ReturnType<typeof fakeServer>, prefix: string): () => void {
+  let release = () => {};
+  const until = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  server.hold = { prefix, until };
+  return release;
 }
 
 // A response as fetch returns it after following redirects to `path`.
@@ -127,7 +137,7 @@ function setup({ full = false, photoCap = 1000 } = {}) {
       },
       photoCap,
     });
-  return { server, store, onSchemaChange, persist, engine };
+  return { server, store, storage, onSchemaChange, persist, engine };
 }
 
 describe("reading the Collection and recipes", () => {
@@ -327,10 +337,7 @@ describe("a new Collection version", () => {
     const { server, store, engine } = setup({ full: true });
     const installed = engine();
     await installed.poll();
-    let release = () => {};
-    server.holdRecipes = new Promise((resolve) => {
-      release = resolve;
-    });
+    const release = held(server, "/api/v/recipes/");
     const pass = installed.prefetch();
 
     server.version = 2;
@@ -428,6 +435,47 @@ describe("full-size photos", () => {
 
     await device.open(c);
     expect(store.paths(PHOTOS)).toEqual(["/images/photo-a.webp", "/images/photo-c.webp"]);
+  });
+
+  it("keeps the photo just opened even when it alone is over the cap", async () => {
+    const { store, engine } = setup({ photoCap: 5 });
+    await engine().open(A);
+    expect(store.paths(PHOTOS)).toEqual(["/images/photo-a.webp"]);
+  });
+
+  it("keeps both photos when two opens overlap", async () => {
+    const { server, store, engine } = setup();
+    const device = engine();
+    const release = held(server, "/images/photo-a.webp");
+    const openA = device.open(A);
+    const openB = device.open(B);
+    release();
+    await Promise.all([openA, openB]);
+    await device.open(card("recipe-c", 1, "photo-c"));
+    expect(store.paths(PHOTOS)).toEqual([
+      "/images/photo-a.webp",
+      "/images/photo-b.webp",
+      "/images/photo-c.webp",
+    ]);
+  });
+
+  it("trims the cache and the index to each other when they disagree", async () => {
+    const { server, store, storage, engine } = setup({ photoCap: 25 });
+    const photo = (id: string) => `/images/${id}.webp`;
+    // photo-a is cached but not indexed, photo-c indexed but not cached, and photo-b, about to be
+    // reopened, cached but not indexed.
+    await store.put(PHOTOS, photo("photo-a"), new Response(new Uint8Array(10)));
+    await store.put(PHOTOS, photo("photo-b"), new Response(new Uint8Array(10)));
+    storage.set("plateful.photos", JSON.stringify([{ path: photo("photo-c"), bytes: 1000 }]));
+
+    const device = engine();
+    await device.open(B);
+    expect(store.paths(PHOTOS)).toEqual([photo("photo-b")]);
+    expect(server.took()).toEqual(["/images/photo-b-card.webp"]);
+
+    // Had photo-c's stale entry counted, photo-b would go to make room.
+    await device.open(card("recipe-d", 1, "photo-d"));
+    expect(store.paths(PHOTOS)).toEqual([photo("photo-b"), photo("photo-d")]);
   });
 
   it("does nothing for a recipe without a Preview Photo", async () => {

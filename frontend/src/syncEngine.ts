@@ -279,15 +279,24 @@ export function createSyncEngine({
 
   // Caches a full-size photo and marks it the most recently opened, then evicts the least
   // recently opened until the photos fit the cap. The index, oldest first, and the cache are
-  // trimmed to each other, so neither holds what the other lost.
-  async function openPhoto(path: string) {
+  // trimmed to each other, so neither holds what the other lost. Opens run one at a time.
+  let opening: Promise<void> = Promise.resolve();
+  function openPhoto(path: string): Promise<void> {
+    const next = opening.then(() => cachePhoto(path));
+    opening = next.catch(() => {});
+    return next;
+  }
+
+  async function cachePhoto(path: string) {
     const cached = new Set(await store.keys(PHOTOS));
-    const index = readPhotoIndex().filter((entry) => cached.has(entry.path) && entry.path !== path);
+    const known = readPhotoIndex().filter((entry) => cached.has(entry.path));
+    const previous = known.find((entry) => entry.path === path);
+    const index = known.filter((entry) => entry.path !== path);
     const indexed = new Set(index.map((entry) => entry.path));
     for (const stray of cached)
       if (stray !== path && !indexed.has(stray)) await store.delete(PHOTOS, stray);
-    const photo = await keep(PHOTOS, path);
-    index.push({ path, bytes: (await photo.blob()).size });
+    const bytes = previous?.bytes ?? (await (await keep(PHOTOS, path)).blob()).size;
+    index.push({ path, bytes });
     let total = index.reduce((sum, entry) => sum + entry.bytes, 0);
     while (total > photoCap && index.length > 1) {
       const oldest = index.shift() as PhotoEntry;
