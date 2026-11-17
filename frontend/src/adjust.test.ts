@@ -70,7 +70,7 @@ const show = (l: IngredientFacts, units: Units, scale: Factor = 1) =>
   lineAmount(l, at(units, scale));
 
 const flour = conversion({ density_g_per_ml: 0.5 }); // 1 cup ≈ 118 g
-const eggs = conversion({ grams_per_count: 50, count_unit: null });
+const eggs = conversion({ grams_per_count: 50, count_unit: "large" });
 const cloves = conversion({ grams_per_count: 3, count_unit: "clove" });
 
 describe("As written", () => {
@@ -252,6 +252,21 @@ describe("unitOptions and nextUnit", () => {
     expect(lineAmount(garlic, at("us"), "g")).toBe("≈ 12 g");
     const can = line(1, "can", "count", cloves);
     expect(unitOptions(can, at("us"))).toEqual(["us"]);
+  });
+
+  it("counts as the API does: in the line's own unit, or a bare count for a line with none", () => {
+    const options = (amount: IngredientFacts) => unitOptions(amount, at("written"));
+    expect(options(line(3, "Clove(s)", "count", cloves))).toContain("g");
+    expect(options(line(3, "cloves", "count", cloves))).toContain("g");
+    expect(
+      options(line(2, null, "count", conversion({ grams_per_count: 9, count_unit: "medium" }))),
+    ).toContain("g");
+    expect(options(line(2, null, "count", cloves))).toEqual(["written"]);
+    expect(weightRefusal(line(2, null, "count", cloves))).toBe(
+      "No weight known for this ingredient yet",
+    );
+    const uncounted = conversion({ grams_per_count: 50, count_unit: null });
+    expect(options(line(2, null, "count", uncounted))).toEqual(["written"]);
   });
 
   it("has one option when nothing converts", () => {

@@ -130,24 +130,41 @@ function tidy(ml: Range, set: [number, string][], converted = false): string {
 const trusted = (c: ConversionFact) =>
   c.confirmed && c.confidence >= CONFIDENCE_THRESHOLD && !c.refused;
 
-const singular = (unit: string) =>
-  unit
-    .toLowerCase()
-    .replace(/\(e?s\)/, "")
-    .replace(/ies$/, "y")
-    .replace(/s$/, "")
-    .trim();
+// Whether a portion counted in `countUnit` counts in a line's unit, ignoring case and plurals: a
+// line with no unit fits only a bare count ("large" egg). Mirrors the API's fdc._counts_in.
+const BARE_COUNTS = new Set([
+  "each",
+  "piece",
+  "unit",
+  "item",
+  "small",
+  "medium",
+  "large",
+  "extra large",
+  "jumbo",
+]);
+const words = (text: string) =>
+  new Set(
+    (text.toLowerCase().match(/[a-z]+/g) ?? []).map((word) =>
+      word.replace(/(?<=..)ies$/, "y").replace(/(?<=...)(?<!s)s$/, ""),
+    ),
+  );
+function countsIn(countUnit: string | null, unit: string | null): boolean {
+  if (!countUnit) return false;
+  if (!unit) return BARE_COUNTS.has(countUnit);
+  const [a, b] = [words(countUnit), words(unit.replace(/\((?:e?s)\)/i, ""))];
+  return a.size === b.size && [...a].every((word) => b.has(word));
+}
 
 // Grams per one of the line's written unit that its conversion gives a volume or count, checked
-// or not. A line with no unit counts in any count unit, as the API decided when it chose it.
+// or not.
 function gramsPerUnit(line: Line): number | undefined {
   const { parse, conversion: c } = line;
   if (!parse || !c) return undefined;
   const m = measure(parse.unit);
   if (m) return m.kind === "volume" && c.density_g_per_ml ? c.density_g_per_ml * m.base : undefined;
   if (parse.unit_kind === "mass" || parse.unit_kind === "volume") return undefined;
-  const counts = !parse.unit || (!!c.count_unit && singular(c.count_unit) === singular(parse.unit));
-  return counts && c.grams_per_count ? c.grams_per_count : undefined;
+  return countsIn(c.count_unit, parse.unit) && c.grams_per_count ? c.grams_per_count : undefined;
 }
 
 const weighs = (line: Line) =>
