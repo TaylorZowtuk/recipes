@@ -203,8 +203,10 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
   const m = measure(parse.unit);
   const base = (per: number) => q.map((v) => v * per) as Range;
   if (choice === "g" || choice === "oz") {
+    // "Under ⅛ oz" is already approximate, so it takes no "≈".
     const grams = base(gramsPerUnit(line) ?? 0);
-    return `≈ ${choice === "g" ? inMetric(grams, "mass", false) : us(grams)}`;
+    const weight = choice === "g" ? inMetric(grams, "mass", false) : us(grams);
+    return weight.startsWith("under") ? weight : `≈ ${weight}`;
   }
   if (m && choice === "metric" && !m.metric) {
     if (!inSet(m, SPOONS)) return inMetric(base(m.base), m.kind, false);

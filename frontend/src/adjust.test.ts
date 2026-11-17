@@ -381,7 +381,7 @@ describe("a tiny amount", () => {
   });
 
   it("shows under ⅛ oz when it rounds below ⅛ oz", () => {
-    expect(amountOf(yeast, at("written"), "oz")).toBe("≈ under ⅛ oz");
+    expect(amountOf(yeast, at("written"), "oz")).toBe("under ⅛ oz");
     expect(show(line(200, "mg", "mass"), "us")).toBe("under ⅛ oz");
     expect(show(line(1, "g", "mass"), "us")).toBe("under ⅛ oz");
     expect(show(line(3, "g", "mass"), "us")).toBe("⅛ oz");
