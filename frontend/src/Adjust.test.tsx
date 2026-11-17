@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Card, Recipe } from "./api/client";
 import { RecipeScreen } from "./RecipeScreen";
@@ -13,7 +13,10 @@ const shown: { recipe?: Recipe; editor: boolean } = { editor: false };
 vi.mock("./collection", () => ({
   useCollection: () => ({
     state: "ready",
-    value: { cards: [card], canonical_ingredients: [], kitchen_settings: { store_categories: [] } },
+    value: {
+      cards: [card, other],
+      canonical_ingredients: [], kitchen_settings: { store_categories: [] },
+    },
   }),
   useRecipe: () => ({ state: "ready", value: shown.recipe }),
   useSync: () => undefined,
@@ -42,6 +45,18 @@ const card: Card = {
   host: null,
   schema_version: 1,
 };
+
+const other: Card = { ...card, id: "01K7TEST000000000000000002", title: "Synthetic Other Beans" };
+
+// Moves the router the test renders, as a link would.
+let go: (path: string) => void = () => {};
+function Navigator() {
+  const navigate = useNavigate();
+  go = (path) => {
+    navigate(path);
+  };
+  return null;
+}
 
 // Butter (i1) weighs: its conversion is confirmed at the Confidence Threshold. Garlic (i2) has no
 // weight per clove. Flour (i3) is 2 cups. Step s1 melts the butter; s2 heats the oven to 425°F.
@@ -107,6 +122,7 @@ function open(search = "", status: Recipe["status"] = "ready") {
   act(() =>
     root?.render(
       <MemoryRouter initialEntries={[`/recipes/${card.id}/synthetic-test-beans${search}`]}>
+        <Navigator />
         <Routes>
           <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
         </Routes>
@@ -159,6 +175,26 @@ describe("the Adjust sheet", () => {
     expect(amount("flour")).toBe("2 cups");
     tap("As written");
     expect(button(/^Adjust/).textContent).toBe("Adjust");
+  });
+});
+
+describe("the Adjust choices", () => {
+  it("are forgotten on leaving the recipe", () => {
+    open();
+    tap(/^Adjust/);
+    tap("2×");
+    tap("Metric");
+    tap(/butter, show in another unit$/);
+    expect(amount("butter")).toBe("¼ cup");
+    const asWritten = () => {
+      expect(button(/^Adjust/).textContent).toBe("Adjust");
+      expect(amount("flour")).toBe("2 cups");
+      expect(amount("butter")).toBe("2 tbsp");
+    };
+    act(() => go(`/recipes/${other.id}/synthetic-other-beans`));
+    asWritten();
+    act(() => go(`/recipes/${card.id}/synthetic-test-beans`));
+    asWritten();
   });
 });
 
