@@ -56,8 +56,9 @@ export function createSyncEngine({
   full: () => boolean;
   /** Asks the browser to keep the cache, once the first full prefetch starts. */
   persist?: () => void;
-  /** Called once, when the API reports a schema version other than this build's. */
-  onSchemaChange: (sync: Sync) => void;
+  /** Called when the API reports a newer schema than this build's. Resolves to whether the page
+   * is reloading; if not, the next poll calls it again. */
+  onSchemaChange: (sync: Sync) => Promise<boolean>;
   /** Where the full-size photos' recency and sizes are kept. */
   storage?: Pick<Storage, "getItem" | "setItem">;
   photoCap?: number;
@@ -118,9 +119,18 @@ export function createSyncEngine({
       throw error;
     }
     update({ sync });
-    if (sync.schema_version !== SCHEMA_VERSION) {
-      if (!schemaChanged) onSchemaChange(sync);
-      schemaChanged = true;
+    if (sync.schema_version > SCHEMA_VERSION) {
+      if (!schemaChanged) {
+        schemaChanged = true;
+        onSchemaChange(sync).then(
+          (reloading) => {
+            schemaChanged = reloading;
+          },
+          () => {
+            schemaChanged = false;
+          },
+        );
+      }
       return sync;
     }
     const held = snapshot.collection;

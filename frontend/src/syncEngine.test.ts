@@ -89,7 +89,7 @@ const recipePath = (id: string, version: number) =>
 function setup({ full = false, photoCap = 1000 } = {}) {
   const server = fakeServer();
   const store = memoryStore();
-  const onSchemaChange = vi.fn();
+  const onSchemaChange = vi.fn(async (_sync: Sync) => true);
   const persist = vi.fn();
   const storage = new Map<string, string>();
   const engine = (mode = { full }) =>
@@ -293,6 +293,26 @@ describe("a schema change", () => {
     await installed.poll();
     expect(onSchemaChange).toHaveBeenCalledTimes(1);
     expect(server.took()).toEqual(["/api/sync", "/api/sync"]);
+  });
+
+  it("calls the hook again on the next poll when it didn't reload", async () => {
+    const { server, engine, onSchemaChange } = setup({ full: true });
+    server.schema = SCHEMA_VERSION + 1;
+    onSchemaChange.mockResolvedValue(false);
+    const installed = engine();
+    await installed.poll();
+    await installed.poll();
+    expect(onSchemaChange).toHaveBeenCalledTimes(2);
+    expect(server.took()).toEqual(["/api/sync", "/api/sync"]);
+  });
+
+  it("ignores an API behind this build", async () => {
+    const { server, engine, onSchemaChange } = setup({ full: true });
+    server.schema = SCHEMA_VERSION - 1;
+    const installed = engine();
+    await installed.poll();
+    expect(onSchemaChange).not.toHaveBeenCalled();
+    expect(installed.getSnapshot().collection?.collection_version).toBe(1);
   });
 });
 

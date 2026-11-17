@@ -47,7 +47,7 @@ export const engine = createSyncEngine({
   store: browserStore(),
   full: prefetchesEverything,
   persist: () => void globalThis.navigator?.storage?.persist?.(),
-  onSchemaChange: (sync) => void reloadForSchema(sync.schema_version),
+  onSchemaChange: (sync) => reloadForSchema(sync.schema_version),
   storage: browserStorage(),
 });
 

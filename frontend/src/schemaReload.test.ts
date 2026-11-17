@@ -1,8 +1,9 @@
 import { expect, it, vi } from "vitest";
 import { reloadForSchema } from "./schemaReload";
 
-// A service worker registration whose update finds a new worker, installing until `installed()`.
-function fakeWorker() {
+// A service worker registration whose update finds a new worker, installing until `installed()`,
+// unless `found` is false: the server still has the old build.
+function fakeWorker({ found = true } = {}) {
   const steps: string[] = [];
   const container = new EventTarget();
   const worker = Object.assign(new EventTarget(), {
@@ -20,7 +21,7 @@ function fakeWorker() {
     waiting: null as typeof worker | null,
     async update() {
       steps.push("update");
-      registration.installing = worker;
+      if (found) registration.installing = worker;
     },
   };
   const installed = () => {
@@ -59,7 +60,7 @@ it("updates the service worker, lets the new one take over, then drops the cache
   expect(steps).toEqual([]);
 
   sw.installed();
-  await done;
+  expect(await done).toBe(true);
   expect(sw.steps).toEqual(["update", 'message {"type":"SKIP_WAITING"}', "controllerchange"]);
   expect(steps).toEqual([
     "delete plateful-data",
@@ -71,7 +72,7 @@ it("updates the service worker, lets the new one take over, then drops the cache
 
 it("drops the caches and reloads where there is no service worker", async () => {
   const { steps, deps: d } = deps(undefined);
-  await reloadForSchema(2, d);
+  expect(await reloadForSchema(2, d)).toBe(true);
   expect(steps).toEqual([
     "delete plateful-data",
     "delete plateful-cards",
@@ -89,4 +90,36 @@ it("reloads once per schema version, so a page still served the old build can't 
 
   await reloadForSchema(3, d);
   expect(steps.filter((step) => step === "reload")).toHaveLength(2);
+});
+
+it("leaves the caches and the page alone while the server still has the old build", async () => {
+  const sw = fakeWorker({ found: false });
+  const { steps, stored, deps: d } = deps(sw.serviceWorker);
+  expect(await reloadForSchema(2, d)).toBe(false);
+  expect(steps).toEqual([]);
+  expect(stored.has("plateful.reloadedForSchema")).toBe(false);
+
+  // A later try, once the new build is up, still reloads.
+  const later = fakeWorker();
+  const { steps: laterSteps, deps: laterDeps } = deps(later.serviceWorker);
+  laterDeps.storage = d.storage;
+  const done = reloadForSchema(2, laterDeps);
+  await vi.waitFor(() => expect(later.steps).toEqual(["update"]));
+  later.installed();
+  expect(await done).toBe(true);
+  expect(laterSteps).toContain("reload");
+});
+
+it("doesn't reload when it can't keep the once-per-version mark", async () => {
+  const { steps, deps: d } = deps(undefined);
+  const broken = () => {
+    throw new DOMException("denied", "SecurityError");
+  };
+  d.storage = { getItem: broken, setItem: broken };
+  expect(await reloadForSchema(2, d)).toBe(false);
+  expect(steps).toEqual([]);
+
+  d.storage = { getItem: () => null, setItem: broken };
+  expect(await reloadForSchema(2, d)).toBe(false);
+  expect(steps).toEqual([]);
 });

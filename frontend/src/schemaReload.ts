@@ -31,29 +31,34 @@ function installed(registration: ServiceWorkerRegistration): Promise<ServiceWork
   });
 }
 
-// The API moved to a schema this build can't read: the new build's service worker takes over at
-// once, then the cached data goes and the page reloads into the new build, which fills it again.
-// Once per schema version, so a page still served the old build can't reload forever.
+// The API moved to a schema this build can't read. Once the new build's service worker has taken
+// over, or where there is none, the cached data goes and the page reloads into the new build.
+// Says whether it reloaded: until the new build is uploaded it doesn't, and a later poll tries
+// again. Once per schema version, so a page still served the old build can't reload forever.
 export async function reloadForSchema(version: number, deps: Deps = browserDeps()) {
   const key = "plateful.reloadedForSchema";
   try {
-    if (deps.storage.getItem(key) === String(version)) return;
-    deps.storage.setItem(key, String(version));
+    if (deps.storage.getItem(key) === String(version)) return false;
   } catch {
-    return;
+    return false;
   }
   const registration = await deps.serviceWorker?.getRegistration().catch(() => undefined);
   if (deps.serviceWorker && registration) {
     await registration.update().catch(() => {});
     const waiting = await installed(registration);
-    if (waiting) {
-      const container = deps.serviceWorker;
-      await new Promise((resolve) => {
-        container.addEventListener("controllerchange", resolve, { once: true });
-        waiting.postMessage({ type: "SKIP_WAITING" });
-      });
-    }
+    if (!waiting) return false;
+    const container = deps.serviceWorker;
+    await new Promise((resolve) => {
+      container.addEventListener("controllerchange", resolve, { once: true });
+      waiting.postMessage({ type: "SKIP_WAITING" });
+    });
+  }
+  try {
+    deps.storage.setItem(key, String(version));
+  } catch {
+    return false;
   }
   await Promise.all([DATA, CARDS, PHOTOS].map((name) => deps.deleteCache(name)));
   deps.reload();
+  return true;
 }
