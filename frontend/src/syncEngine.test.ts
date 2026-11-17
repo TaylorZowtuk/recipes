@@ -568,6 +568,17 @@ describe("polling", () => {
     expect(polls()).toBe(1);
   });
 
+  it("polls when the network comes back, even just after a poll", async () => {
+    const { polls } = started();
+    await vi.advanceTimersByTimeAsync(10_000);
+    polls();
+    fire(win, "focus");
+    await vi.advanceTimersByTimeAsync(1_000);
+    fire(win, "online");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(polls()).toBe(2);
+  });
+
   it("polls when the window regains focus", async () => {
     const { polls } = started();
     await vi.advanceTimersByTimeAsync(10_000);

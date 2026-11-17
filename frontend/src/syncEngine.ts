@@ -342,10 +342,11 @@ export function createSyncEngine({
       const wait = lastPoll + (backedOff ? IDLE : MINUTE) - Date.now();
       timer = setTimeout(tick, Math.max(0, wait));
     };
-    // Coming back fires visibilitychange and focus together, so a tick just after a poll skips.
-    const tick = () => {
+    // Coming back fires visibilitychange and focus together, so a tick just after a poll skips,
+    // unless the network just came back: the poll before it likely failed.
+    const tick = (event?: Event) => {
       if (doc.hidden) return schedule();
-      if (Date.now() - lastPoll < MIN_GAP) return;
+      if (event?.type !== "online" && Date.now() - lastPoll < MIN_GAP) return;
       lastPoll = Date.now();
       poll().catch(() => {});
       schedule();
