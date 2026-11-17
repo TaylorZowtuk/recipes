@@ -282,9 +282,10 @@ class ConversionFact(Fact, FdcNumbers):
 Ratio = Annotated[float, Field(gt=0, le=10, allow_inf_nan=False)]
 
 
-class Substitution(Model):
+class EnrichmentSubstitution(Model):
     """Something the recipe says may stand in for the line, quoted as the recipe words it, with
-    its Canonical Ingredient, how much to use, and its FDC food's numbers.
+    its Canonical Ingredient, how much to use, and its FDC food and FDC portion, as enrichment
+    sends it: the API fills in the numbers.
     """
 
     wording: Label
@@ -293,6 +294,11 @@ class Substitution(Model):
     note: Label  # e.g. "use half as much if dried"
     fdc_id: int
     portion_id: int | None
+
+
+class Substitution(EnrichmentSubstitution):
+    """A substitute as stored, with its FDC food's numbers copied from the FDC Snapshot."""
+
     fdc: FdcNumbers
 
 
@@ -304,6 +310,20 @@ class SubstitutionsFact(Fact):
     """A line's substitutions, which an editor confirms together in one tap."""
 
     items: Annotated[list[Substitution], Field(min_length=1, max_length=MAX_SUBSTITUTES)]
+
+
+class EnrichmentSubstitutionsFact(Fact):
+    """A line's substitutions as enrichment sends them, without their FDC numbers."""
+
+    items: Annotated[list[EnrichmentSubstitution], Field(min_length=1, max_length=MAX_SUBSTITUTES)]
+
+
+class EnrichmentLineFacts(Model):
+    """A line's facts as enrichment sends them: the API builds its conversion from its match."""
+
+    parse: ParseFact | None = None
+    match: MatchFact | None = None
+    substitutions: EnrichmentSubstitutionsFact | None = None
 
 
 class IngredientFacts(Model):
@@ -411,6 +431,14 @@ class RecipeFacts(Model):
     difficulty: DifficultyFact | None = None
 
 
+class EnrichmentFacts(Model):
+    """A recipe's facts as enrichment sends them, without any FDC numbers."""
+
+    ingredients: dict[str, EnrichmentLineFacts] = {}
+    steps: dict[str, StepFacts] = {}
+    difficulty: DifficultyFact | None = None
+
+
 class EnrichmentIssue(Model):
     """Something enrichment corrected or was unsure about, on the fact `fact_id` names, or what an
     editor's FDC food pick on another line left to check: a line no portion of the food fits
@@ -474,12 +502,13 @@ MAX_ISSUES = 200
 
 class Enrichment(Model):
     """What the enrich CLI found in a Pending recipe, keyed by the Original's line ids, with the
-    Canonical Ingredients it creates and the wordings it learns.
+    Canonical Ingredients it creates and the wordings it learns. `fdc_release` is the FDC
+    Snapshot release it chose FDC foods and FDC portions from, which must be the API's.
     """
 
     enrichment_version: int
-    fdc_release: Label | None = None
-    facts: RecipeFacts
+    fdc_release: Label
+    facts: EnrichmentFacts
     issues: Annotated[list[EnrichmentIssue], Field(max_length=MAX_ISSUES)] = []
     canonical_ingredients: list[CanonicalIngredient] = []
     wordings: list[Wording] = []

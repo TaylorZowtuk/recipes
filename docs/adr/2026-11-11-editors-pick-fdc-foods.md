@@ -41,7 +41,7 @@ Each `ConversionFact` and substitution keeps the `release` its numbers came from
 
 ## Decided now for later slices
 
-- **The enrichment request will send only `{fdc_id, portion_id}`**, and the API fills in the numbers with `fdc.numbers`, refusing a request made for another FDC Snapshot release than the one it holds. Today's request sends the numbers.
+- **The enrichment request will send only `{fdc_id, portion_id}`**, and the API fills in the numbers with `fdc.numbers`, refusing a request made for another FDC Snapshot release than the one it holds. Done 2026-11-16 (TaylorZowtuk/recipes#149): the request now carries only ids and `fdc_release`, which must be the API's release, and the API fills in every number.
 - **"Kept in the written unit by an editor" stays its own choice, apart from the portion.** Choosing no portion loses the density or gram weight, and so the line's weight and nutrition; keeping the written unit keeps them, and only shows the line as written.
 
 ## Consequences
