@@ -251,6 +251,28 @@ describe("unitOptions and nextUnit", () => {
   });
 });
 
+describe("a tiny amount", () => {
+  const yeast = line(1 / 8, "tsp", "volume", conversion({ density_g_per_ml: 0.6 }));
+
+  it("shows grams under 10 to one decimal place", () => {
+    expect(lineAmount(yeast, at("written"), "g")).toBe("≈ 0.4 g");
+    expect(show(line(0.1, "oz", "mass"), "metric")).toBe("2.8 g");
+    expect(show(line(0.35, "oz", "mass"), "metric")).toBe("9.9 g");
+  });
+
+  it("shows under ⅛ oz when it rounds below ⅛ oz", () => {
+    expect(lineAmount(yeast, at("written"), "oz")).toBe("≈ under ⅛ oz");
+    expect(show(line(200, "mg", "mass"), "us")).toBe("under ⅛ oz");
+    expect(show(line(1, "g", "mass"), "us")).toBe("under ⅛ oz");
+    expect(show(line(3, "g", "mass"), "us")).toBe("⅛ oz");
+    expect(show(line([1, 10], "g", "mass"), "us")).toBe("⅛–⅜ oz");
+  });
+
+  it("shows a volume of at least ⅛ tsp", () => {
+    expect(show(line(0.5, "ml", "volume"), "us")).toBe("⅛ tsp");
+  });
+});
+
 describe("the Confidence Threshold", () => {
   it("is confirmed and a confidence of at least 0.8", () => {
     expect(CONFIDENCE_THRESHOLD).toBe(0.8);

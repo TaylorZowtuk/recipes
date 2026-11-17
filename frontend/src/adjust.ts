@@ -68,8 +68,9 @@ const inSet = (m: Measure | undefined, set: [number, string][]) =>
 
 const METRIC = { mass: ["g", "kg"], volume: ["ml", "l"] } as const;
 
-// An amount in g or ml, as kg or l from 1000. One written in a metric unit (`exact`) is whole from
-// 10, else a decimal, as a kitchen scale or jug reads; a converted one is whole. Never a fraction.
+// An amount in g or ml, as kg or l from 1000: whole from 10, else a decimal, as a kitchen scale or
+// jug reads, never a fraction. Under 10, one written in a metric unit (`exact`) keeps two places
+// and a converted one shows one.
 function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string {
   const [small, large] = METRIC[kind];
   if (Math.round(values[1]) >= 1000)
@@ -77,14 +78,17 @@ function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string 
       values.map((v) => decimal(v / 1000)),
       large,
     );
+  const underTen = (v: number) => (exact ? decimal(v) : String(Math.round(v * 10) / 10));
   return decimals(
-    values.map((v) => (exact && v < 10 ? decimal(v) : String(Math.round(v)))),
+    values.map((v) => (v < 10 ? underTen(v) : String(Math.round(v)))),
     small,
   );
 }
 
-// An amount in grams in US weights: oz, or lb from 16 oz.
+// An amount in grams in US weights: oz, or lb from 16 oz. One that rounds below ⅛ oz at its high
+// end is "under ⅛ oz"; else neither end shows under ⅛.
 function us(grams: Range): string {
+  if (Math.round((grams[1] / OZ) * 8) === 0) return "under ⅛ oz";
   const oz = grams.map((g) => eighths(g / OZ)) as Range;
   if (oz[1] >= 16) return fractions(grams.map((g) => eighths(g / LB)) as Range, "lb");
   return fractions(oz, "oz");
