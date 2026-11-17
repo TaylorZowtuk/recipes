@@ -1055,6 +1055,8 @@ def test_the_enrichment_request_carries_no_fdc_numbers() -> None:
                 walk(value)
 
     walk(schema)
-    numbers = {"conversion", "fdc"} | FdcNumbers.model_fields.keys() | Per100g.model_fields.keys()
-    assert properties.isdisjoint(numbers)
+    fdc_fields = (
+        {"conversion", "fdc"} | FdcNumbers.model_fields.keys() | Per100g.model_fields.keys()
+    )
+    assert properties.isdisjoint(fdc_fields)
     assert schema["$defs"].keys().isdisjoint({"FdcNumbers", "Per100g", "ConversionFact"})
