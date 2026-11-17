@@ -258,20 +258,27 @@ describe("prefetching", () => {
 });
 
 describe("a failed prefetch request", () => {
-  it.each([403, 429, 503])("ends the pass on a %i, and a later pass picks up from there", async (status) => {
-    const { server, store, engine } = setup({ full: true });
-    const installed = engine();
-    server.status.set(recipePath("recipe-a", 1), status);
-    await installed.poll();
-    await installed.settled();
-    expect(server.took()).toEqual(["/api/sync", "/api/v/collection/1", recipePath("recipe-a", 1)]);
+  it.each([403, 429, 503])(
+    "ends the pass on a %i, and a later pass picks up from there",
+    async (status) => {
+      const { server, store, engine } = setup({ full: true });
+      const installed = engine();
+      server.status.set(recipePath("recipe-a", 1), status);
+      await installed.poll();
+      await installed.settled();
+      expect(server.took()).toEqual([
+        "/api/sync",
+        "/api/v/collection/1",
+        recipePath("recipe-a", 1),
+      ]);
 
-    server.status.clear();
-    await installed.poll();
-    await installed.settled();
-    expect(store.paths(DATA)).toHaveLength(3);
-    expect(store.paths(CARDS)).toHaveLength(2);
-  });
+      server.status.clear();
+      await installed.poll();
+      await installed.settled();
+      expect(store.paths(DATA)).toHaveLength(3);
+      expect(store.paths(CARDS)).toHaveLength(2);
+    },
+  );
 
   it("ends the pass when the network fails", async () => {
     const { server, engine } = setup();

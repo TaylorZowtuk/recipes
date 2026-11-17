@@ -107,7 +107,9 @@ test("reopened offline, the app shows a cached recipe and its card-size photo", 
   // keeps the immutable images too, is emptied so it can't answer instead.
   await (await context.newCDPSession(page)).send("Network.clearBrowserCache");
   await context.setOffline(true);
-  const heroResponse = page.waitForResponse((response) => new URL(response.url()).pathname === card);
+  const heroResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === card,
+  );
   await page.goto(pathOf(OATS));
   await expect(ingredients(page)).toBeVisible();
   const hero = page.locator(".plate-hero img");
