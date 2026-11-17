@@ -87,7 +87,7 @@ test.describe("with service workers blocked", () => {
   });
 });
 
-test("reopened offline, the app shows a cached recipe and its card-size photo", async ({
+test("reopened offline, the app shows cached recipes and their photos", async ({
   page,
   context,
   browserName,
@@ -102,6 +102,19 @@ test("reopened offline, the app shows a cached recipe and its card-size photo", 
     .locator("img")
     .getAttribute("src");
   await cached(page, OATS, card ?? "no card image");
+
+  // Opening a recipe keeps its full-size photo in the sync engine's cache.
+  await page.goto(pathOf(SOUP));
+  const fullSize = (await page.locator(".plate-hero img").getAttribute("src")) ?? "";
+  expect(fullSize).toMatch(/^\/images\/[^/]+(?<!-card)\.webp$/);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async (path) => !!(await (await caches.open("plateful-photos")).match(path)),
+        fullSize,
+      ),
+    )
+    .toBe(true);
 
   // The full-size photo was never opened, so the hero falls back to the card-size copy, which
   // the service worker serves from the sync engine's cache. The browser's own HTTP cache, which
@@ -119,4 +132,15 @@ test("reopened offline, the app shows a cached recipe and its card-size photo", 
     .poll(() => hero.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
     .toBeGreaterThan(0);
   expect((await heroResponse).fromServiceWorker()).toBe(true);
+
+  const fullResponse = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === fullSize,
+  );
+  await page.goto(pathOf(SOUP));
+  await expect(ingredients(page)).toBeVisible();
+  await expect(hero).toHaveAttribute("src", fullSize);
+  await expect
+    .poll(() => hero.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+    .toBeGreaterThan(0);
+  expect((await fullResponse).fromServiceWorker()).toBe(true);
 });
