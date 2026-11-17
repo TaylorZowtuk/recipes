@@ -196,15 +196,23 @@ h1:focus {
 }
 
 /* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */
-.screen-body,
-.sync-status {
+.screen-body {
   padding: 0 calc(var(--gutter) + env(safe-area-inset-right)) 0
     calc(var(--gutter) + env(safe-area-inset-left));
 }
 
-.sync-status {
-  color: var(--text-secondary);
+/* The editor's read-only banner: one slim line above the screen, nothing while empty. */
+.sync-banner {
+  margin: 0;
+  padding: var(--space) calc(var(--gutter) + env(safe-area-inset-right)) var(--space)
+    calc(var(--gutter) + env(safe-area-inset-left));
+  background: var(--warning);
+  color: var(--warning-text);
   font-size: var(--text-small);
+}
+
+.sync-banner:empty {
+  padding-block: 0;
 }
 
 .places {
@@ -1624,8 +1632,7 @@ h1:focus {
       calc(var(--space) * 2) calc(var(--space) * 8);
   }
 
-  .screen-body,
-  .sync-status {
+  .screen-body {
     padding: 0 calc(var(--space) * 8 + env(safe-area-inset-right)) 0 calc(var(--space) * 8);
   }
 }

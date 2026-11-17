@@ -242,7 +242,7 @@ test("the dock leaves the foot of the page clear", async ({ page }) => {
   const clearance = () =>
     page.evaluate(() => {
       window.scrollTo(0, document.documentElement.scrollHeight);
-      const last = document.querySelector(".sync-status")?.getBoundingClientRect().bottom ?? 0;
+      const last = document.querySelector(".screen-body")?.getBoundingClientRect().bottom ?? 0;
       return (document.querySelector(".timer-dock-panel")?.getBoundingClientRect().top ?? 0) - last;
     });
   await expect.poll(clearance).toBeGreaterThanOrEqual(0);

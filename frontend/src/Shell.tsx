@@ -20,9 +20,6 @@ const tabs = [
 // The permanent frame: the four places as a bottom tab bar on phones or a left rail on desktop,
 // around whichever screen is open.
 export function Shell() {
-  const sync = useSync();
-  const online = useOnline();
-  const status = sync === undefined ? "Checking…" : syncStatus({ sync, online });
   const { key, hash } = useLocation();
   const navigationType = useNavigationType();
   const shownKey = useRef(key);
@@ -52,12 +49,23 @@ export function Shell() {
         ))}
         <AccountMenu placement="rail" />
       </nav>
+      <EditorOnly>
+        <SyncBanner />
+      </EditorOnly>
       <Outlet />
-      <p role="status" className="sync-status">
-        {status}
-      </p>
       <TimerDock />
     </div>
+  );
+}
+
+// An editor's slim banner when editing is off, as offline. The status region stays mounted while
+// empty, taking no room, so screen readers announce it when it fills.
+function SyncBanner() {
+  const status = syncStatus({ sync: useSync(), online: useOnline() });
+  return (
+    <p role="status" className="sync-banner">
+      {status}
+    </p>
   );
 }
 

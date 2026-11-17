@@ -153,7 +153,14 @@ function RecipePage() {
         {gone && "This recipe is no longer in the Collection."}
         {missing && !edit.notice && "There’s no recipe at this address."}
       </p>
-      {failed && <LoadFailed what="The recipe" retry={failed.retry} status={status} />}
+      {failed && (
+        <LoadFailed
+          what="The recipe"
+          offline={failed.offline}
+          retry={failed.retry}
+          status={status}
+        />
+      )}
       {missing && (
         <p className="screen-note">
           <Link to="/recipes">Browse the Collection</Link>
