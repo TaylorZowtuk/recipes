@@ -2,7 +2,7 @@
 
 Superseded in part by [Versioned reads under `/api/v/`](2026-10-26-path-versioned-reads-cached-at-cloudfront.md): the phone fetches `/api/v/collection/<n>`, not `/api/collection?v=<n>`, and recipes by version under `/api/v/recipes/`, which is what CloudFront caches.
 
-Superseded in part by [An idle poll backs off to every 5 minutes](2026-11-16-idle-poll-backs-off-to-five-minutes.md): away from the Week and Grocery List tabs, the 60 s poll drops to every 5 minutes after about 5 idle minutes. Everything else here stands.
+Superseded in part by [An idle poll backs off, and the prefetch is paced](2026-11-16-idle-poll-backoff-and-paced-prefetch.md): away from the Week and Grocery List tabs, the 60 s poll drops to every 5 minutes after about 5 idle minutes, and the prefetch sends about one request a second. Everything else here stands.
 
 The PWA keeps the whole collection on installed phones and finds out about changes by polling one small uncached endpoint, `GET /api/sync`. Offline, it queues only the writes that can't conflict (grocery ticks and Extras) and turns every other edit off. We chose polling because it fits the $0 stack: WebSockets would need API Gateway, whose free allowance has expired for this account, and Web Push needs an installed app, notification permission and a store of push subscriptions. We chose to queue only conflict-free writes because ticking groceries in a store with no signal is the one offline edit that matters, and a queue that can't conflict never needs a "your offline change was rejected" screen.
 

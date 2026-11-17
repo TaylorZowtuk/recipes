@@ -20,7 +20,8 @@ async function signInAsEditor(page: Page) {
   expect(signedIn.ok(), "fake sign-in").toBe(true);
 }
 
-// Waits until the sync engine has cached the recipe, and the image at `card` when given.
+// Waits until the sync engine has cached the recipe, and the image at `card` when given. The
+// prefetch sends one request a second, so caching the seed's every recipe and card takes a while.
 async function cached(page: Page, recipe: typeof OATS, card?: string) {
   const has = () =>
     page.evaluate(
@@ -35,7 +36,7 @@ async function cached(page: Page, recipe: typeof OATS, card?: string) {
       },
       { id: recipe.id, card },
     );
-  await expect.poll(has).toBe(true);
+  await expect.poll(has, { timeout: 20_000 }).toBe(true);
 }
 
 async function openFromGrid(page: Page, recipe: typeof OATS) {

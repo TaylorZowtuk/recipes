@@ -35,6 +35,9 @@ const MIN_GAP = 5_000;
 const IDLE = 5 * MINUTE;
 const INTERACTIONS = ["pointerdown", "pointermove", "keydown", "scroll", "touchstart"];
 const PHOTO_INDEX = "plateful.photos";
+// The prefetch sends at most one request a second, so a few phones refilling at once, as after a
+// schema change, stay well inside the WAF's limit of about 1,000 requests per 5 minutes per IP.
+const PREFETCH_GAP = 1000;
 
 const COLLECTION = "/api/v/collection/";
 const RECIPES = "/api/v/recipes/";
@@ -50,6 +53,7 @@ export function createSyncEngine({
   onSchemaChange,
   storage,
   photoCap = 200 * 1024 * 1024,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }: {
   fetch: (path: string) => Promise<Response>;
   store: Store;
@@ -63,6 +67,8 @@ export function createSyncEngine({
   /** Where the full-size photos' recency and sizes are kept. */
   storage?: Pick<Storage, "getItem" | "setItem">;
   photoCap?: number;
+  /** Waits out the gap between prefetch requests. */
+  sleep?: (ms: number) => Promise<void>;
 }) {
   let snapshot: SyncSnapshot = { sync: undefined, collection: undefined };
   const listeners = new Set<() => void>();
@@ -79,6 +85,9 @@ export function createSyncEngine({
   let schemaChanged = false;
   let persisted = false;
   const missing = new Set<string>();
+  let nextPrefetchAt = 0;
+  let hidden = () => false;
+  const shown = new Set<() => void>();
 
   async function request(path: string): Promise<Response> {
     let response: Response;
@@ -161,10 +170,15 @@ export function createSyncEngine({
   /** A poll that starts after any in flight, so it sees this device's own write. */
   const refresh = () => (polling ?? Promise.resolve()).catch(() => {}).then(poll);
 
-  // Keeps `path` for a prefetch. A 404 is remembered for the session; any other failure throws,
-  // ending the pass, which a later one picks up.
-  async function prefetchOne(cache: CacheName, path: string) {
-    if (missing.has(path)) return;
+  // Keeps `path` for a prefetch of `collection`, waiting out the gap since the last prefetch
+  // request and any time the page is hidden. Skipped once a newer Collection is held. A 404 is
+  // remembered for the session; any other failure throws, ending the pass, which a later one picks up.
+  async function prefetchOne(collection: Collection, cache: CacheName, path: string) {
+    if (missing.has(path) || (await store.match(cache, path))) return;
+    await sleep(Math.max(0, nextPrefetchAt - Date.now()));
+    while (hidden()) await new Promise<void>((resolve) => shown.add(resolve));
+    if (snapshot.collection !== collection) return;
+    nextPrefetchAt = Date.now() + PREFETCH_GAP;
     try {
       await keep(cache, path);
     } catch (error) {
@@ -180,13 +194,13 @@ export function createSyncEngine({
       persisted = true;
       persist?.();
     }
-    await prefetchOne(DATA, collectionPath(collection.collection_version));
+    await prefetchOne(collection, DATA, collectionPath(collection.collection_version));
     const cachedRecipes = (await store.keys(DATA)).filter((path) => path.startsWith(RECIPES));
     const opened = new Set(cachedRecipes.map(recipeIdOf));
     for (const card of collection.cards) {
       if (!everything && !opened.has(card.id)) continue;
-      await prefetchOne(DATA, recipePath(card));
-      if (card.preview) await prefetchOne(CARDS, cardImageUrl(card.preview.image_id));
+      await prefetchOne(collection, DATA, recipePath(card));
+      if (card.preview) await prefetchOne(collection, CARDS, cardImageUrl(card.preview.image_id));
     }
   }
 
@@ -340,7 +354,16 @@ export function createSyncEngine({
       lastInteraction = Date.now();
       if (backedOff) schedule();
     };
-    const visibility = () => (doc.hidden ? schedule() : tick());
+    const resume = () => {
+      for (const resolve of shown) resolve();
+      shown.clear();
+    };
+    const visibility = () => {
+      if (doc.hidden) return schedule();
+      resume();
+      tick();
+    };
+    hidden = () => doc.hidden;
 
     doc.addEventListener("visibilitychange", visibility);
     win.addEventListener("focus", tick);
@@ -350,6 +373,8 @@ export function createSyncEngine({
     tick();
     return () => {
       clearTimeout(timer);
+      hidden = () => false;
+      resume();
       doc.removeEventListener("visibilitychange", visibility);
       win.removeEventListener("focus", tick);
       win.removeEventListener("online", tick);

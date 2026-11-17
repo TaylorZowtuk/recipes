@@ -118,7 +118,8 @@ function memoryStore(): Store & { paths: (cache: CacheName) => string[]; walks: 
 const recipePath = (id: string, version: number) =>
   `/api/v/recipes/${id}/${version}/${SCHEMA_VERSION}`;
 
-function setup({ full = false, photoCap = 1000 } = {}) {
+// Unless `paced`, the prefetch's gaps between requests pass at once.
+function setup({ full = false, photoCap = 1000, paced = false } = {}) {
   const server = fakeServer();
   const store = memoryStore();
   const onSchemaChange = vi.fn(async (_sync: Sync) => true);
@@ -136,6 +137,7 @@ function setup({ full = false, photoCap = 1000 } = {}) {
         setItem: (key, value) => void storage.set(key, value),
       },
       photoCap,
+      ...(paced ? {} : { sleep: async () => {} }),
     });
   return { server, store, storage, onSchemaChange, persist, engine };
 }
@@ -600,5 +602,106 @@ describe("polling", () => {
     fire(win, "focus");
     await vi.advanceTimersByTimeAsync(10 * MINUTE);
     expect(polls()).toBe(0);
+  });
+});
+
+describe("a paced prefetch", () => {
+  let win: EventTarget;
+  let doc: EventTarget & { hidden: boolean };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    win = new EventTarget();
+    doc = Object.assign(new EventTarget(), { hidden: false });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("fetches missing items about a second apart", async () => {
+    const { server, store, engine } = setup({ full: true, paced: true });
+    const installed = engine();
+    await installed.poll();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.took()).toEqual(["/api/sync", "/api/v/collection/1", recipePath("recipe-a", 1)]);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(server.took()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(server.took()).toEqual(["/images/photo-a-card.webp"]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.took()).toEqual([recipePath("recipe-b", 1)]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(server.took()).toEqual(["/images/photo-b-card.webp"]);
+    await installed.settled();
+    expect(store.paths(DATA)).toHaveLength(3);
+  });
+
+  it("doesn't wait for items already cached", async () => {
+    const { server, store, engine } = setup({ full: true, paced: true });
+    await store.put(DATA, recipePath("recipe-a", 1), Response.json({}));
+    await store.put(CARDS, "/images/photo-a-card.webp", new Response(new Uint8Array(1)));
+    const installed = engine();
+    await installed.poll();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(server.took()).toEqual(["/api/sync", "/api/v/collection/1", recipePath("recipe-b", 1)]);
+  });
+
+  it("lets a recipe opened meanwhile fetch at once", async () => {
+    const { server, engine } = setup({ full: true, paced: true });
+    const installed = engine();
+    await installed.poll();
+    await vi.advanceTimersByTimeAsync(0);
+    server.took();
+    await installed.open(B);
+    await installed.recipe(card("recipe-c", 1, null)).catch(() => {});
+    expect(server.took()).toEqual([
+      "/images/photo-b-card.webp",
+      "/images/photo-b.webp",
+      recipePath("recipe-c", 1),
+    ]);
+  });
+
+  it("drops the older Collection's items when a newer one arrives mid-pass", async () => {
+    const { server, store, engine } = setup({ full: true, paced: true });
+    const installed = engine();
+    await installed.poll();
+    await vi.advanceTimersByTimeAsync(0);
+    server.took();
+
+    server.version = 2;
+    server.cards = [card("recipe-a", 1, "photo-a"), card("recipe-b", 2, "photo-b2")];
+    await installed.poll();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await installed.settled();
+
+    expect(server.took()).toEqual([
+      "/api/sync",
+      "/api/v/collection/2",
+      "/images/photo-a-card.webp",
+      recipePath("recipe-b", 2),
+      "/images/photo-b2-card.webp",
+    ]);
+    expect(store.paths(DATA)).toEqual([
+      "/api/v/collection/2",
+      recipePath("recipe-a", 1),
+      recipePath("recipe-b", 2),
+    ]);
+  });
+
+  it("sends nothing while the page is hidden, and carries on when it's shown", async () => {
+    const { server, store, engine } = setup({ full: true, paced: true });
+    const installed = engine();
+    installed.start(win, doc);
+    await vi.advanceTimersByTimeAsync(0);
+    server.took();
+    doc.hidden = true;
+    doc.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(server.took()).toEqual([]);
+
+    doc.hidden = false;
+    doc.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(3000);
+    await installed.settled();
+    expect(store.paths(DATA)).toHaveLength(3);
+    expect(store.paths(CARDS)).toHaveLength(2);
   });
 });
