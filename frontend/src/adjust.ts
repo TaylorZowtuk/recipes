@@ -66,35 +66,28 @@ const SPOONS = SPOONS_AND_CUPS.slice(1);
 const inSet = (m: Measure | undefined, set: [number, string][]) =>
   !!m && !m.metric && set.some(([size]) => size === m.base);
 
-// An amount in grams, as metric (g, kg from 1000 g) or US (oz, lb from 16 oz).
-function metric(values: Range, small: string, large: string): string {
-  const whole = values.map(Math.round) as Range;
-  if (whole[1] >= 1000)
-    return decimals(
-      values.map((v) => decimal(v / 1000)),
-      large,
-    );
-  return decimals(whole.map(String), small);
-}
+const METRIC = { mass: ["g", "kg"], volume: ["ml", "l"] } as const;
 
-function us(grams: Range): string {
-  const oz = grams.map((g) => eighths(g / OZ)) as Range;
-  if (oz[1] >= 16) return fractions(grams.map((g) => eighths(g / LB)) as Range, "lb");
-  return fractions(oz, "oz");
-}
-
-// An amount already in a metric unit, in g or ml (or kg or l from 1000): whole from 10, else a
-// decimal, as a kitchen scale or jug reads, never a kitchen fraction.
-function metricAsDecimals(values: Range, small: string, large: string): string {
-  if (values[1] >= 1000)
+// An amount in g or ml, as kg or l from 1000. One written in a metric unit (`exact`) is whole from
+// 10, else a decimal, as a kitchen scale or jug reads; a converted one is whole. Never a fraction.
+function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string {
+  const [small, large] = METRIC[kind];
+  if (Math.round(values[1]) >= 1000)
     return decimals(
       values.map((v) => decimal(v / 1000)),
       large,
     );
   return decimals(
-    values.map((v) => (v >= 10 ? String(Math.round(v)) : decimal(v))),
+    values.map((v) => (exact && v < 10 ? decimal(v) : String(Math.round(v)))),
     small,
   );
+}
+
+// An amount in grams in US weights: oz, or lb from 16 oz.
+function us(grams: Range): string {
+  const oz = grams.map((g) => eighths(g / OZ)) as Range;
+  if (oz[1] >= 16) return fractions(grams.map((g) => eighths(g / LB)) as Range, "lb");
+  return fractions(oz, "oz");
 }
 
 const decimals = ([low, high]: string[], unit: string) =>
@@ -169,18 +162,14 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
   const base = (per: number) => q.map((v) => v * per) as Range;
   if (choice === "g" || choice === "oz") {
     const grams = base(gramsPerUnit(line) ?? 0);
-    return `≈ ${choice === "g" ? metric(grams, "g", "kg") : us(grams)}`;
+    return `≈ ${choice === "g" ? inMetric(grams, "mass", false) : us(grams)}`;
   }
   if (m && choice === "metric" && !m.metric) {
-    if (m.kind === "mass") return metric(base(m.base), "g", "kg");
-    if (!inSet(m, SPOONS)) return metric(base(m.base), "ml", "l");
+    if (!inSet(m, SPOONS)) return inMetric(base(m.base), m.kind, false);
     if (scale !== 1) return tidy(base(m.base), SPOONS);
   }
-  if (m && choice === "metric" && m.metric && m.base >= 1) {
-    return m.kind === "mass"
-      ? metricAsDecimals(base(m.base), "g", "kg")
-      : metricAsDecimals(base(m.base), "ml", "l");
-  }
+  if (m && choice === "metric" && m.metric && m.base >= 1)
+    return inMetric(base(m.base), m.kind, true);
   if (m && choice === "us" && m.metric) {
     return m.kind === "mass" ? us(base(m.base)) : tidy(base(m.base), SPOONS_AND_CUPS, true);
   }
