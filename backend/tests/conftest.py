@@ -12,6 +12,7 @@ from moto import mock_aws
 from recipes import fdc
 from recipes.api import create_app
 from recipes.auth import SERVICE_TOKEN_HEADER, Auth, AuthSettings, Claims, InvalidIdToken
+from recipes.backup import BackupBucket
 from recipes.images import ImageStore
 from recipes.ingest import PoliteFetcher
 from recipes.store import Store, create_table
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 TABLE_NAME = "plateful-test"
 IMAGES_BUCKET = "plateful-test-images"
+BACKUP_BUCKET = "plateful-test-backup"
 SERVICE_TOKEN = "synthetic-service-token"
 EDITOR = {SERVICE_TOKEN_HEADER: SERVICE_TOKEN}
 # The synthetic FDC Snapshot the API's tests look foods up in, never the committed one.
@@ -57,6 +59,15 @@ def images(table: str) -> ImageStore:
 
 
 @pytest.fixture
+def backups(table: str) -> BackupBucket:
+    """An empty backup bucket on the same fake AWS."""
+    boto3.client("s3").create_bucket(
+        Bucket=BACKUP_BUCKET, CreateBucketConfiguration={"LocationConstraint": "us-west-2"}
+    )
+    return BackupBucket(BACKUP_BUCKET)
+
+
+@pytest.fixture
 def store(table: str) -> Store:
     """A bootstrapped store, as the API leaves it once it has started."""
     store = Store(table)
@@ -73,11 +84,12 @@ UNCONFIGURED = Auth(settings=lambda: AuthSettings.parse({}), verifier=no_sign_in
 
 
 @pytest.fixture
-def app(table: str, images: ImageStore) -> FastAPI:
+def app(table: str, images: ImageStore, backups: BackupBucket) -> FastAPI:
     return create_app(
         store=lambda: Store(table),
         auth=lambda: UNCONFIGURED,
         images=lambda: images,
+        backups=lambda: backups,
         snapshot=lambda: SNAPSHOT,
     )
 
@@ -111,6 +123,7 @@ def fdc_snapshot() -> Callable[[], fdc.Snapshot]:
 def editor_client(
     api_store: Store,
     images: ImageStore,
+    backups: BackupBucket,
     fetcher: Callable[[], Fetcher],
     fdc_snapshot: Callable[[], fdc.Snapshot],
 ) -> Iterator[TestClient]:
@@ -124,6 +137,7 @@ def editor_client(
         auth=lambda: auth,
         fetcher=fetcher,
         images=lambda: images,
+        backups=lambda: backups,
         snapshot=fdc_snapshot,
     )
     with TestClient(app, follow_redirects=False) as client:

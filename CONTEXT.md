@@ -226,3 +226,9 @@ _Avoid_: Section, aisle
 **Kitchen settings**:
 The household's shared settings for its kitchen, such as the Store Categories and their order. A new collection starts with Household, Produce, Meat, Aisles, Spices, Dairy, Frozen and Bakery.
 _Avoid_: Preferences, config
+
+### Keeping the collection safe
+
+**Backup Snapshot**:
+A gzipped JSON Lines copy of a stack's whole table, a header line and then one item per line, taken each night and before each prod release and kept in that stack's backup bucket alongside copies of its images. Once a month an editor runs `backup pull`, which saves the latest Backup Snapshot and any images it lacks to a folder the household controls, through short-lived download links from the API. It has nothing to do with the FDC Snapshot.
+_Avoid_: Snapshot (alone), dump, export

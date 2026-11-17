@@ -650,49 +650,80 @@ fi
 pause
 
 # ── 7 ─────────────────────────────────────────────────────────────────────
-stage "Spend alarm emails"
+stage "Alarm emails"
 say "The \$1 budget and the billing alarm publish to one SNS topic, which also trips each stack's kill"
-say "switch. Subscribe the household's email addresses to it, so you hear when that happens. The"
-say "addresses stay in SNS: they're never written to the repo, which is public."
+say "switch. Each stack's stale backup alarm has its own topic: it says when a whole day passed"
+say "without a nightly Backup Snapshot, and when one completes again. Subscribe the household's email"
+say "addresses to all of them. They stay in SNS: they're never written to the repo, which is public."
 printf '\n'
 TOPIC=$(in_aws "terraform -chdir=infra/bootstrap init -input=false -reconfigure -backend-config=bucket=$STATE_BUCKET >/dev/null &&
   terraform -chdir=infra/bootstrap output -raw spend_alarm_topic_arn")
-# email_subs: one "address<TAB>subscription ARN" line per email subscription; a pending one's ARN
-# is PendingConfirmation.
-email_subs() {
-  in_aws "aws sns list-subscriptions-by-topic --region us-east-1 --topic-arn $TOPIC --query \"Subscriptions[?Protocol=='email'].[Endpoint,SubscriptionArn]\" --output text"
-}
-SUBS=$(email_subs)
-CONFIRMED=$(awk -F'\t' '$2 != "PendingConfirmation" { print $1 }' <<<"$SUBS")
-[[ -z $CONFIRMED ]] || say "${GREEN}✓${RESET} Already confirmed: $(paste -sd ' ' <<<"$CONFIRMED")"
-say "Addresses to add, separated by spaces (Enter for none). A pending one gets its email again."
-ask SPEND_EMAILS "Emails:" || SPEND_EMAILS=""
-for addr in $SPEND_EMAILS; do
-  if [[ ! $addr =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
-    warn "$addr doesn't look like an email address: skipped"
-  elif grep -qxF "$addr" <<<"$CONFIRMED"; then
-    say "${GREEN}✓${RESET} $addr is already confirmed."
+# The stale backup alarms' topics, named like their alarms (modules/backup). A stack makes its own
+# on its first deploy.
+TOPICS=("$TOPIC")
+for s in "${STACKS[@]}"; do
+  t=arn:aws:sns:$REGION:$ACCOUNT:plateful-$s-backup
+  if in_aws "aws sns get-topic-attributes --region $REGION --topic-arn $t >/dev/null" 2>/dev/null; then
+    TOPICS+=("$t")
   else
-    in_aws "aws sns subscribe --region us-east-1 --topic-arn $TOPIC --protocol email --notification-endpoint $(printf %q "$addr") >/dev/null" &&
-      say "${GREEN}✓${RESET} subscribed $addr: AWS sent it a confirmation email."
+    note "$s's backup alarm topic doesn't exist until its first deploy (stage 10): re-run this stage then."
+    SKIPPED+=("subscribe the household's email to $s's backup alarm (re-run stage 7 after stage 10)")
   fi
 done
-unset SPEND_EMAILS
+# email_subs TOPIC: one "address<TAB>subscription ARN" line per email subscription; a pending one's
+# ARN is PendingConfirmation.
+email_subs() {
+  in_aws "aws sns list-subscriptions-by-topic --region $(cut -d: -f4 <<<"$1") --topic-arn $1 --query \"Subscriptions[?Protocol=='email'].[Endpoint,SubscriptionArn]\" --output text"
+}
+SUBS=$(email_subs "$TOPIC")
+CONFIRMED=$(awk -F'\t' '$2 != "PendingConfirmation" { print $1 }' <<<"$SUBS")
+[[ -z $CONFIRMED ]] || say "${GREEN}✓${RESET} Already confirmed for the spend alarm: $(paste -sd ' ' <<<"$CONFIRMED")"
+say "Addresses to add, separated by spaces (Enter for none). A pending one gets its email again."
+say "Every address on the spend alarm also gets each backup alarm."
+ask ALARM_EMAILS "Emails:" || ALARM_EMAILS=""
+TYPED=""
+for addr in $ALARM_EMAILS; do
+  if [[ ! $addr =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
+    warn "$addr doesn't look like an email address: skipped"
+  else
+    TYPED+="$addr"$'\n'
+  fi
+done
+unset ALARM_EMAILS
+HOUSEHOLD=$(printf '%s\n%s' "$(cut -f1 <<<"$SUBS")" "$TYPED" | sed '/^$/d' | sort -u)
+for t in "${TOPICS[@]}"; do
+  SUBS=$(email_subs "$t")
+  for addr in $HOUSEHOLD; do
+    state=$(awk -F'\t' -v a="$addr" '$1 == a { print ($2 == "PendingConfirmation" ? "pending" : "confirmed") }' <<<"$SUBS")
+    # A confirmed one stays; a pending one is sent its email again only when typed.
+    if [[ $state == confirmed ]] || { [[ $state == pending ]] && ! grep -qxF "$addr" <<<"$TYPED"; }; then
+      continue
+    fi
+    in_aws "aws sns subscribe --region $(cut -d: -f4 <<<"$t") --topic-arn $t --protocol email --notification-endpoint $(printf %q "$addr") >/dev/null" &&
+      say "${GREEN}✓${RESET} subscribed $addr to ${t##*:}: AWS sent it a confirmation email."
+  done
+done
+unset TYPED HOUSEHOLD
 while true; do
-  SUBS=$(email_subs)
-  PENDING=$(awk -F'\t' '$2 == "PendingConfirmation" { print $1 }' <<<"$SUBS")
-  if [[ -z $SUBS ]]; then
-    warn "Nobody is subscribed, so a tripped kill switch would go unnoticed until the app says so."
-    SKIPPED+=("subscribe the household's email to the spend alarm topic (stage 7)")
+  PENDING="" ALL=""
+  for t in "${TOPICS[@]}"; do
+    SUBS=$(email_subs "$t")
+    ALL+=$(cut -f1 <<<"$SUBS")
+    PENDING+=$(awk -F'\t' -v n="${t##*:}" '$2 == "PendingConfirmation" { printf "%s (%s)\n", $1, n }' <<<"$SUBS")$'\n'
+  done
+  PENDING=$(sed '/^$/d' <<<"$PENDING")
+  if [[ -z $ALL ]]; then
+    warn "Nobody is subscribed, so a tripped kill switch or a stale backup would go unnoticed."
+    SKIPPED+=("subscribe the household's email to the alarm topics (stage 7)")
     break
   elif [[ -z $PENDING ]]; then
-    say "${GREEN}✓${RESET} Every address is confirmed: $(cut -f1 <<<"$SUBS" | paste -sd ' ')"
+    say "${GREEN}✓${RESET} Every subscription is confirmed."
     break
   fi
-  step "Open the \"AWS Notification - Subscription Confirmation\" email at each of these and click"
-  step "Confirm subscription: $(paste -sd ' ' <<<"$PENDING")"
+  step "Open each \"AWS Notification - Subscription Confirmation\" email (one per address and topic) and"
+  step "click Confirm subscription: $(paste -sd ',' <<<"$PENDING" | sed 's/,/, /g')"
   if ! confirm "Check again?"; then
-    SKIPPED+=("confirm the spend alarm emails (stage 7): $(paste -sd ' ' <<<"$PENDING")")
+    SKIPPED+=("confirm the alarm emails (stage 7): $(paste -sd ',' <<<"$PENDING" | sed 's/,/, /g')")
     break
   fi
 done

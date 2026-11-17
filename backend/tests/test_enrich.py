@@ -17,17 +17,14 @@ from requests.structures import CaseInsensitiveDict
 
 from recipes import fdc
 from recipes.auth import SERVICE_TOKEN_HEADER
+from recipes.client import SameOriginSession, Send, checked_base_url, send_with
 from recipes.enrich import (
-    SameOriginSession,
-    Send,
     apply,
     ask,
-    checked_base_url,
     main,
     packet,
     read_answer,
     read_substitutes,
-    send_with,
 )
 from recipes.models import (
     MAX_LABEL,

@@ -47,7 +47,7 @@ variable "log_retention_days" {
 }
 
 variable "environment" {
-  description = "App settings: TABLE_NAME, IMAGES_BUCKET and SSM_PREFIX."
+  description = "App settings: TABLE_NAME, IMAGES_BUCKET, SSM_PREFIX and BACKUP_BUCKET."
   type        = map(string)
 }
 
@@ -143,6 +143,11 @@ output "function_name" {
 
 output "function_arn" {
   value = aws_lambda_function.this.arn
+}
+
+output "environment" {
+  description = "The app settings the function gets, for infra/tests."
+  value       = var.environment
 }
 
 output "reserved_concurrency" {
