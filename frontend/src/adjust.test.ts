@@ -164,6 +164,7 @@ describe("Metric", () => {
     expect(show(line(600, "ml", "volume"), "metric", 2)).toBe("1.2 l");
     expect(show(line(1.5, "kg", "mass"), "metric")).toBe("1.5 kg");
     expect(show(line(2.5, "g", "mass"), "metric")).toBe("2.5 g");
+    expect(show(line(1.25, "ml", "volume"), "metric")).toBe("1.25 ml");
     expect(show(line(250, "g", "mass"), "metric", 1.5)).toBe("375 g");
   });
 });
@@ -204,6 +205,7 @@ describe("As written, scaled", () => {
     expect(show(line(125, "g", "mass"), "written", 1.5)).toBe("188 g");
     expect(show(line(1.5, "kg", "mass"), "written", 0.5)).toBe("750 g");
     expect(show(line(5, "ml", "volume"), "written", 0.5)).toBe("2.5 ml");
+    expect(show(line(2.5, "g", "mass"), "written", 0.5)).toBe("1.25 g");
   });
 
   it("makes a count unit plural or singular as the amount is, in every unit system", () => {
@@ -319,6 +321,17 @@ describe("a tap on a line", () => {
     );
     const uncounted = conversion({ grams_per_count: 50, count_unit: null });
     expect(options(line(2, null, "count", uncounted))).toEqual(["written"]);
+  });
+
+  it("matches fdc._counts_in on plurals and whole units", () => {
+    const counts = (countUnit: string, unit: string) =>
+      unitsCycled(
+        line(2, unit, "count", conversion({ grams_per_count: 5, count_unit: countUnit })),
+        at("written"),
+      ).includes("g");
+    expect(counts("berry", "berries")).toBe(true);
+    expect(counts("clove", "garlic clove")).toBe(false);
+    expect(counts("glass", "glass")).toBe(true);
   });
 
   it("has one option when nothing converts", () => {
@@ -438,5 +451,8 @@ describe("temperature", () => {
     expect(temperature({ t: "temperature", c: 63, written: "63°C" }, "metric")).toBe("63°C");
     expect(temperature({ t: "temperature", c: 114.4, written: "238°F" }, "us")).toBe("238°F");
     expect(temperature({ t: "temperature", c: 63, written: "63°C" }, "written")).toBe("63°C");
+    expect(temperature({ t: "temperature", c: 218, written: "425 degrees f" }, "us")).toBe(
+      "425 degrees f",
+    );
   });
 });
