@@ -552,15 +552,18 @@ function TappableAmount({
   const options = unitOptions(line, choices);
   const current = tapped && options.includes(tapped) ? tapped : undefined;
   const amount = lineAmount(line, choices, current);
-  const reason = options.length === 1 ? weightRefusal(line) : undefined;
+  const reason = weightRefusal(line);
   if (options.length === 1 && !reason) return <span className="ingredient-amount">{amount}</span>;
   return (
     <>
       <button
         type="button"
         className="ingredient-amount ingredient-tap"
-        aria-label={`${amount} ${name}, ${reason ? "why it stays in this unit" : "show in another unit"}`}
-        onClick={() => (reason ? setWhy(true) : onTap(nextUnit(line, choices, current)))}
+        aria-label={`${amount} ${name}, ${options.length === 1 ? "why it stays in this unit" : "show in another unit"}`}
+        onClick={() => {
+          if (reason) setWhy(true);
+          if (options.length > 1) onTap(nextUnit(line, choices, current));
+        }}
       >
         {amount}
       </button>

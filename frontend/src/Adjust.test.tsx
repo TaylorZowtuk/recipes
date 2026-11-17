@@ -192,6 +192,19 @@ describe("a tap on an ingredient's amount", () => {
     expect(amount("garlic")).toBe("2 cloves");
   });
 
+  it("says why a volume with no weight can't be a weight, as it cycles", () => {
+    open();
+    tap(/^Adjust/);
+    tap("Metric");
+    tap(/^.*flour, show in another unit/);
+    const li = [...host.querySelectorAll(".ingredients li")].find((l) =>
+      l.querySelector(".ingredient-name")?.textContent?.startsWith("flour"),
+    );
+    const reason = li?.querySelector(".ingredient-reason");
+    expect(reason?.getAttribute("role")).toBe("status");
+    expect(reason?.textContent).toBe("No weight known for this ingredient yet");
+  });
+
   it("is plain text in a Review Item, never a button in a button", () => {
     shown.editor = true;
     open();
