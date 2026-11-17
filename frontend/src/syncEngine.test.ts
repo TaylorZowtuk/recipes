@@ -12,7 +12,8 @@ import {
 } from "./syncEngine";
 
 // A synthetic Collection on a fake server: two recipes, each with a Preview Photo whose bytes
-// are `photoBytes` long.
+// are `photoBytes` long. Like the real API, it redirects a stale bundle or recipe version to the
+// current one.
 function fakeServer() {
   const server = {
     version: 1,
@@ -40,12 +41,17 @@ function fakeServer() {
         };
         return Response.json(sync);
       }
-      if (path === `/api/v/collection/${server.version}`)
-        return Response.json({ collection_version: server.version, cards: server.cards });
+      if (path.startsWith("/api/v/collection/")) {
+        const current = `/api/v/collection/${server.version}`;
+        const bundle = { collection_version: server.version, cards: server.cards };
+        return landedAt(current, Response.json(bundle));
+      }
       const recipe = path.match(/^\/api\/v\/recipes\/([^/]+)\/(\d+)\/(\d+)$/);
       const found = recipe && server.cards.find((c) => c.id === recipe[1]);
-      if (found && Number(recipe?.[2]) === found.recipe_version)
-        return Response.json({ id: found.id, version: found.recipe_version });
+      if (found) {
+        const current = `/api/v/recipes/${found.id}/${found.recipe_version}/${recipe?.[3]}`;
+        return landedAt(current, Response.json({ id: found.id, version: found.recipe_version }));
+      }
       if (path.startsWith("/images/")) return new Response(new Uint8Array(server.photoBytes));
       return new Response(null, { status: 404 });
     },
@@ -57,6 +63,11 @@ function fakeServer() {
     },
   };
   return server;
+}
+
+// A response as fetch returns it after following redirects to `path`.
+function landedAt(path: string, response: Response): Response {
+  return Object.defineProperty(response, "url", { value: `http://localhost${path}` });
 }
 
 function card(id: string, recipe_version: number, image_id: string | null): Card {
@@ -143,6 +154,20 @@ describe("reading the Collection and recipes", () => {
     expect(recipe).toMatchObject({ id: "recipe-a", version: 1 });
   });
 
+  it("keeps a recipe or bundle the API redirected to its current version under that path", async () => {
+    const { server, store, engine } = setup();
+    const visitor = engine();
+    await visitor.poll();
+    server.version = 2;
+    server.cards = [card("recipe-a", 2, "photo-a"), B];
+    const collection = await visitor.collection();
+    const recipe = await visitor.recipe(A);
+
+    expect(collection.collection_version).toBe(2);
+    expect(recipe).toMatchObject({ id: "recipe-a", version: 2 });
+    expect(store.paths(DATA)).toEqual(["/api/v/collection/2", recipePath("recipe-a", 2)]);
+  });
+
   it("says a recipe or the Collection is not available offline when nothing is cached", async () => {
     const { server, engine } = setup();
     server.offline = true;
@@ -162,13 +187,22 @@ describe("prefetching", () => {
     expect(store.paths(DATA)).toEqual(["/api/v/collection/1"]);
     expect(store.paths(CARDS)).toEqual([]);
 
-    await visitor.recipe(B);
     await visitor.open(B);
-    await visitor.prefetch();
-    expect(store.paths(DATA)).toEqual(["/api/v/collection/1", recipePath("recipe-b", 1)]);
     expect(store.paths(CARDS)).toEqual(["/images/photo-b-card.webp"]);
     expect(store.paths(PHOTOS)).toEqual(["/images/photo-b.webp"]);
+    await visitor.recipe(B);
+    await visitor.prefetch();
+    expect(store.paths(DATA)).toEqual(["/api/v/collection/1", recipePath("recipe-b", 1)]);
     expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("polls only /api/sync for a visitor until a screen asks for the Collection", async () => {
+    const { server, engine } = setup();
+    const visitor = engine();
+    await visitor.poll();
+    await visitor.settled();
+    expect(server.took()).toEqual(["/api/sync"]);
+    expect(visitor.getSnapshot().collection).toBeUndefined();
   });
 
   it("caches the bundle, every recipe and every card-size image when installed or an editor", async () => {
@@ -439,8 +473,12 @@ describe("polling", () => {
     polls();
     doc.hidden = true;
     fire(doc, "visibilitychange");
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(10 * MINUTE);
+    fire(win, "online");
+    await vi.advanceTimersByTimeAsync(0);
     expect(polls()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
 
     doc.hidden = false;
     fire(doc, "visibilitychange");
