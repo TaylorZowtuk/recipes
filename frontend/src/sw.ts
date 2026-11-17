@@ -30,21 +30,16 @@ registerRoute(
 
 // Versioned reads and images come from the sync engine's caches when it holds them, else from the
 // network. Only the engine writes to those caches, so its least-recently-opened limit holds.
-const engineCache = (path: string) =>
-  path.startsWith("/api/v/")
-    ? DATA
-    : path.startsWith("/images/")
-      ? path.endsWith("-card.webp")
-        ? CARDS
-        : PHOTOS
-      : undefined;
 registerRoute(
   ({ url, request }) =>
     url.origin === self.location.origin &&
     request.method === "GET" &&
-    engineCache(url.pathname) !== undefined,
+    (url.pathname.startsWith("/api/v/") || url.pathname.startsWith("/images/")),
   async ({ url, request }) => {
-    const cache = await caches.open(engineCache(url.pathname) as string);
-    return (await cache.match(url.pathname)) ?? fetch(request);
+    for (const name of [DATA, CARDS, PHOTOS]) {
+      const cached = await (await caches.open(name)).match(url.pathname);
+      if (cached) return cached;
+    }
+    return fetch(request);
   },
 );
