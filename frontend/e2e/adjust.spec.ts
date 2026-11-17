@@ -8,6 +8,7 @@ test.use({ serviceWorkers: "block" });
 
 const NOODLES = "Sesame Noodles with Crispy Tofu";
 const NOODLES_PATH = "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu";
+const OATS_PATH = "/recipes/01K7SEED000000000000000003/overnight-oats";
 const CHICKEN_PATH = "/recipes/01K7SEED000000000000000001/lemon-herb-roast-chicken";
 
 const adjust = (page: Page) => page.getByRole("button", { name: /^Adjust/ });
@@ -84,6 +85,17 @@ test("a step's oven temperature follows the unit system", async ({ page }) => {
   await expect(step(page, 1)).toContainText("220°C");
   await choose(page, "US");
   await expect(step(page, 1)).toContainText("425°F");
+});
+
+test("Metric shows a line in cups in ml and one in ounces in g", async ({ page }) => {
+  await page.goto(OATS_PATH);
+  const milk = line(page, "milk");
+  const yogurt = line(page, "plain yogurt");
+  await expect(amount(milk)).toHaveText("½ cup");
+  await expect(amount(yogurt)).toHaveText("2 oz");
+  await choose(page, "Metric");
+  await expect(amount(milk)).toHaveText("118 ml");
+  await expect(amount(yogurt)).toHaveText("57 g");
 });
 
 test("a recipe opened from a Week Plan day starts at that day's scale", async ({ page }) => {
