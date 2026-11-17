@@ -225,9 +225,13 @@ function Day({
               {gone(entry.recipe_id) ? (
                 <span className="week-entry-title">{entry.recipe_title}</span>
               ) : (
+                // The recipe opens at the entry's scale, which its Adjust sheet then shows.
                 <Link
                   className="week-entry-title"
-                  to={recipePath({ id: entry.recipe_id, title: entry.recipe_title })}
+                  to={{
+                    pathname: recipePath({ id: entry.recipe_id, title: entry.recipe_title }),
+                    search: entry.amount.factor === 1 ? "" : `?scale=${entry.amount.factor}`,
+                  }}
                 >
                   {entry.recipe_title}
                 </Link>

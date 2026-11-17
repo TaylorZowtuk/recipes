@@ -90,6 +90,9 @@ UNSALTED_BUTTER = CanonicalIngredient(
 )
 UNSALTED_FDC_ID = 173430
 UNSALTED_TBSP = 92512
+# Seeds, sesame butter, tahini, from roasted and toasted kernels (SR Legacy), by the tablespoon.
+TAHINI_FDC_ID = 170189
+TAHINI_TBSP = 86209
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -307,7 +310,21 @@ RECIPES = [
         status="ready",
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(3, "tbsp", "volume", "tahini"),
+                # Confirmed, so the Adjust sheet can show it as a weight; soy sauce has none.
+                "i1": _parse(3, "tbsp", "volume", "tahini").model_copy(
+                    update={
+                        "conversion": ConversionFact(
+                            provenance="fdc",
+                            confidence=0.9,
+                            estimated=False,
+                            confirmed=True,
+                            confirmed_by="editor@example.com",
+                            confirmed_at=CAPTURED_AT,
+                            fdc_id=TAHINI_FDC_ID,
+                            **fdc.numbers(fdc.snapshot(), TAHINI_FDC_ID, TAHINI_TBSP).model_dump(),
+                        )
+                    }
+                ),
                 "i2": _parse(2, "tbsp", "volume", "soy sauce"),
                 "i3": _parse(1.5, "tbsp", "volume", "rice vinegar"),
                 "i4": _parse(1, "tsp", "volume", "chili oil", comment="or to taste"),

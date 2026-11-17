@@ -41,8 +41,7 @@ export function AdjustButton({
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
-        Adjust
-        {summary && <span className="adjust-summary"> · {summary}</span>}
+        {summary ? `Adjust · ${summary}` : "Adjust"}
       </button>
       <Sheet
         open={open}
