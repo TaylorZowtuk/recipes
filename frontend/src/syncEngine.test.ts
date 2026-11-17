@@ -435,6 +435,16 @@ describe("a schema change", () => {
     expect(server.took()).toEqual(["/api/sync", "/api/sync"]);
   });
 
+  it("calls the hook again on the next poll when it failed", async () => {
+    const { server, engine, onSchemaChange } = setup({ full: true });
+    server.schema = SCHEMA_VERSION + 1;
+    onSchemaChange.mockRejectedValueOnce(new Error("cache delete failed"));
+    const installed = engine();
+    await installed.poll();
+    await installed.poll();
+    expect(onSchemaChange).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores an API behind this build", async () => {
     const { server, engine, onSchemaChange } = setup({ full: true });
     server.schema = SCHEMA_VERSION - 1;
