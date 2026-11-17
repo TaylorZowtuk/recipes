@@ -103,8 +103,11 @@ test("reopened offline, the app shows a cached recipe and its card-size photo", 
   await cached(page, OATS, card ?? "no card image");
 
   // The full-size photo was never opened, so the hero falls back to the card-size copy, which
-  // the service worker serves from the sync engine's cache.
+  // the service worker serves from the sync engine's cache. The browser's own HTTP cache, which
+  // keeps the immutable images too, is emptied so it can't answer instead.
+  await (await context.newCDPSession(page)).send("Network.clearBrowserCache");
   await context.setOffline(true);
+  const heroResponse = page.waitForResponse((response) => new URL(response.url()).pathname === card);
   await page.goto(pathOf(OATS));
   await expect(ingredients(page)).toBeVisible();
   const hero = page.locator(".plate-hero img");
@@ -112,4 +115,5 @@ test("reopened offline, the app shows a cached recipe and its card-size photo", 
   await expect
     .poll(() => hero.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
     .toBeGreaterThan(0);
+  expect((await heroResponse).fromServiceWorker()).toBe(true);
 });
