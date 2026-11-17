@@ -763,6 +763,6 @@ def test_the_seed_has_a_recipe_awaiting_review_with_something_flagged(
     assert canonical(store, swap["canonical_id"]).name == "unsalted butter"
     assert card(store, REVIEW_RECIPE_ID)["needs_review"] == {
         "open_issues": 1,
-        "unconfirmed": 5,
+        "unconfirmed": 4,
         "flagged": 1,
     }

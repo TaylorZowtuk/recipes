@@ -619,7 +619,9 @@ RECIPES = [
                     }
                 ),
                 "i3": _parse(3, "cloves", "count", "garlic", "minced"),
-                "i4": _parse(None, None, None, "salt and pepper", comment="to taste"),
+                "i4": _parse(
+                    None, None, None, "salt and pepper", comment="to taste", confirmed=True
+                ),
             },
             steps={
                 "s2": _step_facts(
