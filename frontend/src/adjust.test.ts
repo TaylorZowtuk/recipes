@@ -282,6 +282,7 @@ describe("weightRefusal", () => {
     const none = "No weight known for this ingredient yet";
     expect(cup(null)).toBe(none);
     expect(cup(conversion({ refused: "no portion chosen" }))).toBe(none);
+    expect(cup(conversion({ density_g_per_ml: 0.5, refused: "no portion chosen" }))).toBe(none);
     expect(cup(conversion({ grams_per_count: 50 }))).toBe(none);
   });
 });
