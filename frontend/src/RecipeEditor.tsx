@@ -82,8 +82,9 @@ export function RecipeEditor({
     if (outcome.kind === "saved") rememberRecipe(outcome.recipe);
     const refreshed =
       outcome.kind === "saved" || outcome.kind === "conflict" ? await reloadCollection() : true;
-    if (!mounted.current) return;
-    setBusy(undefined);
+    // The reload can take this editor away (a recipe deleted elsewhere drops its card), but the
+    // page that owns `dispatch` stays, so the outcome's notice still goes to it.
+    if (mounted.current) setBusy(undefined);
     const nowReady =
       outcome.kind === "saved" &&
       recipe.status === "awaiting_review" &&
