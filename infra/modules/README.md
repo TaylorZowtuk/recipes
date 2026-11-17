@@ -4,11 +4,12 @@ Terraform modules shared by [`stacks/prod`](../stacks/prod), [`stacks/staging`](
 
 | Module | What it makes |
 | --- | --- |
-| `stack` | One whole stack, from `stack-access`, `store`, `api`, `kill-switch` and `site`, on bootstrap's OACs and spend alarm topic. The stacks call only this (and staging also `dev-user`). |
+| `stack` | One whole stack, from `stack-access`, `store`, `api`, `kill-switch`, `backup` and `site`, on bootstrap's OACs and spend alarm topic. The stacks call only this (and staging also `dev-user`). |
 | `stack-access` | No resources: a stack's resource names (OACs included), its permissions boundary and deploy role ARNs, where bootstrap's state lives, and the IAM policy that reaches its data. |
 | `store` | The DynamoDB table (provisioned, `PK`/`SK`), the images bucket and the sign-in secrets in SSM Parameter Store. |
 | `api` | The API Lambda (arm64, Lambda Web Adapter layer, reserved concurrency), its AWS_IAM function URL, execution role and log group. |
 | `kill-switch` | A stack's kill switch: a Lambda that sets the API's reserved concurrency to 0 when SNS invokes it, and the stack's own topic (subscribed) for testing it. It lets both that topic and the account's spend alarm topic invoke it; bootstrap makes the account topic's subscription. |
+| `backup` | A stack's backups: the backup bucket (snapshots expire by kind, image copies never) and the snapshot Lambda, which writes a Backup Snapshot and copies new images, with its role and the nightly EventBridge rule that runs it. |
 | `site` | The CloudFront distribution (on bootstrap's OACs), the WAF web ACL (in us-east-1) with one rule, a per-IP rate limit, the PWA bucket, the SPA-routing and `noindex` CloudFront Functions, the Lambda permissions for CloudFront and both buckets' policies. |
 | `origin-access` | A stack's three CloudFront OACs (api, pwa, images). Called from `bootstrap`, so the deploy roles need no OAC write access; each stack reads the IDs from bootstrap's state. |
 | `private-bucket` | An S3 bucket with public access blocked, SSE-S3 and optional versioning. |

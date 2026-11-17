@@ -234,3 +234,6 @@ backend/packet.json
 backend/answer.json
 backend/ask.json
 backend/substitutes.json
+
+# backup pull's folder when run with `--to backups` from backend/: the household's whole Collection
+backend/backups/

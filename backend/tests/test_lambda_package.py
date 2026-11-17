@@ -82,6 +82,7 @@ def test_run_sh_serves_the_api_on_port_with_the_stack_variables_set(
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
         "PORT": str(port),
         "IMAGES_BUCKET": "plateful-test-images",
+        "BACKUP_BUCKET": "plateful-test-backup",
         "SSM_PREFIX": "/plateful/test/",
     }
     server = subprocess.Popen([RUN_SH], env=env)

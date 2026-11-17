@@ -67,9 +67,11 @@ module "stack" {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
   }
-  stack               = local.stack
-  read_capacity       = 10
-  write_capacity      = 10
+  stack          = local.stack
+  read_capacity  = 10
+  write_capacity = 10
+  # Half the table's, so the app keeps the rest while a snapshot runs (a pre-release one runs by day).
+  snapshot_read_units = 5
   deletion_protection = true
   lambda_zip          = var.lambda_zip
 

@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
     from requests.models import PreparedRequest
 
-    from recipes.enrich import Send
+    from recipes.client import Send
     from recipes.ingest import Fetcher
     from recipes.models import QueuedIngestReason
     from recipes.store import Store
