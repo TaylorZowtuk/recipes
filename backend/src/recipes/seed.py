@@ -144,6 +144,7 @@ def _parse(
     *,
     comment: str | None = None,
     optional: bool = False,
+    confirmed: bool = False,
 ) -> IngredientFacts:
     """A parser's reading of a line, written by hand for the seed. A pair is a range, and None no
     amount, as in "to taste".
@@ -154,6 +155,9 @@ def _parse(
             provenance="parser",
             confidence=0.9,
             estimated=False,
+            confirmed=confirmed,
+            confirmed_by="editor@example.com" if confirmed else None,
+            confirmed_at=CAPTURED_AT if confirmed else None,
             quantity=None if low is None or high is None else Quantity(low=low, high=high),
             unit=unit,
             unit_kind=unit_kind,
@@ -233,12 +237,14 @@ RECIPES = [
         status="ready",
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(1, None, "count", "whole chicken", comment="about 1.8 kg"),
-                "i2": _parse(2, None, "count", "lemons", "halved"),
-                "i3": _parse(6, "sprigs", "count", "fresh thyme"),
-                "i4": _parse(2, "tbsp", "volume", "olive oil"),
-                "i5": _parse(2, None, "count", "onions", "thickly sliced"),
-                "i6": _parse(1, "tsp", "volume", "kosher salt"),
+                "i1": _parse(
+                    1, None, "count", "whole chicken", comment="about 1.8 kg", confirmed=True
+                ),
+                "i2": _parse(2, None, "count", "lemons", "halved", confirmed=True),
+                "i3": _parse(6, "sprigs", "count", "fresh thyme", confirmed=True),
+                "i4": _parse(2, "tbsp", "volume", "olive oil", confirmed=True),
+                "i5": _parse(2, None, "count", "onions", "thickly sliced", confirmed=True),
+                "i6": _parse(1, "tsp", "volume", "kosher salt", confirmed=True),
             },
             steps={
                 "s1": _step_facts("Heat the oven to ", _temperature(218, "425°F"), "."),
@@ -413,11 +419,13 @@ RECIPES = [
         # A line in cups and one in ounces, for the Adjust sheet to show in metric.
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(0.5, "cup", "volume", "rolled oats"),
-                "i2": _parse(0.5, "cup", "volume", "milk"),
-                "i3": _parse(2, "oz", "mass", "plain yogurt"),
-                "i4": _parse(1, "tbsp", "volume", "maple syrup"),
-                "i5": _parse(None, None, None, "berries", comment="to serve", optional=True),
+                "i1": _parse(0.5, "cup", "volume", "rolled oats", confirmed=True),
+                "i2": _parse(0.5, "cup", "volume", "milk", confirmed=True),
+                "i3": _parse(2, "oz", "mass", "plain yogurt", confirmed=True),
+                "i4": _parse(1, "tbsp", "volume", "maple syrup", confirmed=True),
+                "i5": _parse(
+                    None, None, None, "berries", comment="to serve", optional=True, confirmed=True
+                ),
             }
         ),
     ),
@@ -452,13 +460,15 @@ RECIPES = [
         # No editor Difficulty, so the card and the recipe page show this one as a suggestion.
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(1, "tbsp", "volume", "olive oil"),
-                "i2": _parse(1, None, "count", "onion", "diced"),
-                "i3": _parse(2, None, "count", "carrots", "diced"),
-                "i4": _parse(1, "cup", "volume", "red lentils", "rinsed"),
-                "i5": _parse(1, "can", "count", "crushed tomatoes", comment="796 ml"),
-                "i6": _parse(4, "cup", "volume", "vegetable broth"),
-                "i7": _parse(1, "tsp", "volume", "ground cumin"),
+                "i1": _parse(1, "tbsp", "volume", "olive oil", confirmed=True),
+                "i2": _parse(1, None, "count", "onion", "diced", confirmed=True),
+                "i3": _parse(2, None, "count", "carrots", "diced", confirmed=True),
+                "i4": _parse(1, "cup", "volume", "red lentils", "rinsed", confirmed=True),
+                "i5": _parse(
+                    1, "can", "count", "crushed tomatoes", comment="796 ml", confirmed=True
+                ),
+                "i6": _parse(4, "cup", "volume", "vegetable broth", confirmed=True),
+                "i7": _parse(1, "tsp", "volume", "ground cumin", confirmed=True),
             },
             difficulty=DifficultyFact(
                 provenance="llm", confidence=0.6, estimated=True, prep=2, cook=1, cleanup=1
@@ -528,12 +538,12 @@ RECIPES = [
         status="ready",
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(3, "parts", "count", "chili powder"),
-                "i2": _parse(2, "parts", "count", "smoked paprika"),
-                "i3": _parse(2, "parts", "count", "ground cumin"),
-                "i4": _parse(1, "part", "count", "garlic powder"),
-                "i5": _parse(1, "part", "count", "dried oregano"),
-                "i6": _parse(0.5, "part", "count", "cayenne"),
+                "i1": _parse(3, "parts", "count", "chili powder", confirmed=True),
+                "i2": _parse(2, "parts", "count", "smoked paprika", confirmed=True),
+                "i3": _parse(2, "parts", "count", "ground cumin", confirmed=True),
+                "i4": _parse(1, "part", "count", "garlic powder", confirmed=True),
+                "i5": _parse(1, "part", "count", "dried oregano", confirmed=True),
+                "i6": _parse(0.5, "part", "count", "cayenne", confirmed=True),
             }
         ),
     ),
