@@ -21,12 +21,16 @@ function fakeServer() {
     photoBytes: 10,
     cards: [A, B],
     requests: [] as string[],
+    /** Paths answered with this status instead. */
+    status: new Map<string, number>(),
     /** While set, recipe requests wait for it. */
     holdRecipes: undefined as Promise<void> | undefined,
     async fetch(path: string): Promise<Response> {
       server.requests.push(path);
       if (server.offline) throw new TypeError("Failed to fetch");
       if (server.holdRecipes && path.startsWith("/api/v/recipes/")) await server.holdRecipes;
+      const status = server.status.get(path);
+      if (status) return new Response(null, { status });
       if (path === "/api/sync") {
         const sync: Sync = {
           collection_version: server.version,
@@ -185,6 +189,43 @@ describe("prefetching", () => {
     mode.full = true;
     await device.prefetch();
     expect(store.paths(DATA)).toHaveLength(3);
+  });
+});
+
+describe("a failed prefetch request", () => {
+  it.each([403, 429, 503])("ends the pass on a %i, and a later pass picks up from there", async (status) => {
+    const { server, store, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    server.status.set(recipePath("recipe-a", 1), status);
+    await installed.prefetch();
+    expect(server.took()).toEqual(["/api/sync", "/api/v/collection/1", recipePath("recipe-a", 1)]);
+
+    server.status.clear();
+    await installed.prefetch();
+    expect(store.paths(DATA)).toHaveLength(3);
+    expect(store.paths(CARDS)).toHaveLength(2);
+  });
+
+  it("ends the pass when the network fails", async () => {
+    const { server, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    server.took();
+    server.offline = true;
+    await installed.prefetch();
+    expect(server.took()).toEqual([recipePath("recipe-a", 1)]);
+  });
+
+  it("asks for a missing image only once a session, and carries on past it", async () => {
+    const { server, store, engine } = setup({ full: true });
+    const installed = engine();
+    await installed.poll();
+    server.status.set("/images/photo-a-card.webp", 404);
+    await installed.prefetch();
+    await installed.prefetch();
+    expect(server.took().filter((path) => path === "/images/photo-a-card.webp")).toHaveLength(1);
+    expect(store.paths(CARDS)).toEqual(["/images/photo-b-card.webp"]);
   });
 });
 

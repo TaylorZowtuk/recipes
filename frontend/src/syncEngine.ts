@@ -76,6 +76,7 @@ export function createSyncEngine({
   let prefetchAgain = false;
   let schemaChanged = false;
   let persisted = false;
+  const missing = new Set<string>();
 
   async function request(path: string): Promise<Response> {
     let response: Response;
@@ -150,25 +151,42 @@ export function createSyncEngine({
   /** A poll that starts after any in flight, so it sees this device's own write. */
   const refresh = () => (polling ?? Promise.resolve()).catch(() => {}).then(poll);
 
-  // Fetches what should be cached and is missing, then deletes what the bundle supersedes: other
-  // bundle versions, recipes at an old version once the current one is cached, recipes no longer
-  // in the Collection and card-size images no card shows.
-  async function tidy() {
-    const collection = snapshot.collection;
-    if (!collection) return;
+  // Keeps `path` for a prefetch. A 404 is remembered for the session; any other failure throws,
+  // ending the pass, which a later one picks up.
+  async function prefetchOne(cache: CacheName, path: string) {
+    if (missing.has(path)) return;
+    try {
+      await keep(cache, path);
+    } catch (error) {
+      if (!(error instanceof NotFound)) throw error;
+      missing.add(path);
+    }
+  }
+
+  // Fetches what should be cached and is missing, the bundle in memory first.
+  async function fill(collection: Collection) {
     const everything = full();
     if (everything && !persisted) {
       persisted = true;
       persist?.();
     }
-    await keep(DATA, collectionPath(collection.collection_version)).catch(() => {});
+    await prefetchOne(DATA, collectionPath(collection.collection_version));
     const cachedRecipes = (await store.keys(DATA)).filter((path) => path.startsWith(RECIPES));
     const opened = new Set(cachedRecipes.map(recipeIdOf));
     for (const card of collection.cards) {
       if (!everything && !opened.has(card.id)) continue;
-      await keep(DATA, recipePath(card)).catch(() => {});
-      if (card.preview) await keep(CARDS, cardImageUrl(card.preview.image_id)).catch(() => {});
+      await prefetchOne(DATA, recipePath(card));
+      if (card.preview) await prefetchOne(CARDS, cardImageUrl(card.preview.image_id));
     }
+  }
+
+  // Fills the cache, then deletes what the bundle supersedes: other bundle versions, recipes at an
+  // old version once the current one is cached, recipes no longer in the Collection and card-size
+  // images no card shows.
+  async function tidy() {
+    const collection = snapshot.collection;
+    if (!collection) return;
+    await fill(collection).catch(() => {});
 
     // A newer Collection arrived meanwhile: the pass queued for it does the deletes.
     if (snapshot.collection !== collection) return;
