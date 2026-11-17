@@ -226,10 +226,12 @@ export function lineAmount(
   return render(line, choice, choices.scale, portion);
 }
 
-// A step's temperature as written, or in °C or °F to the nearest 5, as an oven dial reads.
+// A step's temperature as written when it's already in the unit system's scale (an F scale is
+// °F, any other °C, as the API reads it), else converted to the nearest 5, as an oven dial reads.
 export function temperature({ c, written }: TemperatureSegment, units: Units): string {
   const nearest5 = (value: number) => Math.round(value / 5) * 5;
-  if (units === "metric") return `${nearest5(c)}°C`;
-  if (units === "us") return `${nearest5((c * 9) / 5 + 32)}°F`;
+  const fahrenheit = /f/i.test(written);
+  if (units === "metric" && fahrenheit) return `${nearest5(c)}°C`;
+  if (units === "us" && !fahrenheit) return `${nearest5((c * 9) / 5 + 32)}°F`;
   return written;
 }

@@ -295,4 +295,10 @@ describe("temperature", () => {
     expect(temperature(oven, "us")).toBe("425°F");
     expect(temperature({ t: "temperature", c: 180, written: "180°C" }, "us")).toBe("355°F");
   });
+
+  it("keeps a temperature already in the chosen system as written", () => {
+    expect(temperature({ t: "temperature", c: 63, written: "63°C" }, "metric")).toBe("63°C");
+    expect(temperature({ t: "temperature", c: 114.4, written: "238°F" }, "us")).toBe("238°F");
+    expect(temperature({ t: "temperature", c: 63, written: "63°C" }, "written")).toBe("63°C");
+  });
 });
