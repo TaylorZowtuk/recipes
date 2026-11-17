@@ -1,8 +1,32 @@
-import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
-import { AS_WRITTEN } from "./adjust";
-import { formatAmount } from "./amount";
-import type { Collection, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
+import { AdjustButton } from "./AdjustSheet";
+import {
+  type AdjustChoices,
+  AS_WRITTEN,
+  lineAmount,
+  nextUnit,
+  type UnitChoice,
+  unitOptions,
+  weightRefusal,
+} from "./adjust";
+import type {
+  Collection,
+  Factor,
+  IngredientFacts,
+  Original,
+  ParseFact,
+  Recipe,
+  RecipeFacts,
+} from "./api/client";
 import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
@@ -34,6 +58,7 @@ import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
 import { type TimerStart, timers } from "./timers";
+import { SCALES } from "./weekPlan";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
 // The header comes from the recipe's card, so it shows as soon as the Collection has loaded. One
@@ -41,6 +66,12 @@ import { type TimerStart, timers } from "./timers";
 // shows the Difficulty and every Tag above the tabs, and to an editor an Edit button that swaps the
 // tabs for the Edit form. Keyed by the recipe, so a Draft never carries over to another one.
 const FINISH_EDITING = "Finish editing to see this step.";
+
+// The scale a link asks for (`?scale=1.5`, as a Week Plan day's links do), if it's one of the scales.
+function linkedScale(search: string): Factor {
+  const asked = Number(new URLSearchParams(search).get("scale"));
+  return SCALES.find((factor) => factor === asked) ?? 1;
+}
 
 export function RecipeScreen() {
   const { id } = useParams();
@@ -50,7 +81,7 @@ export function RecipeScreen() {
 function RecipePage() {
   const { id, slug: shownSlug } = useParams();
   const navigate = useNavigate();
-  const { hash, key } = useLocation();
+  const { hash, key, search } = useLocation();
   const collection = useCollection();
   const card =
     collection.state === "ready" ? collection.value.cards.find((c) => c.id === id) : undefined;
@@ -59,6 +90,11 @@ function RecipePage() {
   const [edit, dispatch] = useReducer(editing, { draft: null });
   const { draft } = edit;
   const ready = card && recipe.state === "ready" ? recipe.value : undefined;
+  // The Adjust choices live only here, on this device, so they go when the recipe does.
+  const [choices, setChoices] = useState<AdjustChoices>(() => ({
+    scale: linkedScale(search),
+    units: "written",
+  }));
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
   // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
@@ -134,12 +170,13 @@ function RecipePage() {
                       />
                       <TagList tags={card.tags} />
                       {ready && (
-                        <EditorOnly>
-                          <div className="hero-actions">
+                        <div className="hero-actions">
+                          <AdjustButton choices={choices} onChange={setChoices} />
+                          <EditorOnly>
                             <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
                             <AddToDayButton recipe={card} />
-                          </div>
-                        </EditorOnly>
+                          </EditorOnly>
+                        </div>
                       )}
                     </>
                   )}
@@ -179,6 +216,10 @@ function RecipePage() {
           recipe={recipe.value}
           collection={collection.value}
           newerLoading={!!recipe.newerLoading}
+          choices={choices}
+          onTap={(lineId, unit) =>
+            setChoices((shown) => ({ ...shown, taps: { ...shown.taps, [lineId]: unit } }))
+          }
         />
       )}
     </Screen>
@@ -202,10 +243,14 @@ function RecipeTabs({
   recipe,
   collection,
   newerLoading,
+  choices,
+  onTap,
 }: {
   recipe: Recipe;
   collection: Collection;
   newerLoading: boolean;
+  choices: AdjustChoices;
+  onTap: (lineId: string, unit: UnitChoice) => void;
 }) {
   const isEditor = useIsEditor();
   const blocked = useEditBlock();
@@ -309,7 +354,13 @@ function RecipeTabs({
             count: counts?.ingredients,
             panel: (
               <>
-                <Ingredients original={recipe.original} facts={recipe.facts} review={review} />
+                <Ingredients
+                  original={recipe.original}
+                  facts={recipe.facts}
+                  review={review}
+                  choices={choices}
+                  onTap={onTap}
+                />
                 {bar("ingredients")}
               </>
             ),
@@ -324,6 +375,7 @@ function RecipeTabs({
                   original={recipe.original}
                   facts={recipe.facts}
                   review={review}
+                  choices={choices}
                 />
                 {bar("steps")}
               </>
@@ -367,26 +419,53 @@ function RecipeTabs({
 }
 
 // The ingredient lines under a heading wherever the Component changes. A line with a parse fact
-// shows its name and preparation with the amount beside them; one without shows its raw text. To
-// an editor, a line with facts is a marked Review Item, and the substitutions follow the lines.
+// shows its name and preparation with the amount beside them, with the Adjust choices; one without
+// shows its raw text. With `onTap`, an amount with another unit to show is a button that moves it
+// on, and one that stays in its unit for want of a weight says why when tapped. To an editor, a
+// line with facts is a marked Review Item, its amount plain text, and the substitutions follow the
+// lines.
 export function Ingredients({
   original,
   facts,
   review,
+  choices = AS_WRITTEN,
+  onTap,
 }: {
   original: Original;
   facts?: RecipeFacts;
   review?: ReviewTarget;
+  choices?: AdjustChoices;
+  onTap?: (lineId: string, unit: UnitChoice) => void;
 }) {
   const parts = byComponent(original.ingredients).map((part) => (
     <section key={part.start} className="component">
       {part.component && <h2>{part.component}</h2>}
       <ul className="ingredients">
         {part.lines.map((line) => {
-          const { parse, match } = facts?.ingredients[line.id] ?? {};
+          const lineFacts = facts?.ingredients[line.id];
+          const { parse, match } = lineFacts ?? {};
           const item = review?.items.get(line.id);
           const isNew = !!(item && match && review?.newCanonicals.has(match.canonical_id));
-          const shown = parse ? <ParsedLine parse={parse} isNew={isNew} /> : line.text;
+          const tapped = choices.taps?.[line.id];
+          const amount =
+            lineFacts &&
+            parse?.quantity &&
+            (onTap && !review ? (
+              <TappableAmount
+                line={lineFacts}
+                name={parse.name}
+                choices={choices}
+                tapped={tapped}
+                onTap={(unit) => onTap(line.id, unit)}
+              />
+            ) : (
+              <span className="ingredient-amount">{lineAmount(lineFacts, choices, tapped)}</span>
+            ));
+          const shown = parse ? (
+            <ParsedLine parse={parse} isNew={isNew} amount={amount} />
+          ) : (
+            line.text
+          );
           return (
             <li key={line.id}>
               {item && review ? (
@@ -453,9 +532,57 @@ function Substitutions({
   );
 }
 
+// An ingredient's amount with the Adjust choices, as a button when a tap shows it in another unit
+// (round its units and back), or says why it stays in its unit for want of a weight. A line with
+// nothing to show either way is plain text. The reason is read out politely when it shows.
+function TappableAmount({
+  line,
+  name,
+  choices,
+  tapped,
+  onTap,
+}: {
+  line: IngredientFacts;
+  name: string;
+  choices: AdjustChoices;
+  tapped?: UnitChoice;
+  onTap: (unit: UnitChoice) => void;
+}) {
+  const [why, setWhy] = useState(false);
+  const options = unitOptions(line, choices);
+  const current = tapped && options.includes(tapped) ? tapped : undefined;
+  const amount = lineAmount(line, choices, current);
+  const reason = options.length === 1 ? weightRefusal(line) : undefined;
+  if (options.length === 1 && !reason) return <span className="ingredient-amount">{amount}</span>;
+  return (
+    <>
+      <button
+        type="button"
+        className="ingredient-amount ingredient-tap"
+        aria-label={`${amount} ${name}, ${reason ? "why it stays in this unit" : "show in another unit"}`}
+        onClick={() => (reason ? setWhy(true) : onTap(nextUnit(line, choices, current)))}
+      >
+        {amount}
+      </button>
+      {reason && (
+        <span role="status" className="ingredient-reason">
+          {why && reason}
+        </span>
+      )}
+    </>
+  );
+}
+
 // `isNew` marks, for an editor, a line matched to a Canonical Ingredient not yet confirmed.
-function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolean }) {
-  const amount = parse.quantity && formatAmount(parse.quantity, parse.unit);
+function ParsedLine({
+  parse,
+  isNew = false,
+  amount,
+}: {
+  parse: ParseFact;
+  isNew?: boolean;
+  amount: ReactNode;
+}) {
   // The preparation and the line's remark follow the name, as in "garlic, minced, to taste".
   const remarks = [parse.preparation, parse.comment].filter(Boolean).join(", ");
   return (
@@ -466,12 +593,7 @@ function ParsedLine({ parse, isNew = false }: { parse: ParseFact; isNew?: boolea
         {isNew && <span className="review-new">new</span>}
       </span>
       {/* The space is invisible in the flex row, but copied text reads "tahini 3 tbsp". */}
-      {amount && (
-        <>
-          {" "}
-          <span className="ingredient-amount">{amount}</span>
-        </>
-      )}
+      {amount && <> {amount}</>}
     </>
   );
 }
@@ -485,11 +607,13 @@ export function Steps({
   original,
   facts,
   review,
+  choices = AS_WRITTEN,
 }: {
   recipeId?: string;
   original: Original;
   facts?: RecipeFacts;
   review?: ReviewTarget;
+  choices?: AdjustChoices;
 }) {
   return byComponent(original.steps).map((part) => (
     <section key={part.start} className="component">
@@ -513,7 +637,7 @@ export function Steps({
                 }}
               />
             );
-          const pieces = stepText(step, facts, AS_WRITTEN);
+          const pieces = stepText(step, facts, choices);
           const shown = pieces.map((piece, n) => {
             if (typeof piece === "string") return piece;
             if ("t" in piece) return (!item && timer(piece, n)) || piece.written;

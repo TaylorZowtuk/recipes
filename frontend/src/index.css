@@ -857,6 +857,43 @@ h1:focus {
   text-align: right;
 }
 
+/* An amount a tap shows in another unit: dotted under, as a hint, with a tap area past the line. */
+.ingredient-tap {
+  position: relative;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline dotted var(--accent-text);
+  text-underline-offset: 0.25em;
+  cursor: pointer;
+}
+
+.ingredient-tap::after {
+  content: "";
+  position: absolute;
+  inset: -12px -8px;
+}
+
+/* Why an amount stays in its unit, under the line once its amount is tapped. */
+.ingredients li:has(.ingredient-reason) {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.ingredient-reason {
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  text-align: right;
+}
+
+.ingredient-reason:not(:empty) {
+  margin-top: var(--space);
+}
+
 .steps {
   margin: 0;
   padding-left: 1.75em;
