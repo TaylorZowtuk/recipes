@@ -295,14 +295,14 @@ h1:focus {
   color: var(--accent-soft-text);
 }
 
-/* The account menu: a floating card under the top bar's account button on phones. It's fixed, so
-   it escapes the desktop rail's scrolling. On a short screen (a small phone, or zoomed in) it stops
-   above the tab bar and scrolls. */
+/* The account menu: a floating card hung from the bottom edge of the phone's top bar, wherever the
+   banner above leaves the bar. On a short screen (a small phone, or zoomed in) it stops above the
+   tab bar and scrolls. */
 .account-menu {
   --menu-top: calc(var(--top-bar-height) + env(safe-area-inset-top));
   --menu-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 2);
-  position: fixed;
-  top: var(--menu-top);
+  position: absolute;
+  top: 100%;
   right: calc(var(--gutter) + env(safe-area-inset-right));
   z-index: 3;
   width: min(280px, calc(100vw - var(--gutter) * 2));
@@ -1602,8 +1602,9 @@ h1:focus {
     margin-top: auto;
   }
 
-  /* Beside the rail, level with the foot of it. */
+  /* Beside the rail, level with the foot of it. Fixed, so it escapes the rail's scrolling. */
   .account-rail .account-menu {
+    position: fixed;
     --menu-top: calc(var(--space) * 2 + env(safe-area-inset-top));
     --menu-bottom: calc(var(--space) * 6 + env(safe-area-inset-bottom));
     top: auto;
