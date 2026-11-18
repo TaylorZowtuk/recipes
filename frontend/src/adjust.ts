@@ -100,29 +100,22 @@ const fractions = ([low, high]: Range, unit: string | null) => formatAmount({ lo
 // To the nearest ⅛, and never less than ⅛.
 const eighths = (value: number) => Math.max(Math.round(value * 8) / 8, 1 / 8);
 
-// The fractions a kitchen measures in: any ⅛ of a spoon, but only ¼, ⅓, ½, ⅔ or ¾ of a cup.
-const CUP_PARTS = [1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4];
-function isKitchen(value: number, size: number): boolean {
+// Whether a number of spoons or cups is whole or a kitchen fraction: any ⅛, or a third.
+function isKitchen(value: number): boolean {
   const rest = value - Math.floor(value);
-  const parts = size === CUP ? CUP_PARTS : FRACTIONS.map(([part]) => part);
-  return rest < 0.01 || rest > 0.99 || parts.some((part) => Math.abs(rest - part) < 0.01);
+  return rest < 0.01 || rest > 0.99 || FRACTIONS.some(([part]) => Math.abs(rest - part) < 0.01);
 }
 
-// A number of cups to the nearest cup part or whole cup, and never less than ¼; of a spoon, to
-// the nearest ⅛.
-function toKitchen(value: number, size: number): number {
-  if (size !== CUP) return eighths(value);
-  const whole = Math.floor(value);
-  const part = [0, ...CUP_PARTS, 1].reduce((best, p) =>
-    Math.abs(value - whole - p) < Math.abs(value - whole - best) ? p : best,
-  );
-  return Math.max(whole + part, 1 / 4);
+// A number of spoons or cups kept as a third when it is one, else to the nearest ⅛ and never less.
+function toKitchen(value: number): number {
+  const third = Math.round(value * 3) / 3;
+  return third > 0 && Math.abs(value - third) < 0.01 ? third : eighths(value);
 }
 
 // A volume in ml in one kitchen unit of `set`: a spoon fits from 1 of it with a low end of ⅛ (tsp
 // always) but carries at most 1 cup when `set` has cups; cups fit from ¼ with a low end of ⅛, or
 // past 1 cup. The largest fitting unit exact in kitchen fractions wins (unless `converted`), else
-// the largest fitting unit, rounded.
+// the largest fitting unit, to the nearest ⅛ (or an exact third).
 function tidy(ml: Range, set: [number, string][], converted = false): string {
   const cups = set.some(([size]) => size === CUP);
   const fits = set.filter(([size]) => {
@@ -133,11 +126,11 @@ function tidy(ml: Range, set: [number, string][], converted = false): string {
   if (!converted) {
     for (const [size, unit] of fits) {
       const values = ml.map((v) => v / size) as Range;
-      if (values.every((v) => isKitchen(v, size))) return fractions(values, unit);
+      if (values.every(isKitchen)) return fractions(values, unit);
     }
   }
   const [size, unit] = fits[0] as [number, string];
-  return fractions(ml.map((v) => toKitchen(v / size, size)) as Range, unit);
+  return fractions(ml.map((v) => toKitchen(v / size)) as Range, unit);
 }
 
 const trusted = (c: ConversionFact) =>

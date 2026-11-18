@@ -112,24 +112,33 @@ describe("As written", () => {
     expect(show(line(1, "tsp", "volume"), "written", 0.5)).toBe("½ tsp");
   });
 
-  it("tidies a range by its high end, in cups only as ¼, ⅓, ½, ⅔ or ¾", () => {
+  it("tidies a range by its high end", () => {
     expect(show(line([0.5, 3], "tbsp", "volume"), "written", 1.5)).toBe("¾–4½ tbsp");
-    expect(show(line(2, "tbsp", "volume"), "written", 3)).toBe("6 tbsp");
+    expect(show(line([0.75, 1.25], "cup", "volume"), "written", 1.5)).toBe("1⅛–1⅞ cups");
     expect(show(line([100, 500], "ml", "volume"), "us", 0.5)).toBe("¼–1 cup");
     // A low end under ⅛ of the larger unit keeps the smaller one.
     expect(show(line([1, 50], "ml", "volume"), "us")).toBe("¼–10⅛ tsp");
   });
 
-  it("rounds a converted cup amount to the nearest ¼, ⅓, ½, ⅔ or ¾ cup", () => {
-    expect(show(line(500, "ml", "volume"), "us")).toBe("2 cups");
-    expect(show(line(4, "l", "volume"), "us")).toBe("17 cups");
-    expect(show(line(300, "ml", "volume"), "us")).toBe("1¼ cups");
+  it("measures cups in ⅛ steps, like spoons", () => {
+    expect(show(line(0.75, "cup", "volume"), "written", 1.5)).toBe("1⅛ cups");
+    expect(show(line(0.75, "cup", "volume"), "us", 1.5)).toBe("1⅛ cups");
+    expect(show(line(6, "tbsp", "volume"), "written", 3)).toBe("1⅛ cups");
+    expect(show(line(2, "tbsp", "volume"), "written", 3)).toBe("⅜ cup");
   });
 
-  it("shows a range past 1 cup in cups, with a low end of at least ¼ cup", () => {
-    expect(show(line([5, 250], "ml", "volume"), "us")).toBe("¼–1 cup");
-    expect(show(line([1 / 48, 2], "cup", "volume"), "written", 2)).toBe("¼–4 cups");
-    expect(show(line([1, 32], "tsp", "volume"), "written", 2)).toBe("¼–1⅓ cups");
+  it("rounds a converted cup amount to the nearest ⅛ cup", () => {
+    expect(show(line(100, "ml", "volume"), "us")).toBe("⅜ cup");
+    expect(show(line(200, "ml", "volume"), "us")).toBe("⅞ cup");
+    expect(show(line(300, "ml", "volume"), "us")).toBe("1¼ cups");
+    expect(show(line(500, "ml", "volume"), "us")).toBe("2⅛ cups");
+    expect(show(line(4, "l", "volume"), "us")).toBe("16⅞ cups");
+  });
+
+  it("shows a range past 1 cup in cups, with a low end of at least ⅛ cup", () => {
+    expect(show(line([5, 250], "ml", "volume"), "us")).toBe("⅛–1 cup");
+    expect(show(line([1 / 48, 2], "cup", "volume"), "written", 2)).toBe("⅛–4 cups");
+    expect(show(line([1, 32], "tsp", "volume"), "written", 2)).toBe("⅛–1⅓ cups");
   });
 });
 
