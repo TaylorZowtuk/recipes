@@ -348,7 +348,7 @@ run "backup" {
   assert {
     condition = output.wiring.grants == {
       Table = {
-        actions   = toset(["dynamodb:Scan"])
+        actions   = toset(["dynamodb:GetItem", "dynamodb:Scan"])
         resources = toset(["arn:aws:dynamodb:us-west-2:123456789012:table/plateful-test"])
       }
       ImagesList = {

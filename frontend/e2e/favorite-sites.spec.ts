@@ -65,21 +65,60 @@ function applied(sites: Site[], { op, id, ...fields }: Operation): Site[] {
   }
 }
 
+// The real API moves the Collection version on every write, and the PWA reads a bundle only at a
+// version it doesn't hold. So `/api/sync`'s version moves whenever `state()` changes or `move()` is
+// called, and the bundle at any such version is the real one with `patch` applied.
+async function stubCollection(
+  page: Page,
+  state: () => unknown,
+  patch: (collection: Record<string, unknown>) => Record<string, unknown>,
+  paused: () => boolean,
+) {
+  const MOVES = 1000;
+  let moves = 0;
+  let seen = JSON.stringify(state());
+  await page.route("**/api/sync", async (route) => {
+    const now = JSON.stringify(state());
+    if (now !== seen) [seen, moves] = [now, moves + 1];
+    const response = await route.fetch();
+    const sync = await response.json();
+    await route.fulfill({
+      response,
+      json: {
+        ...sync,
+        collection_version: sync.collection_version * MOVES + moves,
+        read_only: sync.read_only || paused(),
+      },
+    });
+  });
+  await page.route("**/api/v/collection/*", async (route) => {
+    const url = new URL(route.request().url());
+    const version = Number(url.pathname.split("/").at(-1));
+    url.pathname = `/api/v/collection/${Math.floor(version / MOVES)}`;
+    const response = await route.fetch({ url: url.toString() });
+    const collection = await response.json();
+    await route.fulfill({ response, json: { ...patch(collection), collection_version: version } });
+  });
+  return { move: () => (moves += 1) };
+}
+
 // Serves `sites` in the Collection bundle, in place of the shared item, and answers the PATCH
-// from them. `refuse` makes the next PATCH answer that, instead of saving.
+// from them. `refuse` makes the next PATCH answer that, instead of saving; `paused` pauses editing.
 async function stubSites(page: Page, sites: Site[]) {
   const stub = {
     sites,
     version: 7,
     edits: [] as Edit[],
     refuse: undefined as { status: number; detail: string; sites?: Site[] } | undefined,
+    paused: false,
   };
   const listed = () => ({ version: stub.version, sites: stub.sites });
-  await page.route("**/api/v/collection/*", async (route) => {
-    const response = await route.fetch();
-    const collection = await response.json();
-    await route.fulfill({ response, json: { ...collection, favorite_sites: listed() } });
-  });
+  const { move } = await stubCollection(
+    page,
+    listed,
+    (collection) => ({ ...collection, favorite_sites: listed() }),
+    () => stub.paused,
+  );
   await page.route("**/api/favorite-sites", async (route) => {
     const edit: Edit = route.request().postDataJSON();
     stub.edits.push(edit);
@@ -87,6 +126,7 @@ async function stubSites(page: Page, sites: Site[]) {
       const { status, detail, sites } = stub.refuse;
       stub.sites = sites ?? stub.sites;
       stub.refuse = undefined;
+      if (status === 409) move();
       return route.fulfill({ status, json: { detail } });
     }
     stub.sites = edit.operations.reduce(applied, stub.sites);
@@ -387,11 +427,8 @@ test("editing is off while offline, in the list and in a Draft", async ({ page, 
 });
 
 test("editing is off while Plateful is paused", async ({ page }) => {
-  await page.route("**/api/sync", async (route) => {
-    const response = await route.fetch();
-    await route.fulfill({ response, json: { ...(await response.json()), read_only: true } });
-  });
-  await stubSites(page, [KITCHEN]);
+  const stub = await stubSites(page, [KITCHEN]);
+  stub.paused = true;
   await signIn(page.request);
   await page.goto("/sites");
   await expect(button(page, "Edit")).toBeDisabled();

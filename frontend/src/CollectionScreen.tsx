@@ -100,7 +100,12 @@ export function CollectionScreen() {
         {collection.state === "ready" && resultCount(cards.length, shown.length, query, active > 0)}
       </p>
       {collection.state === "failed" && (
-        <LoadFailed what="The Collection" retry={collection.retry} status={status} />
+        <LoadFailed
+          what="The Collection"
+          offline={collection.offline}
+          retry={collection.retry}
+          status={status}
+        />
       )}
       {shown.length > 0 && (
         <ul className="card-grid" aria-label="Recipes">

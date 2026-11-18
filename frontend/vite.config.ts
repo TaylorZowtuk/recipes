@@ -11,7 +11,11 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      // src/sw.ts: a new build takes over on the next launch, or at once on a schema change.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      registerType: "prompt",
       manifest: {
         name: "Plateful",
         short_name: "Plateful",
@@ -32,12 +36,8 @@ export default defineConfig({
           { src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
         ],
       },
-      // The fonts are precached so the app keeps its look offline. The API, recipe images and
-      // robots.txt come from the server as themselves, never as the app's index.html.
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,woff2}"],
-        navigateFallbackDenylist: [/^\/api\//, /^\/images\//, /^\/robots\.txt$/],
-      },
+      // The fonts are precached so the app keeps its look offline.
+      injectManifest: { globPatterns: ["**/*.{js,css,html,woff2}"] },
     }),
   ],
   server: { proxy: api },
