@@ -128,6 +128,8 @@ describe("As written", () => {
   });
 
   it("rounds a converted cup amount to the nearest ⅛ cup", () => {
+    expect(show(line(75, "ml", "volume"), "us")).toBe("⅓ cup");
+    expect(show(line(158, "ml", "volume"), "us")).toBe("⅔ cup");
     expect(show(line(100, "ml", "volume"), "us")).toBe("⅜ cup");
     expect(show(line(200, "ml", "volume"), "us")).toBe("⅞ cup");
     expect(show(line(300, "ml", "volume"), "us")).toBe("1¼ cups");

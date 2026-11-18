@@ -106,10 +106,10 @@ function isKitchen(value: number): boolean {
   return rest < 0.01 || rest > 0.99 || FRACTIONS.some(([part]) => Math.abs(rest - part) < 0.01);
 }
 
-// A number of spoons or cups kept as a third when it is one, else to the nearest ⅛ and never less.
+// A number of spoons or cups kept as a third when nearer it than any ⅛, else to the nearest ⅛ and never less.
 function toKitchen(value: number): number {
   const third = Math.round(value * 3) / 3;
-  return third > 0 && Math.abs(value - third) < 0.01 ? third : eighths(value);
+  return third > 0 && Math.abs(value - third) < 1 / 48 ? third : eighths(value);
 }
 
 // A volume in ml in one kitchen unit of `set`: a spoon fits from 1 of it with a low end of ⅛ (tsp
