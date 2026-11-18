@@ -256,9 +256,11 @@ export function createSyncEngine({
   }
 
   // The bundle at the polled version. When there's no poll or no bundle to be had, the newest
-  // cached one stands in, so a phone offline or with the API down still shows the Collection.
+  // cached one stands in, so a phone offline or with the API down still shows the Collection. A poll
+  // in flight may be loading the bundle already, so it waits for that rather than read it twice.
   async function loadCollection(): Promise<Collection> {
     try {
+      await polling?.catch(() => {});
       const sync = snapshot.sync ?? (await poll());
       if (snapshot.collection) return snapshot.collection;
       const collection = await read<Collection>(collectionPath(sync.collection_version));

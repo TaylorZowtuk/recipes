@@ -180,6 +180,22 @@ describe("reading the Collection and recipes", () => {
     expect(store.paths(DATA)).toEqual(["/api/v/collection/2", recipePath("recipe-a", 2)]);
   });
 
+  it("reads the bundle once when a screen asks for it while a poll is loading it", async () => {
+    const { server, engine } = setup({ full: true });
+    const editor = engine();
+    const release = held(server, "/api/v/collection/");
+    const polled = editor.poll();
+    await vi.waitFor(() => expect(server.requests).toContain("/api/v/collection/1"));
+    const loaded = editor.collection();
+    release();
+    await Promise.all([polled, loaded]);
+
+    expect(server.took().filter((path) => path.startsWith("/api/v/collection/"))).toEqual([
+      "/api/v/collection/1",
+    ]);
+    expect(await loaded).toBe(editor.getSnapshot().collection);
+  });
+
   it("says a recipe or the Collection is not available offline when nothing is cached", async () => {
     const { server, engine } = setup();
     server.offline = true;
