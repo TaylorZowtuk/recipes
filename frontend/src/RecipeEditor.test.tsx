@@ -67,4 +67,35 @@ describe("the recipe editor", () => {
       nowReady: false,
     });
   });
+
+  // Cancel would unmount the editor while the save is still out; the save's outcome then lands on
+  // whatever Draft the page has by then.
+  it("keeps Cancel from leaving the editor while a save is pending", async () => {
+    let finish: (value: never) => void = () => {};
+    vi.spyOn(api, "PATCH").mockReturnValue(new Promise((resolve) => (finish = resolve)) as never);
+    reload.before = () => {};
+    const dispatch = vi.fn();
+    const r = recipe();
+    act(() =>
+      root.render(
+        <MemoryRouter>
+          <RecipeEditor
+            recipe={r}
+            title={r.original.title}
+            draft={{ ...draftOf(r), tags: "quick" }}
+            dispatch={dispatch}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    await act(async () => host.querySelector<HTMLButtonElement>("button[type=submit]")?.click());
+    const cancel = [...host.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
+    act(() => cancel?.click());
+
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "cancel" });
+    expect(cancel?.getAttribute("aria-disabled")).toBe("true");
+    await act(async () =>
+      finish({ error: { detail: "x" }, response: new Response(null, { status: 500 }) } as never),
+    );
+  });
 });

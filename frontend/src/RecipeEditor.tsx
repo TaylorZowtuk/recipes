@@ -169,7 +169,8 @@ export function RecipeEditor({
         <button
           type="button"
           className="button button-secondary"
-          onClick={() => dispatch({ type: "cancel" })}
+          aria-disabled={!!busy}
+          onClick={() => !busy && dispatch({ type: "cancel" })}
         >
           Cancel
         </button>
