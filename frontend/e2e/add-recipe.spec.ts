@@ -43,12 +43,17 @@ async function openAddRecipeFromGrid(page: Page) {
   await openFromMenu(page);
 }
 
-const syncStatus = (page: Page) => page.locator(".sync-status");
-
-async function collectionVersion(page: Page) {
-  await expect(syncStatus(page)).toHaveText(/collection v\d+$/);
-  return Number((await syncStatus(page).textContent())?.match(/v(\d+)$/)?.[1]);
+// The Collection's version as the API reports it.
+async function collectionVersion(page: Page): Promise<number> {
+  return (await (await page.request.get("/api/sync")).json()).collection_version;
 }
+
+// Waits for the page to fetch the Collection bundle at a version after `before`.
+const bundleAfter = (page: Page, before: number) =>
+  page.waitForResponse((response) => {
+    const version = new URL(response.url()).pathname.match(/^\/api\/v\/collection\/(\d+)$/)?.[1];
+    return Number(version) > before && response.ok();
+  });
 
 // Saves a recipe from another device, as far as this page load knows.
 async function saveElsewhere(page: Page, url: string) {
@@ -80,6 +85,7 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
   const title = titleOf(url);
   await openAddRecipeFromGrid(page);
   const before = await collectionVersion(page);
+  const newBundle = bundleAfter(page, before);
   await fetchRecipe(page, url);
 
   // The review: the Original as captured, ISO Stated Times humanized and other text as written.
@@ -124,7 +130,7 @@ test("an editor adds a recipe from a website and sees it pending in the grid", a
   await expect(card).toContainText("Enrichment pending");
   await expect(card).toContainText("Plateful Test Kitchen");
   await expect(card).toContainText("45 min");
-  await expect.poll(() => collectionVersion(page)).toBeGreaterThan(before);
+  await newBundle;
 
   // Its About tab shows the times as on the review.
   await card.click();

@@ -276,7 +276,9 @@ test("sign-in shows that Google's button and the sign-in are on their way", asyn
     await route.fallback();
   });
 
-  await page.goto("/sign-in");
+  // Google's script can be asked for before the page's load event, and the held script then
+  // holds that event, so don't wait for it.
+  await page.goto("/sign-in", { waitUntil: "commit" });
   const loading = page.getByText("Loading Google sign-in…");
   await expect(loading).toBeVisible();
   // Only Google's iframe is forced to the light scheme; the note keeps the page's.

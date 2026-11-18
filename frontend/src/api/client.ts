@@ -56,3 +56,7 @@ export function createApi(options: ClientOptions) {
 
 // The PWA and the API share one origin behind CloudFront, so paths are relative.
 export const api = createApi({ baseUrl: globalThis.location?.origin });
+
+// A GET whose raw response the sync engine keeps whole in the Cache API, under the path it was
+// fetched from: /api/sync, the versioned reads under /api/v/ and the images they name.
+export const fetchRaw = (path: string): Promise<Response> => fetch(path);

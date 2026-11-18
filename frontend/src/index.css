@@ -50,6 +50,8 @@
   --nav-height: 68px;
   --dock-height: 0px; /* set from the timer dock's height while it shows */
   --top-bar-height: calc(var(--tap) + var(--space) * 4);
+  /* The editor's sync banner, minus the status-bar inset it adds on top: one line of text. */
+  --sync-banner-height: calc(var(--space) * 2 + var(--text-small) * 1.5);
 
   --elevation-card: 0 1px 2px rgba(30, 60, 45, 0.08), 0 4px 12px rgba(30, 60, 45, 0.06);
   --elevation-float: 0 10px 28px rgba(20, 50, 35, 0.25);
@@ -196,15 +198,34 @@ h1:focus {
 }
 
 /* In landscape the notch and the rounded corners sit at the sides, so content keeps clear of them. */
-.screen-body,
-.sync-status {
+.screen-body {
   padding: 0 calc(var(--gutter) + env(safe-area-inset-right)) 0
     calc(var(--gutter) + env(safe-area-inset-left));
 }
 
-.sync-status {
-  color: var(--text-secondary);
+/* The editor's read-only banner: one slim line above the screen, nothing while empty. In the
+   installed app it starts below the status bar and covers the top bar's own gap for it, which the
+   top bar still needs once the banner scrolls away and the bar sticks. Above the top bar, even
+   while its menu lifts it. */
+.sync-banner {
+  position: relative;
+  z-index: 4;
+  margin: 0;
+  padding: calc(var(--space) + env(safe-area-inset-top))
+    calc(var(--gutter) + env(safe-area-inset-right)) var(--space)
+    calc(var(--gutter) + env(safe-area-inset-left));
+  line-height: calc(var(--sync-banner-height) - var(--space) * 2);
+  background: var(--warning);
+  color: var(--warning-text);
   font-size: var(--text-small);
+}
+
+.sync-banner:empty {
+  padding-block: 0;
+}
+
+.sync-banner:not(:empty) + .top-bar {
+  margin-top: calc(-1 * env(safe-area-inset-top));
 }
 
 .places {
@@ -277,14 +298,14 @@ h1:focus {
   color: var(--accent-soft-text);
 }
 
-/* The account menu: a floating card under the top bar's account button on phones. It's fixed, so
-   it escapes the desktop rail's scrolling. On a short screen (a small phone, or zoomed in) it stops
-   above the tab bar and scrolls. */
+/* The account menu: a floating card hung from the bottom edge of the phone's top bar, wherever the
+   banner above leaves the bar. On a short screen (a small phone, or zoomed in) it stops above the
+   tab bar and scrolls, with the banner's height, while it shows, taken off what's left. */
 .account-menu {
   --menu-top: calc(var(--top-bar-height) + env(safe-area-inset-top));
   --menu-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom) + var(--space) * 2);
-  position: fixed;
-  top: var(--menu-top);
+  position: absolute;
+  top: 100%;
   right: calc(var(--gutter) + env(safe-area-inset-right));
   z-index: 3;
   width: min(280px, calc(100vw - var(--gutter) * 2));
@@ -300,6 +321,10 @@ h1:focus {
   font-weight: 400;
   text-align: left;
   animation: menu-in var(--motion) ease-out;
+}
+
+.sync-banner:not(:empty) + .top-bar .account-menu {
+  --menu-top: calc(var(--top-bar-height) + env(safe-area-inset-top) + var(--sync-banner-height));
 }
 
 /* The sticky top bar is its own stacking context, under the tab bar: lift it while its menu is
@@ -1584,8 +1609,9 @@ h1:focus {
     margin-top: auto;
   }
 
-  /* Beside the rail, level with the foot of it. */
+  /* Beside the rail, level with the foot of it. Fixed, so it escapes the rail's scrolling. */
   .account-rail .account-menu {
+    position: fixed;
     --menu-top: calc(var(--space) * 2 + env(safe-area-inset-top));
     --menu-bottom: calc(var(--space) * 6 + env(safe-area-inset-bottom));
     top: auto;
@@ -1624,8 +1650,7 @@ h1:focus {
       calc(var(--space) * 2) calc(var(--space) * 8);
   }
 
-  .screen-body,
-  .sync-status {
+  .screen-body {
     padding: 0 calc(var(--space) * 8 + env(safe-area-inset-right)) 0 calc(var(--space) * 8);
   }
 }
