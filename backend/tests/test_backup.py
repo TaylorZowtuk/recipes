@@ -3,8 +3,10 @@ images the backup bucket doesn't hold yet."""
 
 import gzip
 import json
+import re
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -22,8 +24,7 @@ from recipes.client import SERVICE_TOKEN_ENV, SameOriginSession
 from recipes.store import SCHEMA_KEY, Store
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
+    from botocore.model import OperationModel
     from fastapi.testclient import TestClient
     from requests.models import PreparedRequest, Response
     from types_boto3_s3 import S3Client
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 NOV_13 = datetime(2026, 11, 13, 3, 30, 5, tzinfo=UTC)
 NOV_14 = datetime(2026, 11, 14, 3, 30, 5, tzinfo=UTC)
 DEC_1 = datetime(2026, 12, 1, 3, 30, 5, tzinfo=UTC)
+REPO = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -305,6 +307,62 @@ def test_the_handler_backs_up_the_stack_from_its_environment(
     assert summary["images_copied"] == 1
     assert backup.latest_snapshot_key(s3, BACKUP_BUCKET) == summary["backup_snapshot"]
     assert keys(s3, "snapshots/monthly/") == []
+
+
+# The IAM action each AWS call the handler makes needs. Moto doesn't enforce IAM, so without this a
+# call the snapshot role can't make passes every test and fails only in a deployed stack.
+IAM_ACTIONS = {
+    ("dynamodb", "GetItem"): {"dynamodb:GetItem"},
+    ("dynamodb", "Scan"): {"dynamodb:Scan"},
+    ("s3", "ListObjectsV2"): {"s3:ListBucket"},
+    ("s3", "GetObject"): {"s3:GetObject"},
+    ("s3", "HeadObject"): {"s3:GetObject"},
+    ("s3", "PutObject"): {"s3:PutObject"},
+    ("s3", "CreateMultipartUpload"): {"s3:PutObject"},
+    ("s3", "UploadPart"): {"s3:PutObject"},
+    ("s3", "CompleteMultipartUpload"): {"s3:PutObject"},
+    ("s3", "CopyObject"): {"s3:GetObject", "s3:PutObject"},
+}
+
+
+def snapshot_role_actions() -> set[str]:
+    """Every action the backup module's role policy grants, on any resource."""
+    module = (REPO / "infra/modules/backup/main.tf").read_text()
+    policy = module.split('data "aws_iam_policy_document" "this" {', 1)[1].split("\n}\n", 1)[0]
+    return {
+        action
+        for actions in re.findall(r"actions\s*=\s*\[([^\]]*)\]", policy)
+        for action in re.findall(r'"([^"]+)"', actions)
+    }
+
+
+@pytest.mark.usefixtures("lambda_env")
+def test_the_snapshot_role_grants_every_call_the_handler_makes(
+    table: str, images: ImageStore, s3: S3Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(table)
+    s3.put_object(Bucket=images.bucket, Key=f"images/{1:032x}.webp", Body=b"synthetic")
+    calls: set[tuple[str, str]] = set()
+    make_client = boto3.client
+
+    def recording_client(service: str, *args: Any, **kwargs: Any) -> Any:
+        client = make_client(service, *args, **kwargs)
+
+        def record(model: OperationModel, **_: object) -> None:
+            calls.add((service, model.name))
+
+        client.meta.events.register("before-call", record)
+        return client
+
+    monkeypatch.setattr(boto3, "client", recording_client)
+
+    backup.handler({"kind": "nightly"}, None)
+
+    assert calls, "the handler made no AWS calls"
+    unmapped = calls - IAM_ACTIONS.keys()
+    assert not unmapped, f"add these calls to IAM_ACTIONS: {sorted(unmapped)}"
+    needed = set[str]().union(*(IAM_ACTIONS[call] for call in calls))
+    assert needed <= snapshot_role_actions(), "infra/modules/backup/main.tf doesn't grant them all"
 
 
 @pytest.mark.usefixtures("lambda_env")

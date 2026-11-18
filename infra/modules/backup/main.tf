@@ -123,12 +123,12 @@ resource "aws_cloudwatch_log_group" "this" {
   retention_in_days = var.log_retention_days
 }
 
-# Scan the table, read the images, and read and write the backup bucket. Nothing else: no deletes,
+# Read the schema version and Scan the table, read the images, and read and write the backup bucket. Nothing else: no deletes,
 # so a bad run can't remove an older snapshot (the lifecycle rules expire them).
 data "aws_iam_policy_document" "this" {
   statement {
     sid       = "Table"
-    actions   = ["dynamodb:Scan"]
+    actions   = ["dynamodb:GetItem", "dynamodb:Scan"]
     resources = [var.table_arn]
   }
 
