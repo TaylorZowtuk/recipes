@@ -8,6 +8,8 @@ enrichment's suggestion. Garlic Butter Green Beans awaits review with a new Cano
 a conversion, an open Enrichment Issue and a confirmed substitute for its butter. PANTRY holds
 Canonical Ingredients no recipe uses, for Kitchen settings' tests to change freely. Its Favorite
 Sites are on reserved domains, and the first is on example.com, so it counts the website recipes.
+As enrichment does, every line of a recipe past Pending has a parse fact; Overnight Oats has a
+line in cups and one in ounces, for the Adjust sheet's units.
 """
 
 import io
@@ -90,6 +92,9 @@ UNSALTED_BUTTER = CanonicalIngredient(
 )
 UNSALTED_FDC_ID = 173430
 UNSALTED_TBSP = 92512
+# Seeds, sesame butter, tahini, from roasted and toasted kernels (SR Legacy), by the tablespoon.
+TAHINI_FDC_ID = 170189
+TAHINI_TBSP = 86209
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -131,27 +136,35 @@ def _time(text: str, seconds: int) -> StatedTime:
 
 
 def _parse(
-    amount: float | tuple[float, float],
+    amount: float | tuple[float, float] | None,
     unit: str | None,
-    unit_kind: Literal["mass", "volume", "count"],
+    unit_kind: Literal["mass", "volume", "count"] | None,
     name: str,
     preparation: str | None = None,
     *,
     comment: str | None = None,
+    optional: bool = False,
+    confirmed: bool = False,
 ) -> IngredientFacts:
-    """A parser's reading of a line, written by hand for the seed. A pair is a range."""
+    """A parser's reading of a line, written by hand for the seed. A pair is a range, and None no
+    amount, as in "to taste".
+    """
     low, high = amount if isinstance(amount, tuple) else (amount, amount)
     return IngredientFacts(
         parse=ParseFact(
             provenance="parser",
             confidence=0.9,
             estimated=False,
-            quantity=Quantity(low=low, high=high),
+            confirmed=confirmed,
+            confirmed_by="editor@example.com" if confirmed else None,
+            confirmed_at=CAPTURED_AT if confirmed else None,
+            quantity=None if low is None or high is None else Quantity(low=low, high=high),
             unit=unit,
             unit_kind=unit_kind,
             name=name,
             preparation=preparation,
             comment=comment,
+            optional=optional,
         )
     )
 
@@ -223,6 +236,16 @@ RECIPES = [
         difficulty=Difficulty(prep=1, cook=2, cleanup=2),
         status="ready",
         facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(
+                    1, None, "count", "whole chicken", comment="about 1.8 kg", confirmed=True
+                ),
+                "i2": _parse(2, None, "count", "lemons", "halved", confirmed=True),
+                "i3": _parse(6, "sprigs", "count", "fresh thyme", confirmed=True),
+                "i4": _parse(2, "tbsp", "volume", "olive oil", confirmed=True),
+                "i5": _parse(2, None, "count", "onions", "thickly sliced", confirmed=True),
+                "i6": _parse(1, "tsp", "volume", "kosher salt", confirmed=True),
+            },
             steps={
                 "s1": _step_facts("Heat the oven to ", _temperature(218, "425°F"), "."),
                 "s2": _step_facts(
@@ -242,7 +265,7 @@ RECIPES = [
                     _duration(600, 600, "10 minutes"),
                     " before carving.",
                 ),
-            }
+            },
         ),
     ),
     Recipe(
@@ -307,7 +330,21 @@ RECIPES = [
         status="ready",
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(3, "tbsp", "volume", "tahini"),
+                # Confirmed, so the Adjust sheet can show it as a weight; soy sauce has none.
+                "i1": _parse(3, "tbsp", "volume", "tahini").model_copy(
+                    update={
+                        "conversion": ConversionFact(
+                            provenance="fdc",
+                            confidence=0.9,
+                            estimated=False,
+                            confirmed=True,
+                            confirmed_by="editor@example.com",
+                            confirmed_at=CAPTURED_AT,
+                            fdc_id=TAHINI_FDC_ID,
+                            **fdc.numbers(fdc.snapshot(), TAHINI_FDC_ID, TAHINI_TBSP).model_dump(),
+                        )
+                    }
+                ),
                 "i2": _parse(2, "tbsp", "volume", "soy sauce"),
                 "i3": _parse(1.5, "tbsp", "volume", "rice vinegar"),
                 "i4": _parse(1, "tsp", "volume", "chili oil", comment="or to taste"),
@@ -366,7 +403,7 @@ RECIPES = [
             ingredients=_ingredients(
                 "1/2 cup rolled oats",
                 "1/2 cup milk",
-                "1/4 cup plain yogurt",
+                "2 oz plain yogurt",
                 "1 tbsp maple syrup",
                 "Berries, to serve",
             ),
@@ -379,6 +416,18 @@ RECIPES = [
         tags=["breakfast"],
         difficulty=Difficulty(prep=1, cook=1, cleanup=1),
         status="ready",
+        # A line in cups and one in ounces, for the Adjust sheet to show in metric.
+        facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(0.5, "cup", "volume", "rolled oats", confirmed=True),
+                "i2": _parse(0.5, "cup", "volume", "milk", confirmed=True),
+                "i3": _parse(2, "oz", "mass", "plain yogurt", confirmed=True),
+                "i4": _parse(1, "tbsp", "volume", "maple syrup", confirmed=True),
+                "i5": _parse(
+                    None, None, None, "berries", comment="to serve", optional=True, confirmed=True
+                ),
+            }
+        ),
     ),
     Recipe(
         id="01K7SEED000000000000000004",
@@ -410,9 +459,20 @@ RECIPES = [
         tags=["soup", "weeknight"],
         # No editor Difficulty, so the card and the recipe page show this one as a suggestion.
         facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(1, "tbsp", "volume", "olive oil", confirmed=True),
+                "i2": _parse(1, None, "count", "onion", "diced", confirmed=True),
+                "i3": _parse(2, None, "count", "carrots", "diced", confirmed=True),
+                "i4": _parse(1, "cup", "volume", "red lentils", "rinsed", confirmed=True),
+                "i5": _parse(
+                    1, "can", "count", "crushed tomatoes", comment="796 ml", confirmed=True
+                ),
+                "i6": _parse(4, "cup", "volume", "vegetable broth", confirmed=True),
+                "i7": _parse(1, "tsp", "volume", "ground cumin", confirmed=True),
+            },
             difficulty=DifficultyFact(
                 provenance="llm", confidence=0.6, estimated=True, prep=2, cook=1, cleanup=1
-            )
+            ),
         ),
         status="awaiting_review",
     ),
@@ -476,6 +536,16 @@ RECIPES = [
         ),
         tags=["spice blend"],
         status="ready",
+        facts=RecipeFacts(
+            ingredients={
+                "i1": _parse(3, "parts", "count", "chili powder", confirmed=True),
+                "i2": _parse(2, "parts", "count", "smoked paprika", confirmed=True),
+                "i3": _parse(2, "parts", "count", "ground cumin", confirmed=True),
+                "i4": _parse(1, "part", "count", "garlic powder", confirmed=True),
+                "i5": _parse(1, "part", "count", "dried oregano", confirmed=True),
+                "i6": _parse(0.5, "part", "count", "cayenne", confirmed=True),
+            }
+        ),
     ),
     Recipe(
         id="01K7SEED000000000000000007",
@@ -549,6 +619,9 @@ RECIPES = [
                     }
                 ),
                 "i3": _parse(3, "cloves", "count", "garlic", "minced"),
+                "i4": _parse(
+                    None, None, None, "salt and pepper", comment="to taste", confirmed=True
+                ),
             },
             steps={
                 "s2": _step_facts(

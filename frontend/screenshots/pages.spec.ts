@@ -224,6 +224,22 @@ const pages: Shot[] = [
     loaded: "For the sauce",
   },
   {
+    name: "recipe-adjust",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    click: [/^Adjust/, "2×", "Metric"],
+    shows: "As written",
+  },
+  {
+    name: "recipe-adjust-why",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    click: "2 tbsp soy sauce, why it stays in this unit",
+    shows: "No weight known for this ingredient yet",
+  },
+  {
     name: "recipe-steps",
     path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
     ready: "Sesame Noodles with Crispy Tofu",

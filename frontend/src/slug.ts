@@ -10,6 +10,7 @@ export function slug(title: string): string {
   );
 }
 
-export function recipePath({ id, title }: { id: string; title: string }): string {
-  return `/recipes/${id}/${slug(title)}`;
+// A recipe's path, asking it to open at `scale` when that isn't 1.
+export function recipePath({ id, title }: { id: string; title: string }, scale = 1): string {
+  return `/recipes/${id}/${slug(title)}${scale === 1 ? "" : `?scale=${scale}`}`;
 }

@@ -25,4 +25,12 @@ describe("recipePath", () => {
       "/recipes/01K7SEED000000000000000002/overnight-oats",
     );
   });
+
+  it("asks for a scale other than 1", () => {
+    const oats = { id: "01K7SEED000000000000000002", title: "Overnight Oats" };
+    expect(recipePath(oats, 1.5)).toBe(
+      "/recipes/01K7SEED000000000000000002/overnight-oats?scale=1.5",
+    );
+    expect(recipePath(oats, 1)).toBe("/recipes/01K7SEED000000000000000002/overnight-oats");
+  });
 });
