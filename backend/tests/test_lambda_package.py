@@ -162,8 +162,8 @@ def test_lambda_zip_holds_the_handler_the_package_and_arm64_runtime_deps(
     assert "pint" in top_level, "the API converts an editor's FDC portion with pint"
     for parser_only in ("ingredient_parser", "nltk", "numpy"):
         assert parser_only not in top_level, (
-            "the enrich group's parser stays out of the zip for now: the Our Version ticket "
-            "decides whether the API parses lines on save"
+            "the enrich group's parser stays out of the zip: the API never parses, since an "
+            "editor gives an Our Version line's facts"
         )
     for fallback_only in ("playwright", "greenlet"):
         assert fallback_only not in top_level, "the browser runs only in the local fallback CLI"

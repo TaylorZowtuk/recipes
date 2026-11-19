@@ -6,6 +6,8 @@ Partly superseded by [Substitutions come only from the recipe, and enrichment su
 
 Superseded in part by [The CLI turns a Queued Ingest into a recipe through a browser, recipe-scrapers and a model, and an editor pastes only HTML](2026-11-05-ingest-fallback-chain.md): an `llm` Original stops at *Awaiting Review* even from the bulk import.
 
+Superseded in part by [Our Version's lines are the editor's, and its steps wait for enrich under an Our Version Status](2026-11-18-our-version-lines-are-the-editors-steps-wait-for-enrich.md): saving Our Version runs nothing. The editor gives an edited or added line's facts, so no Our Version line is pending, and an edited or added step waits for `enrich` under the recipe's Our Version Status.
+
 Enrichment runs after a recipe is saved, not during ingest. Deterministic code fills every field it can. An LLM then checks **every** field and fills in the ones that need judgment, but it may only **choose among options that code offers** or write text. Every density, gram weight and nutrient value comes from the bundled USDA FoodData Central (FDC) snapshot. We chose this over letting an LLM enrich freely and validating afterwards, because a model that invents a density or a calorie count produces errors that look plausible and that nobody would catch.
 
 ## Who fills what
