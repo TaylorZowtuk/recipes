@@ -126,7 +126,8 @@ KEPT_INSTRUCTIONS = (
     "confirmed_difficulty are what an editor confirmed, kept as shown: don't answer them. For a "
     "confirmed line, give at most its substitutions (no canonical, fdc_id or corrections). Never "
     "give a line's confirmed Canonical Ingredient as its substitute, nor match a line to one of "
-    "its confirmed substitutes, and count confirmed_uses in each line's portions."
+    "its confirmed substitutes, and count confirmed_uses in each line's portions, as default_uses "
+    "already do."
 )
 WORD_NUMBERS = {
     "a": 1.0,
@@ -198,22 +199,34 @@ def mentions(text: str, name: str) -> bool:
     return re.search(f"{before}{re.escape(name)}{after}", text, re.IGNORECASE) is not None
 
 
+def kept_portions(stored: RecipeFacts) -> dict[str, float]:
+    """How much of each line the steps an editor confirmed the uses of use, by line id."""
+    kept = kept_items(stored)
+    portions: dict[str, float] = {}
+    for step_id, step in stored.steps.items():
+        for use in step.uses.uses if step_id in kept and step.uses else []:
+            portions[use.ref] = portions.get(use.ref, 0) + use.portion
+    return portions
+
+
 def default_uses(recipe: Recipe, facts: EnrichmentFacts) -> dict[str, list[StepUse]]:
-    """Each step's default uses: each parsed line all used in the first step whose text mentions
-    its short name or name, ignoring case.
+    """Each step's default uses: each parsed line used in the first step whose text mentions its
+    short name or name, ignoring case. Re-enriching, a kept step has none, and each line gets
+    what the kept steps leave of it, if anything.
     """
+    kept, used = kept_items(recipe.facts), kept_portions(recipe.facts)
+    steps = [step for step in recipe.original.steps if step.id not in kept]
     uses: dict[str, list[StepUse]] = {step.id: [] for step in recipe.original.steps}
     for line in recipe.original.ingredients:
         fact = facts.ingredients.get(line.id)
         parse = fact.parse if fact else None
-        if parse is None:
+        left = round(1 - used.get(line.id, 0), 4)
+        if parse is None or left <= PORTION_TOLERANCE:
             continue
         names = [name for name in (parse.short_name, parse.name) if name]
-        step = next(
-            (s for s in recipe.original.steps if any(mentions(s.text, n) for n in names)), None
-        )
+        step = next((s for s in steps if any(mentions(s.text, n) for n in names)), None)
         if step:
-            uses[step.id].append(StepUse(ref=line.id, portion=1.0))
+            uses[step.id].append(StepUse(ref=line.id, portion=left))
     return uses
 
 
@@ -757,10 +770,7 @@ class _Answering:
         self.kept = kept_items(stored)
         self.stored = stored
         # How much of each line the kept steps use, which the answered steps add to.
-        self.kept_portions: dict[str, float] = {}
-        for step_id, step in stored.steps.items():
-            for use in step.uses.uses if step_id in self.kept and step.uses else []:
-                self.kept_portions[use.ref] = self.kept_portions.get(use.ref, 0) + use.portion
+        self.kept_portions = kept_portions(stored)
         self.portions = dict(self.kept_portions)
         self.errors: list[str] = []
         self.answered: set[str] = set()

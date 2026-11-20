@@ -1549,3 +1549,34 @@ def test_a_line_answered_without_its_canonical_or_fdc_id_is_rejected(missing: st
     del answered[missing]
 
     assert errors(work(), answer(answered)) == ["i2: give its canonical and fdc_id"]
+
+
+def test_default_uses_leave_out_what_the_kept_steps_use() -> None:
+    # The kept rest step uses half the oil, first named in the heat step, and all the salt.
+    stepped_and_kept = work(
+        reviewed(recipe(steps=STEPS), steps={"s3": uses(("i2", 0.5), ("i4", 1.0))})
+    )
+
+    heat, fry, rest = stepped_and_kept.packet().recipes[0].steps
+
+    assert [(u.ref, u.portion) for u in heat.default_uses] == [("i2", 0.5)]
+    assert [(u.ref, u.portion) for u in fry.default_uses] == [("i1", 1.0), ("i3", 1.0)]
+    assert rest.default_uses == []
+    copied = [
+        step("s1", span("i2", "glimmer oil", 0.5)),
+        step("s2", span("i1", "quill eggs"), span("i3", "snorp garlic")),
+    ]
+    assert enrich(stepped_and_kept, answer(steps=copied)).facts.steps["s1"].uses is not None
+
+
+def test_default_uses_skip_kept_steps_and_lines_they_use_in_full() -> None:
+    # The kept fry step uses all the oil and half the salt, which the rest step names too.
+    stepped_and_kept = work(
+        reviewed(recipe(steps=STEPS), steps={"s2": uses(("i2", 1.0), ("i4", 0.5))})
+    )
+
+    heat, fry, rest = stepped_and_kept.packet().recipes[0].steps
+
+    assert heat.default_uses == []
+    assert fry.default_uses == []
+    assert [(u.ref, u.portion) for u in rest.default_uses] == [("i4", 0.5)]
