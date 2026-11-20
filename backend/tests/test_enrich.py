@@ -998,7 +998,9 @@ def test_reenriching_without_write_prints_the_fact_changes_and_writes_nothing(
     assert failed == 0
     assert stored(editor_client, before["id"]) == before
     puts = [request.url for request in adapter.requests if request.method == "PUT"]
-    assert puts == [f"{BASE_URL}/api/recipes/{before['id']}/enrichment?dry_run=true"]
+    assert puts == [
+        f"{BASE_URL}/api/recipes/{before['id']}/enrichment?dry_run=true&version={before['version']}"
+    ]
     out = capsys.readouterr().out
     eggs = offered["recipes"][0]["lines"][2]["fdc_candidates"][0]["fdc_id"]
     assert f"  i3.match added: quill eggs (FDC {eggs})" in out
@@ -1031,6 +1033,38 @@ def test_reenriching_with_write_keeps_confirmed_facts_and_updates_the_rest(
     assert "i3.match added" in out
     assert "i1." not in out
     assert "Garlic Tofu → ready" in out
+
+
+def test_a_recipe_changed_between_the_dry_run_and_the_write_is_refused(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    chosen = Chosen(ids=(before["id"],))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    def confirming_meanwhile(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        # An editor confirms the eggs' parse after the dry run, before the write.
+        if method == "PUT" and "dry_run" not in url:
+            changed = stored(editor_client, before["id"])
+            changed["facts"]["ingredients"]["i3"]["parse"].update(CONFIRMED)
+            api_store.update_recipe(Recipe.model_validate(changed))
+        return send(method, url, body)
+
+    failed = apply(
+        BASE_URL, confirming_meanwhile, SNAPSHOT, reenrichment(offered), chosen=chosen, write=True
+    )
+
+    assert failed == 1
+    after = stored(editor_client, before["id"])
+    assert after["version"] == before["version"] + 1
+    assert after["facts"]["ingredients"]["i3"]["parse"]["confirmed"]
+    assert after["facts"]["ingredients"]["i3"].get("match") is None
+    puts = [request.url for request in adapter.requests if request.method == "PUT"]
+    assert puts[1] == f"{BASE_URL}/api/recipes/{before['id']}/enrichment?version={before['version']}"
+    assert "changed since" in capsys.readouterr().out
 
 
 def test_reenriching_a_pending_or_unknown_recipe_is_refused(

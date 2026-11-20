@@ -1123,15 +1123,17 @@ def reenrich(
     recipe_id: str,
     facts: dict[str, Any] = SECOND,
     *,
+    version: int | None,
     dry_run: bool = False,
     **fields: object,
 ) -> Response:
     body = {"enrichment_version": 3, "fdc_release": SNAPSHOT.release, "facts": facts, **fields}
+    params = {"dry_run": "true"} if dry_run else {}
     return editor_client.put(
         f"/api/recipes/{recipe_id}/enrichment",
         json=body,
         headers=EDITOR,
-        params={"dry_run": "true"} if dry_run else {},
+        params=params if version is None else {**params, "version": str(version)},
     )
 
 
@@ -1140,7 +1142,7 @@ def test_reenrichment_leaves_confirmed_facts_unchanged_and_updates_the_rest(
 ) -> None:
     before = reviewed(editor_client, api_store, "i1.parse", "s1.segments", "s1.uses", "difficulty")
 
-    response = reenrich(editor_client, before["id"])
+    response = reenrich(editor_client, before["id"], version=before["version"])
 
     assert response.status_code == 200
     stored = fetch(editor_client, before["id"])
@@ -1164,7 +1166,7 @@ def test_a_review_item_with_one_confirmed_fact_is_kept_whole(
 ) -> None:
     before = reviewed(editor_client, api_store, "i1.match", "s1.uses")
 
-    response = reenrich(editor_client, before["id"])
+    response = reenrich(editor_client, before["id"], version=before["version"])
 
     assert response.status_code == 200
     facts, was = response.json()["facts"], before["facts"]
@@ -1186,7 +1188,7 @@ def test_reenrichment_keeps_the_issues_on_kept_items_and_adds_those_on_replaced_
     added = {**issue(4), "fact_id": "i9.parse"}
     ignored = {**issue(5), "fact_id": "s1.segments"}
 
-    response = reenrich(editor_client, before["id"], issues=[added, ignored])
+    response = reenrich(editor_client, before["id"], version=before["version"], issues=[added, ignored])
 
     assert response.status_code == 200
     assert fetch(editor_client, before["id"])["issues"] == [resolved, kept, added]
@@ -1197,7 +1199,7 @@ def test_reenriching_a_recipe_awaiting_review_leaves_it_awaiting_review(
 ) -> None:
     before = reviewed(editor_client, api_store, "i1.parse", status="awaiting_review")
 
-    response = reenrich(editor_client, before["id"])
+    response = reenrich(editor_client, before["id"], version=before["version"])
 
     assert response.status_code == 200
     assert (response.json()["status"], response.json()["ready_batch"]) == ("awaiting_review", None)
@@ -1213,7 +1215,7 @@ def test_reenrichment_that_uses_more_than_all_of_a_line_with_the_kept_steps_is_r
         "steps": {**SECOND["steps"], "s2": {"uses": {**LLM, "uses": [use("i1", 0.75)]}}},
     }
 
-    response = reenrich(editor_client, before["id"], facts)
+    response = reenrich(editor_client, before["id"], facts, version=before["version"])
 
     assert response.status_code == 422
     assert "The steps use more than all of i1" in response.json()["detail"]
@@ -1227,7 +1229,7 @@ def test_reenrichment_matching_a_line_to_its_kept_substitute_is_refused(
     chuck = {**LLM, "canonical_id": CHUCK_ID, "fdc_id": 1002, "portion_id": None}
     facts = {"ingredients": {"i1": {"match": chuck}}}
 
-    response = reenrich(editor_client, before["id"], facts)
+    response = reenrich(editor_client, before["id"], facts, version=before["version"])
 
     assert response.status_code == 422
     assert "A substitute isn't its line's own Canonical Ingredient" in response.json()["detail"]
@@ -1243,7 +1245,12 @@ def test_a_dry_run_returns_the_reenriched_recipe_and_writes_nothing(
     new = {**BEEF, "id": "01K7Q0000000000000000000C3", "name": "parsley"}
 
     response = reenrich(
-        editor_client, before["id"], dry_run=True, wordings=[wording], canonical_ingredients=[new]
+        editor_client,
+        before["id"],
+        version=before["version"],
+        dry_run=True,
+        wordings=[wording],
+        canonical_ingredients=[new],
     )
 
     assert response.status_code == 200
@@ -1263,8 +1270,47 @@ def test_a_dry_run_of_a_pending_recipe_writes_nothing(
 ) -> None:
     recipe = add(api_store, ingest_channel="add_a_recipe")
 
-    response = reenrich(editor_client, recipe.id, FACTS, dry_run=True)
+    response = reenrich(editor_client, recipe.id, FACTS, version=None, dry_run=True)
 
     assert response.status_code == 200
     assert response.json()["status"] == "awaiting_review"
     assert fetch(editor_client, recipe.id) == recipe.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reenriching_without_the_recipes_version_is_refused(
+    editor_client: TestClient, api_store: Store, *, dry_run: bool
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.parse")
+
+    response = reenrich(editor_client, before["id"], version=None, dry_run=dry_run)
+
+    assert response.status_code == 409
+    assert "pass the version" in response.json()["detail"]
+    assert fetch(editor_client, before["id"]) == before
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_reenriching_a_recipe_changed_since_its_version_is_refused(
+    editor_client: TestClient, api_store: Store, *, dry_run: bool
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.parse")
+
+    response = reenrich(editor_client, before["id"], version=before["version"] - 1, dry_run=dry_run)
+
+    assert response.status_code == 409
+    assert "changed since" in response.json()["detail"]
+    assert fetch(editor_client, before["id"]) == before
+
+
+def test_a_pending_recipe_may_be_enriched_at_its_version(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store, ingest_channel="add_a_recipe")
+
+    stale = reenrich(editor_client, recipe.id, FACTS, version=recipe.version + 1)
+    response = reenrich(editor_client, recipe.id, FACTS, version=recipe.version)
+
+    assert stale.status_code == 409
+    assert response.status_code == 200
+    assert response.json()["status"] == "awaiting_review"

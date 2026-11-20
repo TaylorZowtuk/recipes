@@ -799,8 +799,9 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
         403: DUPLICATE[403],
         404: {"description": "No such recipe"},
         409: {
-            "description": "The recipe changed meanwhile, a new Canonical Ingredient's id is "
-            "taken, or an editor confirmed a wording"
+            "description": "A recipe that isn't Pending came without its `version`, the recipe "
+            "isn't at the `version` given or changed meanwhile, a new Canonical Ingredient's id "
+            "is taken, or an editor confirmed a wording"
         },
         422: {
             "description": "The request names another FDC Snapshot release than the API's, a line "
@@ -824,6 +825,7 @@ def put_enrichment(
     store: StoreDep,
     snapshot: SnapshotDep,
     dry_run: Annotated[bool, Query()] = False,
+    version: Annotated[int | None, Query()] = None,
 ) -> Recipe:
     """Store a recipe's facts and Enrichment Issues, with the Canonical Ingredients they create
     and the wordings they learn. A Pending bulk import's recipe is then Ready, and any other, or
@@ -834,7 +836,9 @@ def put_enrichment(
     Re-enrichment, of a recipe Awaiting Review or Ready, never changes a Confirmed fact: each
     Review Item with a Confirmed fact keeps all its stored facts and its open Enrichment Issues,
     and every other item takes the new facts and issues, dropping its old open ones. Resolved
-    issues stay, and the recipe keeps its status.
+    issues stay, and the recipe keeps its status. It must name the recipe's `version`, so a
+    re-enrichment checked in a dry run is refused if the recipe changed since; a Pending recipe
+    may name one too.
 
     With `dry_run`, it checks and returns the recipe it would store, writing nothing.
 
@@ -857,6 +861,18 @@ def put_enrichment(
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
         raise HTTPException(404, "No such recipe")
+    if version is None and recipe.status != "pending":
+        raise HTTPException(
+            409,
+            "Only a Pending recipe can be enriched without its version: "
+            "pass the version you re-enrich as ?version=",
+        )
+    if version is not None and version != recipe.version:
+        raise HTTPException(
+            409,
+            f"The recipe is at version {recipe.version}, not {version}: it changed since, "
+            "so rerun the dry run",
+        )
     foods = snapshot()
     if body.fdc_release != foods.release:
         raise HTTPException(
