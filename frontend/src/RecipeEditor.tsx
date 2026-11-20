@@ -1,6 +1,6 @@
 import { type Dispatch, type FormEvent, useState } from "react";
 import { useNavigate } from "react-router";
-import { api, type Recipe } from "./api/client";
+import { api, type Collection, type Recipe } from "./api/client";
 import { forgetCollection, reloadCollection, rememberRecipe } from "./collection";
 import {
   changeCount,
@@ -13,6 +13,8 @@ import {
   editOutcome,
   saveLabel,
 } from "./editRecipe";
+import { type OurTarget, OurVersionFields, OurVersionSheet, refusedLine } from "./OurVersionEditor";
+import { ourRows } from "./ourVersionDraft";
 import {
   DifficultyField,
   PAUSED,
@@ -55,18 +57,20 @@ export function focusEditHeading() {
   document.getElementById(EDIT_HEADING)?.focus({ preventScroll: true });
 }
 
-// Edit: the draft's Difficulty, Tags and Preview Photo, saved together in one PATCH at the
-// recipe's version. Delete removes the recipe after a confirm. A conflict on either reloads the
+// Edit: the draft's Difficulty, Tags, Preview Photo and, once the recipe isn't Pending, Our
+// Version, saved together in one PATCH at the recipe's version. Delete removes the recipe after a confirm. A conflict on either reloads the
 // Collection and leaves Edit, showing the newer recipe.
 export function RecipeEditor({
   recipe,
   title,
+  collection,
   draft,
   problem,
   dispatch,
 }: {
   recipe: Recipe;
   title: string;
+  collection: Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
   draft: Draft;
   problem?: string;
   dispatch: Dispatch<EditAction>;
@@ -75,6 +79,11 @@ export function RecipeEditor({
   const mounted = useMounted();
   const navigate = useNavigate();
   const [busy, setBusy] = useState<"saving" | "deleting">();
+  const [target, setTarget] = useState<OurTarget>();
+  const ours = recipe.status !== "pending";
+  // A refused Our Version line shows its problem by the line, while the draft still has it.
+  const byLine =
+    ours && ourRows(recipe, draft.ours).ingredients.some((row) => row.id === refusedLine(problem));
   const count = changeCount(recipe, draft);
   const change = (change: Partial<Draft>) => dispatch({ type: "change", change });
 
@@ -134,67 +143,89 @@ export function RecipeEditor({
   };
 
   return (
-    <form
-      className="review-form edit-form"
-      aria-labelledby={EDIT_HEADING}
-      noValidate
-      onSubmit={save}
-    >
-      <h2 id={EDIT_HEADING} tabIndex={-1} className="visually-hidden">
-        Edit recipe
-      </h2>
-      <fieldset disabled={!!blocked} className="review-fields">
-        <PhotoPicker
-          title={title}
-          images={recipe.images}
-          emptyText="This recipe has no photos."
-          preview={draft.preview}
-          onPick={(preview) => change({ preview })}
-        />
-        <DifficultyField
-          difficulty={draft.difficulty}
-          onChange={(difficulty) => change({ difficulty })}
-        />
-        <TagsField tags={draft.tags} onChange={(tags) => change({ tags })} />
-      </fieldset>
-      <div className="review-actions">
-        <button
-          type="submit"
-          className="button"
-          disabled={!!blocked || count === 0}
-          aria-disabled={!!busy}
-        >
-          {busy === "saving" ? "Saving…" : saveLabel(count)}
-        </button>
-        <button
-          type="button"
-          className="button button-secondary"
-          aria-disabled={!!busy}
-          onClick={() => !busy && dispatch({ type: "cancel" })}
-        >
-          Cancel
-        </button>
-      </div>
-      <BlockedNote blocked={blocked} />
-      <p role="status" className="screen-note">
-        {busy === "saving" ? "Saving the changes…" : busy === "deleting" ? "Deleting…" : ""}
-      </p>
-      {problem && (
-        <p role="alert" className="form-problem">
-          {problem}
+    <>
+      <form
+        className="review-form edit-form"
+        aria-labelledby={EDIT_HEADING}
+        noValidate
+        onSubmit={save}
+      >
+        <h2 id={EDIT_HEADING} tabIndex={-1} className="visually-hidden">
+          Edit recipe
+        </h2>
+        <fieldset disabled={!!blocked} className="review-fields">
+          <PhotoPicker
+            title={title}
+            images={recipe.images}
+            emptyText="This recipe has no photos."
+            preview={draft.preview}
+            onPick={(preview) => change({ preview })}
+          />
+          <DifficultyField
+            difficulty={draft.difficulty}
+            onChange={(difficulty) => change({ difficulty })}
+          />
+          <TagsField tags={draft.tags} onChange={(tags) => change({ tags })} />
+          {ours && (
+            <OurVersionFields
+              recipe={recipe}
+              draft={draft.ours}
+              problem={problem}
+              onChange={(ours) => change({ ours })}
+              onOpen={setTarget}
+            />
+          )}
+        </fieldset>
+        <div className="review-actions">
+          <button
+            type="submit"
+            className="button"
+            disabled={!!blocked || count === 0}
+            aria-disabled={!!busy}
+          >
+            {busy === "saving" ? "Saving…" : saveLabel(count)}
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            aria-disabled={!!busy}
+            onClick={() => !busy && dispatch({ type: "cancel" })}
+          >
+            Cancel
+          </button>
+        </div>
+        <BlockedNote blocked={blocked} />
+        <p role="status" className="screen-note">
+          {busy === "saving" ? "Saving the changes…" : busy === "deleting" ? "Deleting…" : ""}
         </p>
-      )}
-      <div className="edit-delete">
-        <button
-          type="button"
-          className="text-button text-button-danger"
-          disabled={!!blocked}
-          aria-disabled={!!busy}
-          onClick={remove}
-        >
-          Delete recipe
-        </button>
-      </div>
-    </form>
+        {problem && !byLine && (
+          <p role="alert" className="form-problem">
+            {problem}
+          </p>
+        )}
+        <div className="edit-delete">
+          <button
+            type="button"
+            className="text-button text-button-danger"
+            disabled={!!blocked}
+            aria-disabled={!!busy}
+            onClick={remove}
+          >
+            Delete recipe
+          </button>
+        </div>
+      </form>
+      {/* Outside the form, as the sheet holds a form of its own. */}
+      <OurVersionSheet
+        target={target}
+        recipe={recipe}
+        draft={draft.ours}
+        collection={collection}
+        disabled={!!blocked}
+        note={blocked ? <BlockedNote blocked={blocked} /> : undefined}
+        onChange={(ours) => change({ ours })}
+        onClose={() => setTarget(undefined)}
+      />
+    </>
   );
 }

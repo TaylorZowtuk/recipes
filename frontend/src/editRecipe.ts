@@ -1,10 +1,16 @@
 import { chosenDifficulty, type DifficultyChoice, parseTags } from "./addRecipe";
 import type { Difficulty, Preview, Recipe, RecipeOperation } from "./api/client";
-import { type Answer, versionedRefusal, type WriteRefusal } from "./writeOutcome";
+import { type OurDraft, ourDraftOf, ourOperation } from "./ourVersionDraft";
+import { type Answer, refusalMessage, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
-// An editor's Draft: the recipe's Difficulty, Tags and Preview Photo as Edit shows them. It lives
-// only in the recipe page's state, so Cancel or leaving the page discards it.
-export type Draft = { difficulty: DifficultyChoice; tags: string; preview: Preview | null };
+// An editor's Draft: the recipe's Difficulty, Tags, Preview Photo and Our Version as Edit shows
+// them. It lives only in the recipe page's state, so Cancel or leaving the page discards it.
+export type Draft = {
+  difficulty: DifficultyChoice;
+  tags: string;
+  preview: Preview | null;
+  ours: OurDraft;
+};
 
 export const RATE_ALL = "Rate all of Prep, Cook and Cleanup, or clear them.";
 export const CHANGED_ELSEWHERE =
@@ -26,6 +32,7 @@ export function draftOf(recipe: Recipe): Draft {
     difficulty: recipe.difficulty ?? {},
     tags: recipe.tags.join(", "),
     preview: recipe.preview,
+    ours: ourDraftOf(recipe),
   };
 }
 
@@ -39,7 +46,7 @@ const samePreview = (a: Preview | null, b: Preview | null) =>
 const sameTags = (a: string[], b: string[]) =>
   a.length === b.length && a.every((tag, i) => tag === b[i]);
 
-// Which of Difficulty, Tags and Preview Photo the draft changes. A part-rated Difficulty counts as
+// Which of Difficulty, Tags, Preview Photo and Our Version the draft changes. A part-rated Difficulty counts as
 // a change, though it can't be saved until it's whole or cleared.
 function changes(recipe: Recipe, draft: Draft) {
   const chosen = chosenDifficulty(draft.difficulty);
@@ -47,6 +54,7 @@ function changes(recipe: Recipe, draft: Draft) {
     difficulty: !chosen.complete || !sameDifficulty(chosen.difficulty, recipe.difficulty),
     tags: !sameTags(parseTags(draft.tags), recipe.tags),
     preview: !samePreview(draft.preview, recipe.preview),
+    ours: !!ourOperation(recipe, draft.ours),
   };
 }
 
@@ -63,21 +71,27 @@ export function draftOperations(recipe: Recipe, draft: Draft): RecipeOperation[]
   if (changed.difficulty) operations.push({ op: "set_difficulty", difficulty: chosen.difficulty });
   if (changed.tags) operations.push({ op: "set_tags", tags: parseTags(draft.tags) });
   if (changed.preview) operations.push({ op: "set_preview", preview: draft.preview });
+  const ours = ourOperation(recipe, draft.ours);
+  if (ours) operations.push(ours);
   return operations;
 }
 
 export const saveLabel = (count: number) => `Save ${count} ${count === 1 ? "change" : "changes"}`;
 
-export type EditOutcome = { kind: "saved"; recipe: Recipe } | WriteRefusal;
+export type EditOutcome =
+  | { kind: "saved"; recipe: Recipe }
+  | { kind: "invalid"; message: string }
+  | WriteRefusal;
 export type DeleteOutcome = { kind: "deleted" } | WriteRefusal;
 
 // What `PATCH /api/recipes/{id}` answered: the saved recipe (200), or why not. A 409 (a stale
-// version) or a 404 (deleted) means the recipe changed elsewhere.
+// version) or a 404 (deleted) means the recipe changed elsewhere. A 422 says what the API refused,
+// such as an Our Version line without its Canonical Ingredient.
 export function editOutcome(answer: Answer<Recipe>): EditOutcome {
   const { data, response } = answer;
-  return response.status === 200 && data
-    ? { kind: "saved", recipe: data }
-    : versionedRefusal(answer);
+  if (response.status === 200 && data) return { kind: "saved", recipe: data };
+  const message = response.status === 422 && refusalMessage(answer.error);
+  return message ? { kind: "invalid", message } : versionedRefusal(answer);
 }
 
 export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
@@ -124,6 +138,8 @@ export function editing(state: EditState, action: EditAction): EditState {
             draft: null,
             notice: action.refreshed ? CHANGED_ELSEWHERE : CHANGED_NOT_REFRESHED,
           };
+        case "invalid":
+          return { ...state, problem: action.outcome.message };
         case "not-an-editor":
           return { ...state, problem: NOT_AN_EDITOR };
         default:

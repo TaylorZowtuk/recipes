@@ -20,6 +20,7 @@ export type QueuedIngest = components["schemas"]["QueuedIngest"];
 export type Duplicate = components["schemas"]["Duplicate"];
 export type Image = components["schemas"]["Image"];
 export type Preview = components["schemas"]["Preview"];
+export type OurVersionDraft = components["schemas"]["OurVersionDraft"];
 export type RecipeOperation = components["schemas"]["RecipeEdit"]["operations"][number];
 export type CountedSites = components["schemas"]["CountedSites"];
 export type CountedSite = components["schemas"]["CountedSite"];

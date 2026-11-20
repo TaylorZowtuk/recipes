@@ -85,7 +85,11 @@ export function effective(
 
 // The Original's items less the removed ones, each added item after the one its `after` names
 // (first for none), several after the same one in the order Our Version lists them.
-function overlay<T extends { id: string }, A extends { id: string; after: string | null }, R>(
+export function overlay<
+  T extends { id: string },
+  A extends { id: string; after: string | null },
+  R,
+>(
   items: T[],
   { remove, add }: { remove: string[]; add: A[] },
   kept: (item: T) => R,

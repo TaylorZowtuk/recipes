@@ -201,10 +201,11 @@ function RecipePage() {
           {missing ? DELETED_ELSEWHERE : edit.notice}
         </p>
       )}
-      {card && ready && draft && (
+      {card && ready && draft && collection.state === "ready" && (
         <RecipeEditor
           recipe={ready}
           title={card.title}
+          collection={collection.value}
           draft={draft}
           problem={edit.problem}
           dispatch={dispatch}
