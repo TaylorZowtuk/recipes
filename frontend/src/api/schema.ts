@@ -464,7 +464,9 @@ export interface paths {
          *     Re-enrichment, of a recipe Awaiting Review or Ready, never changes a Confirmed fact: each
          *     Review Item with a Confirmed fact keeps all its stored facts and its open Enrichment Issues,
          *     and every other item takes the new facts and issues, dropping its old open ones. Resolved
-         *     issues stay, and the recipe keeps its status.
+         *     issues stay, and the recipe keeps its status. It must name the recipe's `version`, so a
+         *     re-enrichment checked in a dry run is refused if the recipe changed since; a Pending recipe
+         *     may name one too.
          *
          *     With `dry_run`, it checks and returns the recipe it would store, writing nothing.
          *
@@ -3616,6 +3618,7 @@ export interface operations {
         parameters: {
             query?: {
                 dry_run?: boolean;
+                version?: number | null;
             };
             header?: never;
             path: {
@@ -3652,7 +3655,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe changed meanwhile, a new Canonical Ingredient's id is taken, or an editor confirmed a wording */
+            /** @description A recipe that isn't Pending came without its `version`, the recipe isn't at the `version` given or changed meanwhile, a new Canonical Ingredient's id is taken, or an editor confirmed a wording */
             409: {
                 headers: {
                     [name: string]: unknown;
