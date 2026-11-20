@@ -17,6 +17,7 @@ from recipes.models import (
     EnrichmentIssue,
     FdcNumbers,
     Per100g,
+    Recipe,
     Step,
     Wording,
 )
@@ -27,7 +28,6 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
     from httpx2 import Response
 
-    from recipes.models import Recipe
     from recipes.store import Store
 
 MISSING_ID = "01K7ZZZZZZZZZZZZZZZZZZZZZZ"
@@ -158,17 +158,6 @@ def test_the_card_shows_the_new_status(editor_client: TestClient, api_store: Sto
     assert card["recipe_version"] == recipe.version + 1
     # Its two parsed lines are each a Review Item.
     assert card["needs_review"] == {"open_issues": 0, "unconfirmed": 2, "flagged": 0}
-
-
-def test_a_recipe_that_is_not_pending_is_refused(
-    editor_client: TestClient, api_store: Store
-) -> None:
-    recipe = add(api_store, READY)
-
-    response = enrich(editor_client, recipe.id)
-
-    assert response.status_code == 409
-    assert fetch(editor_client, recipe.id) == recipe.model_dump(mode="json")
 
 
 def test_a_fact_for_a_line_the_recipe_lacks_is_refused(
@@ -1060,3 +1049,222 @@ def test_the_enrichment_request_carries_no_fdc_numbers() -> None:
     )
     assert properties.isdisjoint(fdc_fields)
     assert schema["$defs"].keys().isdisjoint({"FdcNumbers", "Per100g", "ConversionFact"})
+
+
+# Re-enrichment: a recipe enriched with FIRST, reviewed, then enriched again with SECOND.
+FIRST = {
+    **suggesting(),
+    "ingredients": {**suggesting()["ingredients"], "i9": FACTS["ingredients"]["i9"]},
+    "steps": {"s1": STEPPED["steps"]["s1"], "s2": STEPPED["steps"]["s2"]},
+}
+SECOND = {
+    "ingredients": {
+        "i1": {
+            "parse": {**FACTS["ingredients"]["i1"]["parse"], "name": "beef"},
+            "match": {
+                **LLM,
+                "confidence": 0.7,
+                "canonical_id": BEEF_ID,
+                "fdc_id": 1001,
+                "portion_id": 501,
+            },
+        },
+        "i9": {"parse": {**FACTS["ingredients"]["i9"]["parse"], "name": "flat-leaf parsley"}},
+    },
+    "steps": {
+        "s1": {
+            "segments": {**LLM, "segments": beef(0.25)},
+            "uses": {**LLM, "estimated": True, "uses": [use("i1", 0.25)]},
+        },
+        "s2": {"uses": {**LLM, "estimated": True, "uses": [use("i1", 0.25)]}},
+    },
+    "difficulty": {**SUGGESTION, "prep": 3, "cook": 3, "cleanup": 3},
+}
+CONFIRMED = {
+    "confirmed": True,
+    "confirmed_by": "editor@example.com",
+    "confirmed_at": CONFIRMED_AT,
+    "confirm_batch": "batch-1",
+}
+
+
+def reviewed(
+    editor_client: TestClient,
+    api_store: Store,
+    *confirmed: str,
+    status: str = "ready",
+    issues: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A recipe enriched with FIRST against another release, then reviewed: each fact in
+    `confirmed` Confirmed, at `status`, with `issues`. Returns it as the API sends it.
+    """
+    recipe = add(api_store)
+    enrich_matched(
+        editor_client, recipe.id, facts=FIRST, canonical_ingredients=[BEEF, CHUCK], issues=[]
+    )
+    stored = fetch(editor_client, recipe.id)
+    facts = stored["facts"]
+    for path in confirmed:
+        owner, _, kind = path.partition(".")
+        holders = facts["ingredients"] if owner.startswith("i") else facts["steps"]
+        (facts["difficulty"] if path == "difficulty" else holders[owner][kind]).update(CONFIRMED)
+    stored |= {
+        "status": status,
+        "ready_batch": "batch-1" if status == "ready" else None,
+        "issues": issues or [],
+        "fdc_release": OTHER_RELEASE,
+    }
+    api_store.enrich_recipe(Recipe.model_validate(stored), [], [])
+    return fetch(editor_client, recipe.id)
+
+
+def reenrich(
+    editor_client: TestClient,
+    recipe_id: str,
+    facts: dict[str, Any] = SECOND,
+    *,
+    dry_run: bool = False,
+    **fields: object,
+) -> Response:
+    body = {"enrichment_version": 3, "fdc_release": SNAPSHOT.release, "facts": facts, **fields}
+    return editor_client.put(
+        f"/api/recipes/{recipe_id}/enrichment",
+        json=body,
+        headers=EDITOR,
+        params={"dry_run": "true"} if dry_run else {},
+    )
+
+
+def test_reenrichment_leaves_confirmed_facts_unchanged_and_updates_the_rest(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.parse", "s1.segments", "s1.uses", "difficulty")
+
+    response = reenrich(editor_client, before["id"])
+
+    assert response.status_code == 200
+    stored = fetch(editor_client, before["id"])
+    assert response.json() == stored
+    assert (stored["status"], stored["ready_batch"]) == ("ready", "batch-1")
+    assert (stored["enrichment_version"], stored["fdc_release"]) == (3, SNAPSHOT.release)
+    lines, was = stored["facts"]["ingredients"], before["facts"]["ingredients"]
+    # The line's parse is Confirmed, so its match and conversion stay too.
+    for kind in ("parse", "match", "conversion"):
+        assert lines["i1"][kind] == was["i1"][kind]
+    # Its substitutions are a Review Item of their own, unconfirmed: SECOND has none.
+    assert lines["i1"]["substitutions"] is None
+    assert lines["i9"]["parse"]["name"] == "flat-leaf parsley"
+    assert stored["facts"]["steps"]["s1"] == before["facts"]["steps"]["s1"]
+    assert stored["facts"]["steps"]["s2"]["uses"]["uses"] == [use("i1", 0.25)]
+    assert stored["facts"]["difficulty"] == before["facts"]["difficulty"]
+
+
+def test_a_review_item_with_one_confirmed_fact_is_kept_whole(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.match", "s1.uses")
+
+    response = reenrich(editor_client, before["id"])
+
+    assert response.status_code == 200
+    facts, was = response.json()["facts"], before["facts"]
+    assert facts["ingredients"]["i1"]["parse"] == was["ingredients"]["i1"]["parse"]
+    assert facts["ingredients"]["i1"]["parse"]["name"] == "stewing beef"
+    assert facts["steps"]["s1"] == was["steps"]["s1"]
+    assert facts["difficulty"]["prep"] == 3
+
+
+def test_reenrichment_keeps_the_issues_on_kept_items_and_adds_those_on_replaced_ones(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    dropped = {**issue(1), "fact_id": "i9.parse"}
+    resolved = {**issue(2, "resolved"), "fact_id": "i9.parse"}
+    kept = issue(3)  # on i1.match, kept with its Confirmed parse
+    before = reviewed(
+        editor_client, api_store, "i1.parse", "s1.uses", issues=[dropped, resolved, kept]
+    )
+    added = {**issue(4), "fact_id": "i9.parse"}
+    ignored = {**issue(5), "fact_id": "s1.segments"}
+
+    response = reenrich(editor_client, before["id"], issues=[added, ignored])
+
+    assert response.status_code == 200
+    assert fetch(editor_client, before["id"])["issues"] == [resolved, kept, added]
+
+
+def test_reenriching_a_recipe_awaiting_review_leaves_it_awaiting_review(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.parse", status="awaiting_review")
+
+    response = reenrich(editor_client, before["id"])
+
+    assert response.status_code == 200
+    assert (response.json()["status"], response.json()["ready_batch"]) == ("awaiting_review", None)
+
+
+def test_reenrichment_that_uses_more_than_all_of_a_line_with_the_kept_steps_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # The kept s1 uses half the beef; SECOND's s1 a quarter, so its s2 may use three quarters.
+    before = reviewed(editor_client, api_store, "s1.uses")
+    facts = {
+        **SECOND,
+        "steps": {**SECOND["steps"], "s2": {"uses": {**LLM, "uses": [use("i1", 0.75)]}}},
+    }
+
+    response = reenrich(editor_client, before["id"], facts)
+
+    assert response.status_code == 422
+    assert "The steps use more than all of i1" in response.json()["detail"]
+    assert fetch(editor_client, before["id"]) == before
+
+
+def test_reenrichment_matching_a_line_to_its_kept_substitute_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.substitutions")
+    chuck = {**LLM, "canonical_id": CHUCK_ID, "fdc_id": 1002, "portion_id": None}
+    facts = {"ingredients": {"i1": {"match": chuck}}}
+
+    response = reenrich(editor_client, before["id"], facts)
+
+    assert response.status_code == 422
+    assert "A substitute isn't its line's own Canonical Ingredient" in response.json()["detail"]
+    assert fetch(editor_client, before["id"]) == before
+
+
+def test_a_dry_run_returns_the_reenriched_recipe_and_writes_nothing(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    before = reviewed(editor_client, api_store, "i1.parse")
+    collection = bundle(editor_client)
+    wording = {"wording": "flat-leaf parsley", "canonical_id": CHUCK_ID, "schema_version": 1}
+    new = {**BEEF, "id": "01K7Q0000000000000000000C3", "name": "parsley"}
+
+    response = reenrich(
+        editor_client, before["id"], dry_run=True, wordings=[wording], canonical_ingredients=[new]
+    )
+
+    assert response.status_code == 200
+    would = response.json()
+    assert would["version"] == before["version"] + 1
+    assert would["facts"]["ingredients"]["i9"]["parse"]["name"] == "flat-leaf parsley"
+    assert (
+        would["facts"]["ingredients"]["i1"]["parse"]
+        == before["facts"]["ingredients"]["i1"]["parse"]
+    )
+    assert fetch(editor_client, before["id"]) == before
+    assert bundle(editor_client) == collection
+
+
+def test_a_dry_run_of_a_pending_recipe_writes_nothing(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = add(api_store, ingest_channel="add_a_recipe")
+
+    response = reenrich(editor_client, recipe.id, FACTS, dry_run=True)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "awaiting_review"
+    assert fetch(editor_client, recipe.id) == recipe.model_dump(mode="json")
