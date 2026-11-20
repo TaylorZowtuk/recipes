@@ -1025,7 +1025,10 @@ def test_reenriching_with_write_keeps_confirmed_facts_and_updates_the_rest(
     after = stored(editor_client, before["id"])
     lines, was = after["facts"]["ingredients"], before["facts"]["ingredients"]
     assert lines["i1"] == was["i1"]
-    assert lines["i3"]["match"]["canonical_id"] != was["i3"].get("match")
+    assert was["i3"].get("match") is None
+    canonicals = bundle(editor_client)["canonical_ingredients"]
+    (eggs,) = (c for c in canonicals if c["name"] == "quill eggs")
+    assert lines["i3"]["match"]["canonical_id"] == eggs["id"]
     assert lines["i3"]["conversion"]["provenance"] == "fdc"
     assert (after["status"], after["ready_batch"]) == ("ready", "batch-1")
     assert after["enrichment_version"] == ENRICHMENT_VERSION
@@ -1063,7 +1066,8 @@ def test_a_recipe_changed_between_the_dry_run_and_the_write_is_refused(
     assert after["facts"]["ingredients"]["i3"]["parse"]["confirmed"]
     assert after["facts"]["ingredients"]["i3"].get("match") is None
     puts = [request.url for request in adapter.requests if request.method == "PUT"]
-    assert puts[1] == f"{BASE_URL}/api/recipes/{before['id']}/enrichment?version={before['version']}"
+    url = f"{BASE_URL}/api/recipes/{before['id']}/enrichment"
+    assert puts[1] == f"{url}?version={before['version']}"
     assert "changed since" in capsys.readouterr().out
 
 
@@ -1099,6 +1103,54 @@ def test_packet_with_recipe_offers_only_that_recipe(
     assert packet(BASE_URL, send, SNAPSHOT, None, Chosen(ids=(chosen.id,))) == 0
 
     assert [r["recipe_id"] for r in json.loads(capsys.readouterr().out)["recipes"]] == [chosen.id]
+
+
+def test_the_dry_run_shows_removed_facts_issue_changes_and_the_fdc_release(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The oil line is unconfirmed, with its open new-canonical issue, at another release.
+    before = reviewed(editor_client, api_store, capsys, conversion={})
+    at_other = Recipe.model_validate(before | {"fdc_release": OTHER_RELEASE})
+    before = api_store.update_recipe(at_other).model_dump(mode="json")
+    chosen = Chosen(ids=(before["id"],))
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+    eggs = offered["recipes"][0]["lines"][2]["fdc_candidates"][0]["fdc_id"]
+    new_eggs = {"name": "quill eggs", "family": "egg", "store_category_id": "dairy"}
+    answer = answer_text(
+        offered,
+        {"line_id": "i3", "canonical": {"new": new_eggs}, "fdc_id": eggs, "portion_id": None},
+    )
+
+    assert apply(BASE_URL, send, SNAPSHOT, answer, chosen=chosen) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    assert "  i1.match removed: glimmer oil (FDC 2004)" in out
+    assert "  i1.conversion removed: FDC 2004" in out
+    assert (
+        "  issue dropped: i1.match: (none) → glimmer oil — "
+        "new Canonical Ingredient glimmer oil (oil, Aisles)"
+    ) in out
+    assert (
+        "  issue added: i3.match: (none) → quill eggs — "
+        "new Canonical Ingredient quill eggs (egg, Dairy)"
+    ) in out
+    assert f"  FDC release {OTHER_RELEASE} → {SNAPSHOT.release}" in out
+
+
+def test_a_recipe_named_twice_is_offered_once(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    chosen = add(api_store, "Ready Stew", status="ready")
+    adapter = api(editor_client)
+
+    twice = Chosen(ids=(chosen.id, chosen.id))
+    assert packet(BASE_URL, through(adapter), SNAPSHOT, None, twice) == 0
+
+    assert [r["recipe_id"] for r in json.loads(capsys.readouterr().out)["recipes"]] == [chosen.id]
+    reads = [r.url for r in adapter.requests if r.url == f"{BASE_URL}/api/recipes/{chosen.id}"]
+    assert len(reads) == 1
 
 
 def test_a_conversion_changed_under_the_same_fdc_food_shows_what_differs(

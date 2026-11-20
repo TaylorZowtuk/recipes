@@ -1205,7 +1205,9 @@ def test_reenrichment_keeps_the_issues_on_kept_items_and_adds_those_on_replaced_
     added = {**issue(4), "fact_id": "i9.parse"}
     ignored = {**issue(5), "fact_id": "s1.segments"}
 
-    response = reenrich(editor_client, before["id"], version=before["version"], issues=[added, ignored])
+    response = reenrich(
+        editor_client, before["id"], version=before["version"], issues=[added, ignored]
+    )
 
     assert response.status_code == 200
     assert fetch(editor_client, before["id"])["issues"] == [resolved, kept, added]
