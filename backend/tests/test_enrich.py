@@ -1219,6 +1219,9 @@ def test_reenriching_offers_a_confirmed_match_and_refuses_it_as_a_substitute_the
     editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:
     before, zorbleberry = margarine_kept(editor_client, api_store, capsys)
+    # Another recipe made a berry oil, offered as the quoted substitute's other candidate.
+    berry_oil = zorbleberry.model_copy(update={"id": new_ulid(), "name": "berry oil"})
+    api_store.enrich_recipe(add(api_store, "Berry Stew", status="ready"), [berry_oil], [])
     chosen = Chosen(ids=(before.id,))
     quoted = quoting(before.id, "zorbleberry oil")
     adapter = api(editor_client)
@@ -1245,13 +1248,19 @@ def test_reenriching_offers_a_confirmed_match_and_refuses_it_as_a_substitute_the
         "confirmed match"
     ) in capsys.readouterr().out
 
-    failed = apply(
-        BASE_URL, send, SNAPSHOT, reenrichment(offered), quoted, chosen=chosen, write=True
-    )
+    accepted = json.loads(reenrichment(offered))
+    other = substitutions[0] | {"canonical_id": berry_oil.id}
+    accepted["recipes"][0]["lines"].append({"line_id": "i1", "substitutions": [other]})
+    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(accepted), quoted, chosen=chosen, write=True)
 
     assert failed == 0
     after = stored(editor_client, before.id)
-    assert after["facts"]["ingredients"]["i1"]["match"]["canonical_id"] == zorbleberry.id
+    oil, was = after["facts"]["ingredients"]["i1"], before.facts.ingredients["i1"]
+    assert (oil["match"], oil["conversion"]) == (
+        was.model_dump(mode="json")["match"],
+        was.model_dump(mode="json")["conversion"],
+    )
+    assert [item["canonical_id"] for item in oil["substitutions"]["items"]] == [berry_oil.id]
     assert after["facts"]["ingredients"]["i3"]["match"] is not None
     assert after["enrichment_version"] == ENRICHMENT_VERSION
 
