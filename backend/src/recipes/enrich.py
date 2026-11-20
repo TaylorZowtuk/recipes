@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 from pydantic import ValidationError
 
@@ -41,6 +41,7 @@ from recipes.models import (
     ParseFact,
     Recipe,
     SegmentsFact,
+    StoredFact,
     SubstitutionsFact,
     UsesFact,
     Wording,
@@ -336,7 +337,7 @@ def _shown(value: object) -> str:
     return f"{value:g}" if isinstance(value, float) else str(value)
 
 
-def summary(fact: Fact | None, names: dict[str, str]) -> str:
+def summary(fact: StoredFact | None, names: dict[str, str]) -> str:
     """A fact in a few words, for a change line: its main values."""
     match fact:
         case ParseFact(quantity=quantity, unit=unit, name=name):
@@ -356,8 +357,10 @@ def summary(fact: Fact | None, names: dict[str, str]) -> str:
             text = ", ".join(f"{use.ref} {use.portion:g}" for use in uses) or "none"
         case DifficultyFact(prep=prep, cook=cook, cleanup=cleanup):
             text = f"prep {prep}, cook {cook}, cleanup {cleanup}"
+        case None:
+            text = "(none)"
         case _:
-            text = "(details)"
+            assert_never(fact)
     return text
 
 

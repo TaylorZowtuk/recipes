@@ -7,7 +7,7 @@ import secrets
 import string
 from datetime import UTC, date, datetime
 from itertools import chain
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -593,7 +593,13 @@ def item_of(fact_id: str) -> str:
     return fact_id.partition(".")[0]
 
 
-def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
+# Every kind of fact a recipe stores.
+type StoredFact = (
+    ParseFact | MatchFact | ConversionFact | SubstitutionsFact | SegmentsFact | UsesFact
+) | DifficultyFact
+
+
+def fact_at(facts: RecipeFacts, path: str) -> StoredFact | None:
     """The fact at `path`, such as `i3.match`, `s2.uses` or `difficulty`, if the recipe has it."""
     if path == "difficulty":
         return facts.difficulty
@@ -601,7 +607,7 @@ def fact_at(facts: RecipeFacts, path: str) -> Fact | None:
     holder = facts.ingredients.get(owner) or facts.steps.get(owner)
     if holder is None or kind not in type(holder).model_fields:
         return None
-    return getattr(holder, kind)
+    return cast("StoredFact | None", getattr(holder, kind))
 
 
 class NeedsReview(Model):
