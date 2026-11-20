@@ -215,6 +215,14 @@ _Avoid_: Countdown, stopwatch, reminder
 How one recipe shows while cooking it: a scale (½× to 3×), a unit system (as written, metric or US) and, for any ingredient tapped, its own unit. They stay on the device and reset on leaving the recipe. Metric and US convert only within a kind, a weight to a weight and a volume to a volume; spoons stay spoons.
 _Avoid_: Settings, preferences
 
+**Step tick**:
+A cook's mark that one step of a recipe is done, set and cleared with the tick under the step's number; a ticked step dims. Step ticks stay on the device, keyed by the step's id, and are never shared or queued, unlike a Grocery Item's tick, which is shared by the household and queued while offline.
+_Avoid_: Checkbox, progress, done mark
+
+**Cooking mode**:
+A recipe shown full-screen, one step at a time, for cooking from. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
+_Avoid_: Cook view, step-by-step mode
+
 **Confidence Threshold**:
 What a line's conversion must clear before a volume or count shows as a weight: confirmed, with a confidence of at least 0.8. Below it the line stays in its written unit. A weight it gives is marked "≈".
 _Avoid_: Cutoff

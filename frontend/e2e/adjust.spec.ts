@@ -20,11 +20,13 @@ const line = (page: Page, name: string) =>
     .getByRole("listitem")
     .filter({ hasText: name });
 const amount = (scope: Locator) => scope.locator(".ingredient-amount");
+// A step's text, without the number shown beside it.
 const step = (page: Page, n: number) =>
   page
     .getByRole("tabpanel", { name: "Steps" })
     .getByRole("listitem")
-    .nth(n - 1);
+    .nth(n - 1)
+    .locator(".step-body");
 
 async function choose(page: Page, ...names: string[]) {
   await adjust(page).click();
