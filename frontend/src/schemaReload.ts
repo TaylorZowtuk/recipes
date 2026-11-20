@@ -1,9 +1,11 @@
+import { isCookingModeOpen } from "./cookingMode";
 import { CARDS, DATA, PHOTOS } from "./syncEngine";
 
 type Deps = {
   serviceWorker: ServiceWorkerContainer | undefined;
   deleteCache: (name: string) => Promise<unknown>;
   reload: () => void;
+  cooking: () => boolean;
   storage: Pick<Storage, "getItem" | "setItem">;
 };
 
@@ -11,6 +13,7 @@ const browserDeps = (): Deps => ({
   serviceWorker: globalThis.navigator?.serviceWorker,
   deleteCache: (name) => (typeof caches === "undefined" ? Promise.resolve() : caches.delete(name)),
   reload: () => location.reload(),
+  cooking: isCookingModeOpen,
   storage: {
     getItem: (key) => sessionStorage.getItem(key),
     setItem: (key, value) => sessionStorage.setItem(key, value),
@@ -33,10 +36,12 @@ function installed(registration: ServiceWorkerRegistration): Promise<ServiceWork
 
 // The API moved to a schema this build can't read. Once the new build's service worker has taken
 // over, or where there is none, the cached data goes and the page reloads into the new build.
-// Says whether it reloaded: until the new build is uploaded it doesn't, and a later poll tries
-// again. Once per schema version, so a page still served the old build can't reload forever.
+// Says whether it reloaded: until the new build is uploaded it doesn't, nor while cooking mode is
+// open (checked again once the new worker has installed), and a later poll tries again. Once per
+// schema version, so a page still served the old build can't reload forever.
 export async function reloadForSchema(version: number, deps: Deps = browserDeps()) {
   const key = "plateful.reloadedForSchema";
+  if (deps.cooking()) return false;
   try {
     if (deps.storage.getItem(key) === String(version)) return false;
   } catch {
@@ -46,7 +51,7 @@ export async function reloadForSchema(version: number, deps: Deps = browserDeps(
   if (deps.serviceWorker && registration) {
     await registration.update().catch(() => {});
     const waiting = await installed(registration);
-    if (!waiting) return false;
+    if (!waiting || deps.cooking()) return false;
     const container = deps.serviceWorker;
     await new Promise((resolve) => {
       container.addEventListener("controllerchange", resolve, { once: true });

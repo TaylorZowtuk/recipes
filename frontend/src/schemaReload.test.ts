@@ -44,6 +44,7 @@ function deps(serviceWorker?: unknown) {
       serviceWorker: serviceWorker as ServiceWorkerContainer | undefined,
       deleteCache: async (name: string) => void steps.push(`delete ${name}`),
       reload: () => steps.push("reload"),
+      cooking: () => false,
       storage: {
         getItem: (key: string) => stored.get(key) ?? null,
         setItem: (key: string, value: string) => void stored.set(key, value),
@@ -121,5 +122,36 @@ it("doesn't reload when it can't keep the once-per-version mark", async () => {
 
   d.storage = { getItem: () => null, setItem: broken };
   expect(await reloadForSchema(2, d)).toBe(false);
+  expect(steps).toEqual([]);
+});
+
+it("waits while cooking mode is open, then reloads on a try after it closes", async () => {
+  const sw = fakeWorker();
+  const { steps, stored, deps: d } = deps(sw.serviceWorker);
+  d.cooking = () => true;
+  expect(await reloadForSchema(2, d)).toBe(false);
+  expect(sw.steps).toEqual([]);
+  expect(steps).toEqual([]);
+  expect(stored.has("plateful.reloadedForSchema")).toBe(false);
+
+  d.cooking = () => false;
+  const done = reloadForSchema(2, d);
+  await vi.waitFor(() => expect(sw.steps).toEqual(["update"]));
+  sw.installed();
+  expect(await done).toBe(true);
+  expect(steps).toContain("reload");
+});
+
+it("doesn't take over if cooking mode opened while the new worker installed", async () => {
+  const sw = fakeWorker();
+  const { steps, deps: d } = deps(sw.serviceWorker);
+  let cooking = false;
+  d.cooking = () => cooking;
+  const done = reloadForSchema(2, d);
+  await vi.waitFor(() => expect(sw.steps).toEqual(["update"]));
+  cooking = true;
+  sw.installed();
+  expect(await done).toBe(false);
+  expect(sw.steps).toEqual(["update"]);
   expect(steps).toEqual([]);
 });
