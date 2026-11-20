@@ -8,6 +8,8 @@ import { isCookingModeOpen } from "./cookingMode";
 import { RecipeScreen } from "./RecipeScreen";
 import { recipe as reviewRecipe, stamp } from "./review.fixtures";
 import { stepTicks } from "./stepTicks";
+import { TimerDock } from "./TimerDock";
+import { timers } from "./timers";
 
 // Cooking mode, opened from the recipe page in a DOM: where it starts, what Next, Back, Finish and
 // Close do to the Step ticks, the text size it keeps, and the recipe it holds while open.
@@ -89,6 +91,11 @@ beforeAll(() => {
     this.open = false;
     this.dispatchEvent(new Event("close"));
   };
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
 });
 
 afterEach(() => {
@@ -97,6 +104,8 @@ afterEach(() => {
   host.remove();
   stepTicks.clear(card.id);
   localStorage.clear();
+  for (const timer of timers.snapshot().timers) timers.cancel(timer.id);
+  Reflect.deleteProperty(navigator, "wakeLock");
 });
 
 const page = () => (
@@ -104,6 +113,7 @@ const page = () => (
     <Routes>
       <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
     </Routes>
+    <TimerDock />
   </MemoryRouter>
 );
 
@@ -157,6 +167,14 @@ describe("cooking mode", () => {
     expect(stepShown()).toBe("Simmer for 8-10 minutes.");
   });
 
+  it("opens at the first step without a tick even when a later step has one", () => {
+    stepTicks.tick(card.id, "s1");
+    stepTicks.tick(card.id, "s3");
+    open();
+    cook();
+    expect(progress()).toBe("Step 2 of 3");
+  });
+
   it("opens at step 1 when every step is ticked", () => {
     for (const id of ["s1", "s2", "s3"]) stepTicks.tick(card.id, id);
     open();
@@ -200,6 +218,18 @@ describe("cooking mode", () => {
     expect(cooking()).toBeNull();
     expect(ticks()).toEqual(["s1"]);
     expect(pageButton(/^(Cook|Resume)$/).textContent).toBe("Resume");
+    expect(document.activeElement).toBe(pageButton("Resume"));
+  });
+
+  it("closes on Escape, the dialog's own close, keeping the ticks", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    act(() => cooking()?.close());
+    expect(cooking()).toBeNull();
+    expect(isCookingModeOpen()).toBe(false);
+    expect(ticks()).toEqual(["s1"]);
+    expect(document.activeElement).toBe(pageButton("Resume"));
   });
 
   it("is marked open while shown, and closed after Close and when the page goes", () => {
@@ -258,6 +288,32 @@ describe("cooking mode", () => {
     open();
     cook();
     expect(cooking()?.querySelector(".cooking-screen")?.textContent).toBe("Screen may turn off");
+  });
+
+  it("keeps the screen on while open, and lets it go on Close", async () => {
+    const sentinel = Object.assign(new EventTarget(), { release: vi.fn(async () => {}) });
+    const request = vi.fn(async (_type: "screen") => sentinel);
+    Object.defineProperty(navigator, "wakeLock", { value: { request }, configurable: true });
+    open();
+    cook();
+    await act(async () => {});
+    expect(request).toHaveBeenCalledWith("screen");
+    expect(cooking()?.querySelector(".cooking-screen")?.textContent).toBe("Screen stays on");
+    tap(inCooking("Close"));
+    expect(sentinel.release).toHaveBeenCalled();
+  });
+
+  it("shows the Timers inside it while open, and back on the page after Close", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    tap(inCooking("Start a timer for 8-10 minutes"));
+    const dock = document.querySelector(".timer-dock");
+    expect(dock?.hidden).toBe(false);
+    expect(cooking()?.contains(dock)).toBe(true);
+    tap(inCooking("Close"));
+    expect(document.querySelector(".timer-dock")?.closest("dialog")).toBeNull();
+    expect(document.querySelectorAll(".timer-dock")).toHaveLength(1);
   });
 
   it("keeps the recipe it opened with when a newer version arrives", () => {
