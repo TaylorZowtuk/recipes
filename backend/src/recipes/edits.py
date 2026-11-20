@@ -92,7 +92,7 @@ class NewCanonical(BaseModel):
 CanonicalChoice = Annotated[ExistingCanonical | NewCanonical, Field(discriminator="kind")]
 
 
-class EditLine(BaseModel):
+class LineFields(BaseModel):
     """A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
     portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
     keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
@@ -100,8 +100,6 @@ class EditLine(BaseModel):
     none has no match, and so no food.
     """
 
-    kind: Literal["line"]
-    line_id: Label
     quantity: Quantity | None
     unit: Label | None
     name: Name
@@ -110,6 +108,13 @@ class EditLine(BaseModel):
     portion_id: int | None
     canonical: CanonicalChoice | None = None
     keep_weight: bool | None = None
+
+
+class EditLine(LineFields):
+    """An edit of one of the Original's lines, by its id."""
+
+    kind: Literal["line"]
+    line_id: Label
 
 
 class StepTimer(BaseModel):
@@ -406,10 +411,40 @@ def _edit_line(
 ) -> Edited:
     if edit.line_id not in {line.id for line in recipe.original.ingredients}:
         raise HTTPException(422, f"The recipe has no line {edit.line_id}")
+    result = Edited(recipe)
     facts = recipe.facts.model_copy(deep=True)
-    line = facts.ingredients.setdefault(edit.line_id, IngredientFacts())
-    old = line.parse
-    renamed = old is not None and normalize_wording(edit.name) != normalize_wording(old.name)
+    old = facts.ingredients.get(edit.line_id)
+    facts.ingredients[edit.line_id] = edited_line(
+        store, recipe.id, edit, old, snapshot=snapshot, now=now, result=result
+    )
+    base = recipe.model_copy(update={"facts": facts})
+    if result.shared:
+        # The recipe's other lines with the wording take the match too, as other recipes'.
+        base = result.shared.apply(base, edit.line_id) or base
+    issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
+    result.recipe = settled(base.model_copy(update={"issues": issues}))
+    return result
+
+
+def edited_line(
+    store: Store,
+    recipe_id: str,
+    edit: EditLine,
+    old: IngredientFacts | None,
+    *,
+    snapshot: Callable[[], fdc.Snapshot],
+    now: datetime,
+    result: Edited,
+) -> IngredientFacts:
+    """The line's facts as the editor gives them, in place of `old`. A new Canonical Ingredient,
+    FDC food or portion goes in `result` with the wording it fixes and the other recipes it reaches;
+    an unchanged one is Confirmed as it stands, with its Canonical Ingredient and wording.
+    """
+    line = old.model_copy(deep=True) if old else IngredientFacts()
+    old_parse = line.parse
+    renamed = old_parse is not None and normalize_wording(edit.name) != normalize_wording(
+        old_parse.name
+    )
     if renamed and line.match and not edit.canonical:
         # Keeping the match would confirm the old Canonical Ingredient for the new wording.
         raise HTTPException(422, "Changing the wording needs a Canonical Ingredient choice")
@@ -418,14 +453,13 @@ def _edit_line(
         now,
         quantity=edit.quantity,
         unit=edit.unit,
-        unit_kind=_unit_kind(old, edit.unit),
+        unit_kind=_unit_kind(old_parse, edit.unit),
         name=edit.name,
-        short_name=old.short_name if old and old.name == edit.name else None,
+        short_name=old_parse.short_name if old_parse and old_parse.name == edit.name else None,
         preparation=edit.preparation,
-        comment=old.comment if old else None,
-        optional=old.optional if old else False,
+        comment=old_parse.comment if old_parse else None,
+        optional=old_parse.optional if old_parse else False,
     )
-    result, base = Edited(recipe), recipe
     current, picked = line.match, (edit.fdc_id, edit.portion_id)
     kept = ExistingCanonical(kind="existing", id=current.canonical_id) if current else None
     choice = edit.canonical or kept
@@ -452,21 +486,16 @@ def _edit_line(
                 )
             ]
             recipes = store.recipes()
-            result.others = [o.id for o in recipes if o.id != recipe.id and shared.lines(o)]
-            # The recipe's other lines with the wording take the match too, as other recipes'.
-            base = shared.apply(recipe.model_copy(update={"facts": facts}), edit.line_id) or base
-            facts = base.facts
-            line = facts.ingredients[edit.line_id]
+            result.others = [o.id for o in recipes if o.id != recipe_id and shared.lines(o)]
     else:
         # The same food and portion: the line's match and conversion are Confirmed as they stand.
         line.match, line.conversion = _checked(line.match, now), _checked(line.conversion, now)
+        facts = RecipeFacts(ingredients={edit.line_id: line})
         canonicals, wordings = confirm_matches(store, facts, [f"{edit.line_id}.match"], None)
         result.confirmed, result.learned = canonicals, wordings
     if edit.keep_weight is not None:
         line.conversion = _kept(line.conversion, edit.line_id, keep=edit.keep_weight, now=now)
-    issues = resolve(base, lambda fact_id: item_of(fact_id) == edit.line_id)
-    result.recipe = settled(base.model_copy(update={"facts": facts, "issues": issues}))
-    return result
+    return line
 
 
 def _picked(

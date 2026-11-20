@@ -9,7 +9,8 @@ a conversion, an open Enrichment Issue and a confirmed substitute for its butter
 Canonical Ingredients no recipe uses, for Kitchen settings' tests to change freely. Its Favorite
 Sites are on reserved domains, and the first is on example.com, so it counts the website recipes.
 As enrichment does, every line of a recipe past Pending has a parse fact; Overnight Oats has a
-line in cups and one in ounces, for the Adjust sheet's units.
+line in cups and one in ounces, for the Adjust sheet's units. Lemon Herb Roast Chicken has an Our
+Version: less salt, garlic for the thyme, an edited step waiting for enrich, and a note.
 """
 
 import io
@@ -21,6 +22,7 @@ from PIL import Image, ImageDraw
 from recipes import fdc
 from recipes.models import (
     SCHEMA_VERSION,
+    AddedLine,
     CanonicalIngredient,
     ConversionFact,
     Difficulty,
@@ -33,6 +35,11 @@ from recipes.models import (
     IngredientSegment,
     MatchFact,
     Original,
+    OurLine,
+    OurLines,
+    OurStep,
+    OurSteps,
+    OurVersion,
     ParseFact,
     Preview,
     Quantity,
@@ -95,6 +102,23 @@ UNSALTED_TBSP = 92512
 # Seeds, sesame butter, tahini, from roasted and toasted kernels (SR Legacy), by the tablespoon.
 TAHINI_FDC_ID = 170189
 TAHINI_TBSP = 86209
+# The garlic Our Version adds to the roast chicken, as an editor picks it: a Canonical Ingredient
+# and its wording, Confirmed, and Garlic, raw (SR Legacy) by the clove.
+GARLIC = CanonicalIngredient(
+    id="01K7SEED0000000000000000C7",
+    name="garlic",
+    family="garlic",
+    store_category_id="produce",
+    confirmed=True,
+    version=1,
+    schema_version=SCHEMA_VERSION,
+)
+GARLIC_WORDING = Wording(
+    wording="garlic cloves", canonical_id=GARLIC.id, confirmed=True, schema_version=SCHEMA_VERSION
+)
+GARLIC_FDC_ID = 169230
+GARLIC_CLOVE = 84480
+CHICKEN_ID = "01K7SEED000000000000000001"
 BUTTER_WORDING = Wording(wording="butter", canonical_id=BUTTER.id, schema_version=SCHEMA_VERSION)
 PANTRY = [
     CanonicalIngredient(
@@ -169,6 +193,24 @@ def _parse(
     )
 
 
+def _editors(facts: IngredientFacts, text: str) -> OurLine:
+    """An Our Version line with the parse as the editor gives it: Confirmed, provenance `editor`."""
+    editors = {
+        "provenance": "editor",
+        "confidence": 1,
+        "estimated": False,
+        "confirmed": True,
+        "confirmed_by": "editor",
+        "confirmed_at": CAPTURED_AT,
+    }
+    parse = facts.parse.model_copy(update=editors) if facts.parse else None
+    match = facts.match.model_copy(update=editors) if facts.match else None
+    conversion = facts.conversion.model_copy(update=editors) if facts.conversion else None
+    return OurLine.model_validate(
+        {"text": text, "parse": parse, "match": match, "conversion": conversion}
+    )
+
+
 def _ingredient(ref: str, written: str, portion: float = 1.0) -> IngredientSegment:
     return IngredientSegment(ref=ref, written=written, portion=portion)
 
@@ -201,7 +243,7 @@ def _step_facts(*parts: str | Segment, uses: dict[str, float] | None = None) -> 
 
 RECIPES = [
     Recipe(
-        id="01K7SEED000000000000000001",
+        id=CHICKEN_ID,
         schema_version=SCHEMA_VERSION,
         version=1,
         source=_website("lemon-herb-roast-chicken"),
@@ -267,6 +309,56 @@ RECIPES = [
                 ),
             },
         ),
+        our_version=OurVersion(
+            ingredients=OurLines(
+                edit={
+                    "i6": _editors(_parse(0.5, "tsp", "volume", "kosher salt"), "½ tsp kosher salt")
+                },
+                remove=["i3"],
+                add=[
+                    AddedLine(
+                        id="i7",
+                        after="i2",
+                        **_editors(
+                            _parse(4, None, "count", "garlic cloves", "smashed").model_copy(
+                                update={
+                                    "match": MatchFact(
+                                        provenance="editor",
+                                        confidence=1,
+                                        estimated=False,
+                                        canonical_id=GARLIC.id,
+                                        fdc_id=GARLIC_FDC_ID,
+                                        portion_id=GARLIC_CLOVE,
+                                    ),
+                                    "conversion": ConversionFact(
+                                        provenance="editor",
+                                        confidence=1,
+                                        estimated=False,
+                                        fdc_id=GARLIC_FDC_ID,
+                                        **fdc.numbers(
+                                            fdc.snapshot(), GARLIC_FDC_ID, GARLIC_CLOVE
+                                        ).model_dump(),
+                                    ),
+                                }
+                            ),
+                            "4 garlic cloves, smashed",
+                        ).model_dump(),
+                    )
+                ],
+            ),
+            steps=OurSteps(
+                edit={
+                    "s3": OurStep(
+                        text="Rub the chicken with oil and salt, and stuff it with the lemons "
+                        "and garlic."
+                    )
+                }
+            ),
+            note="Less salt, and garlic in place of the thyme.",
+            edited_at=CAPTURED_AT,
+        ),
+        # The edited step waits for enrich to segment it.
+        our_version_status="pending",
     ),
     Recipe(
         id=E2E_RECIPE_ID,
@@ -694,6 +786,8 @@ def placeholder_photo(
 def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
+        if added.id == CHICKEN_ID:
+            store.enrich_recipe(added, [GARLIC], [GARLIC_WORDING])
         if added.id == REVIEW_RECIPE_ID:
             store.enrich_recipe(added, [BUTTER, UNSALTED_BUTTER, *PANTRY], [BUTTER_WORDING])
     store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))

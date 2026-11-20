@@ -1,7 +1,4 @@
-"""The domain model: one shape for DynamoDB items and the API (recipe data model ADR).
-
-Our Version joins these models when the feature that writes it arrives.
-"""
+"""The domain model: one shape for DynamoDB items and the API (recipe data model ADR)."""
 
 import secrets
 import string
@@ -523,6 +520,67 @@ class Enrichment(Model):
         return self
 
 
+class OurLine(Model):
+    """An Our Version line, which replaces the Original's line or is added: its text, built from
+    its parse, and its facts, all the editor's.
+    """
+
+    text: Line
+    component: Label | None = None
+    parse: ParseFact
+    match: MatchFact | None = None
+    conversion: ConversionFact | None = None
+
+
+class AddedLine(OurLine):
+    """A line Our Version adds, after the effective line `after` names, or first for none."""
+
+    id: Label
+    after: Label | None
+
+
+class OurStep(Model):
+    """An Our Version step, which replaces the Original's step or is added: only its text until
+    enrich segments it.
+    """
+
+    text: Line
+    component: Label | None = None
+
+
+class AddedStep(OurStep):
+    """A step Our Version adds, after the effective step `after` names, or first for none."""
+
+    id: Label
+    after: Label | None
+
+
+class OurLines(Model):
+    edit: Annotated[dict[str, OurLine], Field(max_length=MAX_LINES)] = {}
+    remove: Annotated[list[Label], Field(max_length=MAX_LINES)] = []
+    add: Annotated[list[AddedLine], Field(max_length=MAX_LINES)] = []
+
+
+class OurSteps(Model):
+    edit: Annotated[dict[str, OurStep], Field(max_length=MAX_LINES)] = {}
+    remove: Annotated[list[Label], Field(max_length=MAX_LINES)] = []
+    add: Annotated[list[AddedStep], Field(max_length=MAX_LINES)] = []
+
+
+Note = Annotated[str, StringConstraints(max_length=5000)]
+
+
+class OurVersion(Model):
+    """The household's whole-line overlay on the Original, by line and step id. A line or step it
+    leaves alone keeps the Original's text and facts.
+    """
+
+    ingredients: OurLines = OurLines()
+    steps: OurSteps = OurSteps()
+    note: Note | None = None
+    edited_at: datetime
+
+
 class Recipe(Model):
     id: Ulid
     schema_version: int
@@ -542,6 +600,9 @@ class Recipe(Model):
     issues: list[EnrichmentIssue] = []
     # The Confirm Batch that moved it from Awaiting Review to Ready, so undoing it moves it back.
     ready_batch: Label | None = None
+    our_version: OurVersion | None = None
+    # Where Our Version is in enrichment, apart from `status`; none without Our Version.
+    our_version_status: EnrichmentStatus | None = None
 
 
 # The facts an editor checks together as one Review Item, for an ingredient line and for a step.
@@ -679,6 +740,7 @@ class Card(Model):
     needs_review: NeedsReview
     recipe_version: int
     host: str | None = None  # a website recipe's; a card written before there were hosts has none
+    our_version_status: EnrichmentStatus | None = None
 
 
 def stated_seconds(times: StatedTimes) -> int | None:
@@ -717,6 +779,7 @@ def card_for(recipe: Recipe) -> Card:
         needs_review=needs_review(recipe),
         recipe_version=recipe.version,
         host=site_host(recipe.dedupe_key) if website else None,
+        our_version_status=recipe.our_version_status,
     )
 
 
