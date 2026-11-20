@@ -455,11 +455,18 @@ export interface paths {
         get?: never;
         /**
          * Put Enrichment
-         * @description Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
-         *     create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
+         * @description Store a recipe's facts and Enrichment Issues, with the Canonical Ingredients they create
+         *     and the wordings they learn. A Pending bulk import's recipe is then Ready, and any other, or
          *     any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
          *     Enrichment sends only FDC ids: each matched line's conversion and each substitute's numbers
          *     come from the API's own FDC Snapshot, whose release the recipe records.
+         *
+         *     Re-enrichment, of a recipe Awaiting Review or Ready, never changes a Confirmed fact: each
+         *     Review Item with a Confirmed fact keeps all its stored facts and its open Enrichment Issues,
+         *     and every other item takes the new facts and issues, dropping its old open ones. Resolved
+         *     issues stay, and the recipe keeps its status.
+         *
+         *     With `dry_run`, it checks and returns the recipe it would store, writing nothing.
          *
          *     Refused unless it was enriched against the API's FDC Snapshot release, every match and
          *     substitute names an FDC food the FDC Snapshot has and either no FDC portion or one of that
@@ -473,7 +480,9 @@ export interface paths {
          *     of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
          *     names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
          *     every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
-         *     enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+         *     enriched recipe is at most MAX_RECIPE_BYTES as JSON. Re-enrichment's facts must also fit
+         *     with the kept ones: each line's `portion`s across the steps still add up to at most 1, and
+         *     no substitute is its line's own match.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
         post?: never;
@@ -3605,7 +3614,9 @@ export interface operations {
     };
     put_enrichment_api_recipes__recipe_id__enrichment_put: {
         parameters: {
-            query?: never;
+            query?: {
+                dry_run?: boolean;
+            };
             header?: never;
             path: {
                 recipe_id: string;
@@ -3641,14 +3652,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe isn't Pending or changed meanwhile, a new Canonical Ingredient's id is taken, or an editor confirmed a wording */
+            /** @description The recipe changed meanwhile, a new Canonical Ingredient's id is taken, or an editor confirmed a wording */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description The request names another FDC Snapshot release than the API's, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1, an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match, a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description The request names another FDC Snapshot release than the API's, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1 (with any kept steps'), an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match (kept or new), a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
