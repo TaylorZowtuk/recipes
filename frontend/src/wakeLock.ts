@@ -11,7 +11,8 @@ type Visibility = Pick<EventTarget, "addEventListener" | "removeEventListener"> 
 };
 
 // Keeps the screen on with the Screen Wake Lock until stopped, saying how that's going. The browser
-// lets the lock go when the page is hidden, so it asks again whenever the page is shown without one.
+// lets the lock go when the page is hidden, so it asks again whenever the page is shown without one,
+// quietly: past the first ask it says only whether the screen stays on.
 export function keepScreenOn(
   nav: WakeLockNavigator,
   doc: Visibility,
@@ -28,7 +29,6 @@ export function keepScreenOn(
 
   const ask = () => {
     asking = true;
-    onStatus("asking");
     wakeLock.request("screen").then(
       (sentinel) => {
         asking = false;
@@ -55,6 +55,7 @@ export function keepScreenOn(
   };
 
   doc.addEventListener("visibilitychange", shown);
+  onStatus("asking");
   ask();
   return () => {
     stopped = true;

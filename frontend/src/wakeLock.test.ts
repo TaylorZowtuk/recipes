@@ -86,7 +86,7 @@ describe("keepScreenOn", () => {
     expect(nav.wakeLock.request).toHaveBeenCalledTimes(2);
     requests[1]?.resolve();
     await settle();
-    expect(said).toEqual(["asking", "on", "off", "asking", "on"]);
+    expect(said).toEqual(["asking", "on", "off", "on"]);
 
     // Shown again while the lock still holds, it doesn't ask twice.
     doc.dispatchEvent(new Event("visibilitychange"));
