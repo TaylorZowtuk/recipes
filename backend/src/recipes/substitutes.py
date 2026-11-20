@@ -93,19 +93,20 @@ def substitutes_packet(recipes: list[Recipe]) -> SubstitutesPacket:
 
 
 def checked(substitutes: Substitutes, recipes: list[Recipe]) -> Quoted:
-    """Each Pending recipe's quoted wordings by line, once each is found in the line itself, a step
-    or the description, as it names, ignoring case and on word boundaries. A recipe that isn't
-    Pending, as one an earlier run wrote, is skipped with a note on stderr. Raises Rejected with
+    """Each recipe's quoted wordings by line, once each is found in the line itself, a step or the
+    description, as it names, ignoring case and on word boundaries. A recipe that isn't one of
+    `recipes`, as one an earlier run wrote, is skipped with a note on stderr. Raises Rejected with
     every quote that isn't found.
     """
-    pending = {recipe.id: recipe for recipe in recipes}
+    enriching = {recipe.id: recipe for recipe in recipes}
     quoted: Quoted = {}
     errors: list[str] = []
     for answered in substitutes.recipes:
-        recipe = pending.get(answered.recipe_id)
+        recipe = enriching.get(answered.recipe_id)
         if recipe is None:
             print(
-                f"{answered.recipe_id} isn't a Pending recipe, so its quotes are skipped",
+                f"{answered.recipe_id} isn't one of the recipes to enrich, so its quotes are "
+                "skipped",
                 file=sys.stderr,
             )
             continue

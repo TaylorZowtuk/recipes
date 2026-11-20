@@ -67,6 +67,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 "src/recipes/auth.py" = ["S105"] # names the service token's header, which isn't the token
 "src/recipes/client.py" = ["S105"] # names the service token's variable, which isn't the token
 "src/recipes/dev.py" = ["TC001"] # FastAPI reads a route's annotations at runtime
+"src/recipes/enrich.py" = ["PLR0913"] # apply and sent take the answer's parts and the chosen recipes, by name
 "src/recipes/fallback.py" = ["BLE001"] # whatever fails on one Source, the others still go on
 "src/recipes/fdc.py" = [
     "PLC0415", # pint is imported on first conversion, to keep it out of cold starts

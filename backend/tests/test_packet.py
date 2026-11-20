@@ -1076,7 +1076,7 @@ def test_a_quote_may_come_from_its_own_line_ignoring_case() -> None:
     assert [o.wording for o in offered.lines[1].substitute_offers] == ["ZORBLEBERRY OIL"]
 
 
-def test_quotes_for_a_recipe_that_isnt_pending_are_skipped_with_a_note(
+def test_quotes_for_a_recipe_not_being_enriched_are_skipped_with_a_note(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     other = "01K7Q0000000000000000000R9"
@@ -1092,7 +1092,7 @@ def test_quotes_for_a_recipe_that_isnt_pending_are_skipped_with_a_note(
     (offered,) = offering(quoted).packet().recipes
 
     assert [o.wording for o in offered.lines[1].substitute_offers] == ["zorbleberry oil"]
-    assert f"{other} isn't a Pending recipe" in capsys.readouterr().err
+    assert f"{other} isn't one of the recipes to enrich" in capsys.readouterr().err
 
 
 def test_a_quoted_substitute_with_an_amount_is_offered_its_cached_canonical_first() -> None:
