@@ -220,7 +220,7 @@ def default_uses(recipe: Recipe, facts: EnrichmentFacts) -> dict[str, list[StepU
     for line in recipe.original.ingredients:
         fact = facts.ingredients.get(line.id)
         parse = fact.parse if fact else None
-        left = round(1 - used.get(line.id, 0), 4)
+        left = 1 - used.get(line.id, 0)
         if parse is None or left <= PORTION_TOLERANCE:
             continue
         names = [name for name in (parse.short_name, parse.name) if name]

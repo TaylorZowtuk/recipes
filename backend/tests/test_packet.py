@@ -1580,6 +1580,16 @@ def test_default_uses_leave_out_what_the_kept_steps_use() -> None:
     assert enrich(stepped_and_kept, answer(steps=copied)).facts.steps["s1"].uses is not None
 
 
+def test_default_uses_of_a_third_left_sum_with_the_kept_step_to_no_more_than_one() -> None:
+    # The kept rest step uses a third of the oil, so the heat step's default is the exact rest.
+    third = work(reviewed(recipe(steps=STEPS), steps={"s3": uses(("i2", 1 / 3))}))
+
+    heat = third.packet().recipes[0].steps[0]
+
+    copied = [step("s1", span("i2", "glimmer oil", heat.default_uses[0].portion))]
+    assert enrich(third, answer(steps=copied)).facts.steps["s1"].uses is not None
+
+
 def test_default_uses_skip_kept_steps_and_lines_they_use_in_full() -> None:
     # The kept fry step uses all the oil and half the salt, which the rest step names too.
     stepped_and_kept = work(
