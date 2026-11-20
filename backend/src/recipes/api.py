@@ -100,6 +100,7 @@ from recipes.models import (
     fact_at,
     fact_paths,
     item_of,
+    kept_items,
     new_ulid,
     normalize_wording,
     settled,
@@ -906,11 +907,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
     (a Pending recipe has none), refused if the facts don't fit together.
     """
     new, stored = _filled(body, snapshot), recipe.facts
-    kept = {
-        item_of(path)
-        for path in fact_paths(stored)
-        if (fact := fact_at(stored, path)) and fact.confirmed
-    }
+    kept = kept_items(stored)
     facts = RecipeFacts(
         ingredients=_merged(stored.ingredients, new.ingredients, kept, IngredientFacts()),
         steps=_merged(stored.steps, new.steps, kept, StepFacts()),

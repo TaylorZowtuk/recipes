@@ -55,6 +55,7 @@ from recipes.models import (
     Quantity,
     Ratio,
     Recipe,
+    RecipeFacts,
     Segment,
     SegmentsFact,
     StatedTimes,
@@ -64,6 +65,7 @@ from recipes.models import (
     TextSegment,
     UsesFact,
     Wording,
+    kept_items,
     new_ulid,
     normalize_wording,
     written_as,
@@ -117,6 +119,14 @@ INSTRUCTIONS = (
     "a line's portions add up to at most 1 across all the steps. Leave out a step you can't read. "
     "Give the recipe a difficulty from its steps and stated_times: prep, cook and cleanup, each "
     "1 (easy) to 3 (hard); its Total Difficulty is their sum."
+)
+# Added to the instructions when a recipe has Review Items an editor confirmed.
+KEPT_INSTRUCTIONS = (
+    " A line's confirmed, its confirmed_substitutions, a step's confirmed_uses and the recipe's "
+    "confirmed_difficulty are what an editor confirmed, kept as shown: don't answer them. For a "
+    "confirmed line, give at most its substitutions (no canonical, fdc_id or corrections). Never "
+    "give a line's confirmed Canonical Ingredient as its substitute, nor match a line to one of "
+    "its confirmed substitutes, and count confirmed_uses in each line's portions."
 )
 WORD_NUMBERS = {
     "a": 1.0,
@@ -226,6 +236,15 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _absent(value: object) -> bool:
+    return value is None
+
+
+# What an editor confirmed shows only when it is there, so a packet without it, and its
+# offer_id, stay as they were.
+KEPT = Field(default=None, exclude_if=_absent)
+
+
 # The packet
 
 
@@ -264,6 +283,24 @@ class SubstituteOffer(Strict):
     fdc_candidates: list[FdcCandidate]
 
 
+class ConfirmedCanonical(Strict):
+    id: str
+    name: str
+
+
+class ConfirmedLine(Strict):
+    """A line's parse and match as an editor confirmed them, kept whole."""
+
+    parse: OfferedParse | None
+    canonical: ConfirmedCanonical | None
+    fdc_id: int | None
+
+
+class ConfirmedSubstitute(Strict):
+    wording: str
+    canonical: ConfirmedCanonical
+
+
 class PacketLine(Strict):
     line_id: str
     text: str
@@ -273,6 +310,8 @@ class PacketLine(Strict):
     canonical_candidates: list[CanonicalCandidate]
     fdc_candidates: list[FdcCandidate]
     substitute_offers: list[SubstituteOffer]
+    confirmed: ConfirmedLine | None = KEPT
+    confirmed_substitutions: list[ConfirmedSubstitute] | None = KEPT
 
 
 class OfferedDuration(Strict):
@@ -300,6 +339,7 @@ class PacketStep(Strict):
     text: str
     offers: list[OfferedDuration | OfferedTemperature]
     default_uses: list[OfferedUse]
+    confirmed_uses: list[OfferedUse] | None = KEPT
 
 
 class PacketRecipe(Strict):
@@ -310,6 +350,7 @@ class PacketRecipe(Strict):
     stated_times: StatedTimes
     lines: list[PacketLine]
     steps: list[PacketStep]
+    confirmed_difficulty: Difficulty | None = KEPT
 
 
 class Packet(Strict):
@@ -370,9 +411,10 @@ class AnsweredSubstitution(Strict):
 
 class AnsweredLine(Strict):
     line_id: str
-    canonical: Existing | New
-    fdc_id: int
-    portion_id: int | None
+    # Each left out only for a confirmed line, given just its substitutions.
+    canonical: Existing | New | None = None
+    fdc_id: int | None = None
+    portion_id: int | None = None
     quantity: AnsweredQuantity | None = None  # only to correct the parse
     optional: bool | None = None  # only to correct the parse
     doubts: Annotated[list[Line], Field(max_length=MAX_DOUBTS)] = []
@@ -463,12 +505,13 @@ class Work:
             }
             canonical_json = json.dumps(offered, sort_keys=True, separators=(",", ":"))
             offer.offer_id = hashlib.sha256(canonical_json.encode()).hexdigest()
+        reenriching = any(kept_items(recipe.facts) for recipe, _ in self.recipes.values())
         self._packet = Packet(
             fdc_release=snapshot.release,
             store_categories=store_categories,
             families=sorted({canonical.family for canonical in canonical_ingredients}),
             recipes=offers,
-            instructions=INSTRUCTIONS,
+            instructions=INSTRUCTIONS + (KEPT_INSTRUCTIONS if reenriching else ""),
         )
         self._offered = {offer.recipe_id: offer for offer in offers}
 
@@ -489,13 +532,51 @@ class Work:
                 self._offer_line(line, fact.parse if fact else None, quoted.get(line.id, []))
             )
         uses = default_uses(recipe, facts)
-        return PacketRecipe(
+        offered = PacketRecipe(
             recipe_id=recipe.id,
             title=recipe.original.title,
             stated_times=recipe.original.stated_times,
             lines=lines,
             steps=[_offer_step(step, uses[step.id]) for step in recipe.original.steps],
         )
+        self._show_kept(offered, recipe.facts)
+        return offered
+
+    def _show_kept(self, offered: PacketRecipe, stored: RecipeFacts) -> None:
+        """Show the model each Review Item re-enrichment keeps, with its stored facts."""
+        kept = kept_items(stored)
+        for line in offered.lines:
+            facts = stored.ingredients.get(line.line_id)
+            if facts is None:
+                continue
+            if line.line_id in kept:
+                match = facts.match
+                line.confirmed = ConfirmedLine(
+                    parse=_offered_parse(facts.parse),
+                    canonical=self._confirmed(match.canonical_id) if match else None,
+                    fdc_id=match.fdc_id if match else None,
+                )
+            if f"{line.line_id}.substitutions" in kept and facts.substitutions:
+                line.confirmed_substitutions = [
+                    ConfirmedSubstitute(
+                        wording=item.wording, canonical=self._confirmed(item.canonical_id)
+                    )
+                    for item in facts.substitutions.items
+                ]
+        for step in offered.steps:
+            facts = stored.steps.get(step.step_id)
+            if step.step_id in kept and facts:
+                used = facts.uses.uses if facts.uses else []
+                step.confirmed_uses = [OfferedUse(ref=u.ref, portion=u.portion) for u in used]
+        if "difficulty" in kept and stored.difficulty:
+            kept = stored.difficulty
+            offered.confirmed_difficulty = Difficulty(
+                prep=kept.prep, cook=kept.cook, cleanup=kept.cleanup
+            )
+
+    def _confirmed(self, canonical_id: str) -> ConfirmedCanonical:
+        canonical = self.canonicals.get(canonical_id)
+        return ConfirmedCanonical(id=canonical_id, name=canonical.name if canonical else "")
 
     def _offer_line(
         self, line: IngredientLine, parse: ParseFact | None, quoted: list[str]
@@ -598,9 +679,9 @@ class Work:
                     )
                 ]
             )
-        _, facts = self.recipes[answered.recipe_id]
+        stored, facts = self.recipes[answered.recipe_id]
         lines = {line.line_id: line for line in offered.lines}
-        recipe = _Answering(self, facts, model, set(lines))
+        recipe = _Answering(self, facts, model, set(lines), stored.facts)
         for answered_line in answered.lines:
             line = lines.get(answered_line.line_id)
             if line is None:
@@ -610,6 +691,8 @@ class Work:
             else:
                 recipe.answer(line, answered_line)
         recipe.answer_steps(offered.steps, answered.steps)
+        if answered.difficulty and "difficulty" in recipe.kept:
+            recipe.errors.append(f"difficulty: {KEPT_ERROR}")
         if recipe.errors:
             raise Rejected(recipe.errors)
         if (learned := len(recipe.created) + len(recipe.learned)) > MAX_LEARNED:
@@ -648,19 +731,37 @@ class Work:
             self.wordings[wording.wording] = wording
 
 
+# Why an answer to a Review Item an editor confirmed is refused.
+KEPT_ERROR = "an editor confirmed it: leave it out"
+
+
 class _Answering:
     """One recipe's answer, line by line and step by step: its errors, or the facts and what it
     learns.
     """
 
-    def __init__(self, work: Work, facts: EnrichmentFacts, model: str, line_ids: set[str]) -> None:
+    def __init__(
+        self,
+        work: Work,
+        facts: EnrichmentFacts,
+        model: str,
+        line_ids: set[str],
+        stored: RecipeFacts,
+    ) -> None:
         self.work = work
         self.model = model
         self.line_ids = line_ids
         self.ingredients = dict(facts.ingredients)
         self.steps: dict[str, StepFacts] = {}
-        # How much of each line the answered steps use, all told.
-        self.portions: dict[str, float] = {}
+        # The Review Items the API keeps whole, and the facts it keeps them with.
+        self.kept = kept_items(stored)
+        self.stored = stored
+        # How much of each line the kept steps use, which the answered steps add to.
+        self.kept_portions: dict[str, float] = {}
+        for step_id, step in stored.steps.items():
+            for use in step.uses.uses if step_id in self.kept and step.uses else []:
+                self.kept_portions[use.ref] = self.kept_portions.get(use.ref, 0) + use.portion
+        self.portions = dict(self.kept_portions)
         self.errors: list[str] = []
         self.answered: set[str] = set()
         self.issues: list[EnrichmentIssue] = []
@@ -669,22 +770,25 @@ class _Answering:
 
     def answer(self, line: PacketLine, answered: AnsweredLine) -> None:
         self.answered.add(line.line_id)
+        if line.line_id in self.kept:
+            self._answer_kept(line, answered)
+            return
+        if answered.canonical is None or answered.fdc_id is None:
+            self.errors.append(f"{line.line_id}: give its canonical and fdc_id")
+            return
         parse = self._parse(line.line_id)
         wording = normalize_wording(_name(line.text, parse))
         food = next((f for f in line.fdc_candidates if f.fdc_id == answered.fdc_id), None)
+        kept_errors = self._check_kept_substitutions(line.line_id, answered)
+        self.errors += kept_errors
         quantity, errors = self._corrected(line, answered, parse)
         optional, optional_errors = _corrected_optional(answered, parse)
         errors += optional_errors
         errors += self._check_canonical(line, answered.canonical, wording)
         errors += _check_food(answered.fdc_id, answered.portion_id, food)
         errors += _check_substitutions(line, answered.substitutions)
-        own = self._matched_id(answered.canonical)
-        errors += [
-            f"substitute {s.wording}: Canonical Ingredient {s.canonical_id} is the line's own match"
-            for s in answered.substitutions
-            if s.canonical_id == own
-        ]
-        if errors or food is None:
+        errors += _own_match(answered.substitutions, self._matched_id(answered.canonical), "own")
+        if errors or kept_errors or food is None:
             self.errors += [f"{line.line_id}: {error}" for error in errors]
             return
         reason = answered.corrections_reason or ""
@@ -711,17 +815,6 @@ class _Answering:
         confidence = parse.confidence if parse else 0
         if answered.doubts:
             confidence = min(confidence, DOUBTED_CONFIDENCE)
-        substitutions = [
-            EnrichmentSubstitution(
-                wording=s.wording,
-                canonical_id=s.canonical_id,
-                ratio=s.ratio,
-                note=s.note,
-                fdc_id=s.fdc_id,
-                portion_id=s.portion_id,
-            )
-            for s in answered.substitutions
-        ]
         self.ingredients[line.line_id] = EnrichmentLineFacts(
             parse=parse,
             match=MatchFact(
@@ -732,15 +825,63 @@ class _Answering:
                 fdc_id=food.fdc_id,
                 portion_id=answered.portion_id,
             ),
-            substitutions=EnrichmentSubstitutionsFact(
-                provenance="llm", confidence=confidence, estimated=True, items=substitutions
-            )
-            if substitutions
-            else None,
+            substitutions=_substitutions(answered.substitutions, confidence),
         )
         # A line without a parse has only its text, which is no wording to learn.
         if parse:
             self._learn(wording, canonical)
+
+    def _answer_kept(self, line: PacketLine, answered: AnsweredLine) -> None:
+        """A confirmed line's answer: only its substitutions, never its kept match."""
+        line_id = line.line_id
+        corrects = (
+            answered.canonical,
+            answered.fdc_id,
+            answered.portion_id,
+            answered.quantity,
+            answered.optional,
+            answered.doubts,
+            answered.corrections_reason,
+        )
+        errors = (
+            [f"{KEPT_ERROR}, or give only its substitutions"]
+            if any(field is not None and field != [] for field in corrects)
+            else []
+        )
+        kept_errors = self._check_kept_substitutions(line_id, answered)
+        errors += _check_substitutions(line, answered.substitutions)
+        match = self.stored.ingredients[line_id].match
+        own = match.canonical_id if match else None
+        errors += _own_match(answered.substitutions, own, "confirmed")
+        if errors or kept_errors:
+            self.errors += [f"{line_id}: {error}" for error in errors] + kept_errors
+            return
+        parse = self._parse(line_id)
+        confidence = parse.confidence if parse else 0
+        if substitutions := _substitutions(answered.substitutions, confidence):
+            self.ingredients[line_id] = EnrichmentLineFacts(
+                parse=parse, substitutions=substitutions
+            )
+
+    def _check_kept_substitutions(self, line_id: str, answered: AnsweredLine) -> list[str]:
+        """Refuse substitutions for a line whose substitutions an editor confirmed, and a match
+        to one of them, each error naming its Review Item.
+        """
+        if f"{line_id}.substitutions" not in self.kept:
+            return []
+        kept = self.stored.ingredients[line_id].substitutions
+        errors = (
+            [f"{line_id}.substitutions: an editor confirmed them: leave them out"]
+            if answered.substitutions
+            else []
+        )
+        matched = self._matched_id(answered.canonical) if answered.canonical else None
+        if kept and matched in {item.canonical_id for item in kept.items}:
+            errors.append(
+                f"{line_id}: Canonical Ingredient {matched} is one of the line's confirmed "
+                "substitutes"
+            )
+        return errors
 
     def answer_steps(self, offered: list[PacketStep], answered: list[AnsweredStep]) -> None:
         """Each answered step's segments and uses, refusing a line whose portions across the
@@ -751,15 +892,20 @@ class _Answering:
             step = steps.get(answered_step.step_id)
             if step is None:
                 self.errors.append(f"no step {answered_step.step_id}")
+            elif answered_step.step_id in self.kept:
+                self.errors.append(f"{step.step_id}: {KEPT_ERROR}")
             elif answered_step.step_id in self.steps:
                 self.errors.append(f"{step.step_id}: answered twice")
             else:
                 self._answer_step(step, answered_step)
-        self.errors += [
-            f"{ref}: its portions add up to {total:g}, more than all of it"
-            for ref, total in self.portions.items()
-            if total > 1 + PORTION_TOLERANCE
-        ]
+        for ref, total in self.portions.items():
+            if total <= 1 + PORTION_TOLERANCE:
+                continue
+            kept = self.kept_portions.get(ref)
+            with_kept = f" with the confirmed steps' {kept:g}" if kept else ""
+            self.errors.append(
+                f"{ref}: its portions add up to {total:g}{with_kept}, more than all of it"
+            )
 
     def _answer_step(self, step: PacketStep, answered: AnsweredStep) -> None:
         """The step's segments, built by placing its kept offers and its ingredients, each with
@@ -981,6 +1127,36 @@ def _check_substitutions(line: PacketLine, answered: list[AnsweredSubstitution])
             for error in _check_food(substitution.fdc_id, substitution.portion_id, food)
         ]
     return errors
+
+
+def _own_match(substitutions: list[AnsweredSubstitution], own: str | None, kind: str) -> list[str]:
+    """Refuse a substitute that is the line's own (or confirmed) match."""
+    return [
+        f"substitute {s.wording}: Canonical Ingredient {s.canonical_id} is the line's {kind} match"
+        for s in substitutions
+        if own and s.canonical_id == own
+    ]
+
+
+def _substitutions(
+    answered: list[AnsweredSubstitution], confidence: float
+) -> EnrichmentSubstitutionsFact | None:
+    items = [
+        EnrichmentSubstitution(
+            wording=s.wording,
+            canonical_id=s.canonical_id,
+            ratio=s.ratio,
+            note=s.note,
+            fdc_id=s.fdc_id,
+            portion_id=s.portion_id,
+        )
+        for s in answered
+    ]
+    if not items:
+        return None
+    return EnrichmentSubstitutionsFact(
+        provenance="llm", confidence=confidence, estimated=True, items=items
+    )
 
 
 def _corrected_optional(

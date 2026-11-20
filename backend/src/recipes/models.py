@@ -593,6 +593,15 @@ def item_of(fact_id: str) -> str:
     return fact_id.partition(".")[0]
 
 
+def kept_items(facts: RecipeFacts) -> set[str]:
+    """The Review Items re-enrichment keeps whole: each with a Confirmed fact."""
+    return {
+        item_of(path)
+        for path in fact_paths(facts)
+        if (fact := fact_at(facts, path)) and fact.confirmed
+    }
+
+
 # Every kind of fact a recipe stores.
 type StoredFact = (
     ParseFact | MatchFact | ConversionFact | SubstitutionsFact | SegmentsFact | UsesFact
