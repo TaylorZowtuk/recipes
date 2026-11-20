@@ -246,8 +246,8 @@ def sent(
 ) -> bool:
     """Write one recipe's enrichment and print its status and Enrichment Issues. Re-enriching, a
     dry run first prints its fact changes, and only `write` writes them; both name the version
-    the changes are against, so the API refuses them if the recipe changed since. False when the
-    API refused it.
+    the changes are against (the one in its packet), so the API refuses them if the recipe changed
+    since. False when the API refused it.
     """
     title, body_bytes = stored.original.title, enrichment.model_dump_json().encode()
     url = f"{base_url}/api/recipes/{stored.id}/enrichment"

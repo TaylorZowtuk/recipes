@@ -1070,6 +1070,33 @@ def test_a_recipe_changed_between_the_dry_run_and_the_write_is_refused(
     assert "changed since" in capsys.readouterr().out
 
 
+def test_a_recipe_an_editor_changed_after_the_dry_run_is_refused_by_the_write(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    chosen = Chosen(ids=(before["id"],))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    answered = reenrichment(json.loads(capsys.readouterr().out))
+    assert apply(BASE_URL, send, SNAPSHOT, answered, chosen=chosen) == 0
+    # After the dry run an editor resolves the oil's issue, which leaves its kept items as they were.
+    changed = stored(editor_client, before["id"])
+    assert changed["issues"]
+    for issue in changed["issues"]:
+        issue["status"] = "resolved"
+    changed = api_store.update_recipe(Recipe.model_validate(changed)).model_dump(mode="json")
+    capsys.readouterr()
+    adapter.requests.clear()
+
+    failed = apply(BASE_URL, send, SNAPSHOT, answered, chosen=chosen, write=True)
+
+    assert failed == 1
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
+    assert stored(editor_client, before["id"]) == changed
+    assert "its offer changed since the packet" in capsys.readouterr().out
+
+
 def test_reenriching_a_pending_or_unknown_recipe_is_refused(
     editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
 ) -> None:

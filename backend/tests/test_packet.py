@@ -1415,7 +1415,11 @@ def test_a_packet_without_confirmed_facts_is_the_pending_one() -> None:
 
     packet = work(pending).packet()
 
-    assert work(unconfirmed).packet() == packet
+    # Only the version of the recipe being re-enriched, and so its offer_id, differ.
+    reenriched = work(unconfirmed).packet()
+    assert [r.version for r in reenriched.recipes] == [unconfirmed.version]
+    without = {"recipes": {0: {"offer_id", "version"}}}
+    assert reenriched.model_dump(exclude=without) == packet.model_dump(exclude=without)
     assert packet.instructions == INSTRUCTIONS
     (offered,) = packet.model_dump()["recipes"]
     assert set(offered) == {"recipe_id", "offer_id", "title", "stated_times", "lines", "steps"}
@@ -1438,6 +1442,13 @@ def test_the_offer_id_changes_when_an_item_becomes_confirmed() -> None:
         return offer_id(work(reviewed(recipe(), ingredients=oil(match=match))))
 
     assert offered(confirmed=True) != offered(confirmed=False)
+
+
+def test_a_reenriched_recipes_offer_id_changes_with_its_version() -> None:
+    def offered(version: int) -> str:
+        return offer_id(work(reviewed(recipe()).model_copy(update={"version": version})))
+
+    assert offered(3) != offered(4)
 
 
 def kept() -> Work:

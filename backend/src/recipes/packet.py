@@ -359,6 +359,8 @@ class PacketRecipe(Strict):
     recipe_id: str
     # The SHA-256 of what this recipe is offered, so an answer to an older offer is refused.
     offer_id: str = ""
+    # The version of a recipe being re-enriched, so any change to it since changes its offer_id.
+    version: int | None = KEPT
     title: str
     stated_times: StatedTimes
     lines: list[PacketLine]
@@ -547,6 +549,7 @@ class Work:
         uses = default_uses(recipe, facts)
         offered = PacketRecipe(
             recipe_id=recipe.id,
+            version=None if recipe.status == "pending" else recipe.version,
             title=recipe.original.title,
             stated_times=recipe.original.stated_times,
             lines=lines,

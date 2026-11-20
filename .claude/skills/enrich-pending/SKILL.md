@@ -52,7 +52,7 @@ Done when apply has accepted, rejected or failed every item and every rejection 
 
 Done when every Pending recipe in the first Work Packet is written or recorded as left Pending with its reason.
 
-To re-enrich recipes that aren't Pending, when the user asks, run the same steps with `--recipe <id>` or `--stale` on all three commands (`enrich stale <BASE>` lists the stale ones). `apply` then prints each recipe's fact changes and writes nothing: show them to the user, and only once they agree, apply again with `--write`. A recipe that changed since that dry run is refused: make a fresh packet, answer it and dry-run it again.
+To re-enrich recipes that aren't Pending, when the user asks, run the same steps with `--recipe <id>` or `--stale` on all three commands (`enrich stale <BASE>` lists the stale ones). `apply` then prints each recipe's fact changes and writes nothing: show them to the user, and only once they agree, apply again with `--write`. A recipe that changed in any way since its packet, and so since that dry run, is refused because its offer changed: make a fresh packet, answer it and dry-run it again.
 
 ## 5. Summarise in chat
 
