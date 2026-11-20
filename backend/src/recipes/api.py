@@ -903,27 +903,23 @@ def put_enrichment(
 
 def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
     """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
-    on re-enrichment, refused if the facts don't fit together.
+    (a Pending recipe has none), refused if the facts don't fit together.
     """
-    facts, issues, status = _filled(body, snapshot), body.issues, recipe.status
-    if recipe.status == "pending":
-        status = _enriched_status(recipe)
-    else:
-        stored = recipe.facts
-        kept = {
-            item_of(path)
-            for path in fact_paths(stored)
-            if (fact := fact_at(stored, path)) and fact.confirmed
-        }
-        facts = RecipeFacts(
-            ingredients=_merged(stored.ingredients, facts.ingredients, kept, IngredientFacts()),
-            steps=_merged(stored.steps, facts.steps, kept, StepFacts()),
-            difficulty=stored.difficulty if "difficulty" in kept else facts.difficulty,
-        )
-        issues = [
-            *(i for i in recipe.issues if i.status == "resolved" or item_of(i.fact_id) in kept),
-            *(i for i in body.issues if item_of(i.fact_id) not in kept),
-        ]
+    new, stored = _filled(body, snapshot), recipe.facts
+    kept = {
+        item_of(path)
+        for path in fact_paths(stored)
+        if (fact := fact_at(stored, path)) and fact.confirmed
+    }
+    facts = RecipeFacts(
+        ingredients=_merged(stored.ingredients, new.ingredients, kept, IngredientFacts()),
+        steps=_merged(stored.steps, new.steps, kept, StepFacts()),
+        difficulty=stored.difficulty if "difficulty" in kept else new.difficulty,
+    )
+    issues = [
+        *(i for i in recipe.issues if i.status == "resolved" or item_of(i.fact_id) in kept),
+        *(i for i in body.issues if item_of(i.fact_id) not in kept),
+    ]
     _check_together(facts)
     return recipe.model_copy(
         update={
@@ -931,7 +927,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
             "enrichment_version": body.enrichment_version,
             "fdc_release": snapshot.release,
             "issues": issues,
-            "status": status,
+            "status": _enriched_status(recipe) if recipe.status == "pending" else recipe.status,
         }
     )
 
