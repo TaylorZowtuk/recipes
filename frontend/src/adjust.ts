@@ -1,6 +1,7 @@
 import { decimal, FRACTIONS, formatAmount } from "./amount";
 import type { ConversionFact, Factor, IngredientFacts, StepFacts } from "./api/client";
 import { EDITOR_KEPT } from "./factEdits";
+import type { Version } from "./ourVersion";
 
 // The Confidence Threshold: a volume or count shows as a weight only when its conversion is
 // confirmed with at least this confidence.
@@ -12,8 +13,14 @@ export type Units = "written" | "metric" | "us";
 // gives a volume or count.
 export type UnitChoice = Units | "g" | "oz";
 
-// The Adjust choices: a scale, a unit system and each tapped line's unit, by ingredient ref.
-export type AdjustChoices = { scale: Factor; units: Units; taps?: Record<string, UnitChoice> };
+// The Adjust choices: a scale, a unit system, each tapped line's unit, by ingredient ref, and the
+// version shown (Our Version when there is one, unless the Original is chosen).
+export type AdjustChoices = {
+  scale: Factor;
+  units: Units;
+  taps?: Record<string, UnitChoice>;
+  version?: Version;
+};
 export const AS_WRITTEN: AdjustChoices = { scale: 1, units: "written" };
 
 type Line = IngredientFacts;

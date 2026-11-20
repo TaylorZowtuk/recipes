@@ -920,6 +920,24 @@ h1:focus {
   margin-top: var(--space);
 }
 
+/* What Our Version changed on a line or step, quietly under it: "was ¾ cup", "added in Our Version". */
+.ingredients li:has(.our-version-note) {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+.our-version-note {
+  display: block;
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  font-style: italic;
+}
+
+.our-version-about {
+  margin: 0;
+}
+
 .steps {
   margin: 0;
   padding-left: 1.75em;
