@@ -15,7 +15,7 @@ import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
-import { ClockIcon } from "./icons";
+import { CheckIcon, ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { Plate } from "./Plate";
 import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
@@ -38,6 +38,7 @@ import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
 import { type DurationPiece, stepText } from "./stepText";
+import { stepTicks, useStepTicks } from "./stepTicks";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
@@ -254,6 +255,7 @@ function RecipeTabs({
   const opener = useRef<HTMLElement | null>(null);
   const location = useLocation();
   const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
+  const ticks = useStepTicks(recipe.id);
   const items = isEditor ? reviewOf(recipe) : undefined;
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
@@ -369,6 +371,7 @@ function RecipeTabs({
                   facts={recipe.facts}
                   review={review}
                   choices={choices}
+                  ticks={ticks}
                 />
                 {bar("steps")}
               </>
@@ -601,19 +604,22 @@ function ParsedLine({
 // The steps, numbered through the whole recipe across its Components. Where a step names an
 // ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
 // is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
-// buttons follow in a row. A captured recipe has no `recipeId` yet, so no Timers.
+// buttons follow in a row. Under each step's number, its Step tick: a ticked step dims. A captured
+// recipe has no `recipeId` yet, so no Timers and no ticks.
 export function Steps({
   recipeId,
   original,
   facts,
   review,
   choices = AS_WRITTEN,
+  ticks = new Set(),
 }: {
   recipeId?: string;
   original: Original;
   facts?: RecipeFacts;
   review?: ReviewTarget;
   choices?: AdjustChoices;
+  ticks?: ReadonlySet<string>;
 }) {
   return byComponent(original.steps).map((part) => (
     <section key={part.start} className="component">
@@ -651,23 +657,52 @@ export function Steps({
           const timerRow = pieces.flatMap((piece, n) =>
             typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
           );
+          const body =
+            item && review ? (
+              <>
+                <ReviewButton item={item} review={review}>
+                  {shown}
+                </ReviewButton>
+                {timerRow.length > 0 && (
+                  <div className="step-timers">
+                    <ClockIcon />
+                    {timerRow}
+                  </div>
+                )}
+              </>
+            ) : (
+              shown
+            );
+          if (!recipeId)
+            return (
+              <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
+                {body}
+              </li>
+            );
+          const number = part.start + index;
+          const done = ticks.has(step.id);
           return (
-            <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
-              {item && review ? (
-                <>
-                  <ReviewButton item={item} review={review}>
-                    {shown}
-                  </ReviewButton>
-                  {timerRow.length > 0 && (
-                    <div className="step-timers">
-                      <ClockIcon />
-                      {timerRow}
-                    </div>
-                  )}
-                </>
-              ) : (
-                shown
-              )}
+            <li
+              key={step.id}
+              id={`step-${step.id}`}
+              tabIndex={-1}
+              className={done ? "step step-ticked" : "step"}
+            >
+              <div className="step-mark">
+                <span className="step-number" aria-hidden="true">
+                  {number}
+                </span>
+                <button
+                  type="button"
+                  className="step-tick"
+                  aria-pressed={done}
+                  aria-label={`Step ${number} done`}
+                  onClick={() => stepTicks.toggle(recipeId, step.id)}
+                >
+                  <CheckIcon />
+                </button>
+              </div>
+              <div className="step-body">{body}</div>
             </li>
           );
         })}
