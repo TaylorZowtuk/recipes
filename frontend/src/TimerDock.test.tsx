@@ -1,7 +1,10 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
-import { TimerDock } from "./TimerDock";
+import { TimerDock, TimerDockHost } from "./TimerDock";
 import type { TimerView } from "./timers";
 
 const shown: { timers: TimerView[]; notice: string | null } = { timers: [], notice: null };
@@ -87,5 +90,37 @@ describe("TimerDock", () => {
   it("shows its notice in the status region", () => {
     const markup = render([view({})], "The 8-10 minutes timer is already running.");
     expect(markup).toMatch(/role="status"[^>]*>The 8-10 minutes timer is already running\.</);
+  });
+
+  it("stays in the place shown last when an earlier place goes", () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    globalThis.ResizeObserver ??= class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    shown.timers = [view({})];
+    const page = document.createElement("div");
+    document.body.append(page);
+    const root = createRoot(page);
+    const places = (first: boolean) => (
+      <MemoryRouter>
+        <TimerDock />
+        {first && (
+          <div id="first">
+            <TimerDockHost />
+          </div>
+        )}
+        <div id="second">
+          <TimerDockHost />
+        </div>
+      </MemoryRouter>
+    );
+    act(() => root.render(places(true)));
+    expect(page.querySelector("#second .timer-dock")).not.toBeNull();
+    act(() => root.render(places(false)));
+    expect(page.querySelector("#second .timer-dock")).not.toBeNull();
+    act(() => root.unmount());
+    page.remove();
   });
 });

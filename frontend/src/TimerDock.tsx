@@ -27,8 +27,11 @@ const setHost = (element: HTMLElement | null) => {
 export function TimerDockHost() {
   const place = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    setHost(place.current);
-    return () => setHost(null);
+    const element = place.current;
+    setHost(element);
+    return () => {
+      if (host === element) setHost(null);
+    };
   }, []);
   return <div ref={place} />;
 }
