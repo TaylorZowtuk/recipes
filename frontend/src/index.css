@@ -18,7 +18,6 @@
   --emphasis: #c2362b;
   --emphasis-text: #b02e24;
   --done: #2e5e45;
-  --ticked-opacity: 0.45;
   --warning: #f6ebd2;
   --warning-text: #6e5210;
   --cooking-bg: #f7f8f5;
@@ -944,7 +943,8 @@ h1:focus {
 }
 
 /* A step with a Step tick: its number, and the tick under it, in a column of their own in place of
-   the list marker. A ticked step dims, all but its tick. */
+   the list marker. A ticked step dims: its number and text go to the secondary text colour, which
+   still reads in a bright kitchen, while its tick and Timers keep their own colours. */
 .steps:has(> .step) {
   padding-left: 0;
 }
@@ -982,7 +982,7 @@ h1:focus {
 
 .step-ticked .step-number,
 .step-ticked .step-body {
-  opacity: var(--ticked-opacity);
+  color: var(--text-secondary);
 }
 
 .facts div {
@@ -1039,7 +1039,8 @@ h1:focus {
 /* Off while offline: greyed out, as every edit that isn't queued is. */
 .ingest-form fieldset:disabled,
 .review-form fieldset:disabled,
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -2561,19 +2562,37 @@ html:has(.cooking[open]) {
 }
 
 .cooking-top .cooking-size[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-soft-text);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .cooking-progress {
   padding: calc(var(--space) * 2) var(--cooking-right) 0 var(--cooking-left);
 }
 
-.cooking-progress-text {
-  margin: 0 0 var(--space);
+/* The step count, the Adjust choices when they aren't as written, and whether the screen stays on:
+   always in view, whatever the step's length. */
+.cooking-progress-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: calc(var(--space) * 3);
+  margin-bottom: var(--space);
   color: var(--text-secondary);
   font-size: var(--text-small);
+}
+
+.cooking-progress-row p {
+  margin: 0;
+}
+
+.cooking-progress-text,
+.cooking-adjusted {
   font-weight: 700;
+}
+
+.cooking-screen {
+  margin-left: auto;
 }
 
 .cooking-progress progress {
@@ -2621,6 +2640,7 @@ html:has(.cooking[open]) {
 
 .cooking-step {
   margin: 0 0 calc(var(--space) * 6);
+  overflow-wrap: anywhere;
   font-size: var(--text-cooking-step);
   line-height: 1.35;
 }
@@ -2648,12 +2668,6 @@ html:has(.cooking[open]) {
   margin: 0 0 calc(var(--space) * 2);
   font-size: var(--text-body);
   font-weight: 700;
-}
-
-.cooking-screen {
-  margin: calc(var(--space) * 4) 0 0;
-  color: var(--text-secondary);
-  font-size: var(--text-small);
 }
 
 /* On a wide screen the progress and Back and Next keep to the step's width. */

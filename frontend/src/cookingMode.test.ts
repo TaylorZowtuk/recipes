@@ -1,20 +1,14 @@
-import { afterEach, expect, it, vi } from "vitest";
-import { isCookingModeOpen, setCookingModeOpen, subscribeCookingMode } from "./cookingMode";
+import { expect, it } from "vitest";
+import { isCookingModeOpen, openCookingMode } from "./cookingMode";
 
-afterEach(() => setCookingModeOpen(false));
-
-it("says whether cooking mode is open and tells subscribers when that changes", () => {
-  const listener = vi.fn();
-  const unsubscribe = subscribeCookingMode(listener);
+it("is open while any opening is unreleased, and each release counts once", () => {
   expect(isCookingModeOpen()).toBe(false);
-
-  setCookingModeOpen(true);
-  setCookingModeOpen(true);
+  const first = openCookingMode();
+  const second = openCookingMode();
   expect(isCookingModeOpen()).toBe(true);
-  expect(listener).toHaveBeenCalledTimes(1);
-
-  unsubscribe();
-  setCookingModeOpen(false);
+  first();
+  first();
+  expect(isCookingModeOpen()).toBe(true);
+  second();
   expect(isCookingModeOpen()).toBe(false);
-  expect(listener).toHaveBeenCalledTimes(1);
 });

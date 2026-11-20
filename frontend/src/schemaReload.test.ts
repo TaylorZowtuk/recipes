@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { setCookingModeOpen } from "./cookingMode";
+import { openCookingMode } from "./cookingMode";
 import { reloadForSchema } from "./schemaReload";
 
 // A service worker registration whose update finds a new worker, installing until `installed()`,
@@ -165,15 +165,15 @@ it("holds off by default while cooking mode is open, and reloads once it closes"
     setItem: (key: string, value: string) => void stored.set(key, value),
   });
   vi.stubGlobal("location", { reload });
+  const release = openCookingMode();
   try {
-    setCookingModeOpen(true);
     expect(await reloadForSchema(2)).toBe(false);
     expect(reload).not.toHaveBeenCalled();
-    setCookingModeOpen(false);
+    release();
     expect(await reloadForSchema(2)).toBe(true);
     expect(reload).toHaveBeenCalled();
   } finally {
-    setCookingModeOpen(false);
+    release();
     vi.unstubAllGlobals();
   }
 });

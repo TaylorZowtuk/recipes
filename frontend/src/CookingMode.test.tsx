@@ -13,13 +13,19 @@ import { timers } from "./timers";
 
 // Cooking mode, opened from the recipe page in a DOM: where it starts, what Next, Back, Finish and
 // Close do to the Step ticks, the text size it keeps, and the recipe it holds while open.
-const shown: { recipe?: Recipe } = {};
+// `loaded` stands in for what loading the recipe gave, when it isn't `recipe`; `cards` for the
+// Collection's cards, when they aren't `card`.
+const shown: { recipe?: Recipe; loaded?: unknown; cards?: Card[] } = {};
 vi.mock("./collection", () => ({
   useCollection: () => ({
     state: "ready",
-    value: { cards: [card], canonical_ingredients: [], kitchen_settings: { store_categories: [] } },
+    value: {
+      cards: shown.cards ?? [card],
+      canonical_ingredients: [],
+      kitchen_settings: { store_categories: [] },
+    },
   }),
-  useRecipe: () => ({ state: "ready", value: shown.recipe }),
+  useRecipe: () => shown.loaded ?? { state: "ready", value: shown.recipe },
   useSync: () => undefined,
 }));
 vi.mock("./session", () => ({
@@ -91,6 +97,7 @@ beforeAll(() => {
     this.open = false;
     this.dispatchEvent(new Event("close"));
   };
+  Element.prototype.scrollIntoView ??= () => {};
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -104,6 +111,8 @@ afterEach(() => {
   host.remove();
   stepTicks.clear(card.id);
   localStorage.clear();
+  shown.loaded = undefined;
+  shown.cards = undefined;
   for (const timer of timers.snapshot().timers) timers.cancel(timer.id);
   Reflect.deleteProperty(navigator, "wakeLock");
 });
@@ -144,7 +153,12 @@ const inCooking = (name: string | RegExp) => {
 const tap = (button: HTMLButtonElement) => act(() => button.click());
 const cook = () => tap(pageButton(/^(Cook|Resume)$/));
 const progress = () => cooking()?.querySelector(".cooking-progress-text")?.textContent;
-const stepShown = () => cooking()?.querySelector(".cooking-step")?.textContent;
+// The step as shown, without the step number said only to a screen reader.
+function stepShown() {
+  const step = cooking()?.querySelector(".cooking-step")?.cloneNode(true) as Element | undefined;
+  for (const hidden of step?.querySelectorAll(".visually-hidden") ?? []) hidden.remove();
+  return step?.textContent;
+}
 const ticks = () => [...stepTicks.snapshot(card.id)].sort();
 
 describe("the Cook button", () => {
@@ -186,7 +200,7 @@ describe("cooking mode", () => {
     open();
     cook();
     expect(progress()).toBe("Step 1 of 3");
-    expect(inCooking("Back").disabled).toBe(true);
+    expect(inCooking("Back").getAttribute("aria-disabled")).toBe("true");
     tap(inCooking("Next"));
     expect(progress()).toBe("Step 2 of 3");
     expect(ticks()).toEqual(["s1"]);
@@ -195,6 +209,22 @@ describe("cooking mode", () => {
     expect(ticks()).toEqual(["s1"]);
     tap(inCooking("Next"));
     expect(ticks()).toEqual(["s1"]);
+  });
+
+  it("keeps focus on Back when it reaches step 1, where Back does nothing", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    const back = inCooking("Back");
+    expect(back.getAttribute("aria-disabled")).toBe("false");
+    act(() => back.focus());
+    tap(back);
+    expect(progress()).toBe("Step 1 of 3");
+    expect(back.getAttribute("aria-disabled")).toBe("true");
+    expect(back.disabled).toBe(false);
+    expect(document.activeElement).toBe(back);
+    tap(back);
+    expect(progress()).toBe("Step 1 of 3");
   });
 
   it("finishes on the last step: ticks it, clears the recipe's ticks and closes", () => {
@@ -267,27 +297,48 @@ describe("cooking mode", () => {
     cook();
     expect(stepShown()).toBe("Melt ¼ cup butter.");
     expect(find(cooking(), /^Adjust/)).toBeUndefined();
+    expect(cooking()?.querySelector(".cooking-progress .cooking-adjusted")?.textContent).toBe("2×");
+  });
+
+  it("says nothing of Adjust when the recipe is as written", () => {
+    open();
+    cook();
+    expect(cooking()?.querySelector(".cooking-adjusted")).toBeNull();
+  });
+
+  it("says which step it is in the step's live text, for a screen reader", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    expect(cooking()?.querySelector(".cooking-step .visually-hidden")?.textContent).toBe(
+      "Step 2 of 3. ",
+    );
   });
 
   it("keeps a larger text size on this device", () => {
     open();
     cook();
-    expect(inCooking("Larger text").getAttribute("aria-pressed")).toBe("false");
-    tap(inCooking("Larger text"));
-    expect(inCooking("Larger text").getAttribute("aria-pressed")).toBe("true");
+    expect(inCooking("A+ larger text").getAttribute("aria-pressed")).toBe("false");
+    tap(inCooking("A+ larger text"));
+    expect(inCooking("A+ larger text").getAttribute("aria-pressed")).toBe("true");
     expect(cooking()?.classList.contains("cooking-large")).toBe(true);
+    expect(cooking()?.querySelector(".cooking-size .visually-hidden")?.textContent).toBe(
+      " larger text",
+    );
     expect(localStorage.getItem("plateful.cookingTextSize")).toBe("large");
     tap(inCooking("Close"));
     cook();
-    expect(inCooking("Larger text").getAttribute("aria-pressed")).toBe("true");
-    tap(inCooking("Larger text"));
+    expect(inCooking("A+ larger text").getAttribute("aria-pressed")).toBe("true");
+    tap(inCooking("A+ larger text"));
     expect(localStorage.getItem("plateful.cookingTextSize")).toBeNull();
   });
 
   it("says the screen may turn off where the browser can't keep it on", () => {
     open();
     cook();
-    expect(cooking()?.querySelector(".cooking-screen")?.textContent).toBe("Screen may turn off");
+    expect(cooking()?.querySelector(".cooking-progress .cooking-screen")?.textContent).toBe(
+      "Screen may turn off",
+    );
   });
 
   it("keeps the screen on while open, and lets it go on Close", async () => {
@@ -308,12 +359,48 @@ describe("cooking mode", () => {
     cook();
     tap(inCooking("Next"));
     tap(inCooking("Start a timer for 8-10 minutes"));
-    const dock = document.querySelector(".timer-dock");
+    const dock = document.querySelector<HTMLElement>(".timer-dock");
     expect(dock?.hidden).toBe(false);
     expect(cooking()?.contains(dock)).toBe(true);
     tap(inCooking("Close"));
     expect(document.querySelector(".timer-dock")?.closest("dialog")).toBeNull();
     expect(document.querySelectorAll(".timer-dock")).toHaveLength(1);
+  });
+
+  it("goes to the step a Timer's link names", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    tap(inCooking("Start a timer for 8-10 minutes"));
+    tap(inCooking("Next"));
+    expect(progress()).toBe("Step 3 of 3");
+    const link = cooking()?.querySelector<HTMLAnchorElement>(".timer-jump");
+    act(() => link?.click());
+    expect(progress()).toBe("Step 2 of 3");
+    expect(ticks()).toEqual(["s1", "s2"]);
+  });
+
+  it("stays open on what it opened with when a newer version fails to load", () => {
+    open();
+    cook();
+    tap(inCooking("Next"));
+    shown.loaded = { state: "failed", notFound: false, offline: true, retry: () => {} };
+    act(() => root?.render(page()));
+    expect(cooking()?.open).toBe(true);
+    expect(progress()).toBe("Step 2 of 3");
+    expect(isCookingModeOpen()).toBe(true);
+    tap(inCooking("Close"));
+    expect(cooking()).toBeNull();
+    expect(isCookingModeOpen()).toBe(false);
+  });
+
+  it("stays open when the recipe goes from the Collection", () => {
+    open();
+    cook();
+    shown.cards = [];
+    act(() => root?.render(page()));
+    expect(cooking()?.open).toBe(true);
+    expect(stepShown()).toBe("Melt 2 tbsp butter.");
   });
 
   it("keeps the recipe it opened with when a newer version arrives", () => {

@@ -47,9 +47,12 @@ test("cooking mode resumes at the first step without a tick, and Finish clears t
     "neutral oil 3 tbsp",
   );
   await expect(inCooking(page, "Start a timer for 8-10 minutes")).toBeVisible();
-  await inCooking(page, "Close").click();
+  await page.keyboard.press("Escape");
   await expect(cooking(page)).toBeHidden();
+  await expect(cookButton(page)).toBeFocused();
 
+  // The ticks are kept on this device, so they're still there after a reload.
+  await page.reload();
   await expect(cookButton(page)).toHaveText("Resume");
   await page.getByRole("tab", { name: "Steps" }).click();
   await expect(tick(page, 1)).toHaveAttribute("aria-pressed", "true");

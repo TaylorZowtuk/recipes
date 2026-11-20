@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { AdjustButton } from "./AdjustSheet";
 import { type AdjustChoices, AS_WRITTEN, type LineView, lineView, type UnitChoice } from "./adjust";
 import type { Collection, Factor, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
-import { CookButton } from "./CookingMode";
+import { CookButton, type Cooking, CookingMode } from "./CookingMode";
 import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
@@ -76,6 +76,10 @@ function RecipePage() {
     scale: linkedScale(search),
     units: "written",
   }));
+  // Cooking mode lives here, not in the hero, so it stays open on what it opened with while the
+  // page can't show the recipe: a newer version that failed to load, or the card gone.
+  const [cooking, setCooking] = useState<Cooking | null>(null);
+  const cookOpener = useRef<HTMLButtonElement>(null);
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
   // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
@@ -153,7 +157,13 @@ function RecipePage() {
                       {ready && (
                         <div className="hero-actions">
                           <AdjustButton choices={choices} onChange={setChoices} pending={pending} />
-                          <CookButton recipe={ready} choices={pending ? AS_WRITTEN : choices} />
+                          <CookButton
+                            recipe={ready}
+                            opener={cookOpener}
+                            onCook={() =>
+                              setCooking({ recipe: ready, choices: pending ? AS_WRITTEN : choices })
+                            }
+                          />
                           <EditorOnly>
                             <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
                             <AddToDayButton recipe={card} />
@@ -168,6 +178,7 @@ function RecipePage() {
           : {}
       }
     >
+      {cooking && <CookingMode {...cooking} opener={cookOpener} onClose={() => setCooking(null)} />}
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}

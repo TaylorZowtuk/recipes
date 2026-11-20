@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { useLocation } from "react-router";
+import { adjustSummary } from "./AdjustSheet";
 import { type AdjustChoices, lineView } from "./adjust";
 import type { Recipe } from "./api/client";
-import { setCookingModeOpen } from "./cookingMode";
+import { openCookingMode } from "./cookingMode";
 import { BackIcon, CloseIcon, ForwardIcon } from "./icons";
 import { stepNodes, TimerButton } from "./StepPieces";
 import { stepText } from "./stepText";
@@ -34,53 +36,45 @@ const SCREEN: Record<ScreenStatus, string> = {
   off: "Screen may turn off",
 };
 
-type Cooking = { recipe: Recipe; choices: AdjustChoices };
+export type Cooking = { recipe: Recipe; choices: AdjustChoices };
 
-// The recipe page's Cook button, Resume once any of the recipe's steps has a Step tick. It opens
-// Cooking mode with the recipe and Adjust choices as they are, which hold until it closes; focus
-// then returns here.
-export function CookButton({ recipe, choices }: Cooking) {
+// The recipe page's Cook button, Resume once any of the recipe's steps has a Step tick.
+export function CookButton({
+  recipe,
+  opener,
+  onCook,
+}: {
+  recipe: Recipe;
+  opener: RefObject<HTMLButtonElement | null>;
+  onCook: () => void;
+}) {
   const ticks = useStepTicks(recipe.id);
-  const [cooking, setCooking] = useState<Cooking | null>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-  const closed = useRef(false);
-
-  useEffect(() => {
-    if (cooking || !closed.current) return;
-    closed.current = false;
-    opener.current?.focus();
-  }, [cooking]);
-
   const { steps } = recipe.original;
   if (steps.length === 0) return null;
   return (
-    <>
-      <button
-        ref={opener}
-        type="button"
-        className="button cook-open"
-        aria-haspopup="dialog"
-        onClick={() => setCooking({ recipe, choices })}
-      >
-        {steps.some((step) => ticks.has(step.id)) ? "Resume" : "Cook"}
-      </button>
-      {cooking && (
-        <CookingMode
-          {...cooking}
-          onClose={() => {
-            closed.current = true;
-            setCooking(null);
-          }}
-        />
-      )}
-    </>
+    <button
+      ref={opener}
+      type="button"
+      className="button cook-open"
+      aria-haspopup="dialog"
+      onClick={onCook}
+    >
+      {steps.some((step) => ticks.has(step.id)) ? "Resume" : "Cook"}
+    </button>
   );
 }
 
 // Cooking mode: the recipe full-screen, one step at a time, from the first without a Step tick.
 // Next ticks the step it leaves; Finish ticks the last, clears the recipe's ticks and closes; Back
-// and Close change no tick. The screen is kept on, and running Timers show above Back and Next.
-function CookingMode({ recipe, choices, onClose }: Cooking & { onClose: () => void }) {
+// and Close change no tick. It keeps the recipe and Adjust choices it opened with, whatever the page
+// under it loads, until it closes, and focus then returns to `opener`. The screen is kept on,
+// running Timers show above Back and Next, and a Timer's link to one of its steps goes there.
+export function CookingMode({
+  recipe,
+  choices,
+  opener,
+  onClose,
+}: Cooking & { opener: RefObject<HTMLElement | null>; onClose: () => void }) {
   const { steps, ingredients, title } = recipe.original;
   const [at, setAt] = useState(() => {
     const ticked = stepTicks.ticked(
@@ -97,13 +91,27 @@ function CookingMode({ recipe, choices, onClose }: Cooking & { onClose: () => vo
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const id = useId();
+  const adjusted = adjustSummary(choices);
 
   useEffect(() => {
-    setCookingModeOpen(true);
+    const release = openCookingMode();
     if (!dialog.current?.open) dialog.current?.showModal();
     heading.current?.focus();
-    return () => setCookingModeOpen(false);
-  }, []);
+    return () => {
+      release();
+      opener.current?.focus();
+    };
+  }, [opener]);
+
+  // Only a navigation made while open moves it: the step in the address when it opened is old.
+  const { hash, key } = useLocation();
+  const shownKey = useRef(key);
+  useEffect(() => {
+    if (shownKey.current === key) return;
+    shownKey.current = key;
+    const linked = steps.findIndex((step) => hash === `#step-${step.id}`);
+    if (linked >= 0) setAt(linked);
+  }, [key, hash, steps]);
 
   const step = steps[at];
   if (!step) return null;
@@ -134,25 +142,31 @@ function CookingMode({ recipe, choices, onClose }: Cooking & { onClose: () => vo
         <button
           type="button"
           className="icon-button cooking-size"
-          aria-label="Larger text"
           aria-pressed={large}
           onClick={() => {
             keepLarge(!large);
             setLarge(!large);
           }}
         >
-          A+
+          A+<span className="visually-hidden"> larger text</span>
         </button>
       </div>
       <div className="cooking-progress">
-        <p id={`${id}-progress`} className="cooking-progress-text">
-          Step {number} of {steps.length}
-        </p>
+        <div className="cooking-progress-row">
+          <p id={`${id}-progress`} className="cooking-progress-text">
+            Step {number} of {steps.length}
+          </p>
+          {adjusted && <p className="cooking-adjusted">{adjusted}</p>}
+          <p role="status" className="cooking-screen">
+            {SCREEN[screen]}
+          </p>
+        </div>
         <progress max={steps.length} value={number} aria-labelledby={`${id}-progress`} />
       </div>
       <div className="cooking-body">
         {step.component && <p className="cooking-component">{step.component}</p>}
         <p className="cooking-step" aria-live="polite">
+          <span className="visually-hidden">{`Step ${number} of ${steps.length}. `}</span>
           {stepNodes(stepText(step, recipe.facts, choices), (piece, n) => (
             <TimerButton
               key={n}
@@ -191,17 +205,14 @@ function CookingMode({ recipe, choices, onClose }: Cooking & { onClose: () => vo
             </ul>
           </section>
         )}
-        <p role="status" className="cooking-screen">
-          {SCREEN[screen]}
-        </p>
       </div>
       <TimerDockHost />
       <div className="cooking-nav">
         <button
           type="button"
           className="button button-secondary"
-          disabled={at === 0}
-          onClick={() => setAt(at - 1)}
+          aria-disabled={at === 0}
+          onClick={() => at > 0 && setAt(at - 1)}
         >
           <BackIcon />
           Back
