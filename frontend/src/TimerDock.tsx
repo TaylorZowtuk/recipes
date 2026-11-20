@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router";
 import { CloseIcon, PauseIcon, PlayIcon } from "./icons";
 import { focusTitle } from "./Screen";
@@ -7,12 +8,43 @@ import { type TimerView, timers, useTimers } from "./timers";
 
 const PHASE_CLASS = { counting: "", chimed: " timer-chimed", alarming: " timer-alarming" };
 
+// Where the dock goes while a full-screen modal, Cooking mode, is open: inside it, since the modal
+// covers the page and makes it inert. Null puts it back in the page.
+let host: HTMLElement | null = null;
+const hostListeners = new Set<() => void>();
+const subscribeHost = (listener: () => void) => {
+  hostListeners.add(listener);
+  return () => {
+    hostListeners.delete(listener);
+  };
+};
+const setHost = (element: HTMLElement | null) => {
+  host = element;
+  for (const listener of hostListeners) listener();
+};
+
+/** Shows the Timers here, in place of the page, while mounted. */
+export function TimerDockHost() {
+  const place = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    setHost(place.current);
+    return () => setHost(null);
+  }, []);
+  return <div ref={place} />;
+}
+
 // The running Timers, floating above the tab bar on every screen, and a status region for what they
 // say. Its height goes in --dock-height, 0 while hidden, so the rest of the page can stay clear of it.
 export function TimerDock() {
   const { timers: running, notice } = useTimers();
   const dock = useRef<HTMLElement>(null);
+  const placed = useSyncExternalStore(
+    subscribeHost,
+    () => host,
+    () => null,
+  );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new place mounts a new dock to watch.
   useEffect(() => {
     const root = document.documentElement;
     const observer = new ResizeObserver(() =>
@@ -20,9 +52,9 @@ export function TimerDock() {
     );
     if (dock.current) observer.observe(dock.current);
     return () => observer.disconnect();
-  }, []);
+  }, [placed]);
 
-  return (
+  const section = (
     <section ref={dock} className="timer-dock" aria-label="Timers" hidden={running.length === 0}>
       <div className="timer-dock-panel">
         <p role="status" className="timer-notice">
@@ -36,6 +68,7 @@ export function TimerDock() {
       </div>
     </section>
   );
+  return placed ? createPortal(section, placed) : section;
 }
 
 // Scrolls the list alone: the dock is fixed, so the page has no part in showing a row. WebKit

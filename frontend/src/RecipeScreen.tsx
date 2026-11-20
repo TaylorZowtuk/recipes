@@ -1,16 +1,9 @@
-import {
-  Fragment,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { AdjustButton } from "./AdjustSheet";
 import { type AdjustChoices, AS_WRITTEN, type LineView, lineView, type UnitChoice } from "./adjust";
 import type { Collection, Factor, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
+import { CookButton } from "./CookingMode";
 import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
@@ -34,6 +27,7 @@ import {
   undoBatch,
 } from "./review";
 import { focusTitle, hashTookFocus, Screen } from "./Screen";
+import { stepNodes, TimerButton } from "./StepPieces";
 import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
@@ -42,7 +36,7 @@ import { stepTicks, useStepTicks } from "./stepTicks";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
-import { type TimerStart, timers } from "./timers";
+import { timers } from "./timers";
 import { SCALES } from "./weekPlan";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
@@ -159,6 +153,7 @@ function RecipePage() {
                       {ready && (
                         <div className="hero-actions">
                           <AdjustButton choices={choices} onChange={setChoices} pending={pending} />
+                          <CookButton recipe={ready} choices={pending ? AS_WRITTEN : choices} />
                           <EditorOnly>
                             <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
                             <AddToDayButton recipe={card} />
@@ -631,29 +626,19 @@ export function Steps({
             recipeId && (
               <TimerButton
                 key={n}
-                start={{
-                  recipeId,
-                  recipeTitle: original.title,
-                  stepId: step.id,
-                  stepNumber: part.start + index,
-                  position: n,
-                  written: piece.written,
-                  lowS: piece.low_s,
-                  highS: piece.high_s,
-                }}
+                recipeId={recipeId}
+                recipeTitle={original.title}
+                step={step}
+                number={part.start + index}
+                piece={piece}
+                n={n}
               />
             );
           const pieces = stepText(step, facts, choices);
-          const shown = pieces.map((piece, n) => {
-            if (typeof piece === "string") return piece;
-            if ("t" in piece) return (!item && timer(piece, n)) || piece.written;
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
-              <Fragment key={n}>
-                <span className="step-amount">{piece.amount}</span> {piece.name}
-              </Fragment>
-            );
-          });
+          const shown = stepNodes(
+            pieces,
+            (piece, n) => (!item && timer(piece, n)) || piece.written,
+          );
           const timerRow = pieces.flatMap((piece, n) =>
             typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
           );
@@ -709,19 +694,6 @@ export function Steps({
       </ol>
     </section>
   ));
-}
-
-function TimerButton({ start }: { start: TimerStart }) {
-  return (
-    <button
-      type="button"
-      className="step-timer"
-      aria-label={`Start a timer for ${start.written}`}
-      onClick={() => timers.start(start)}
-    >
-      {start.written}
-    </button>
-  );
 }
 
 // The Stated Times (an ISO duration humanized, other text as written) and the yield as written.
