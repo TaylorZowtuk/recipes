@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
@@ -286,8 +286,10 @@ def changes(before: Recipe, after: Recipe, names: dict[str, str]) -> list[str]:
         if was is None or now is None:
             verb = "added" if was is None else "removed"
             lines.append(f"{path} {verb}: {summary(now or was, names)}")
+        elif (said := summary(was, names)) == summary(now, names):
+            lines.append(f"{path} changed: {said}: {differences(was, now)}")
         else:
-            lines.append(f"{path} changed: {summary(was, names)} → {summary(now, names)}")
+            lines.append(f"{path} changed: {said} → {summary(now, names)}")
     old = {(i.fact_id, i.before, i.after, i.reason) for i in before.issues}
     new = {(i.fact_id, i.before, i.after, i.reason) for i in after.issues}
     lines += [
@@ -303,6 +305,33 @@ def changes(before: Recipe, after: Recipe, names: dict[str, str]) -> list[str]:
     if before.fdc_release != after.fdc_release:
         lines.append(f"FDC release {before.fdc_release} → {after.fdc_release}")
     return lines
+
+
+def differences(was: Fact, now: Fact) -> str:
+    """Each field that differs between two facts, a nested one as `per_100g.kcal`, with its
+    values before and after.
+    """
+
+    def flat(fact: Fact) -> dict[str, object]:
+        fields: dict[str, object] = {}
+        for name, value in fact.model_dump(mode="json").items():
+            if isinstance(value, dict):
+                nested = cast("dict[str, object]", value)
+                fields |= {f"{name}.{key}": inner for key, inner in nested.items()}
+            else:
+                fields[name] = value
+        return fields
+
+    before, after = flat(was), flat(now)
+    return ", ".join(
+        f"{name} {_shown(before.get(name))} → {_shown(after.get(name))}"
+        for name in dict.fromkeys([*before, *after])
+        if before.get(name) != after.get(name)
+    )
+
+
+def _shown(value: object) -> str:
+    return f"{value:g}" if isinstance(value, float) else str(value)
 
 
 def summary(fact: Fact | None, names: dict[str, str]) -> str:

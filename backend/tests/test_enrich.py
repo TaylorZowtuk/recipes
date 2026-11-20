@@ -940,17 +940,27 @@ CONFIRMED = {
 
 
 def reviewed(
-    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+    editor_client: TestClient,
+    api_store: Store,
+    capsys: pytest.CaptureFixture[str],
+    conversion: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """A recipe the CLI enriched with its glimmer oil matched, then Ready at an older enrichment
-    version with the oil line's match Confirmed. Returns it as the API sends it.
+    version with the oil line's match Confirmed, or with `conversion`'s fields on its unconfirmed
+    conversion. Returns it as the API sends it.
     """
     recipe = add(api_store, "Garlic Tofu")
     send = through(api(editor_client))
     assert apply(BASE_URL, send, SNAPSHOT, answer_text(work_packet(send, capsys))) == 0
     capsys.readouterr()
     enriched = stored(editor_client, recipe.id)
-    enriched["facts"]["ingredients"]["i1"]["match"].update(CONFIRMED)
+    oil = enriched["facts"]["ingredients"]["i1"]
+    if conversion is None:
+        oil["match"].update(CONFIRMED)
+    else:
+        oil["conversion"] |= conversion | {
+            "per_100g": oil["conversion"]["per_100g"] | conversion.get("per_100g", {})
+        }
     enriched |= {"status": "ready", "ready_batch": "batch-1", "enrichment_version": 3}
     api_store.update_recipe(Recipe.model_validate(enriched))
     return stored(editor_client, recipe.id)
@@ -1055,3 +1065,23 @@ def test_packet_with_recipe_offers_only_that_recipe(
     assert packet(BASE_URL, send, SNAPSHOT, None, Chosen(ids=(chosen.id,))) == 0
 
     assert [r["recipe_id"] for r in json.loads(capsys.readouterr().out)["recipes"]] == [chosen.id]
+
+
+def test_a_conversion_changed_under_the_same_fdc_food_shows_what_differs(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    density = 13.5 / 14.78676478125
+    older = {"release": OTHER_RELEASE, "density_g_per_ml": 0.8, "per_100g": {"kcal": 800}}
+    before = reviewed(editor_client, api_store, capsys, conversion=older)
+    chosen = Chosen(ids=(before["id"],))
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    assert apply(BASE_URL, send, SNAPSHOT, answer_text(offered), chosen=chosen) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        f"  i1.conversion changed: FDC 2004: release {OTHER_RELEASE} → {SNAPSHOT.release}, "
+        f"density_g_per_ml 0.8 → {density:g}, per_100g.kcal 800 → 884"
+    ) in out
