@@ -1513,3 +1513,39 @@ def test_portions_that_with_a_kept_steps_use_more_than_all_of_a_line_are_rejecte
     assert errors(stepped_and_kept, answered) == [
         "i4: its portions add up to 1.25 with the confirmed steps' 0.5, more than all of it"
     ]
+
+
+def test_substitutions_for_a_kept_line_whose_substitutions_are_kept_too_are_rejected() -> None:
+    both = work(
+        reviewed(described(), ingredients=oil(match=oil_match(), substitutions=substituted())),
+        canonicals=[GLIMMER, ZORBLE],
+        substitutes=ZORBLEBERRY_OIL,
+    )
+
+    answered = answer({"line_id": "i2", "substitutions": [substitution()]})
+
+    assert errors(both, answered) == ["i2.substitutions: an editor confirmed them: leave them out"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"quantity": {"low": 1}},
+        {"optional": True},
+        {"doubts": ["is it glimmer oil?"]},
+        {"corrections_reason": "the parse is wrong"},
+    ],
+    ids=["quantity", "optional", "doubts", "corrections_reason"],
+)
+def test_a_correction_to_a_kept_line_is_rejected(fields: dict[str, Any]) -> None:
+    assert errors(kept(), answer({"line_id": "i2", **fields})) == [
+        "i2: an editor confirmed it: leave it out, or give only its substitutions"
+    ]
+
+
+@pytest.mark.parametrize("missing", ["canonical", "fdc_id"])
+def test_a_line_answered_without_its_canonical_or_fdc_id_is_rejected(missing: str) -> None:
+    answered = line()
+    del answered[missing]
+
+    assert errors(work(), answer(answered)) == ["i2: give its canonical and fdc_id"]
