@@ -106,9 +106,14 @@ function RecipePage() {
     if (draft && hash.startsWith("#step-")) timers.notify(FINISH_EDITING);
   }, [key, draft, hash]);
 
+  // A renamed recipe's address takes its new slug in place, marked so Cooking mode doesn't take the
+  // step in it for a new jump.
   useEffect(() => {
     if (card && shownSlug !== slug(card.title))
-      navigate({ pathname: recipePath(card), search, hash }, { replace: true });
+      navigate(
+        { pathname: recipePath(card), search, hash },
+        { replace: true, state: { slugFixed: true } },
+      );
   }, [card, shownSlug, search, hash, navigate]);
 
   const missing = collection.state === "ready" && !card;
@@ -178,7 +183,14 @@ function RecipePage() {
           : {}
       }
     >
-      {cooking && <CookingMode {...cooking} opener={cookOpener} onClose={() => setCooking(null)} />}
+      {cooking && (
+        <CookingMode
+          {...cooking}
+          opener={cookOpener}
+          fallback={status}
+          onClose={() => setCooking(null)}
+        />
+      )}
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}

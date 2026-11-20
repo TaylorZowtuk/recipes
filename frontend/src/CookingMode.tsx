@@ -67,14 +67,20 @@ export function CookButton({
 // Cooking mode: the recipe full-screen, one step at a time, from the first without a Step tick.
 // Next ticks the step it leaves; Finish ticks the last, clears the recipe's ticks and closes; Back
 // and Close change no tick. It keeps the recipe and Adjust choices it opened with, whatever the page
-// under it loads, until it closes, and focus then returns to `opener`. The screen is kept on,
+// under it loads, until it closes, and focus then returns to `opener`, or to `fallback` when the
+// page no longer shows it. The screen is kept on,
 // running Timers show above Back and Next, and a Timer's link to one of its steps goes there.
 export function CookingMode({
   recipe,
   choices,
   opener,
+  fallback,
   onClose,
-}: Cooking & { opener: RefObject<HTMLElement | null>; onClose: () => void }) {
+}: Cooking & {
+  opener: RefObject<HTMLElement | null>;
+  fallback: RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
   const { steps, ingredients, title } = recipe.original;
   const [at, setAt] = useState(() => {
     const ticked = stepTicks.ticked(
@@ -99,19 +105,21 @@ export function CookingMode({
     heading.current?.focus();
     return () => {
       release();
-      opener.current?.focus();
+      (opener.current ?? fallback.current)?.focus();
     };
-  }, [opener]);
+  }, [opener, fallback]);
 
-  // Only a navigation made while open moves it: the step in the address when it opened is old.
-  const { hash, key } = useLocation();
+  // Only a navigation made while open moves it: the step in the address when it opened is old, and
+  // so is the step in an address the page only corrected the slug of.
+  const { hash, key, state } = useLocation();
   const shownKey = useRef(key);
   useEffect(() => {
     if (shownKey.current === key) return;
     shownKey.current = key;
+    if (state?.slugFixed) return;
     const linked = steps.findIndex((step) => hash === `#step-${step.id}`);
     if (linked >= 0) setAt(linked);
-  }, [key, hash, steps]);
+  }, [key, hash, state, steps]);
 
   const step = steps[at];
   if (!step) return null;

@@ -15,7 +15,7 @@ import { timers } from "./timers";
 // Close do to the Step ticks, the text size it keeps, and the recipe it holds while open.
 // `loaded` stands in for what loading the recipe gave, when it isn't `recipe`; `cards` for the
 // Collection's cards, when they aren't `card`.
-const shown: { recipe?: Recipe; loaded?: unknown; cards?: Card[] } = {};
+const shown: { recipe?: Recipe; loaded?: unknown; cards?: Card[]; entry?: string } = {};
 vi.mock("./collection", () => ({
   useCollection: () => ({
     state: "ready",
@@ -113,12 +113,13 @@ afterEach(() => {
   localStorage.clear();
   shown.loaded = undefined;
   shown.cards = undefined;
+  shown.entry = undefined;
   for (const timer of timers.snapshot().timers) timers.cancel(timer.id);
   Reflect.deleteProperty(navigator, "wakeLock");
 });
 
 const page = () => (
-  <MemoryRouter initialEntries={[`/recipes/${card.id}/synthetic-test-beans`]}>
+  <MemoryRouter initialEntries={[shown.entry ?? `/recipes/${card.id}/synthetic-test-beans`]}>
     <Routes>
       <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
     </Routes>
@@ -380,6 +381,25 @@ describe("cooking mode", () => {
     expect(ticks()).toEqual(["s1", "s2"]);
   });
 
+  it("doesn't go to the step in the address it opened with", () => {
+    shown.entry = `/recipes/${card.id}/synthetic-test-beans#step-s3`;
+    open();
+    cook();
+    expect(progress()).toBe("Step 1 of 3");
+  });
+
+  it("stays on its step when a renamed card corrects the address's slug", () => {
+    shown.entry = `/recipes/${card.id}/synthetic-test-beans#step-s2`;
+    open();
+    cook();
+    tap(inCooking("Next"));
+    tap(inCooking("Next"));
+    expect(progress()).toBe("Step 3 of 3");
+    shown.cards = [{ ...card, title: "Renamed Test Beans" }];
+    act(() => root?.render(page()));
+    expect(progress()).toBe("Step 3 of 3");
+  });
+
   it("stays open on what it opened with when a newer version fails to load", () => {
     open();
     cook();
@@ -392,6 +412,7 @@ describe("cooking mode", () => {
     tap(inCooking("Close"));
     expect(cooking()).toBeNull();
     expect(isCookingModeOpen()).toBe(false);
+    expect(document.activeElement).toBe(host.querySelector(".screen-note[role=status]"));
   });
 
   it("stays open when the recipe goes from the Collection", () => {
