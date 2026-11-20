@@ -1080,7 +1080,7 @@ def test_a_recipe_an_editor_changed_after_the_dry_run_is_refused_by_the_write(
     assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
     answered = reenrichment(json.loads(capsys.readouterr().out))
     assert apply(BASE_URL, send, SNAPSHOT, answered, chosen=chosen) == 0
-    # After the dry run an editor resolves the oil's issue, which leaves its kept items as they were.
+    # After the dry run an editor resolves the oil's issue, leaving its kept items as they were.
     changed = stored(editor_client, before["id"])
     assert changed["issues"]
     for issue in changed["issues"]:
@@ -1251,7 +1251,8 @@ def test_reenriching_offers_a_confirmed_match_and_refuses_it_as_a_substitute_the
     accepted = json.loads(reenrichment(offered))
     other = substitutions[0] | {"canonical_id": berry_oil.id}
     accepted["recipes"][0]["lines"].append({"line_id": "i1", "substitutions": [other]})
-    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(accepted), quoted, chosen=chosen, write=True)
+    answered = json.dumps(accepted)
+    failed = apply(BASE_URL, send, SNAPSHOT, answered, quoted, chosen=chosen, write=True)
 
     assert failed == 0
     after = stored(editor_client, before.id)
