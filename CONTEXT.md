@@ -107,6 +107,10 @@ _Avoid_: Annotation, field
 The version of enrichment a recipe was enriched with, recorded on the recipe so out-of-date recipes can be found for re-enrichment.
 _Avoid_: Enrichment run, parser version
 
+**Re-enrichment**:
+An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status.
+_Avoid_: Refresh, backfill
+
 **Ingest Channel**:
 How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
 _Avoid_: Origin, import type

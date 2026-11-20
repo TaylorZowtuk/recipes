@@ -12,19 +12,29 @@ from recipes import fdc
 from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
+    DifficultyFact,
     Enrichment,
+    IngredientFacts,
     IngredientLine,
+    MatchFact,
     Original,
     Recipe,
+    RecipeFacts,
     StatedTime,
     StatedTimes,
     Step,
+    StepFacts,
+    StepUse,
     StoreCategory,
+    Substitution,
+    SubstitutionsFact,
+    UsesFact,
     WebsiteSource,
     Wording,
 )
 from recipes.offers import find_offers
 from recipes.packet import (
+    INSTRUCTIONS,
     Answer,
     AnsweredRecipe,
     Rejected,
@@ -1076,7 +1086,7 @@ def test_a_quote_may_come_from_its_own_line_ignoring_case() -> None:
     assert [o.wording for o in offered.lines[1].substitute_offers] == ["ZORBLEBERRY OIL"]
 
 
-def test_quotes_for_a_recipe_that_isnt_pending_are_skipped_with_a_note(
+def test_quotes_for_a_recipe_not_being_enriched_are_skipped_with_a_note(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     other = "01K7Q0000000000000000000R9"
@@ -1092,7 +1102,7 @@ def test_quotes_for_a_recipe_that_isnt_pending_are_skipped_with_a_note(
     (offered,) = offering(quoted).packet().recipes
 
     assert [o.wording for o in offered.lines[1].substitute_offers] == ["zorbleberry oil"]
-    assert f"{other} isn't a Pending recipe" in capsys.readouterr().err
+    assert f"{other} isn't one of the recipes to enrich" in capsys.readouterr().err
 
 
 def test_a_quoted_substitute_with_an_amount_is_offered_its_cached_canonical_first() -> None:
@@ -1305,3 +1315,289 @@ def test_the_same_optional_as_the_parse_changes_nothing() -> None:
 
 def test_the_instructions_say_what_optional_covers() -> None:
     assert '"optional", "for garnish" or "to serve"' in work().packet().instructions
+
+
+# Re-enrichment
+
+
+def oil_match(*, confirmed: bool = True) -> MatchFact:
+    return MatchFact(
+        provenance="editor",
+        confidence=1,
+        estimated=False,
+        confirmed=confirmed,
+        canonical_id=GLIMMER_ID,
+        fdc_id=2004,
+        portion_id=606,
+    )
+
+
+def uses(*pairs: tuple[str, float], confirmed: bool = True) -> StepFacts:
+    used = [StepUse(ref=ref, portion=portion) for ref, portion in pairs]
+    return StepFacts(
+        uses=UsesFact(
+            provenance="editor", confidence=1, estimated=False, confirmed=confirmed, uses=used
+        )
+    )
+
+
+def substituted(canonical_id: str = ZORBLE.id) -> SubstitutionsFact:
+    """A Confirmed zorbleberry oil substitute, as `canonical_id`."""
+    item = Substitution(
+        wording="zorbleberry oil",
+        canonical_id=canonical_id,
+        ratio=2,
+        note="",
+        fdc_id=1001,
+        portion_id=501,
+        fdc=fdc.numbers(SNAPSHOT, 1001, 501),
+    )
+    return SubstitutionsFact(
+        provenance="llm", confidence=0.8, estimated=True, confirmed=True, items=[item]
+    )
+
+
+KEPT_DIFFICULTY = DifficultyFact(
+    provenance="llm", confidence=0.5, estimated=True, confirmed=True, prep=1, cook=2, cleanup=1
+)
+
+
+def reviewed(base: Recipe, **facts: Any) -> Recipe:
+    """The recipe Ready with `facts`."""
+    return base.model_copy(update={"status": "ready", "version": 3, "facts": RecipeFacts(**facts)})
+
+
+def oil(**facts: Any) -> dict[str, IngredientFacts]:
+    """The glimmer oil line (i2) with its parse and `facts`."""
+    return {"i2": IngredientFacts(parse=parse_line(LINES[1]), **facts)}
+
+
+def test_a_reenriched_recipes_packet_shows_each_kept_review_item() -> None:
+    kept = reviewed(
+        recipe(steps=STEPS),
+        ingredients={
+            "i1": IngredientFacts(parse=parse_line(LINES[0])),
+            **oil(match=oil_match(), substitutions=substituted()),
+        },
+        steps={"s1": uses(("i2", 0.5)), "s2": uses(("i1", 1.0), confirmed=False)},
+        difficulty=KEPT_DIFFICULTY,
+    )
+
+    packet = work(kept, canonicals=[GLIMMER, ZORBLE]).packet()
+
+    (offered,) = packet.recipes
+    eggs, glimmer = (line.model_dump() for line in offered.lines[:2])
+    assert "confirmed" not in eggs
+    assert "confirmed_substitutions" not in eggs
+    assert glimmer["confirmed"] == {
+        "parse": glimmer["parse"],
+        "canonical": {"id": GLIMMER_ID, "name": "glimmer oil"},
+        "fdc_id": 2004,
+    }
+    assert glimmer["confirmed_substitutions"] == [
+        {"wording": "zorbleberry oil", "canonical": {"id": ZORBLE.id, "name": "zorbleberry"}}
+    ]
+    heat, fry, _ = (step.model_dump() for step in offered.steps)
+    assert heat["confirmed_uses"] == [{"ref": "i2", "portion": 0.5}]
+    assert "confirmed_uses" not in fry
+    assert offered.model_dump()["confirmed_difficulty"] == {"prep": 1, "cook": 2, "cleanup": 1}
+    assert packet.instructions.startswith(INSTRUCTIONS)
+    assert "an editor confirmed" in packet.instructions.removeprefix(INSTRUCTIONS)
+
+
+def test_a_packet_without_confirmed_facts_is_the_pending_one() -> None:
+    pending = recipe(steps=STEPS)
+    unconfirmed = reviewed(
+        pending,
+        ingredients=oil(match=oil_match(confirmed=False)),
+        steps={"s1": uses(("i2", 1), confirmed=False)},
+    )
+
+    packet = work(pending).packet()
+
+    # Only the version of the recipe being re-enriched, and so its offer_id, differ.
+    reenriched = work(unconfirmed).packet()
+    assert [r.version for r in reenriched.recipes] == [unconfirmed.version]
+    without = {"recipes": {0: {"offer_id", "version"}}}
+    assert reenriched.model_dump(exclude=without) == packet.model_dump(exclude=without)
+    assert packet.instructions == INSTRUCTIONS
+    (offered,) = packet.model_dump()["recipes"]
+    assert set(offered) == {"recipe_id", "offer_id", "title", "stated_times", "lines", "steps"}
+    assert set(offered["lines"][0]) == {
+        "line_id",
+        "text",
+        "parse",
+        "readable_quantities",
+        "wording_confirmed",
+        "canonical_candidates",
+        "fdc_candidates",
+        "substitute_offers",
+    }
+    assert set(offered["steps"][0]) == {"step_id", "text", "offers", "default_uses"}
+
+
+def test_the_offer_id_changes_when_an_item_becomes_confirmed() -> None:
+    def offered(*, confirmed: bool) -> str:
+        match = oil_match(confirmed=confirmed)
+        return offer_id(work(reviewed(recipe(), ingredients=oil(match=match))))
+
+    assert offered(confirmed=True) != offered(confirmed=False)
+
+
+def test_a_reenriched_recipes_offer_id_changes_with_its_version() -> None:
+    def offered(version: int) -> str:
+        return offer_id(work(reviewed(recipe()).model_copy(update={"version": version})))
+
+    assert offered(3) != offered(4)
+
+
+def kept() -> Work:
+    """A Ready recipe whose glimmer oil line, one step and difficulty an editor confirmed, offered
+    zorbleberry oil as the oil's substitute, with glimmer oil among its candidates.
+    """
+    return work(
+        reviewed(
+            described(),
+            ingredients=oil(match=oil_match()),
+            steps={"s1": uses(("i2", 0.5))},
+            difficulty=KEPT_DIFFICULTY,
+        ),
+        canonicals=[GLIMMER, ZORBLE],
+        wordings=[],
+        substitutes=ZORBLEBERRY_OIL,
+    )
+
+
+def test_an_answer_to_a_kept_item_is_rejected() -> None:
+    answered = answer(
+        line(),
+        steps=[step("s1", span("i2", "glimmer oil", 0.5))],
+        difficulty={"prep": 2, "cook": 2, "cleanup": 2},
+    )
+
+    assert errors(kept(), answered) == [
+        "i2: an editor confirmed it: leave it out, or give only its substitutions",
+        "s1: an editor confirmed it: leave it out",
+        "difficulty: an editor confirmed it: leave it out",
+    ]
+
+
+def test_a_kept_line_may_be_given_only_its_substitutions() -> None:
+    enrichment = enrich(kept(), answer({"line_id": "i2", "substitutions": [substitution()]}))
+
+    facts = enrichment.facts.ingredients["i2"]
+    assert facts.match is None
+    assert facts.substitutions is not None
+    assert [item.canonical_id for item in facts.substitutions.items] == [ZORBLE.id]
+    assert enrichment.wordings == []
+
+
+def test_a_substitute_that_is_a_kept_lines_match_is_rejected() -> None:
+    own = substitution(canonical_id=GLIMMER_ID, fdc_id=2004, portion_id=606)
+
+    assert errors(kept(), answer({"line_id": "i2", "substitutions": [own]})) == [
+        (
+            f"i2: substitute zorbleberry oil: Canonical Ingredient {GLIMMER_ID} is the line's "
+            "confirmed match"
+        )
+    ]
+
+
+def test_kept_substitutions_are_not_answered_nor_matched() -> None:
+    confirmed = work(
+        reviewed(described(), ingredients=oil(substitutions=substituted(GLIMMER_ID))),
+        canonicals=[GLIMMER, ZORBLE],
+        substitutes=ZORBLEBERRY_OIL,
+    )
+
+    assert errors(confirmed, answer(line(substitutions=[substitution()]))) == [
+        "i2.substitutions: an editor confirmed them: leave them out",
+        f"i2: Canonical Ingredient {GLIMMER_ID} is one of the line's confirmed substitutes",
+    ]
+
+
+def test_portions_that_with_a_kept_steps_use_more_than_all_of_a_line_are_rejected() -> None:
+    stepped_and_kept = work(reviewed(recipe(steps=STEPS), steps={"s3": uses(("i4", 0.5))}))
+
+    answered = answer(steps=[step("s2", span("i4", "salt", 0.75))])
+
+    assert errors(stepped_and_kept, answered) == [
+        "i4: its portions add up to 1.25 with the confirmed steps' 0.5, more than all of it"
+    ]
+
+
+def test_substitutions_for_a_kept_line_whose_substitutions_are_kept_too_are_rejected() -> None:
+    both = work(
+        reviewed(described(), ingredients=oil(match=oil_match(), substitutions=substituted())),
+        canonicals=[GLIMMER, ZORBLE],
+        substitutes=ZORBLEBERRY_OIL,
+    )
+
+    answered = answer({"line_id": "i2", "substitutions": [substitution()]})
+
+    assert errors(both, answered) == ["i2.substitutions: an editor confirmed them: leave them out"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"quantity": {"low": 1}},
+        {"optional": True},
+        {"doubts": ["is it glimmer oil?"]},
+        {"corrections_reason": "the parse is wrong"},
+    ],
+    ids=["quantity", "optional", "doubts", "corrections_reason"],
+)
+def test_a_correction_to_a_kept_line_is_rejected(fields: dict[str, Any]) -> None:
+    assert errors(kept(), answer({"line_id": "i2", **fields})) == [
+        "i2: an editor confirmed it: leave it out, or give only its substitutions"
+    ]
+
+
+@pytest.mark.parametrize("missing", ["canonical", "fdc_id"])
+def test_a_line_answered_without_its_canonical_or_fdc_id_is_rejected(missing: str) -> None:
+    answered = line()
+    del answered[missing]
+
+    assert errors(work(), answer(answered)) == ["i2: give its canonical and fdc_id"]
+
+
+def test_default_uses_leave_out_what_the_kept_steps_use() -> None:
+    # The kept rest step uses half the oil, first named in the heat step, and all the salt.
+    stepped_and_kept = work(
+        reviewed(recipe(steps=STEPS), steps={"s3": uses(("i2", 0.5), ("i4", 1.0))})
+    )
+
+    heat, fry, rest = stepped_and_kept.packet().recipes[0].steps
+
+    assert [(u.ref, u.portion) for u in heat.default_uses] == [("i2", 0.5)]
+    assert [(u.ref, u.portion) for u in fry.default_uses] == [("i1", 1.0), ("i3", 1.0)]
+    assert rest.default_uses == []
+    copied = [
+        step("s1", span("i2", "glimmer oil", 0.5)),
+        step("s2", span("i1", "quill eggs"), span("i3", "snorp garlic")),
+    ]
+    assert enrich(stepped_and_kept, answer(steps=copied)).facts.steps["s1"].uses is not None
+
+
+def test_default_uses_of_a_third_left_sum_with_the_kept_step_to_no_more_than_one() -> None:
+    # The kept rest step uses a third of the oil, so the heat step's default is the exact rest.
+    third = work(reviewed(recipe(steps=STEPS), steps={"s3": uses(("i2", 1 / 3))}))
+
+    heat = third.packet().recipes[0].steps[0]
+
+    copied = [step("s1", span("i2", "glimmer oil", heat.default_uses[0].portion))]
+    assert enrich(third, answer(steps=copied)).facts.steps["s1"].uses is not None
+
+
+def test_default_uses_skip_kept_steps_and_lines_they_use_in_full() -> None:
+    # The kept fry step uses all the oil and half the salt, which the rest step names too.
+    stepped_and_kept = work(
+        reviewed(recipe(steps=STEPS), steps={"s2": uses(("i2", 1.0), ("i4", 0.5))})
+    )
+
+    heat, fry, rest = stepped_and_kept.packet().recipes[0].steps
+
+    assert heat.default_uses == []
+    assert fry.default_uses == []
+    assert [(u.ref, u.portion) for u in rest.default_uses] == [("i4", 0.5)]

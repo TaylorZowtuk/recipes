@@ -19,12 +19,14 @@ from recipes import fdc
 from recipes.auth import SERVICE_TOKEN_HEADER
 from recipes.client import SameOriginSession, Send, checked_base_url, send_with
 from recipes.enrich import (
+    Chosen,
     apply,
     ask,
     main,
     packet,
     read_answer,
     read_substitutes,
+    stale,
 )
 from recipes.models import (
     MAX_LABEL,
@@ -388,7 +390,7 @@ def test_rerunning_apply_after_a_partial_success_writes_the_rest(
     failed = apply(BASE_URL, send, SNAPSHOT, text, quoted)
 
     printed = capsys.readouterr()
-    assert f"{first.id} isn't a Pending recipe" in printed.err
+    assert f"{first.id} isn't one of the recipes to enrich" in printed.err
     assert "Chili Noodles → awaiting_review" in printed.out
     assert failed == 1  # the first recipe, which isn't in the packet any more
     assert stored(editor_client, second.id)["facts"]["ingredients"]["i1"]["substitutions"]
@@ -793,11 +795,20 @@ def test_main_without_the_service_token_stops_and_says_so(
 @pytest.mark.parametrize(
     ("argv", "called", "expected"),
     [
-        (["substitutes"], "ask", ()),
-        (["packet", "--substitutes", "f"], "packet", ("snapshot", "quotes")),
-        (["apply", "a.json", "--substitutes", "f"], "apply", ("snapshot", "answer text", "quotes")),
+        (["substitutes"], "ask", (None,)),
+        (["packet", "--substitutes", "f"], "packet", ("snapshot", "quotes", None)),
+        (
+            ["apply", "a.json", "--substitutes", "f"],
+            "apply",
+            ("snapshot", "answer text", "quotes", None, False),
+        ),
+        (
+            ["apply", "a.json", "--recipe", "r1", "--recipe", "r2", "--write"],
+            "apply",
+            ("snapshot", "answer text", "quotes", Chosen(ids=("r1", "r2")), True),
+        ),
     ],
-    ids=["substitutes", "packet", "apply"],
+    ids=["substitutes", "packet", "apply", "re-enrich"],
 )
 def test_main_runs_the_command_it_is_given_and_pass_1_needs_no_snapshot(
     monkeypatch: pytest.MonkeyPatch, argv: list[str], called: str, expected: tuple[str, ...]
@@ -807,9 +818,9 @@ def test_main_runs_the_command_it_is_given_and_pass_1_needs_no_snapshot(
     calls: list[tuple[str, tuple[Any, ...]]] = []
 
     def recorder(name: str) -> Any:
-        def record(base_url: str, send: object, *rest: Any) -> bool:
+        def record(base_url: str, send: object, *rest: Any, **named: Any) -> bool:
             assert send == "send"
-            calls.append((name, (base_url, *rest)))
+            calls.append((name, (base_url, *rest, *named.values())))
             return False
 
         return record
@@ -827,7 +838,7 @@ def test_main_runs_the_command_it_is_given_and_pass_1_needs_no_snapshot(
     monkeypatch.setattr("recipes.enrich.send_with", constant("send"))
     monkeypatch.setattr("recipes.enrich.read_answer", constant("answer text"))
     monkeypatch.setattr("recipes.enrich.read_substitutes", constant("quotes"))
-    snapshot = constant("snapshot") if expected else no_snapshot
+    snapshot = constant("snapshot") if called != "ask" else no_snapshot
     monkeypatch.setattr("recipes.enrich.load_snapshot", snapshot)
 
     with pytest.raises(SystemExit) as stopped:
@@ -888,3 +899,403 @@ def test_apply_prints_each_written_recipes_enrichment_issues_under_its_line(
         "  i3.parse: 1-2 → 2 — the method uses two\n"
         "  i3.match: (none) → quill eggs — new Canonical Ingredient quill eggs (egg, Dairy)"
     ) in out
+
+
+def test_stale_lists_each_recipe_enriched_at_another_version_or_release(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def enriched_at(title: str, version: int | None, release: str | None) -> Recipe:
+        recipe = add(api_store, title, status="ready")
+        update = {"enrichment_version": version, "fdc_release": release}
+        return api_store.update_recipe(recipe.model_copy(update=update))
+
+    enriched_at("Current Stew", ENRICHMENT_VERSION, SNAPSHOT.release)
+    older = enriched_at("Older Stew", 3, SNAPSHOT.release)
+    other = enriched_at("Other Release Stew", ENRICHMENT_VERSION, OTHER_RELEASE)
+    never = enriched_at("Unversioned Stew", None, None)
+    add(api_store, "Pending Stew")
+    adapter = api(editor_client)
+
+    assert stale(BASE_URL, through(adapter), SNAPSHOT.release) == 0
+
+    assert {request.method for request in adapter.requests} == {"GET"}
+    current = f"(now {ENRICHMENT_VERSION}, {SNAPSHOT.release})"
+    assert capsys.readouterr().out.splitlines() == [
+        f"{older.id} Older Stew: enrichment version 3, FDC release {SNAPSHOT.release} {current}",
+        (
+            f"{other.id} Other Release Stew: enrichment version {ENRICHMENT_VERSION}, "
+            f"FDC release {OTHER_RELEASE} {current}"
+        ),
+        f"{never.id} Unversioned Stew: enrichment version none, FDC release none {current}",
+    ]
+
+
+OTHER_RELEASE = "foundation-2026-04-30+sr_legacy-2018-04"
+CONFIRMED = {
+    "confirmed": True,
+    "confirmed_by": "editor@example.com",
+    "confirmed_at": "2026-10-01T12:00:00Z",
+    "confirm_batch": "batch-1",
+}
+
+
+def reviewed(
+    editor_client: TestClient,
+    api_store: Store,
+    capsys: pytest.CaptureFixture[str],
+    conversion: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A recipe the CLI enriched with its glimmer oil matched, then Ready at an older enrichment
+    version with the oil line's match Confirmed, or with `conversion`'s fields on its unconfirmed
+    conversion. Returns it as the API sends it.
+    """
+    recipe = add(api_store, "Garlic Tofu")
+    send = through(api(editor_client))
+    assert apply(BASE_URL, send, SNAPSHOT, answer_text(work_packet(send, capsys))) == 0
+    capsys.readouterr()
+    enriched = stored(editor_client, recipe.id)
+    oil = enriched["facts"]["ingredients"]["i1"]
+    if conversion is None:
+        oil["match"].update(CONFIRMED)
+    else:
+        oil["conversion"] |= conversion | {
+            "per_100g": oil["conversion"]["per_100g"] | conversion.get("per_100g", {})
+        }
+    enriched |= {"status": "ready", "ready_batch": "batch-1", "enrichment_version": 3}
+    api_store.update_recipe(Recipe.model_validate(enriched))
+    return stored(editor_client, recipe.id)
+
+
+def reenrichment(offered: dict[str, Any]) -> str:
+    """An answer that leaves out the Confirmed oil line and matches the quill eggs."""
+    eggs = offered["recipes"][0]["lines"][2]
+    return answer_text(
+        offered,
+        {
+            "line_id": "i3",
+            "canonical": {
+                "new": {"name": "quill eggs", "family": "egg", "store_category_id": "dairy"}
+            },
+            "fdc_id": eggs["fdc_candidates"][0]["fdc_id"],
+            "portion_id": None,
+        },
+    )
+
+
+def test_reenriching_without_write_prints_the_fact_changes_and_writes_nothing(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    chosen = Chosen(ids=(before["id"],))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    failed = apply(BASE_URL, send, SNAPSHOT, reenrichment(offered), chosen=chosen)
+
+    assert failed == 0
+    assert stored(editor_client, before["id"]) == before
+    puts = [request.url for request in adapter.requests if request.method == "PUT"]
+    assert puts == [
+        f"{BASE_URL}/api/recipes/{before['id']}/enrichment?dry_run=true&version={before['version']}"
+    ]
+    out = capsys.readouterr().out
+    eggs = offered["recipes"][0]["lines"][2]["fdc_candidates"][0]["fdc_id"]
+    assert f"  i3.match added: quill eggs (FDC {eggs})" in out
+    assert f"  i3.conversion added: FDC {eggs}" in out
+    assert f"  enrichment version 3 → {ENRICHMENT_VERSION}" in out
+    assert "i1." not in out
+    assert "rerun apply with --write" in out
+
+
+def test_reenriching_with_write_keeps_confirmed_facts_and_updates_the_rest(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, Chosen(stale=SNAPSHOT.release)) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    chosen = Chosen(ids=(before["id"],))
+    failed = apply(BASE_URL, send, SNAPSHOT, reenrichment(offered), chosen=chosen, write=True)
+
+    assert failed == 0
+    after = stored(editor_client, before["id"])
+    lines, was = after["facts"]["ingredients"], before["facts"]["ingredients"]
+    assert lines["i1"] == was["i1"]
+    assert was["i3"].get("match") is None
+    canonicals = bundle(editor_client)["canonical_ingredients"]
+    (eggs,) = (c for c in canonicals if c["name"] == "quill eggs")
+    assert lines["i3"]["match"]["canonical_id"] == eggs["id"]
+    assert lines["i3"]["conversion"]["provenance"] == "fdc"
+    assert (after["status"], after["ready_batch"]) == ("ready", "batch-1")
+    assert after["enrichment_version"] == ENRICHMENT_VERSION
+    out = capsys.readouterr().out
+    assert "i3.match added" in out
+    assert "i1." not in out
+    assert "Garlic Tofu → ready" in out
+
+
+def test_a_recipe_changed_between_the_dry_run_and_the_write_is_refused(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    chosen = Chosen(ids=(before["id"],))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    def confirming_meanwhile(method: str, url: str, body: bytes | None) -> tuple[int, Any]:
+        # An editor confirms the eggs' parse after the dry run, before the write.
+        if method == "PUT" and "dry_run" not in url:
+            changed = stored(editor_client, before["id"])
+            changed["facts"]["ingredients"]["i3"]["parse"].update(CONFIRMED)
+            api_store.update_recipe(Recipe.model_validate(changed))
+        return send(method, url, body)
+
+    failed = apply(
+        BASE_URL, confirming_meanwhile, SNAPSHOT, reenrichment(offered), chosen=chosen, write=True
+    )
+
+    assert failed == 1
+    after = stored(editor_client, before["id"])
+    assert after["version"] == before["version"] + 1
+    assert after["facts"]["ingredients"]["i3"]["parse"]["confirmed"]
+    assert after["facts"]["ingredients"]["i3"].get("match") is None
+    puts = [request.url for request in adapter.requests if request.method == "PUT"]
+    url = f"{BASE_URL}/api/recipes/{before['id']}/enrichment"
+    assert puts[1] == f"{url}?version={before['version']}"
+    assert "changed since" in capsys.readouterr().out
+
+
+def test_a_recipe_an_editor_changed_after_the_dry_run_is_refused_by_the_write(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = reviewed(editor_client, api_store, capsys)
+    chosen = Chosen(ids=(before["id"],))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    answered = reenrichment(json.loads(capsys.readouterr().out))
+    assert apply(BASE_URL, send, SNAPSHOT, answered, chosen=chosen) == 0
+    # After the dry run an editor resolves the oil's issue, leaving its kept items as they were.
+    changed = stored(editor_client, before["id"])
+    assert changed["issues"]
+    for issue in changed["issues"]:
+        issue["status"] = "resolved"
+    changed = api_store.update_recipe(Recipe.model_validate(changed)).model_dump(mode="json")
+    capsys.readouterr()
+    adapter.requests.clear()
+
+    failed = apply(BASE_URL, send, SNAPSHOT, answered, chosen=chosen, write=True)
+
+    assert failed == 1
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
+    assert stored(editor_client, before["id"]) == changed
+    assert "its offer changed since the packet" in capsys.readouterr().out
+
+
+def test_reenriching_a_pending_or_unknown_recipe_is_refused(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pending = add(api_store, "Pending Stew")
+    send = through(api(editor_client))
+
+    assert packet(BASE_URL, send, SNAPSHOT, None, Chosen(ids=(pending.id, "01NOTARECIPE"))) == 1
+
+    err = capsys.readouterr().err
+    assert f"{pending.id} Pending Stew is Pending: enrich it without --recipe" in err
+    assert "01NOTARECIPE isn't a recipe in the Collection" in err
+
+
+def test_write_without_chosen_recipes_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        main(["apply", "https://d111111abcdef8.cloudfront.net", "a.json", "--write"])
+
+    assert stopped.value.code == 2
+    assert "--write needs --recipe or --stale" in capsys.readouterr().err
+
+
+def test_packet_with_recipe_offers_only_that_recipe(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    chosen = add(api_store, "Ready Stew", status="ready")
+    add(api_store, "Other Stew", status="ready")
+    add(api_store, "Garlic Tofu")
+
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, Chosen(ids=(chosen.id,))) == 0
+
+    assert [r["recipe_id"] for r in json.loads(capsys.readouterr().out)["recipes"]] == [chosen.id]
+
+
+def test_the_dry_run_shows_removed_facts_issue_changes_and_the_fdc_release(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The oil line is unconfirmed, with its open new-canonical issue, at another release.
+    before = reviewed(editor_client, api_store, capsys, conversion={})
+    at_other = Recipe.model_validate(before | {"fdc_release": OTHER_RELEASE})
+    before = api_store.update_recipe(at_other).model_dump(mode="json")
+    chosen = Chosen(ids=(before["id"],))
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+    eggs = offered["recipes"][0]["lines"][2]["fdc_candidates"][0]["fdc_id"]
+    new_eggs = {"name": "quill eggs", "family": "egg", "store_category_id": "dairy"}
+    answer = answer_text(
+        offered,
+        {"line_id": "i3", "canonical": {"new": new_eggs}, "fdc_id": eggs, "portion_id": None},
+    )
+
+    assert apply(BASE_URL, send, SNAPSHOT, answer, chosen=chosen) == 0
+
+    out = capsys.readouterr().out.splitlines()
+    assert "  i1.match removed: glimmer oil (FDC 2004)" in out
+    assert "  i1.conversion removed: FDC 2004" in out
+    assert (
+        "  issue dropped: i1.match: (none) → glimmer oil — "
+        "new Canonical Ingredient glimmer oil (oil, Aisles)"
+    ) in out
+    assert (
+        "  issue added: i3.match: (none) → quill eggs — "
+        "new Canonical Ingredient quill eggs (egg, Dairy)"
+    ) in out
+    assert f"  FDC release {OTHER_RELEASE} → {SNAPSHOT.release}" in out
+
+
+def test_a_recipe_named_twice_is_offered_once(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    chosen = add(api_store, "Ready Stew", status="ready")
+    adapter = api(editor_client)
+
+    twice = Chosen(ids=(chosen.id, chosen.id))
+    assert packet(BASE_URL, through(adapter), SNAPSHOT, None, twice) == 0
+
+    assert [r["recipe_id"] for r in json.loads(capsys.readouterr().out)["recipes"]] == [chosen.id]
+    reads = [r.url for r in adapter.requests if r.url == f"{BASE_URL}/api/recipes/{chosen.id}"]
+    assert len(reads) == 1
+
+
+def test_a_conversion_changed_under_the_same_fdc_food_shows_what_differs(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    density = 13.5 / 14.78676478125
+    older = {"release": OTHER_RELEASE, "density_g_per_ml": 0.8, "per_100g": {"kcal": 800}}
+    before = reviewed(editor_client, api_store, capsys, conversion=older)
+    chosen = Chosen(ids=(before["id"],))
+    send = through(api(editor_client))
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+
+    assert apply(BASE_URL, send, SNAPSHOT, answer_text(offered), chosen=chosen) == 0
+
+    out = capsys.readouterr().out
+    assert (
+        f"  i1.conversion changed: FDC 2004: release {OTHER_RELEASE} → {SNAPSHOT.release}, "
+        f"density_g_per_ml 0.8 → {density:g}, per_100g.kcal 800 → 884"
+    ) in out
+
+
+def margarine_kept(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> tuple[Recipe, CanonicalIngredient]:
+    """A recipe that says zorbleberry oil works in place of its glimmer oil, enriched, then Ready
+    with an editor's Confirmed match of the oil line to zorbleberry. Returns it as stored.
+    """
+    recipe, zorbleberry = substituting(api_store)
+    send = through(api(editor_client))
+    assert apply(BASE_URL, send, SNAPSHOT, answer_text(work_packet(send, capsys))) == 0
+    capsys.readouterr()
+    enriched = stored(editor_client, recipe.id)
+    enriched["facts"]["ingredients"]["i1"]["match"] |= CONFIRMED | {"canonical_id": zorbleberry.id}
+    enriched |= {"status": "ready", "ready_batch": "batch-1", "enrichment_version": 3}
+    return api_store.update_recipe(Recipe.model_validate(enriched)), zorbleberry
+
+
+def test_reenriching_offers_a_confirmed_match_and_refuses_it_as_a_substitute_then_writes(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before, zorbleberry = margarine_kept(editor_client, api_store, capsys)
+    # Another recipe made a berry oil, offered as the quoted substitute's other candidate.
+    berry_oil = zorbleberry.model_copy(update={"id": new_ulid(), "name": "berry oil"})
+    api_store.enrich_recipe(add(api_store, "Berry Stew", status="ready"), [berry_oil], [])
+    chosen = Chosen(ids=(before.id,))
+    quoted = quoting(before.id, "zorbleberry oil")
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, quoted, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+    oil = offered["recipes"][0]["lines"][0]
+    assert oil["confirmed"]["canonical"] == {"id": zorbleberry.id, "name": "zorbleberry"}
+    substitute = json.loads(substituted_answer(offered, zorbleberry.id))["recipes"][0]
+    del substitute["difficulty"]
+    substitutions = substitute["lines"][0]["substitutions"]
+    substitute["lines"] = [{"line_id": "i1", "substitutions": substitutions}]
+    clashing = {"model": "a-model", "recipes": [substitute]}
+
+    failed = apply(
+        BASE_URL, send, SNAPSHOT, json.dumps(clashing), quoted, chosen=chosen, write=True
+    )
+
+    assert failed == 1
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
+    assert stored(editor_client, before.id)["version"] == before.version
+    assert (
+        f"  i1: substitute zorbleberry oil: Canonical Ingredient {zorbleberry.id} is the line's "
+        "confirmed match"
+    ) in capsys.readouterr().out
+
+    accepted = json.loads(reenrichment(offered))
+    other = substitutions[0] | {"canonical_id": berry_oil.id}
+    accepted["recipes"][0]["lines"].append({"line_id": "i1", "substitutions": [other]})
+    answered = json.dumps(accepted)
+    failed = apply(BASE_URL, send, SNAPSHOT, answered, quoted, chosen=chosen, write=True)
+
+    assert failed == 0
+    after = stored(editor_client, before.id)
+    oil, was = after["facts"]["ingredients"]["i1"], before.facts.ingredients["i1"]
+    assert (oil["match"], oil["conversion"]) == (
+        was.model_dump(mode="json")["match"],
+        was.model_dump(mode="json")["conversion"],
+    )
+    assert [item["canonical_id"] for item in oil["substitutions"]["items"]] == [berry_oil.id]
+    assert after["facts"]["ingredients"]["i3"]["match"] is not None
+    assert after["enrichment_version"] == ENRICHMENT_VERSION
+
+
+def test_reenriching_refuses_portions_that_with_a_confirmed_steps_use_more_than_a_line(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    steps = [
+        Step(id="s1", text="Warm the glimmer oil."),
+        Step(id="s2", text="Add the glimmer oil."),
+    ]
+    recipe = add(api_store, "Oil Stew", status="ready")
+    kept = {"provenance": "editor", "confidence": 1, "estimated": False, **CONFIRMED}
+    facts = {"steps": {"s1": {"uses": {**kept, "uses": [{"ref": "i1", "portion": 0.7}]}}}}
+    original = recipe.original.model_copy(update={"steps": steps})
+    changed = recipe.model_dump() | {"original": original, "facts": facts}
+    before = api_store.update_recipe(Recipe.model_validate(changed))
+    chosen = Chosen(ids=(before.id,))
+    adapter = api(editor_client)
+    send = through(adapter)
+    assert packet(BASE_URL, send, SNAPSHOT, None, chosen) == 0
+    offered = json.loads(capsys.readouterr().out)
+    assert offered["recipes"][0]["steps"][0]["confirmed_uses"] == [{"ref": "i1", "portion": 0.7}]
+    answered = json.loads(answer_text(offered))
+    answered["recipes"][0]["steps"] = [
+        {"step_id": "s2", "ingredients": [{"ref": "i1", "written": "glimmer oil", "portion": 0.5}]}
+    ]
+
+    failed = apply(BASE_URL, send, SNAPSHOT, json.dumps(answered), chosen=chosen, write=True)
+
+    assert failed == 1
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
+    assert stored(editor_client, before.id)["version"] == before.version
+    assert (
+        "Oil Stew → rejected, nothing written:\n"
+        "  i1: its portions add up to 1.2 with the confirmed steps' 0.7, more than all of it"
+    ) in capsys.readouterr().out
