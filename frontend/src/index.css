@@ -18,6 +18,7 @@
   --emphasis: #c2362b;
   --emphasis-text: #b02e24;
   --done: #2e5e45;
+  --ticked-opacity: 0.45;
   --warning: #f6ebd2;
   --warning-text: #6e5210;
   --cooking-bg: #f7f8f5;
@@ -935,10 +936,53 @@ h1:focus {
   font-weight: 700;
 }
 
-.steps li::marker {
+.steps li::marker,
+.step-number {
   color: var(--accent-text);
   font-family: var(--font-display);
   font-weight: 700;
+}
+
+/* A step with a Step tick: its number, and the tick under it, in a column of their own in place of
+   the list marker. A ticked step dims, all but its tick. */
+.steps:has(> .step) {
+  padding-left: 0;
+}
+
+.steps li.step {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  column-gap: calc(var(--space) * 2);
+  padding-left: 0;
+}
+
+.step-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.step-tick {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--outline-strong);
+  cursor: pointer;
+}
+
+.step-tick[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--done);
+}
+
+.step-ticked .step-number,
+.step-ticked .step-body {
+  opacity: var(--ticked-opacity);
 }
 
 .facts div {
