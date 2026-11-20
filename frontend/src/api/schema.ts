@@ -351,9 +351,16 @@ export interface paths {
         head?: never;
         /**
          * Patch Recipe
-         * @description Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
+         * @description Apply an editor's Tags, Difficulty, Preview Photo and Our Version changes to the recipe at
          *     `body.version`, with its card, in one write. A recipe Awaiting Review with nothing left to
          *     review is Ready.
+         *
+         *     Our Version is saved whole: its edited and added lines take the editor's facts, Confirmed with
+         *     provenance `editor`, built as a Review line edit builds them, with text built from them; a line
+         *     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
+         *     its wording as a Review line edit does, for this recipe's Original lines and, once the recipe
+         *     is saved, every other recipe's. A new or changed step makes the Our Version Status Pending; a
+         *     new Our Version without one is Ready. The Original's facts and the Enrichment Status stay.
          */
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
@@ -628,6 +635,80 @@ export interface components {
              */
             op: "add";
         };
+        /**
+         * AddedLine
+         * @description A line Our Version adds, after the effective line `after` names, or first for none.
+         */
+        AddedLine: {
+            /** After */
+            after: string | null;
+            /** Component */
+            component: string | null;
+            conversion: components["schemas"]["ConversionFact"] | null;
+            /** Id */
+            id: string;
+            match: components["schemas"]["MatchFact-Output"] | null;
+            parse: components["schemas"]["ParseFact-Output"];
+            /** Text */
+            text: string;
+        };
+        /**
+         * AddedLineDraft
+         * @description An added line: `id` is the one Our Version gave it, or any other the draft's `after`s
+         *     name it by until the API gives it one. `after` names the effective line it follows, or none
+         *     for first.
+         */
+        AddedLineDraft: {
+            /** After */
+            after: string | null;
+            /** Canonical */
+            canonical?: (components["schemas"]["ExistingCanonical"] | components["schemas"]["NewCanonical"]) | null;
+            /** Component */
+            component?: string | null;
+            /** Fdc Id */
+            fdc_id: number | null;
+            /** Id */
+            id?: string | null;
+            /** Keep Weight */
+            keep_weight?: boolean | null;
+            /** Name */
+            name: string;
+            /** Portion Id */
+            portion_id: number | null;
+            /** Preparation */
+            preparation: string | null;
+            quantity: components["schemas"]["Quantity"] | null;
+            /** Unit */
+            unit: string | null;
+        };
+        /**
+         * AddedStep
+         * @description A step Our Version adds, after the effective step `after` names, or first for none.
+         */
+        AddedStep: {
+            /** After */
+            after: string | null;
+            /** Component */
+            component: string | null;
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+        };
+        /**
+         * AddedStepDraft
+         * @description An added step, with `id` and `after` as an added line's.
+         */
+        AddedStepDraft: {
+            /** After */
+            after: string | null;
+            /** Component */
+            component?: string | null;
+            /** Id */
+            id?: string | null;
+            /** Text */
+            text: string;
+        };
         /** BackupLink */
         BackupLink: {
             /** Key */
@@ -736,6 +817,8 @@ export interface components {
             /** Id */
             id: string;
             needs_review: components["schemas"]["NeedsReview"];
+            /** Our Version Status */
+            our_version_status: ("pending" | "awaiting_review" | "ready") | null;
             preview: components["schemas"]["Preview"] | null;
             /** Recipe Version */
             recipe_version: number;
@@ -1036,11 +1119,7 @@ export interface components {
         };
         /**
          * EditLine
-         * @description A line's amount, unit, wording and preparation as the editor reads it, its FDC food and
-         *     portion (none chosen is allowed), and, if given, its new Canonical Ingredient and whether it
-         *     keeps its written unit (true) or converts to a weight (false). No quantity means no amount, as
-         *     in "to taste". A line that has or gets a Canonical Ingredient needs an FDC food; a line with
-         *     none has no match, and so no food.
+         * @description An edit of one of the Original's lines, by its id.
          */
         EditLine: {
             /** Canonical */
@@ -1511,6 +1590,26 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** LinesDraft */
+        LinesDraft: {
+            /**
+             * Add
+             * @default []
+             */
+            add: components["schemas"]["AddedLineDraft"][];
+            /**
+             * Edit
+             * @default {}
+             */
+            edit: {
+                [key: string]: components["schemas"]["OurLineDraft"];
+            };
+            /**
+             * Remove
+             * @default []
+             */
+            remove: string[];
+        };
         /**
          * MatchFact
          * @description The line's Canonical Ingredient, with the FDC food and portion row the model or an editor
@@ -1673,6 +1772,155 @@ export interface components {
             /** Title */
             title: string;
             yield: components["schemas"]["RecipeYield-Output"] | null;
+        };
+        /**
+         * OurLine
+         * @description An Our Version line, which replaces the Original's line or is added: its text, built from
+         *     its parse, and its facts, all the editor's.
+         */
+        OurLine: {
+            /** Component */
+            component: string | null;
+            conversion: components["schemas"]["ConversionFact"] | null;
+            match: components["schemas"]["MatchFact-Output"] | null;
+            parse: components["schemas"]["ParseFact-Output"];
+            /** Text */
+            text: string;
+        };
+        /**
+         * OurLineDraft
+         * @description An edited line as the editor wants it, in the fields of a Review line edit.
+         */
+        OurLineDraft: {
+            /** Canonical */
+            canonical?: (components["schemas"]["ExistingCanonical"] | components["schemas"]["NewCanonical"]) | null;
+            /** Component */
+            component?: string | null;
+            /** Fdc Id */
+            fdc_id: number | null;
+            /** Keep Weight */
+            keep_weight?: boolean | null;
+            /** Name */
+            name: string;
+            /** Portion Id */
+            portion_id: number | null;
+            /** Preparation */
+            preparation: string | null;
+            quantity: components["schemas"]["Quantity"] | null;
+            /** Unit */
+            unit: string | null;
+        };
+        /** OurLines */
+        OurLines: {
+            /**
+             * Add
+             * @default []
+             */
+            add: components["schemas"]["AddedLine"][];
+            /**
+             * Edit
+             * @default {}
+             */
+            edit: {
+                [key: string]: components["schemas"]["OurLine"];
+            };
+            /**
+             * Remove
+             * @default []
+             */
+            remove: string[];
+        };
+        /**
+         * OurStep
+         * @description An Our Version step, which replaces the Original's step or is added: only its text until
+         *     enrich segments it.
+         */
+        OurStep: {
+            /** Component */
+            component: string | null;
+            /** Text */
+            text: string;
+        };
+        /** OurStepDraft */
+        OurStepDraft: {
+            /** Component */
+            component?: string | null;
+            /** Text */
+            text: string;
+        };
+        /** OurSteps */
+        OurSteps: {
+            /**
+             * Add
+             * @default []
+             */
+            add: components["schemas"]["AddedStep"][];
+            /**
+             * Edit
+             * @default {}
+             */
+            edit: {
+                [key: string]: components["schemas"]["OurStep"];
+            };
+            /**
+             * Remove
+             * @default []
+             */
+            remove: string[];
+        };
+        /**
+         * OurVersion
+         * @description The household's whole-line overlay on the Original, by line and step id. A line or step it
+         *     leaves alone keeps the Original's text and facts.
+         */
+        OurVersion: {
+            /**
+             * Edited At
+             * Format: date-time
+             */
+            edited_at: string;
+            /**
+             * @default {
+             *       "add": [],
+             *       "edit": {},
+             *       "remove": []
+             *     }
+             */
+            ingredients: components["schemas"]["OurLines"];
+            /** Note */
+            note: string | null;
+            /**
+             * @default {
+             *       "add": [],
+             *       "edit": {},
+             *       "remove": []
+             *     }
+             */
+            steps: components["schemas"]["OurSteps"];
+        };
+        /**
+         * OurVersionDraft
+         * @description Our Version as the editor wants it, whole: what it edits, removes and adds.
+         */
+        OurVersionDraft: {
+            /**
+             * @default {
+             *       "add": [],
+             *       "edit": {},
+             *       "remove": []
+             *     }
+             */
+            ingredients: components["schemas"]["LinesDraft"];
+            /** Note */
+            note?: string | null;
+            /**
+             * @default {
+             *       "add": [],
+             *       "edit": {},
+             *       "remove": []
+             *     }
+             */
+            steps: components["schemas"]["StepsDraft"];
         };
         /**
          * ParseFact
@@ -1888,6 +2136,9 @@ export interface components {
              */
             issues: components["schemas"]["EnrichmentIssue-Output"][];
             original: components["schemas"]["Original-Output"];
+            our_version: components["schemas"]["OurVersion"] | null;
+            /** Our Version Status */
+            our_version_status: ("pending" | "awaiting_review" | "ready") | null;
             preview: components["schemas"]["Preview"] | null;
             /** Ready Batch */
             ready_batch: string | null;
@@ -1914,7 +2165,7 @@ export interface components {
          */
         RecipeEdit: {
             /** Operations */
-            operations: (components["schemas"]["SetTags"] | components["schemas"]["SetDifficulty"] | components["schemas"]["SetPreview"])[];
+            operations: (components["schemas"]["SetTags"] | components["schemas"]["SetDifficulty"] | components["schemas"]["SetPreview"] | components["schemas"]["SetOurVersion"] | components["schemas"]["RemoveOurVersion"])[];
             /** Version */
             version: number;
         };
@@ -1967,6 +2218,14 @@ export interface components {
              * @enum {string}
              */
             op: "remove";
+        };
+        /** RemoveOurVersion */
+        RemoveOurVersion: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "remove_our_version";
         };
         /**
          * RemoveSubstitution
@@ -2135,6 +2394,18 @@ export interface components {
              */
             op: "set_difficulty";
         };
+        /**
+         * SetOurVersion
+         * @description Save Our Version as the editor wants it, whole, in place of any the recipe has.
+         */
+        SetOurVersion: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            op: "set_our_version";
+            our_version: components["schemas"]["OurVersionDraft"];
+        };
         /** SetPantryStaple */
         SetPantryStaple: {
             /**
@@ -2301,6 +2572,26 @@ export interface components {
             portion: number;
             /** Ref */
             ref: string;
+        };
+        /** StepsDraft */
+        StepsDraft: {
+            /**
+             * Add
+             * @default []
+             */
+            add: components["schemas"]["AddedStepDraft"][];
+            /**
+             * Edit
+             * @default {}
+             */
+            edit: {
+                [key: string]: components["schemas"]["OurStepDraft"];
+            };
+            /**
+             * Remove
+             * @default []
+             */
+            remove: string[];
         };
         /** StoreCategory */
         StoreCategory: {
@@ -3426,14 +3717,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe changed since the editor read it */
+            /** @description The recipe, or a Canonical Ingredient or wording Our Version confirms, changed since the editor read it, or the recipe is Pending and can't have Our Version yet */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Not a valid edit, or the preview isn't one of the recipe's images */
+            /** @description Not a valid edit, the preview isn't one of the recipe's images, Our Version edits or removes a line or step the Original lacks, both edits and removes one, adds one after a line or step it doesn't have or with an id already used, or has a line its Review line edit would refuse, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

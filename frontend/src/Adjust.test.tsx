@@ -44,6 +44,7 @@ const card: Card = {
   needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   host: null,
+  our_version_status: null,
   schema_version: 1,
 };
 
