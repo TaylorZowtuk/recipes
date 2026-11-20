@@ -1176,6 +1176,23 @@ def test_a_review_item_with_one_confirmed_fact_is_kept_whole(
     assert facts["difficulty"]["prep"] == 3
 
 
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_a_step_the_answer_leaves_out_is_kept_only_if_it_has_a_confirmed_fact(
+    editor_client: TestClient, api_store: Store, *, confirmed: bool
+) -> None:
+    before = reviewed(editor_client, api_store, *(["s2.uses"] if confirmed else []))
+    without_s2 = {**SECOND, "steps": {"s1": SECOND["steps"]["s1"]}}
+
+    response = reenrich(editor_client, before["id"], without_s2, version=before["version"])
+
+    assert response.status_code == 200
+    steps = fetch(editor_client, before["id"])["facts"]["steps"]
+    if confirmed:
+        assert steps["s2"] == before["facts"]["steps"]["s2"]
+    else:
+        assert "s2" not in steps
+
+
 def test_reenrichment_keeps_the_issues_on_kept_items_and_adds_those_on_replaced_ones(
     editor_client: TestClient, api_store: Store
 ) -> None:
