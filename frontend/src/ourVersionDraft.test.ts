@@ -9,6 +9,7 @@ import {
   editStep,
   lineFor,
   lineText,
+  type OurDraft,
   ourDraftOf,
   ourOperation,
   ourRows,
@@ -207,6 +208,48 @@ describe("the Our Version draft", () => {
     expect(lineFor(r, "i5").facts?.parse?.name).toBe("beans");
     expect(lineFor(r, "i2")).toEqual(lineOf(r, "i2"));
     expect(lineFor(r, "new-1")).toEqual({ id: "new-1", text: "" });
+  });
+});
+
+describe("a stored Our Version changed in one thing alone", () => {
+  // The stored Our Version, which also edits step s1, drafted and then changed by `change`.
+  const changed = (change: (draft: OurDraft) => void) => {
+    const base = withOurs();
+    const ours = base.our_version as NonNullable<Recipe["our_version"]>;
+    const s1 = { text: "Brown the butter.", component: null };
+    const r = { ...base, our_version: { ...ours, steps: { ...ours.steps, edit: { s1 } } } };
+    const draft = structuredClone(ourDraftOf(r));
+    expect(ourOperation(r, draft)).toBeUndefined();
+    change(draft);
+    return ourOperation(r, draft);
+  };
+  const i1 = (draft: OurDraft) =>
+    draft.ingredients.edit.i1 as NonNullable<OurDraft["ingredients"]["edit"]["i1"]>;
+  const i5 = (draft: OurDraft) =>
+    draft.ingredients.add[0] as NonNullable<OurDraft["ingredients"]["add"][0]>;
+
+  it.each<[string, (draft: OurDraft) => void]>([
+    ["a line's food", (d) => (i1(d).fdc_id = 99999)],
+    ["a line's portion", (d) => (i1(d).portion_id = 7)],
+    ["a line's Canonical Ingredient", (d) => (i1(d).canonical = { kind: "existing", id: "c9" })],
+    ["a line's component", (d) => (i1(d).component = "For the glaze")],
+    ["an added line's place", (d) => (i5(d).after = "i2")],
+    ["an added line's id", (d) => (i5(d).id = "i6")],
+    [
+      "a step's component",
+      (d) => ((d.steps.edit.s1 as { component: string | null }).component = "To serve"),
+    ],
+  ])("is sent for %s", (_, change) => {
+    expect(changed(change)?.op).toBe("set_our_version");
+  });
+
+  it("is sent once a stored edited line is restored, and nothing else changes", () => {
+    const operation = changed((d) => {
+      d.ingredients = restoreItem(d, "ingredients", "i1").ingredients;
+    });
+    expect(operation?.op === "set_our_version" && operation.our_version.ingredients.edit).toEqual(
+      {},
+    );
   });
 });
 
