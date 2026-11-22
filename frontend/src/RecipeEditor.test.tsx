@@ -338,6 +338,14 @@ describe("the recipe editor", () => {
     expect(alerts()[0]?.textContent).toBe("Line new-1 needs a Canonical Ingredient choice");
   });
 
+  it("shows the API's refusal of an Our Version step by that step", () => {
+    const at = { part: "steps" as const, id: "s1" };
+    render(recipe(), "Step s1 follows a step that isn't there", at);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.closest(".our-version-row")?.textContent).toContain("Melt the butter.");
+    expect(alerts()[0]?.textContent).toBe("Follows a step that isn't there");
+  });
+
   it("shows a refusal of no line under the form", () => {
     render(recipe(), "An edited recipe is at most 350000 bytes as JSON");
     expect(alerts()).toHaveLength(1);

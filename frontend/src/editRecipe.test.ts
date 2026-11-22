@@ -216,6 +216,16 @@ describe("editOutcome and deleteOutcome", () => {
   });
 });
 
+describe("a refusal's place", () => {
+  it("is nowhere when the 422 names a part that isn't one", () => {
+    const refused = { detail: [{ msg: "Line i1 is wrong", part: "bogus", id: "i1" }] };
+    expect(editOutcome({ error: refused, response: response(422) })).toEqual({
+      kind: "invalid",
+      message: "Line i1 is wrong",
+    });
+  });
+});
+
 describe("editing", () => {
   const r = recipe();
   const open = editing({ draft: null }, { type: "open", recipe: r });
@@ -321,6 +331,22 @@ describe("editing", () => {
       refreshed: true,
     });
     expect(failed.at).toBeUndefined();
+  });
+
+  it("forgets where the refused line is once a whole Difficulty or a sign-in is asked for", () => {
+    const at = { part: "ingredients" as const, id: "i3" };
+    const refused = editing(open, {
+      type: "settled",
+      outcome: { kind: "invalid", message: "Line i3 needs an FDC food", at },
+      refreshed: true,
+    });
+    expect(editing(refused, { type: "incomplete" }).at).toBeUndefined();
+    const signedOut = editing(refused, {
+      type: "settled",
+      outcome: { kind: "not-an-editor" },
+      refreshed: true,
+    });
+    expect(signedOut.at).toBeUndefined();
   });
 
   it("clears an old notice when Edit opens again", () => {
