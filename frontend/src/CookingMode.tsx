@@ -68,11 +68,11 @@ export function CookButton({
   );
 }
 
-// Cooking mode: the recipe full-screen, in the version its Adjust choices show, one step at a time, from the first without a Step tick.
-// Next ticks the step it leaves; Finish ticks the last, clears the recipe's ticks and closes; Back
-// and Close change no tick. It keeps the recipe and Adjust choices it opened with, whatever the page
-// under it loads, until it closes, and focus then returns to `opener`, or to `fallback` when the
-// page no longer shows it. The screen is kept on,
+// Cooking mode: the recipe full-screen, in the version its Adjust choices show, one step at a
+// time, from the first without a Step tick. Next ticks the step it leaves; Finish ticks the last,
+// clears the recipe's ticks and closes; Back and Close change no tick. It keeps the recipe and
+// Adjust choices it opened with, whatever the page under it loads, until it closes, and focus then
+// returns to `opener`, or to `fallback` when the page no longer shows it. The screen is kept on,
 // running Timers show above Back and Next, and a Timer's link to one of its steps goes there.
 export function CookingMode({
   recipe,
