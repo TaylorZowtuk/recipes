@@ -212,7 +212,7 @@ The recipes the household places on each day of one Monday-to-Sunday week. A day
 _Avoid_: Meal plan, menu, schedule
 
 **Timer**:
-A countdown started from a duration in a step, one of several that can run at once in the dock while the app stays in the foreground. A range such as 8-10 minutes is one timer: it chimes at the low end, to say check it, and alarms at the high end until it is cancelled or given another minute. A single duration only alarms. A timer stays in the dock until it is cancelled, and can't be started again while it's there. It lives in the page and is never stored.
+A countdown started from a duration in a step, one of several that can run at once in the dock while the app stays in the foreground. A range such as 8-10 minutes is one timer: it chimes at the low end, to say check it, and alarms at the high end until it is cancelled or given another minute. A single duration only alarms. A timer with more than a minute to go can also have a minute taken off. A timer stays in the dock until it is cancelled, and can't be started again while it's there. It lives in the page and is never stored.
 _Avoid_: Countdown, stopwatch, reminder
 
 **Adjust choices**:

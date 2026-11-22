@@ -2458,6 +2458,12 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
   font-weight: 700;
 }
 
+/* −1 with a minute or less to go: greyed out, as an unavailable button is. */
+.timer-add[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 @media (min-width: 768px) {
   .timer-dock {
     inset: auto 0 0 var(--rail-width);
