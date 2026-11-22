@@ -217,6 +217,12 @@ describe("editOutcome and deleteOutcome", () => {
 });
 
 describe("a refusal's place", () => {
+  it("is the step when the 422 names one", () => {
+    const refused = { detail: [{ msg: "Step s3 is wrong", part: "steps", id: "s3" }] };
+    const outcome = editOutcome({ error: refused, response: response(422) });
+    expect(outcome).toMatchObject({ kind: "invalid", at: { part: "steps", id: "s3" } });
+  });
+
   it("is nowhere when the 422 names a part that isn't one", () => {
     const refused = { detail: [{ msg: "Line i1 is wrong", part: "bogus", id: "i1" }] };
     expect(editOutcome({ error: refused, response: response(422) })).toEqual({
