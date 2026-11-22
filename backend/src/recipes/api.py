@@ -101,6 +101,8 @@ from recipes.models import (
     Wording,
     fact_at,
     fact_paths,
+    item_of,
+    kept_items,
     new_ulid,
     normalize_wording,
     resolve,
@@ -820,31 +822,48 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
         403: DUPLICATE[403],
         404: {"description": "No such recipe"},
         409: {
-            "description": "The recipe isn't Pending or changed meanwhile, a new Canonical "
-            "Ingredient's id is taken, or an editor confirmed a wording"
+            "description": "A recipe that isn't Pending came without its `version`, the recipe "
+            "isn't at the `version` given or changed meanwhile, a new Canonical Ingredient's id "
+            "is taken, or an editor confirmed a wording"
         },
         422: {
             "description": "The request names another FDC Snapshot release than the API's, a line "
             "or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that "
             "isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't "
             "have, a step's segments aren't its text, its segments or uses name a line the recipe "
-            "doesn't have, a line's portions add up to more than 1, an issue isn't open, "
-            "substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a "
-            "substitute is its line's own match, a wording isn't a parsed line's name, it learns "
-            "more than one write holds, a fact names an unknown Canonical Ingredient or Store "
-            "Category, or a new Canonical Ingredient or wording is confirmed or at another schema "
-            "version, or the enriched recipe is too big to store"
+            "doesn't have, a line's portions add up to more than 1 (with any kept steps'), an "
+            "issue isn't open, substitutions or a suggested Difficulty aren't the LLM's "
+            "unconfirmed estimate, a substitute is its line's own match (kept or new), a wording "
+            "isn't a parsed line's name, it learns more than one write holds, a fact names an "
+            "unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or "
+            "wording is confirmed or at another schema version, or the enriched recipe is too big "
+            "to store"
         },
     },
 )
 def put_enrichment(
-    recipe_id: Annotated[Ulid, Path()], body: Enrichment, store: StoreDep, snapshot: SnapshotDep
+    *,
+    recipe_id: Annotated[Ulid, Path()],
+    body: Enrichment,
+    store: StoreDep,
+    snapshot: SnapshotDep,
+    dry_run: Annotated[bool, Query()] = False,
+    version: Annotated[int | None, Query()] = None,
 ) -> Recipe:
-    """Store a Pending recipe's facts and Enrichment Issues, with the Canonical Ingredients they
-    create and the wordings they learn. A bulk import's recipe is then Ready, and any other, or
+    """Store a recipe's facts and Enrichment Issues, with the Canonical Ingredients they create
+    and the wordings they learn. A Pending bulk import's recipe is then Ready, and any other, or
     any whose Original an LLM extracted, waits in Awaiting Review for an editor to check it.
     Enrichment sends only FDC ids: each matched line's conversion and each substitute's numbers
     come from the API's own FDC Snapshot, whose release the recipe records.
+
+    Re-enrichment, of a recipe Awaiting Review or Ready, never changes a Confirmed fact: each
+    Review Item with a Confirmed fact keeps all its stored facts and its open Enrichment Issues,
+    and every other item takes the new facts and issues, dropping its old open ones. Resolved
+    issues stay, and the recipe keeps its status. It must name the recipe's `version`, so a
+    re-enrichment checked in a dry run is refused if the recipe changed since; a Pending recipe
+    may name one too.
+
+    With `dry_run`, it checks and returns the recipe it would store, writing nothing.
 
     Refused unless it was enriched against the API's FDC Snapshot release, every match and
     substitute names an FDC food the FDC Snapshot has and either no FDC portion or one of that
@@ -858,13 +877,25 @@ def put_enrichment(
     of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
     names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
     every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
-    enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+    enriched recipe is at most MAX_RECIPE_BYTES as JSON. Re-enrichment's facts must also fit
+    with the kept ones: each line's `portion`s across the steps still add up to at most 1, and
+    no substitute is its line's own match.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
         raise HTTPException(404, "No such recipe")
-    if recipe.status != "pending":
-        raise HTTPException(409, "Only a Pending recipe can be enriched")
+    if version is None and recipe.status != "pending":
+        raise HTTPException(
+            409,
+            "Only a Pending recipe can be enriched without its version: "
+            "pass the version you re-enrich as ?version=",
+        )
+    if version is not None and version != recipe.version:
+        raise HTTPException(
+            409,
+            f"The recipe is at version {recipe.version}, not {version}: it changed since, "
+            "so rerun the dry run",
+        )
     foods = snapshot()
     if body.fdc_release != foods.release:
         raise HTTPException(
@@ -880,23 +911,77 @@ def put_enrichment(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
         )
     _check_canonical_ingredients(body, store)
-    enriched = recipe.model_copy(
-        update={
-            "facts": _filled(body, foods),
-            "enrichment_version": body.enrichment_version,
-            "fdc_release": foods.release,
-            "issues": body.issues,
-            "status": _enriched_status(recipe),
-        }
-    )
+    enriched = _enriched(recipe, body, foods)
     if len(enriched.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An enriched recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
+    if dry_run:
+        return enriched.model_copy(update={"version": enriched.version + 1})
     try:
         return store.enrich_recipe(enriched, body.canonical_ingredients, body.wordings)
     except CanonicalExists:
         raise HTTPException(409, "A new Canonical Ingredient's id is taken") from None
     except WordingConfirmed:
         raise HTTPException(409, "An editor confirmed one of the wordings") from None
+
+
+def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
+    """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
+    (a Pending recipe has none), refused if the facts don't fit together.
+    """
+    new, stored = _filled(body, snapshot), recipe.facts
+    kept = kept_items(stored)
+    facts = RecipeFacts(
+        ingredients=_merged(stored.ingredients, new.ingredients, kept, IngredientFacts()),
+        steps=_merged(stored.steps, new.steps, kept, StepFacts()),
+        difficulty=stored.difficulty if "difficulty" in kept else new.difficulty,
+    )
+    issues = [
+        *(i for i in recipe.issues if i.status == "resolved" or item_of(i.fact_id) in kept),
+        *(i for i in body.issues if item_of(i.fact_id) not in kept),
+    ]
+    _check_together(facts)
+    return recipe.model_copy(
+        update={
+            "facts": facts,
+            "enrichment_version": body.enrichment_version,
+            "fdc_release": snapshot.release,
+            "issues": issues,
+            "status": _enriched_status(recipe) if recipe.status == "pending" else recipe.status,
+        }
+    )
+
+
+def _merged[H: IngredientFacts | StepFacts](
+    stored: dict[str, H], new: dict[str, H], kept: set[str], empty: H
+) -> dict[str, H]:
+    """Each line's or step's new facts, with the stored ones of each Review Item in `kept`."""
+    merged: dict[str, H] = {}
+    for owner in stored | new:
+        facts = {
+            kind: getattr(
+                stored.get(owner, empty)
+                if item_of(f"{owner}.{kind}") in kept
+                else new.get(owner, empty),
+                kind,
+            )
+            for kind in type(empty).model_fields
+        }
+        if any(facts.values()):
+            merged[owner] = empty.model_copy(update=facts)
+    return merged
+
+
+def _check_together(facts: RecipeFacts) -> None:
+    """Refuse a line used more than once over across the steps, and a substitute that is its
+    line's own Canonical Ingredient.
+    """
+    if over := overused(facts.steps):
+        raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
+    for line in facts.ingredients.values():
+        match = line.match.canonical_id if line.match else None
+        substitutes = line.substitutions.items if line.substitutions else []
+        if any(item.canonical_id == match for item in substitutes):
+            raise HTTPException(422, "A substitute isn't its line's own Canonical Ingredient")
 
 
 def _filled(body: Enrichment, snapshot: fdc.Snapshot) -> RecipeFacts:
@@ -1464,17 +1549,13 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
 
 
 def _check_steps(body: Enrichment, recipe: Recipe) -> None:
-    """Refuse a fact for a step the recipe doesn't have, a step's facts `_check_step` refuses, and
-    a line used more than once over across the steps.
-    """
+    """Refuse a fact for a step the recipe lacks, and the step facts `_check_step` refuses."""
     texts = {step.id: step.text for step in recipe.original.steps}
     if unknown := sorted(body.facts.steps.keys() - texts.keys()):
         raise HTTPException(422, f"The recipe has no step {', '.join(unknown)}")
     lines = {line.id for line in recipe.original.ingredients}
     for step_id, facts in body.facts.steps.items():
         _check_step(step_id, texts[step_id], facts, lines)
-    if over := overused(body.facts.steps):
-        raise HTTPException(422, f"The steps use more than all of {', '.join(over)}")
 
 
 def _check_step(step_id: str, text: str, facts: StepFacts, lines: set[str]) -> None:
@@ -1518,9 +1599,7 @@ def _check_step(step_id: str, text: str, facts: StepFacts, lines: set[str]) -> N
 
 
 def _check_suggestions(body: Enrichment) -> None:
-    """Refuse substitutions or a suggested Difficulty that aren't the LLM's unconfirmed estimate,
-    and a substitute that is its line's own Canonical Ingredient.
-    """
+    """Refuse substitutions or a suggested Difficulty that aren't the LLM's unconfirmed estimate."""
     lines = body.facts.ingredients.values()
     suggestions: list[Fact] = [facts.substitutions for facts in lines if facts.substitutions]
     if body.facts.difficulty:
@@ -1537,10 +1616,6 @@ def _check_suggestions(body: Enrichment) -> None:
         raise HTTPException(
             422, "Substitutions and a suggested Difficulty arrive as the LLM's unconfirmed estimate"
         )
-    for facts in lines:
-        match = facts.match.canonical_id if facts.match else None
-        if any(item.canonical_id == match for item in _substitutes(facts)):
-            raise HTTPException(422, "A substitute isn't its line's own Canonical Ingredient")
 
 
 def _substitutes(facts: EnrichmentLineFacts) -> list[EnrichmentSubstitution]:

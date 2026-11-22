@@ -1,21 +1,14 @@
-import {
-  Fragment,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { AdjustButton } from "./AdjustSheet";
 import { type AdjustChoices, AS_WRITTEN, type LineView, lineView, type UnitChoice } from "./adjust";
 import type { Collection, Factor, Original, ParseFact, Recipe, RecipeFacts } from "./api/client";
+import { CookButton, type Cooking, CookingMode } from "./CookingMode";
 import { useCollection, useRecipe } from "./collection";
 import { AddToDayButton } from "./DaySheet";
 import { DifficultyMeters } from "./DifficultyMeters";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
-import { ClockIcon } from "./icons";
+import { CheckIcon, ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
 import { type EffectiveOriginal, effective, lineNote, stepNote } from "./ourVersion";
 import { Plate } from "./Plate";
@@ -35,14 +28,16 @@ import {
   undoBatch,
 } from "./review";
 import { focusTitle, hashTookFocus, Screen } from "./Screen";
+import { stepNodes, TimerButton } from "./StepPieces";
 import { EditorOnly, useIsEditor } from "./session";
 import { recipePath, slug } from "./slug";
 import { formatStatedTime, statedTimeText } from "./statedTime";
 import { type DurationPiece, stepText } from "./stepText";
+import { stepTicks, useStepTicks } from "./stepTicks";
 import { Tabs } from "./Tabs";
 import { TagList } from "./TagList";
 import { Toast, type ToastMessage } from "./Toast";
-import { type TimerStart, timers } from "./timers";
+import { timers } from "./timers";
 import { SCALES } from "./weekPlan";
 
 // A recipe at /recipes/<id>/<slug>. The id finds it; a stale or missing slug is corrected in place.
@@ -82,6 +77,10 @@ function RecipePage() {
     scale: linkedScale(search),
     units: "written",
   }));
+  // Cooking mode lives here, not in the hero, so it stays open on what it opened with while the
+  // page can't show the recipe: a newer version that failed to load, or the card gone.
+  const [cooking, setCooking] = useState<Cooking | null>(null);
+  const cookOpener = useRef<HTMLButtonElement>(null);
 
   // Focus moves with Edit, since the control that had it is gone: entering it, to the form's
   // heading; leaving it, to the notice saying why Edit closed if there is one, else the title. A
@@ -108,9 +107,14 @@ function RecipePage() {
     if (draft && hash.startsWith("#step-")) timers.notify(FINISH_EDITING);
   }, [key, draft, hash]);
 
+  // A renamed recipe's address takes its new slug in place, marked so Cooking mode doesn't take the
+  // step in it for a new jump.
   useEffect(() => {
     if (card && shownSlug !== slug(card.title))
-      navigate({ pathname: recipePath(card), search, hash }, { replace: true });
+      navigate(
+        { pathname: recipePath(card), search, hash },
+        { replace: true, state: { slugFixed: true } },
+      );
   }, [card, shownSlug, search, hash, navigate]);
 
   const missing = collection.state === "ready" && !card;
@@ -164,6 +168,13 @@ function RecipePage() {
                             pending={pending}
                             ourVersion={!!ready.our_version}
                           />
+                          <CookButton
+                            recipe={ready}
+                            opener={cookOpener}
+                            onCook={() =>
+                              setCooking({ recipe: ready, choices: pending ? AS_WRITTEN : choices })
+                            }
+                          />
                           <EditorOnly>
                             <EditButton onEdit={() => dispatch({ type: "open", recipe: ready })} />
                             <AddToDayButton recipe={card} />
@@ -178,6 +189,14 @@ function RecipePage() {
           : {}
       }
     >
+      {cooking && (
+        <CookingMode
+          {...cooking}
+          opener={cookOpener}
+          fallback={status}
+          onClose={() => setCooking(null)}
+        />
+      )}
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {loading && "Loading the recipe…"}
         {gone && "This recipe is no longer in the Collection."}
@@ -262,6 +281,7 @@ function RecipeTabs({
   const opener = useRef<HTMLElement | null>(null);
   const location = useLocation();
   const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
+  const ticks = useStepTicks(recipe.id);
   const items = isEditor ? reviewOf(recipe) : undefined;
   const version = choices.version ?? "ours";
   const shown = effective(recipe, version);
@@ -379,6 +399,7 @@ function RecipeTabs({
                   facts={shown.facts}
                   review={review}
                   choices={choices}
+                  ticks={ticks}
                 />
                 {bar("steps")}
               </>
@@ -620,20 +641,23 @@ function ParsedLine({
 // The steps, numbered through the whole recipe across its Components. Where a step names an
 // ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
 // is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
-// buttons follow in a row. A captured recipe has no `recipeId` yet, so no Timers. In Our Version,
-// an edited or added step says so under it, and isn't a Review Item.
+// buttons follow in a row. Under each step's number, its Step tick: a ticked step dims. A captured
+// recipe has no `recipeId` yet, so no Timers and no ticks. In Our Version, an edited or added step
+// says so under it, and isn't a Review Item.
 export function Steps({
   recipeId,
   original,
   facts,
   review,
   choices = AS_WRITTEN,
+  ticks = new Set(),
 }: {
   recipeId?: string;
   original: EffectiveOriginal;
   facts?: RecipeFacts;
   review?: ReviewTarget;
   choices?: AdjustChoices;
+  ticks?: ReadonlySet<string>;
 }) {
   return byComponent(original.steps).map((part) => (
     <section key={part.start} className="component">
@@ -646,69 +670,80 @@ export function Steps({
             recipeId && (
               <TimerButton
                 key={n}
-                start={{
-                  recipeId,
-                  recipeTitle: original.title,
-                  stepId: step.id,
-                  stepNumber: part.start + index,
-                  position: n,
-                  written: piece.written,
-                  lowS: piece.low_s,
-                  highS: piece.high_s,
-                }}
+                recipeId={recipeId}
+                recipeTitle={original.title}
+                step={step}
+                number={part.start + index}
+                piece={piece}
+                n={n}
               />
             );
           const pieces = stepText(step, facts, choices);
-          const shown = pieces.map((piece, n) => {
-            if (typeof piece === "string") return piece;
-            if ("t" in piece) return (!item && timer(piece, n)) || piece.written;
-            return (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a step's pieces never reorder.
-              <Fragment key={n}>
-                <span className="step-amount">{piece.amount}</span> {piece.name}
-              </Fragment>
-            );
-          });
+          const shown = stepNodes(
+            pieces,
+            (piece, n) => (!item && timer(piece, n)) || piece.written,
+          );
           const timerRow = pieces.flatMap((piece, n) =>
             typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
           );
-          return (
-            <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
-              {item && review ? (
-                <>
-                  <ReviewButton item={item} review={review}>
-                    {shown}
-                  </ReviewButton>
-                  {timerRow.length > 0 && (
-                    <div className="step-timers">
-                      <ClockIcon />
-                      {timerRow}
-                    </div>
-                  )}
-                </>
-              ) : (
-                shown
-              )}
+          const main =
+            item && review ? (
+              <>
+                <ReviewButton item={item} review={review}>
+                  {shown}
+                </ReviewButton>
+                {timerRow.length > 0 && (
+                  <div className="step-timers">
+                    <ClockIcon />
+                    {timerRow}
+                  </div>
+                )}
+              </>
+            ) : (
+              shown
+            );
+          const body = (
+            <>
+              {main}
               {note && <span className="our-version-note">{note}</span>}
+            </>
+          );
+          if (!recipeId)
+            return (
+              <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
+                {body}
+              </li>
+            );
+          const number = part.start + index;
+          const done = ticks.has(step.id);
+          return (
+            <li
+              key={step.id}
+              id={`step-${step.id}`}
+              tabIndex={-1}
+              className={done ? "step step-ticked" : "step"}
+            >
+              <div className="step-mark">
+                <span className="step-number" aria-hidden="true">
+                  {number}
+                </span>
+                <button
+                  type="button"
+                  className="step-tick"
+                  aria-pressed={done}
+                  aria-label={`Step ${number} done`}
+                  onClick={() => stepTicks.toggle(recipeId, step.id)}
+                >
+                  <CheckIcon />
+                </button>
+              </div>
+              <div className="step-body">{body}</div>
             </li>
           );
         })}
       </ol>
     </section>
   ));
-}
-
-function TimerButton({ start }: { start: TimerStart }) {
-  return (
-    <button
-      type="button"
-      className="step-timer"
-      aria-label={`Start a timer for ${start.written}`}
-      onClick={() => timers.start(start)}
-    >
-      {start.written}
-    </button>
-  );
 }
 
 // The Stated Times (an ISO duration humanized, other text as written) and the yield as written.

@@ -160,7 +160,11 @@ const lineOf = (name: string) =>
   [...host.querySelectorAll(".ingredients li")].find((li) =>
     li.querySelector(".ingredient-name")?.textContent?.startsWith(name),
   );
-const steps = () => [...host.querySelectorAll(".steps li")].map((li) => li.textContent);
+// Each step's text, without the number beside it.
+const steps = () =>
+  [...host.querySelectorAll(".steps li")].map(
+    (li) => (li.querySelector(".step-body") ?? li).textContent,
+  );
 
 describe("the Adjust sheet", () => {
   it("scales the ingredients and steps, and shows the choice on its button", () => {

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import type { Card, Original, ParseFact, Recipe } from "./api/client";
 import { Ingredients, RecipeScreen, Steps } from "./RecipeScreen";
+import { stepTicks } from "./stepTicks";
 import { timers } from "./timers";
 
 // The Collection the recipe page reads its card from, with the recipe itself loading until a test
@@ -381,7 +382,7 @@ describe("Steps", () => {
 
     it("is a button that starts a timer, in a step with an id to jump to", () => {
       const markup = renderToStaticMarkup(<Steps recipeId="r1" original={fry} facts={facts} />);
-      expect(markup).toContain('<li id="step-s1" tabindex="-1">');
+      expect(markup).toContain('<li id="step-s1" tabindex="-1" class="step">');
       expect(markup).toContain(
         'Fry for <button type="button" class="step-timer" aria-label="Start a timer for 8-10 minutes">8-10 minutes</button>.',
       );
@@ -401,7 +402,7 @@ describe("Steps", () => {
         expect(reviewItem.replace(/<[^>]+>/g, "")).toContain("Fry for 8-10 minutes.");
         expect(reviewItem).not.toContain("step-timer");
         expect(markup.slice(markup.indexOf(reviewItem) + reviewItem.length)).toMatch(
-          /^<div class="step-timers">.*aria-label="Start a timer for 8-10 minutes">8-10 minutes<\/button><\/div><\/li>/,
+          /^<div class="step-timers">.*aria-label="Start a timer for 8-10 minutes">8-10 minutes<\/button><\/div><\/div><\/li>/,
         );
       });
 
@@ -431,6 +432,88 @@ describe("Steps", () => {
       const markup = renderToStaticMarkup(<Steps original={fry} facts={facts} />);
       expect(markup).toContain("Fry for 8-10 minutes.");
       expect(markup).not.toContain("<button");
+    });
+  });
+
+  describe("a Step tick", () => {
+    const parts = {
+      ...original(),
+      steps: [
+        { id: "s1", component: "For the sauce", text: "Whisk the sauce." },
+        { id: "s2", component: "For the noodles", text: "Boil the noodles." },
+        { id: "s3", component: "For the noodles", text: "Toss with the sauce." },
+      ],
+    };
+    const ticks = (markup: string) =>
+      [...markup.matchAll(/<button[^>]*class="step-tick"[^>]*>/g)].map(([tag]) => tag);
+
+    it("sits under each step's number, named by the number through every Component", () => {
+      const markup = renderToStaticMarkup(<Steps recipeId="r-ticks-1" original={parts} />);
+      expect(markup).toContain(
+        '<li id="step-s3" tabindex="-1" class="step"><div class="step-mark"><span class="step-number" aria-hidden="true">3</span><button type="button" class="step-tick" aria-pressed="false" aria-label="Step 3 done">',
+      );
+      expect(ticks(markup).map((tag) => tag.match(/aria-label="([^"]+)"/)?.[1])).toEqual([
+        "Step 1 done",
+        "Step 2 done",
+        "Step 3 done",
+      ]);
+    });
+
+    it("is pressed on a ticked step, which dims", () => {
+      const markup = renderToStaticMarkup(
+        <Steps recipeId="r-ticks-2" original={parts} ticks={new Set(["s2", "s9"])} />,
+      );
+      expect(ticks(markup).map((tag) => tag.includes('aria-pressed="true"'))).toEqual([
+        false,
+        true,
+        false,
+      ]);
+      expect(markup).toContain('<li id="step-s2" tabindex="-1" class="step step-ticked">');
+      expect(markup).toContain('<li id="step-s1" tabindex="-1" class="step">');
+    });
+
+    it("toggles the step's tick on a tap", () => {
+      const tick = buttons(Steps({ recipeId: "r-ticks-3", original: parts })).find(
+        ({ props }) => props.className === "step-tick",
+      );
+      tick?.props.onClick();
+      expect([...stepTicks.ticked("r-ticks-3", ["s1", "s2", "s3"])]).toEqual(["s1"]);
+      stepTicks.clear("r-ticks-3");
+    });
+
+    it("never sits inside a Review Item's button", () => {
+      const markup = renderToStaticMarkup(
+        <Steps
+          recipeId="r-ticks-4"
+          original={parts}
+          review={{
+            items: new Map([
+              [
+                "s1",
+                {
+                  id: "s1",
+                  kind: "step" as const,
+                  tab: "steps" as const,
+                  factIds: ["s1.segments"],
+                  mark: "confirmed" as const,
+                  issues: [],
+                },
+              ],
+            ]),
+            open: vi.fn(),
+            newCanonicals: new Set<string>(),
+          }}
+        />,
+      );
+      const reviewItem = markup.match(/<button[^>]*review-item.*?<\/button>/)?.[0] ?? "";
+      expect(reviewItem).not.toContain("step-tick");
+      expect(ticks(markup)).toHaveLength(3);
+    });
+
+    it("isn't there on a captured recipe, with no recipe id yet", () => {
+      const markup = renderToStaticMarkup(<Steps original={parts} />);
+      expect(markup).not.toContain("step-tick");
+      expect(markup).toContain('<li id="step-s1" tabindex="-1">');
     });
   });
 });
@@ -588,6 +671,23 @@ describe("RecipeScreen review", () => {
       ([, attrs = "", t = ""]) =>
         attrs.match(/aria-label="([^"]*)"/)?.[1] ?? t.replace(/<[^>]+>/g, ""),
     );
+
+  it("dims a step this device has ticked", () => {
+    shown.cards = [card];
+    shown.recipe = recipe("ready");
+    stepTicks.tick(card.id, "s1");
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[`/recipes/${card.id}/synthetic-test-beans#step-s1`]}>
+        <Routes>
+          <Route path="/recipes/:id/:slug?" element={<RecipeScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    stepTicks.clear(card.id);
+    shown.recipe = undefined;
+    expect(markup).toContain('<li id="step-s1" tabindex="-1" class="step step-ticked">');
+    expect(markup).toContain('aria-pressed="true" aria-label="Step 1 done"');
+  });
 
   it("opens on the Steps tab at a step's address", () => {
     const selected = (path: string) => {

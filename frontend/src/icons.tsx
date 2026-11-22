@@ -74,6 +74,12 @@ export const ClockIcon = () => (
   </Icon>
 );
 
+export const CheckIcon = () => (
+  <Icon>
+    <path d="m5 12.5 4.5 4.5L19 7.5" />
+  </Icon>
+);
+
 export const PauseIcon = () => (
   <Icon>
     <path d="M8.5 5v14M15.5 5v14" />

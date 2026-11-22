@@ -107,6 +107,10 @@ _Avoid_: Annotation, field
 The version of enrichment a recipe was enriched with, recorded on the recipe so out-of-date recipes can be found for re-enrichment.
 _Avoid_: Enrichment run, parser version
 
+**Re-enrichment**:
+An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status.
+_Avoid_: Refresh, backfill
+
 **Ingest Channel**:
 How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
 _Avoid_: Origin, import type
@@ -218,6 +222,14 @@ _Avoid_: Countdown, stopwatch, reminder
 **Adjust choices**:
 How one recipe shows while cooking it: a scale (½× to 3×), a unit system (as written, metric or US) and, for any ingredient tapped, its own unit. They stay on the device and reset on leaving the recipe. Metric and US convert only within a kind, a weight to a weight and a volume to a volume; spoons stay spoons.
 _Avoid_: Settings, preferences
+
+**Step tick**:
+A cook's mark that one step of a recipe is done, set and cleared with the tick under the step's number; a ticked step dims. Step ticks stay on the device, keyed by the step's id, and are never shared or queued, unlike a Grocery Item's tick, which is shared by the household and queued while offline.
+_Avoid_: Checkbox, progress, done mark
+
+**Cooking mode**:
+A recipe shown full-screen, one step at a time, for cooking from. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
+_Avoid_: Cook view, step-by-step mode
 
 **Confidence Threshold**:
 What a line's conversion must clear before a volume or count shows as a weight: confirmed, with a confidence of at least 0.8. Below it the line stays in its written unit. A weight it gives is marked "≈".

@@ -16,9 +16,9 @@ const VERSIONS: [Version, string][] = [
   ["original", "Original"],
 ];
 
-// The Adjust choices shown on the button when they differ from Our Version as written at 1×, as
-// "2× · Metric · Original".
-function adjustSummary({ scale, units, version }: AdjustChoices): string {
+// The Adjust choices shown on the button, and in Cooking mode, when they differ from Our Version
+// as written at 1×, as "2× · Metric · Original".
+export function adjustSummary({ scale, units, version }: AdjustChoices): string {
   return [
     scale !== 1 && scaleLabel(scale),
     units !== "written" && UNITS.find(([u]) => u === units)?.[1],
