@@ -152,11 +152,11 @@ The recipe exactly as captured from its source. It never changes after ingest, e
 _Avoid_: Source version, scraped version
 
 **Our Version**:
-The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed; its edited and added steps wait for enrichment.
+The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed, until a wording fixed on another line prepared another way leaves one's food unconfirmed with an issue; its edited and added steps wait for enrichment.
 _Avoid_: Personal adjustment, variant, fork
 
 **Our Version Status**:
-Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
+Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched, or given an issue by a wording fixed elsewhere, and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
 _Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
 
 **Effective lines**:
