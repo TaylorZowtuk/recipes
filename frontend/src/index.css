@@ -935,10 +935,54 @@ h1:focus {
   font-weight: 700;
 }
 
-.steps li::marker {
+.steps li::marker,
+.step-number {
   color: var(--accent-text);
   font-family: var(--font-display);
   font-weight: 700;
+}
+
+/* A step with a Step tick: its number, and the tick under it, in a column of their own in place of
+   the list marker. A ticked step dims: its number and text go to the secondary text colour, which
+   still reads in a bright kitchen, while its tick and Timers keep their own colours. */
+.steps:has(> .step) {
+  padding-left: 0;
+}
+
+.steps li.step {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  column-gap: calc(var(--space) * 2);
+  padding-left: 0;
+}
+
+.step-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.step-tick {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--outline-strong);
+  cursor: pointer;
+}
+
+.step-tick[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--done);
+}
+
+.step-ticked .step-number,
+.step-ticked .step-body {
+  color: var(--text-secondary);
 }
 
 .facts div {
@@ -995,7 +1039,8 @@ h1:focus {
 /* Off while offline: greyed out, as every edit that isn't queued is. */
 .ingest-form fieldset:disabled,
 .review-form fieldset:disabled,
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -2432,6 +2477,219 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 
 .hero-actions .edit-open {
   margin-top: 0;
+}
+
+/* Cooking mode: the whole screen, one step at a time in large text, with Back and Next at thumb
+   height at its foot. Running Timers float just above them, and the step scrolls clear of both. */
+.cooking {
+  --cooking-left: max(
+    calc(var(--gutter) + env(safe-area-inset-left)),
+    calc(50vw - 380px + var(--gutter))
+  );
+  --cooking-right: max(
+    calc(var(--gutter) + env(safe-area-inset-right)),
+    calc(50vw - 380px + var(--gutter))
+  );
+  --cooking-nav-height: calc(
+    var(--cooking-button) +
+    var(--space) *
+    6 +
+    1px +
+    env(safe-area-inset-bottom)
+  );
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: var(--cooking-bg);
+  color: var(--cooking-text);
+  text-align: left;
+}
+
+/* The page behind stays put while Cooking mode is open. */
+html:has(.cooking[open]) {
+  overflow: hidden;
+}
+
+.cooking[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.cooking::backdrop {
+  background: var(--cooking-bg);
+}
+
+.cooking-top {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  padding: calc(var(--space) * 2 + env(safe-area-inset-top))
+    calc(var(--gutter) + env(safe-area-inset-right)) 0
+    calc(var(--gutter) + env(safe-area-inset-left));
+}
+
+.cooking-top .icon-button {
+  color: var(--cooking-text);
+}
+
+.cooking-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-weight: 700;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cooking-title:focus {
+  outline: none;
+}
+
+.cooking-size {
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-weight: 700;
+}
+
+.cooking-top .cooking-size[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cooking-progress {
+  padding: calc(var(--space) * 2) var(--cooking-right) 0 var(--cooking-left);
+}
+
+/* The step count, the Adjust choices when they aren't as written, and whether the screen stays on:
+   always in view, whatever the step's length. */
+.cooking-progress-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: calc(var(--space) * 3);
+  margin-bottom: var(--space);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.cooking-progress-row p {
+  margin: 0;
+}
+
+.cooking-progress-text,
+.cooking-adjusted {
+  font-weight: 700;
+}
+
+.cooking-screen {
+  margin-left: auto;
+}
+
+.cooking-progress progress {
+  display: block;
+  width: 100%;
+  height: 8px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--divider);
+  overflow: hidden;
+  appearance: none;
+}
+
+.cooking-progress progress::-webkit-progress-bar {
+  background: var(--divider);
+}
+
+.cooking-progress progress::-webkit-progress-value {
+  border-radius: var(--radius-pill);
+  background: var(--cooking-progress);
+}
+
+.cooking-progress progress::-moz-progress-bar {
+  border-radius: var(--radius-pill);
+  background: var(--cooking-progress);
+}
+
+.cooking-body {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: calc(var(--space) * 5) calc(var(--gutter) + env(safe-area-inset-right))
+    calc(var(--dock-height) + var(--space) * 4) calc(var(--gutter) + env(safe-area-inset-left));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cooking-component {
+  margin: 0 0 calc(var(--space) * 2);
+  color: var(--accent-text);
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.cooking-step {
+  margin: 0 0 calc(var(--space) * 6);
+  overflow-wrap: anywhere;
+  font-size: var(--text-cooking-step);
+  line-height: 1.35;
+}
+
+.cooking-large .cooking-step {
+  font-size: var(--text-cooking-step-large);
+}
+
+.cooking-step .step-timer {
+  font: inherit;
+  font-weight: 700;
+}
+
+.cooking-uses {
+  padding: calc(var(--space) * 3) calc(var(--space) * 4);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.cooking-uses li:last-child {
+  border-bottom: none;
+}
+
+.cooking-uses h3 {
+  margin: 0 0 calc(var(--space) * 2);
+  font-size: var(--text-body);
+  font-weight: 700;
+}
+
+/* On a wide screen the progress and Back and Next keep to the step's width. */
+.cooking-nav {
+  display: flex;
+  gap: calc(var(--space) * 3);
+  padding: calc(var(--space) * 3) var(--cooking-right)
+    calc(var(--space) * 3 + env(safe-area-inset-bottom)) var(--cooking-left);
+  border-top: 1px solid var(--divider);
+  background: var(--cooking-bg);
+}
+
+.cooking-nav .button {
+  flex: 1;
+  gap: calc(var(--space) * 2);
+  min-height: var(--cooking-button);
+  font-size: var(--text-card-title);
+}
+
+.cooking .timer-dock {
+  inset: auto 0 var(--cooking-nav-height);
+  padding-bottom: calc(var(--space) * 2);
 }
 
 /* A Pending recipe's disabled Adjust, with the note saying why under it. */

@@ -10,8 +10,9 @@ const UNITS: [Units, string][] = [
   ["us", "US"],
 ];
 
-// The Adjust choices shown on the button when they differ from as written at 1×, as "2× · Metric".
-function adjustSummary({ scale, units }: AdjustChoices): string {
+// The Adjust choices shown on the button, and in Cooking mode, when they differ from as written at
+// 1×, as "2× · Metric".
+export function adjustSummary({ scale, units }: AdjustChoices): string {
   return [
     scale !== 1 && scaleLabel(scale),
     units !== "written" && UNITS.find(([u]) => u === units)?.[1],
