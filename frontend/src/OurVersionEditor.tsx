@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useEffect, useRef } from "react";
 import type { Collection, Recipe } from "./api/client";
 import type { RefusedAt } from "./editRecipe";
 import { LineForm, StepTextForm } from "./ItemEditForm";
@@ -46,6 +46,19 @@ export function OurVersionFields({
   onChange: (ours: OurDraft) => void;
   onOpen: (target: OurTarget) => void;
 }) {
+  // Remove and Restore each swap themselves out of their row, so the one that takes its place
+  // gets the focus once the draft changes.
+  const field = useRef<HTMLFieldSetElement>(null);
+  const swapped = useRef<{ row: string; action: "Remove" | "Restore" }>(undefined);
+  useEffect(() => {
+    const focus = swapped.current;
+    if (!focus) return;
+    swapped.current = undefined;
+    field.current
+      ?.querySelector(`[data-row="${CSS.escape(focus.row)}"]`)
+      ?.querySelector<HTMLElement>(`[data-action="${focus.action}"]`)
+      ?.focus();
+  });
   if (draft.removed)
     return (
       <fieldset className="our-version-field">
@@ -79,8 +92,14 @@ export function OurVersionFields({
                   title: `Add a ${NOUN[part]} after ${row.text}`,
                 })
               }
-              onRemove={() => onChange(removeItem(draft, part, row.id))}
-              onRestore={() => onChange(restoreItem(draft, part, row.id))}
+              onRemove={() => {
+                swapped.current = { row: `${part} ${row.id}`, action: "Restore" };
+                onChange(removeItem(draft, part, row.id));
+              }}
+              onRestore={() => {
+                swapped.current = { row: `${part} ${row.id}`, action: "Remove" };
+                onChange(restoreItem(draft, part, row.id));
+              }}
             >
               {problem && refusedAt?.part === part && refusedAt.id === row.id && (
                 <p role="alert" className="form-problem">
@@ -107,7 +126,7 @@ export function OurVersionFields({
       </div>
     ));
   return (
-    <fieldset className="our-version-field">
+    <fieldset ref={field} className="our-version-field">
       <legend>Our Version</legend>
       <p className="field-hint">
         Your household’s own lines and steps. The Original stays as it is, and Adjust can show it.
@@ -176,7 +195,10 @@ function OurRow({
   const removed = row.change === "removed";
   const named = <span className="visually-hidden"> {row.text}</span>;
   return (
-    <li className={removed ? "our-version-row our-version-removed" : "our-version-row"}>
+    <li
+      data-row={`${part} ${row.id}`}
+      className={removed ? "our-version-row our-version-removed" : "our-version-row"}
+    >
       <span className="our-version-text">
         {removed ? <s>{row.text}</s> : row.text}
         {row.change && <span className="our-version-mark"> · {MARKS[row.change]}</span>}
@@ -188,12 +210,12 @@ function OurRow({
           </button>
         )}
         {(removed || row.change === "edited") && (
-          <button type="button" className="text-button" onClick={onRestore}>
+          <button type="button" className="text-button" data-action="Restore" onClick={onRestore}>
             Restore{named}
           </button>
         )}
         {!removed && (
-          <button type="button" className="text-button" onClick={onRemove}>
+          <button type="button" className="text-button" data-action="Remove" onClick={onRemove}>
             Remove{named}
           </button>
         )}

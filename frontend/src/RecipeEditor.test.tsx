@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api/client";
 import { draftOf } from "./editRecipe";
+import { OurVersionFields } from "./OurVersionEditor";
+import { ourDraftOf } from "./ourVersionDraft";
 import { RecipeEditor } from "./RecipeEditor";
 import { collection, recipe } from "./review.fixtures";
 
@@ -187,6 +189,24 @@ describe("the recipe editor", () => {
         },
       },
     ]);
+  });
+
+  it("moves the focus to Restore once Remove is pressed, and back again", () => {
+    const r = recipe();
+    function Fields() {
+      const [draft, setDraft] = useState(ourDraftOf(r));
+      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+    }
+    act(() => root.render(<Fields />));
+    const press = (name: string) => {
+      const pressed = button(name);
+      pressed?.focus();
+      act(() => pressed?.click());
+    };
+    press("Remove 2 cups flour or rice flour");
+    expect(document.activeElement?.textContent).toBe("Restore 2 cups flour or rice flour");
+    press("Restore 2 cups flour or rice flour");
+    expect(document.activeElement?.textContent).toBe("Remove 2 cups flour or rice flour");
   });
 
   it("offers no Our Version on a Pending recipe", () => {
