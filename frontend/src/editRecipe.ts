@@ -1,5 +1,5 @@
 import { chosenDifficulty, type DifficultyChoice, parseTags } from "./addRecipe";
-import type { Difficulty, Preview, Recipe, RecipeOperation } from "./api/client";
+import type { Difficulty, Preview, Recipe, RecipeOperation, Refused } from "./api/client";
 import { type OurDraft, ourDraftOf, ourOperation, type Part } from "./ourVersionDraft";
 import {
   type Answer,
@@ -92,11 +92,13 @@ export type EditOutcome =
   | { kind: "invalid"; message: string; at?: RefusedAt }
   | WriteRefusal;
 
-// Where a 422 says the refused line or step is: `[{"msg", "part", "id"}]`, else nowhere.
+// Where a 422 says the refused line or step is, else nowhere. The part is checked all the same,
+// since a 422 from anything but the API wouldn't match the declared body.
 function refusedAt(error: unknown): RefusedAt | undefined {
-  const detail = (apiError(error) as { detail?: unknown } | undefined)?.detail;
-  const first = Array.isArray(detail) ? (detail[0] as Partial<RefusedAt> | undefined) : undefined;
-  const { part, id } = first ?? {};
+  const detail = (apiError(error) as Refused | undefined)?.detail;
+  const first = Array.isArray(detail) ? detail[0] : undefined;
+  if (!first || !("part" in first)) return undefined;
+  const { part, id } = first;
   return (part === "ingredients" || part === "steps") && typeof id === "string"
     ? { part, id }
     : undefined;

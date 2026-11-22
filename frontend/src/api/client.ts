@@ -18,6 +18,7 @@ export type Ingested = components["schemas"]["Ingested"];
 export type NewRecipe = components["schemas"]["NewRecipe"];
 export type QueuedIngest = components["schemas"]["QueuedIngest"];
 export type Duplicate = components["schemas"]["Duplicate"];
+export type Refused = components["schemas"]["Refused"];
 export type Image = components["schemas"]["Image"];
 export type Preview = components["schemas"]["Preview"];
 export type OurVersionDraft = components["schemas"]["OurVersionDraft"];
