@@ -278,17 +278,29 @@ export type Row = {
   change?: "edited" | "added" | "removed";
 };
 
-// A line's text as the recipe view shows its parse: "2 tbsp butter, softened".
-function lineText(line: OurLineFields) {
+type LineParse = Pick<OurLineFields, "quantity" | "unit" | "name" | "preparation"> & {
+  comment: string | null;
+};
+
+// A line's text as the recipe view shows its parse, as the API's `line_text` builds it:
+// "2 tbsp butter, softened, or to taste".
+export function lineText(line: LineParse) {
   const amount = line.quantity ? formatAmount(line.quantity, line.unit) : line.unit;
   const named = [amount, line.name].filter(Boolean).join(" ");
-  return line.preparation ? `${named}, ${line.preparation}` : named;
+  return [named, line.preparation, line.comment].filter(Boolean).join(", ");
 }
 
-// The stored line's text while the draft has it as stored, else one built from its fields.
-function textOf(line: OurLineFields, stored: StoredLine | undefined, facts?: IngredientFacts) {
+// The stored line's text while the draft has it as stored, else one built from its fields and the
+// comment of the line it replaces, Our Version's or else the Original's, as the API builds it.
+function textOf(
+  line: OurLineFields,
+  stored: StoredLine | undefined,
+  facts: IngredientFacts | undefined,
+  original?: IngredientFacts,
+) {
   const same = stored && sameLine(storedFields(facts, stored.component), line);
-  return same ? stored.text : lineText(line);
+  const comment = (facts ?? original)?.parse?.comment ?? null;
+  return same ? stored.text : lineText({ ...line, comment });
 }
 
 export function ourRows(recipe: Recipe, draft: OurDraft): Record<Part, Row[]> {
@@ -302,7 +314,12 @@ export function ourRows(recipe: Recipe, draft: OurDraft): Record<Part, Row[]> {
       const edit = lines.edit[line.id];
       if (lines.remove.includes(line.id)) return { ...line, change: "removed" };
       if (!edit) return line;
-      const text = textOf(edit, ours?.ingredients.edit[line.id], ours?.facts.ingredients[line.id]);
+      const text = textOf(
+        edit,
+        ours?.ingredients.edit[line.id],
+        ours?.facts.ingredients[line.id],
+        recipe.facts.ingredients[line.id],
+      );
       return { id: line.id, component: edit.component ?? null, text, change: "edited" };
     },
     (line): Row => ({

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Recipe } from "./api/client";
 import { EDITOR_KEPT, type LineEdit, lineDraft, lineEdit, lineOf } from "./factEdits";
@@ -7,6 +8,7 @@ import {
   editLine,
   editStep,
   lineFor,
+  lineText,
   ourDraftOf,
   ourOperation,
   ourRows,
@@ -205,5 +207,26 @@ describe("the Our Version draft", () => {
     expect(lineFor(r, "i5").facts?.parse?.name).toBe("beans");
     expect(lineFor(r, "i2")).toEqual(lineOf(r, "i2"));
     expect(lineFor(r, "new-1")).toEqual({ id: "new-1", text: "" });
+  });
+});
+
+// Cases the API's line_text checks too, so an edited line reads the same in Edit as once saved.
+const lineTexts: {
+  cases: { name: string; parse: Parameters<typeof lineText>[0]; text: string }[];
+} = JSON.parse(
+  readFileSync(new URL("../../backend/tests/fixtures/line_text.json", import.meta.url), "utf8"),
+);
+
+describe.each(lineTexts.cases)("the shared line text case: $name", (c) => {
+  it("reads as the API builds it", () => expect(lineText(c.parse)).toBe(c.text));
+});
+
+describe("an edited line's row", () => {
+  it("keeps the comment of the line it replaces", () => {
+    const r = recipe();
+    const i1 = r.facts.ingredients.i1;
+    if (i1) i1.parse = { ...parse("butter"), comment: "or to taste" };
+    const draft = editLine(r, ourDraftOf(r), "i1", edit("butter", 3), form);
+    expect(ourRows(r, draft).ingredients[0]?.text).toBe("3 tbsp butter, or to taste");
   });
 });
