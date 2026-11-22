@@ -172,6 +172,8 @@ test("an editor edits Our Version in Edit, sees it marked, and removes it", asyn
   await expect(page.getByRole("button", { name: /^Adjust/ })).toBeVisible();
   await expect(line(page, "olive oil")).toHaveCount(1);
   await expect(line(page, "garlic cloves")).toHaveCount(0);
-  const stored = await page.request.get(`/api/recipes/${id}`);
-  expect((await stored.json()).our_version).toBeNull();
+  // The page already showed the Original, so only the stored recipe says the save landed.
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/recipes/${id}`)).json()).our_version)
+    .toBeNull();
 });
