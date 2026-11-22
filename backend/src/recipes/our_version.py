@@ -26,6 +26,7 @@ from recipes.edits import (
 )
 from recipes.models import (
     MAX_LINES,
+    OUR_VERSION,
     AddedLine,
     AddedStep,
     ConversionFact,
@@ -41,6 +42,8 @@ from recipes.models import (
     OurVersion,
     Recipe,
     RecipeFacts,
+    item_of,
+    resolve,
 )
 
 if TYPE_CHECKING:
@@ -144,7 +147,7 @@ def save(
         *((line_id, line, originals.get(line_id)) for line_id, line in lines_draft.edit.items()),
         *((line_id, line, None) for line_id, _, line in added_lines),
     ]
-    facts = {
+    built = {
         line_id: _line(
             line_id,
             line,
@@ -157,8 +160,13 @@ def save(
         )
         for line_id, line, original in drafted
     }
+    fresh = {line_id: facts for line_id, facts in built.items() if facts is not None}
+    kept = {line_id: stored_facts[line_id] for line_id, facts in built.items() if facts is None}
     # A line Our Version writes always has a parse, as an edit gives one.
-    texts = {line_id: line_text(cast("ParseFact", f.parse)) for line_id, f in facts.items()}
+    texts = {
+        line_id: line_text(cast("ParseFact", facts.parse))
+        for line_id, facts in {**kept, **fresh}.items()
+    }
     edit = {
         line_id: OurLine(text=texts[line_id], component=line.component)
         for line_id, line in lines_draft.edit.items()
@@ -181,7 +189,7 @@ def save(
     ours = OurVersion(
         ingredients=OurLines(edit=edit, remove=lines_draft.remove, add=add),
         steps=steps,
-        facts=RecipeFacts(ingredients=facts),
+        facts=RecipeFacts(ingredients=kept),
         note=draft.note,
         edited_at=now,
     )
@@ -190,7 +198,20 @@ def save(
     for edited in saved.edits:
         if edited.shared:
             changed = edited.shared.apply(changed) or changed
-    saved.recipe = changed
+    # The lines this save changed are the editor's own picks, so the spread passes them by, and
+    # their open issues, with those of lines it dropped, are settled.
+    ours = cast("OurVersion", changed.our_version)
+    spread = ours.facts.ingredients
+    facts = {line_id: fresh[line_id] if line_id in fresh else spread[line_id] for line_id in built}
+    issues = resolve(
+        changed,
+        lambda fact_id: (
+            fact_id.startswith(OUR_VERSION)
+            and item_of(fact_id.removeprefix(OUR_VERSION)) not in kept
+        ),
+    )
+    ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
+    saved.recipe = changed.model_copy(update={"our_version": ours, "issues": issues})
     return saved
 
 
@@ -269,13 +290,13 @@ def _line(
     saved: Saved,
     snapshot: Callable[[], fdc.Snapshot],
     now: datetime,
-) -> IngredientFacts:
-    """The Our Version line's facts as drafted: as stored if only its component changed, else the
-    editor's, built from the line it replaces as a Review line edit builds them. A line Our
-    Version adds needs a Canonical Ingredient.
+) -> IngredientFacts | None:
+    """The Our Version line's facts as drafted: None if they stay as stored, since only its
+    component changed, else the editor's, built from the line it replaces as a Review line edit
+    builds them. A line Our Version adds needs a Canonical Ingredient.
     """
     if stored and _unchanged(draft, stored):
-        return stored
+        return None
     # The Original's substitutes are for its own line, not the one Our Version writes.
     old = stored or (original.model_copy(update={"substitutions": None}) if original else None)
     if draft.canonical is None and (old is None or old.match is None) and original is None:

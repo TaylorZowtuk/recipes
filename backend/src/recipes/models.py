@@ -605,6 +605,9 @@ class Recipe(Model):
     our_version_status: EnrichmentStatus | None = None
 
 
+# The prefix of a fact's path in Our Version: `our_version.i4.match`.
+OUR_VERSION = "our_version."
+
 # The facts an editor checks together as one Review Item, for an ingredient line and for a step.
 LINE_ITEM = ("parse", "match", "conversion")
 STEP_ITEM = ("segments", "uses")
@@ -627,7 +630,8 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
     parse, match and conversion (`i3`), a line's substitutions (`i3.substitutions`), a step's
     segments and uses (`s2`), and the suggested Difficulty (`difficulty`) unless the editor set
     the recipe's own. An open Enrichment Issue's fact joins its item, which it makes if the
-    recipe lacks the item's facts, so the editor can accept its correction.
+    recipe lacks the item's facts, so the editor can accept its correction. An issue on an Our
+    Version fact is not yet in any item.
     """
     facts = recipe.facts
     items: dict[str, list[str]] = {}
@@ -640,11 +644,20 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
     if facts.difficulty and recipe.difficulty is None:
         items["difficulty"] = ["difficulty"]
     items = {item: paths for item, paths in items.items() if paths}
-    for fact_id in (issue.fact_id for issue in recipe.issues if issue.status == "open"):
+    for fact_id in _open_on_original(recipe):
         paths = items.setdefault(item_of(fact_id), [])
         if fact_id not in paths:
             paths.append(fact_id)
     return items
+
+
+def _open_on_original(recipe: Recipe) -> list[str]:
+    """The facts of the recipe's open Enrichment Issues, apart from those on Our Version."""
+    return [
+        issue.fact_id
+        for issue in recipe.issues
+        if issue.status == "open" and not issue.fact_id.startswith(OUR_VERSION)
+    ]
 
 
 def item_of(fact_id: str) -> str:
@@ -674,8 +687,8 @@ class NeedsReview(Model):
 
 
 def needs_review(recipe: Recipe) -> NeedsReview:
-    """What the recipe still has for an editor to check."""
-    open_facts = [issue.fact_id for issue in recipe.issues if issue.status == "open"]
+    """What the recipe still has for an editor to check, apart from its Our Version."""
+    open_facts = _open_on_original(recipe)
     items = review_items(recipe).values()
     flagged = [any(path in open_facts for path in paths) for paths in items]
     unconfirmed = [

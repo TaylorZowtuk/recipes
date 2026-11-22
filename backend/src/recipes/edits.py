@@ -24,6 +24,7 @@ from recipes.models import (
     MAX_LINES,
     MAX_RECIPE_BYTES,
     MAX_SUBSTITUTES,
+    OUR_VERSION,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -266,12 +267,18 @@ class SharedMatch:
         return _preparation(parse) == self.preparation
 
     def lines(self, recipe: Recipe) -> list[str]:
-        """The recipe's lines the match changes: those with the wording and the preparation, and
-        those with the wording and another preparation whose Canonical Ingredient changes.
+        """The recipe's lines the match changes, its Our Version's as `our_version.<id>`: those
+        with the wording and the preparation, and those with the wording and another
+        preparation whose Canonical Ingredient changes.
         """
+        ours = recipe.our_version
+        theirs = [f"{OUR_VERSION}{line_id}" for line_id in self._lines(ours.facts)] if ours else []
+        return [*self._lines(recipe.facts), *theirs]
+
+    def _lines(self, facts: RecipeFacts) -> list[str]:
         return [
             line_id
-            for line_id, line in recipe.facts.ingredients.items()
+            for line_id, line in facts.ingredients.items()
             if line.parse
             and normalize_wording(line.parse.name) == self.wording
             and (
@@ -282,31 +289,54 @@ class SharedMatch:
         ]
 
     def apply(self, recipe: Recipe, picked_on: str | None = None) -> Recipe | None:
-        """The recipe with each line the match changes matched, apart from `picked_on`, the line
-        the editor picked the food on, or None if it has none. A line with the preparation takes
-        the food, its open issues on its match and conversion are resolved, and if no portion of
-        the food fits it, an open issue asks an editor to pick one. A line with another
-        preparation takes the Canonical Ingredient and keeps its own food, unconfirmed since
-        nobody confirmed that food for the new Canonical Ingredient (or takes the food,
-        unconfirmed too, if it had none); its open issues on its match are resolved, and an open
-        issue asks an editor to pick its food.
+        """The recipe with each line the match changes matched, in the Original and in Our
+        Version, apart from `picked_on`, the line the editor picked the food on, or None if it
+        has none. A line with the preparation takes the food, its open issues on its match and
+        conversion are resolved, and if no portion of the food fits it, an open issue asks an
+        editor to pick one. A line with another preparation takes the Canonical Ingredient and
+        keeps its own food, unconfirmed since nobody confirmed that food for the new Canonical
+        Ingredient (or takes the food, unconfirmed too, if it had none); its open issues on its
+        match are resolved, and an open issue asks an editor to pick its food. An open issue on
+        an Our Version line makes a Ready Our Version Awaiting Review.
         """
-        lines = self.lines(recipe)
-        if not lines:
+        if not self.lines(recipe):
             return None
-        facts = recipe.facts.model_copy(deep=True)
         asks: list[EnrichmentIssue] = []
         fixed: set[str] = set()
-        for line_id in lines:
-            line = facts.ingredients[line_id]
+        changes: dict[str, object] = {
+            "facts": self._matched(recipe.facts, "", picked_on, asks, fixed)
+        }
+        if ours := recipe.our_version:
+            asked = len(asks)
+            facts = self._matched(ours.facts, OUR_VERSION, picked_on, asks, fixed)
+            changes["our_version"] = ours.model_copy(update={"facts": facts})
+            if len(asks) > asked and recipe.our_version_status == "ready":
+                changes["our_version_status"] = "awaiting_review"
+        changes["issues"] = [*resolve(recipe, lambda fact_id: fact_id in fixed), *asks]
+        return settled(recipe.model_copy(update=changes))
+
+    def _matched(
+        self,
+        facts: RecipeFacts,
+        prefix: str,
+        picked_on: str | None,
+        asks: list[EnrichmentIssue],
+        fixed: set[str],
+    ) -> RecipeFacts:
+        """The facts with each line the match changes matched, its issues' paths under `prefix`:
+        the asks it raises go in `asks`, and the paths whose open issues it settles in `fixed`.
+        """
+        facts = facts.model_copy(deep=True)
+        for line_id in self._lines(facts):
+            line, path = facts.ingredients[line_id], f"{prefix}{line_id}"
             if line.parse is None:
                 continue
             takes_food = self._takes_food(line.parse)
             if takes_food or line.match is None:
-                fixed |= {f"{line_id}.match", f"{line_id}.conversion"}
+                fixed |= {f"{path}.match", f"{path}.conversion"}
             else:
-                fixed.add(f"{line_id}.match")
-            if line_id == picked_on:
+                fixed.add(f"{path}.match")
+            if path == picked_on:
                 continue
             if takes_food or line.match is None:
                 portion_id, fits = self._portion_for(line.parse)
@@ -316,13 +346,12 @@ class SharedMatch:
                     line.match = _unconfirmed(line.match)
                     line.conversion = _unconfirmed(line.conversion)
                 if not fits:
-                    asks.append(self._ask(line_id, line.parse))
+                    asks.append(self._ask(path, line.parse))
             else:
                 line.match = _unconfirmed(line.match, canonical_id=self.canonical_id)
             if not takes_food:
-                asks.append(self._ask_food(line_id, line.parse))
-        issues = [*resolve(recipe, lambda fact_id: fact_id in fixed), *asks]
-        return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
+                asks.append(self._ask_food(path, line.parse))
+        return facts
 
     def _portion_for(self, parse: ParseFact) -> tuple[int | None, bool]:
         """The food's portion that fits the line's written unit, and whether one does. A weight

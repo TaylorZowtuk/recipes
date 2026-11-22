@@ -3,14 +3,24 @@ lines carry the editor's own facts, Confirmed, in its own facts map; its steps w
 under the Our Version Status. The Original's facts change only when a line's pick fixes a wording.
 """
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR
 from test_enrichment_review import BEEF, CONFIRMED, FACTS, STEW, awaiting, card, parse, stored
-from test_review_edits import PORK, beef_line, numbers, other
+from test_review_edits import PORK, beef_line, edit, line_edit, numbers, other
 
-from recipes.models import IngredientFacts, Quantity, RecipeFacts
+from recipes.edits import EDITOR_KEPT
+from recipes.models import (
+    AddedLine,
+    EnrichmentStatus,
+    IngredientFacts,
+    OurLines,
+    OurVersion,
+    Quantity,
+    RecipeFacts,
+)
 from recipes.our_version import kitchen_number, line_text
 from recipes.seed import CHICKEN_ID, GARLIC, load
 
@@ -240,6 +250,128 @@ def test_a_canonical_ingredient_chosen_in_our_version_also_matches_the_recipes_o
     assert original is not None
     assert (original.canonical_id, original.fdc_id) == (added["canonical_id"], 1002)
     assert saved.ingredients["i1"] == recipe.facts.ingredients["i1"]
+
+
+BRAISING = {"kind": "new", "name": "Braising Beef", "family": "beef", "store_category_id": "meat"}
+
+
+def with_ours(
+    store: Store, n: int, preparation: str | None = None, status: EnrichmentStatus = "ready"
+) -> Recipe:
+    """Another stew, Ready, whose Our Version adds a "stewing beef" line (i10) matched as the
+    Original's beef line is.
+    """
+    facts = beef_line().ingredients["i1"].model_copy(deep=True)
+    assert facts.parse is not None
+    facts.parse.preparation = preparation
+    ours = OurVersion(
+        ingredients=OurLines(add=[AddedLine(id="i10", after="i1", text="1 stewing beef")]),
+        facts=RecipeFacts(ingredients={"i10": facts}),
+        edited_at=datetime(2026, 11, 1, tzinfo=UTC),
+    )
+    return other(
+        store, n, RecipeFacts(), status="ready", our_version=ours, our_version_status=status
+    )
+
+
+def our_line(store: Store, recipe_id: str) -> IngredientFacts:
+    ours = stored(store, recipe_id).our_version
+    assert ours is not None
+    return ours.facts.ingredients["i10"]
+
+
+def braised(client: TestClient, recipe: Recipe, how: str, **fields: Any) -> Response:
+    """Fix "stewing beef" as Braising Beef, FDC food 1002, by a Review line edit or Our Version."""
+    pick: dict[str, Any] = {"canonical": BRAISING, "fdc_id": 1002, "portion_id": 503, **fields}
+    if how == "review":
+        return edit(client, recipe, **line_edit(**pick))
+    return save(client, recipe, {"ingredients": lines(edit={"i1": line(**pick)})})
+
+
+@pytest.mark.parametrize("how", ["review", "our_version"])
+def test_a_wording_fix_reaches_another_recipes_our_version_lines(
+    editor_client: TestClient, api_store: Store, how: str
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2)
+
+    response = braised(editor_client, recipe, how)
+
+    assert response.status_code == 200, response.text
+    braising = next(c for c in api_store.canonical_ingredients() if c.name == "Braising Beef")
+    matched = our_line(api_store, sharing.id).match
+    assert matched is not None
+    assert (matched.canonical_id, matched.fdc_id, matched.confirmed) == (braising.id, 1002, True)
+    assert stored(api_store, sharing.id).our_version_status == "ready"
+
+
+def test_a_wording_fix_in_a_review_edit_reaches_the_recipes_own_our_version_lines(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = with_ours(api_store, 2)
+
+    response = braised(editor_client, recipe, "review")
+
+    assert response.status_code == 200, response.text
+    matched = our_line(api_store, recipe.id).match
+    assert matched is not None
+    assert matched.fdc_id == 1002
+
+
+def test_the_our_version_line_the_editor_picked_on_keeps_their_pick(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+
+    response = braised(editor_client, recipe, "our_version", keep_weight=True)
+
+    assert response.status_code == 200, response.text
+    ours = stored(api_store, recipe.id).our_version
+    assert ours is not None
+    conversion = ours.facts.ingredients["i1"].conversion
+    assert conversion is not None
+    assert conversion.refused == EDITOR_KEPT
+
+
+@pytest.mark.parametrize(
+    ("before", "after"), [("ready", "awaiting_review"), ("pending", "pending")]
+)
+def test_an_our_version_line_prepared_another_way_is_asked_for_its_food(
+    editor_client: TestClient,
+    api_store: Store,
+    before: EnrichmentStatus,
+    after: EnrichmentStatus,
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, preparation="cubed", status=before)
+    needs = card(api_store, sharing.id)["needs_review"]
+
+    response = braised(editor_client, recipe, "our_version")
+
+    assert response.status_code == 200, response.text
+    braising = next(c for c in api_store.canonical_ingredients() if c.name == "Braising Beef")
+    changed = stored(api_store, sharing.id)
+    matched = our_line(api_store, sharing.id).match
+    assert matched is not None
+    assert (matched.canonical_id, matched.fdc_id, matched.confirmed) == (braising.id, 1001, False)
+    [issue] = changed.issues
+    assert (issue.fact_id, issue.status) == ("our_version.i10.match", "open")
+    assert (changed.status, changed.our_version_status) == ("ready", after)
+    assert card(api_store, sharing.id)["needs_review"] == needs
+
+
+def test_saving_our_version_settles_the_issues_of_the_lines_it_changes_or_drops(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, preparation="cubed")
+    braised(editor_client, recipe, "our_version")
+
+    response = save(editor_client, stored(api_store, sharing.id), {"note": "No beef"})
+
+    assert response.status_code == 200, response.text
+    [issue] = stored(api_store, sharing.id).issues
+    assert (issue.fact_id, issue.status) == ("our_version.i10.match", "resolved")
 
 
 def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(

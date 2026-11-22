@@ -978,9 +978,10 @@ def patch_recipe(
     Our Version is saved whole: its edited and added lines take the editor's facts, Confirmed with
     provenance `editor`, built as a Review line edit builds them, with text built from them; a line
     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
-    its wording as a Review line edit does, for this recipe's Original lines and, once the recipe
-    is saved, every other recipe's. A new or changed step makes the Our Version Status Pending; a
-    new Our Version without one is Ready. The Original's facts and the Enrichment Status stay.
+    its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
+    Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
+    Our Version Status Pending; a new Our Version without one is Ready. The Enrichment Status
+    stays.
     """
     recipe = _recipe(store, recipe_id)
     if {operation.op for operation in body.operations} & OUR_VERSION_OPS:
