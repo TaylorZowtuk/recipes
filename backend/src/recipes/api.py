@@ -926,7 +926,8 @@ def put_enrichment(
 
 def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
     """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
-    (a Pending recipe has none), refused if the facts don't fit together.
+    (a Pending recipe has none), refused if the facts don't fit together. Our Version's issues
+    are its own, and stay.
     """
     new, stored = _filled(body, snapshot), recipe.facts
     kept = kept_items(stored)
@@ -936,7 +937,13 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
         difficulty=stored.difficulty if "difficulty" in kept else new.difficulty,
     )
     issues = [
-        *(i for i in recipe.issues if i.status == "resolved" or item_of(i.fact_id) in kept),
+        *(
+            i
+            for i in recipe.issues
+            if i.status == "resolved"
+            or i.fact_id.startswith(OUR_VERSION)
+            or item_of(i.fact_id) in kept
+        ),
         *(i for i in body.issues if item_of(i.fact_id) not in kept),
     ]
     _check_together(facts)
