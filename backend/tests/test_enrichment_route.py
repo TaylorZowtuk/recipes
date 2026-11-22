@@ -1222,9 +1222,9 @@ def test_reenrichment_keeps_our_versions_issues_and_status(
         "our_version": {
             "ingredients": {"add": [{"id": "i5", "after": None, "text": "1 lemon"}]},
             "edited_at": "2026-11-02T00:00:00Z",
-            "last_line": 5,
         },
         "our_version_status": "awaiting_review",
+        "our_version_last_line": 5,
         "issues": [ours],
     }
     api_store.enrich_recipe(Recipe.model_validate(stored), [], [])

@@ -1102,6 +1102,8 @@ def patch_recipe(
                 changes |= {
                     "our_version": saved.recipe.our_version,
                     "our_version_status": saved.recipe.our_version_status,
+                    "our_version_last_line": saved.recipe.our_version_last_line,
+                    "our_version_last_step": saved.recipe.our_version_last_step,
                     "facts": saved.recipe.facts,
                     "issues": saved.recipe.issues,
                 }

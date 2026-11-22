@@ -385,8 +385,6 @@ const OUR_VERSION: Recipe["our_version"] = {
   },
   note: "Less butter, and a lemon.",
   edited_at: "2026-11-02T00:00:00Z",
-  last_line: 5,
-  last_step: 0,
 };
 const names = () =>
   [...host.querySelectorAll(".ingredients .ingredient-name")].map((name) => name.textContent);

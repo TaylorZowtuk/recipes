@@ -303,6 +303,7 @@ def with_ours(  # noqa: PLR0913 - each is a way the tests vary the stew
         status="ready",
         our_version=ours,
         our_version_status=status,
+        our_version_last_line=10,
     )
 
 
@@ -826,18 +827,21 @@ def test_an_added_id_is_never_given_again_after_its_line_is_dropped(
     assert [a["id"] for a in ours["steps"]["add"]] == ["s6"]
 
 
-def test_an_added_id_an_issue_names_is_never_given_again_after_our_version_is_removed(
+def test_an_added_id_is_never_given_again_after_our_version_is_removed(
     editor_client: TestClient, api_store: Store
 ) -> None:
-    recipe = with_ours(api_store, 2, preparation="cubed")
-    braised(editor_client, awaiting(api_store, issues=[], status="ready"), "our_version")
+    recipe = ready(api_store)
+    step = {"text": "Rest.", "after": None}
+    draft = {"ingredients": lines(add=[tomatoes()]), "steps": lines(add=[step])}
+    assert save(editor_client, recipe, draft).status_code == 200
     assert remove(editor_client, stored(api_store, recipe.id)).status_code == 200
 
-    draft = {"ingredients": lines(add=[tomatoes()])}
     response = save(editor_client, stored(api_store, recipe.id), draft)
 
     assert response.status_code == 200, response.text
-    assert [a["id"] for a in response.json()["our_version"]["ingredients"]["add"]] == ["i11"]
+    ours = response.json()["our_version"]
+    assert [a["id"] for a in ours["ingredients"]["add"]] == ["i11"]
+    assert [a["id"] for a in ours["steps"]["add"]] == ["s6"]
 
 
 # Our Version Status

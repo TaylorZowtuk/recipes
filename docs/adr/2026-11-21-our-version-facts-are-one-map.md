@@ -49,5 +49,5 @@ An editor's pick of a Canonical Ingredient or FDC food fixes the wording for eve
 
 - An Our Version line's facts aren't always the editor's: a wording fixed on another line can change its match, and for another preparation leave it unconfirmed, with provenance `editor` but no one's confirmation.
 - An Our Version can be `awaiting_review` before `enrich` has looked at it, with issues the PWA doesn't list until #169. Its lines still scale and shop as they are meanwhile.
-- Removing Our Version settles its open issues, and an id one of them names is never given to a new added line or step, so an old issue never lands on a new line.
+- Removing Our Version settles its open issues. The recipe keeps the highest added line and step numbers any Our Version gave (`our_version_last_line`, `our_version_last_step`) through Remove, so no id is given twice: an old issue never lands on a new line, and a Step tick never marks a new step done.
 - A save settles the open issues only of the lines and steps it changes or drops, so the issues #169 and #170 add on the ones it keeps stay open.

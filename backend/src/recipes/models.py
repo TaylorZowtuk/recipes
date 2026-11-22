@@ -571,8 +571,7 @@ class OurVersion(Model):
     """The household's whole-line overlay on the Original, by line and step id. A line or step it
     leaves alone keeps the Original's text and facts; one it edits or adds has its facts in
     `facts`, addressed as the Original's are, so `our_version.i4.parse` is
-    `facts.ingredients["i4"].parse`. `last_line` and `last_step` are the highest numbers it gave
-    an added line's or step's id, so no id is given twice.
+    `facts.ingredients["i4"].parse`.
     """
 
     ingredients: OurLines = OurLines()
@@ -580,8 +579,6 @@ class OurVersion(Model):
     facts: RecipeFacts = RecipeFacts()
     note: Note | None = None
     edited_at: datetime
-    last_line: int = 0
-    last_step: int = 0
 
 
 class Recipe(Model):
@@ -606,6 +603,10 @@ class Recipe(Model):
     our_version: OurVersion | None = None
     # Where Our Version is in enrichment, apart from `status`; none without Our Version.
     our_version_status: EnrichmentStatus | None = None
+    # The highest numbers any Our Version gave an added line's or step's id. They outlive Remove
+    # Our Version, so no id is given twice and a Step tick never lands on a new step.
+    our_version_last_line: int = 0
+    our_version_last_step: int = 0
 
     @model_validator(mode="after")
     def _our_version_with_its_status(self) -> Recipe:

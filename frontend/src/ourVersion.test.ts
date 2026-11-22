@@ -53,8 +53,6 @@ const ours = (fields: Partial<NonNullable<Recipe["our_version"]>> = {}): Recipe 
       },
       note: "More beans, less butter.",
       edited_at: "2026-11-02T00:00:00Z",
-      last_line: 7,
-      last_step: 3,
       ...fields,
     },
   });

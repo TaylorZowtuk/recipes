@@ -451,8 +451,6 @@ function oursRecipe(): Recipe {
       facts: { ingredients: {}, steps: {}, difficulty: null },
       note: null,
       edited_at: "2026-11-02T00:00:00Z",
-      last_line: 0,
-      last_step: 4,
     },
     our_version_status: "ready",
   };

@@ -354,6 +354,7 @@ RECIPES = [
         ),
         # The edited step waits for enrich to segment it.
         our_version_status="pending",
+        our_version_last_line=7,
     ),
     Recipe(
         id=E2E_RECIPE_ID,

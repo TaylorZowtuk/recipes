@@ -63,8 +63,6 @@ const withOurs = (): Recipe =>
       },
       note: "Less butter.",
       edited_at: "2026-11-02T00:00:00Z",
-      last_line: 5,
-      last_step: 0,
     },
   });
 

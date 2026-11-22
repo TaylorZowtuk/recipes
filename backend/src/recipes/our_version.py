@@ -141,25 +141,19 @@ def save(
     _check_changes("steps", step_ids, steps_draft.edit, steps_draft.remove)
     stored_lines = before.ingredients if before else OurLines()
     stored_steps = before.steps if before else OurSteps()
-    # An issue outlives the Our Version it was on, so its line's or step's id is never given again.
-    named = [
-        i.fact_id.removeprefix(OUR_VERSION).partition(".")[0]
-        for i in recipe.issues
-        if i.fact_id.startswith(OUR_VERSION)
-    ]
     added_lines, last_line = _ids(
         "ingredients",
         line_ids,
         [a.id for a in stored_lines.add],
         lines_draft.add,
-        max(before.last_line if before else 0, _highest("ingredients", named)),
+        recipe.our_version_last_line,
     )
     added_steps, last_step = _ids(
         "steps",
         step_ids,
         [a.id for a in stored_steps.add],
         steps_draft.add,
-        max(before.last_step if before else 0, _highest("steps", named)),
+        recipe.our_version_last_step,
     )
     _check_order("ingredients", line_ids, lines_draft.remove, added_lines)
     _check_order("steps", step_ids, steps_draft.remove, added_steps)
@@ -220,11 +214,16 @@ def save(
         facts=RecipeFacts(ingredients=kept),
         note=draft.note,
         edited_at=now,
-        last_line=last_line,
-        last_step=last_step,
     )
     status = _status(recipe, stored_steps, steps)
-    changed = recipe.model_copy(update={"our_version": ours, "our_version_status": status})
+    changed = recipe.model_copy(
+        update={
+            "our_version": ours,
+            "our_version_status": status,
+            "our_version_last_line": last_line,
+            "our_version_last_step": last_step,
+        }
+    )
     for edited in saved.edits:
         if edited.shared:
             changed = edited.shared.apply(changed) or changed
@@ -311,7 +310,7 @@ def _ids[A: AddedLineDraft | AddedStepDraft](
 ) -> tuple[list[tuple[str, str | None, A]], int]:
     """Each added line's or step's id and the id it follows, and the highest number given. It
     keeps an id Our Version already gave it; any other gets the next in the sequence past every
-    id the Original used and every number Our Version gave (`last`), and the draft's `after`s
+    id the Original used and every number any Our Version gave (`last`), and the draft's `after`s
     that named it name that id.
     """
     kind, prefix = KIND[part], PREFIX[part]

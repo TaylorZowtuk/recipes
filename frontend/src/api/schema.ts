@@ -1891,8 +1891,7 @@ export interface components {
          * @description The household's whole-line overlay on the Original, by line and step id. A line or step it
          *     leaves alone keeps the Original's text and facts; one it edits or adds has its facts in
          *     `facts`, addressed as the Original's are, so `our_version.i4.parse` is
-         *     `facts.ingredients["i4"].parse`. `last_line` and `last_step` are the highest numbers it gave
-         *     an added line's or step's id, so no id is given twice.
+         *     `facts.ingredients["i4"].parse`.
          */
         OurVersion: {
             /**
@@ -1915,16 +1914,6 @@ export interface components {
              *     }
              */
             ingredients: components["schemas"]["OurLines"];
-            /**
-             * Last Line
-             * @default 0
-             */
-            last_line: number;
-            /**
-             * Last Step
-             * @default 0
-             */
-            last_step: number;
             /** Note */
             note: string | null;
             /**
@@ -2175,6 +2164,16 @@ export interface components {
             issues: components["schemas"]["EnrichmentIssue-Output"][];
             original: components["schemas"]["Original-Output"];
             our_version: components["schemas"]["OurVersion"] | null;
+            /**
+             * Our Version Last Line
+             * @default 0
+             */
+            our_version_last_line: number;
+            /**
+             * Our Version Last Step
+             * @default 0
+             */
+            our_version_last_step: number;
             /** Our Version Status */
             our_version_status: ("pending" | "awaiting_review" | "ready") | null;
             preview: components["schemas"]["Preview"] | null;
