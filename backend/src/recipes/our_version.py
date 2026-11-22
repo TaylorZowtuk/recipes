@@ -142,19 +142,25 @@ def save(
     _check_changes("steps", step_ids, steps_draft.edit, steps_draft.remove)
     stored_lines = before.ingredients if before else OurLines()
     stored_steps = before.steps if before else OurSteps()
+    # An issue outlives the Our Version it was on, so its line's or step's id is never given again.
+    named = [
+        i.fact_id.removeprefix(OUR_VERSION).partition(".")[0]
+        for i in recipe.issues
+        if i.fact_id.startswith(OUR_VERSION)
+    ]
     added_lines, last_line = _ids(
         "ingredients",
         line_ids,
         [a.id for a in stored_lines.add],
         lines_draft.add,
-        before.last_line if before else 0,
+        max(before.last_line if before else 0, _highest("ingredients", named)),
     )
     added_steps, last_step = _ids(
         "steps",
         step_ids,
         [a.id for a in stored_steps.add],
         steps_draft.add,
-        before.last_step if before else 0,
+        max(before.last_step if before else 0, _highest("steps", named)),
     )
     _check_order("ingredients", line_ids, lines_draft.remove, added_lines)
     _check_order("steps", step_ids, steps_draft.remove, added_steps)
@@ -285,8 +291,7 @@ def _ids[A: AddedLineDraft | AddedStepDraft](
             refuse(part, item_id, f"{kind} {item_id} is the Original's, so it can't be added")
         if given.count(item_id) > 1:
             refuse(part, item_id, f"{kind} {item_id} is added twice")
-    used = [int(m[1]) for i in [*original, *stored] if (m := re.fullmatch(rf"{prefix}(\d+)", i))]
-    following = max([*used, last])
+    following = max(_highest(part, [*original, *stored]), last)
     renamed: dict[str, str] = {}
     ids: list[str] = []
     for a in added:
@@ -302,6 +307,12 @@ def _ids[A: AddedLineDraft | AddedStepDraft](
         for item_id, a in zip(ids, added, strict=True)
     ]
     return placed, following
+
+
+def _highest(part: Part, ids: Sequence[str]) -> int:
+    """The highest number among the ids of the part's sequence (`i3`, `s2`), or 0."""
+    prefix = PREFIX[part]
+    return max([int(m[1]) for i in ids if (m := re.fullmatch(rf"{prefix}(\d+)", i))], default=0)
 
 
 def _check_order(

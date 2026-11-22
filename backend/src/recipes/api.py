@@ -55,6 +55,7 @@ from recipes.models import (
     MAX_LINES,
     MAX_RECIPE_BYTES,
     MAX_SITE_NOTE,
+    OUR_VERSION,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -102,6 +103,7 @@ from recipes.models import (
     fact_paths,
     new_ulid,
     normalize_wording,
+    resolve,
     settled,
     site_host,
     written_as,
@@ -982,8 +984,8 @@ def patch_recipe(
     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
     Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
-    Our Version Status Pending; a new Our Version without one is Ready. The Enrichment Status
-    stays.
+    Our Version Status Pending; a new Our Version without one is Ready. Removing Our Version
+    settles its open issues. The Enrichment Status stays.
     """
     recipe = _recipe(store, recipe_id)
     if {operation.op for operation in body.operations} & OUR_VERSION_OPS:
@@ -1011,7 +1013,9 @@ def patch_recipe(
                     "issues": saved.recipe.issues,
                 }
             case RemoveOurVersion():
-                changes |= {"our_version": None, "our_version_status": None}
+                # Its open issues go with it, settled.
+                issues = resolve(recipe, lambda fact_id: fact_id.startswith(OUR_VERSION))
+                changes |= {"our_version": None, "our_version_status": None, "issues": issues}
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
     edited = settled(recipe.model_copy(update=changes))

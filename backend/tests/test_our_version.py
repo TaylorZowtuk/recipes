@@ -701,6 +701,19 @@ def test_an_added_id_is_never_given_again_after_its_line_is_dropped(
     assert [a["id"] for a in ours["steps"]["add"]] == ["s6"]
 
 
+def test_an_added_id_an_issue_names_is_never_given_again_after_our_version_is_removed(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = with_ours(api_store, 2, preparation="cubed")
+    braised(editor_client, awaiting(api_store, issues=[], status="ready"), "our_version")
+    assert remove(editor_client, stored(api_store, recipe.id)).status_code == 200
+
+    response = save(editor_client, stored(api_store, recipe.id), {"ingredients": lines(add=[tomatoes()])})
+
+    assert response.status_code == 200, response.text
+    assert [a["id"] for a in response.json()["our_version"]["ingredients"]["add"]] == ["i11"]
+
+
 # Our Version Status
 
 
@@ -768,6 +781,19 @@ def test_removing_our_version_clears_it_and_its_status(
     assert (response.json()["our_version"], response.json()["our_version_status"]) == (None, None)
     assert card(api_store, recipe.id)["our_version_status"] is None
     assert stored(api_store, recipe.id).facts == recipe.facts
+
+
+def test_removing_our_version_settles_its_open_issues(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = with_ours(api_store, 2, preparation="cubed")
+    braised(editor_client, awaiting(api_store, issues=[], status="ready"), "our_version")
+
+    response = remove(editor_client, stored(api_store, recipe.id))
+
+    assert response.status_code == 200, response.text
+    [asked] = stored(api_store, recipe.id).issues
+    assert (asked.fact_id, asked.status) == ("our_version.i10.match", "resolved")
 
 
 @pytest.mark.parametrize(
