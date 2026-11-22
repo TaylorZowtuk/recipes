@@ -173,9 +173,14 @@ export function OurVersionFields({
   );
 }
 
-// A refusal under its row, without the "Line <id>" or "Step <id>" lead the row already says.
+// A refusal under its row, without the "Line <id>" or "Step <id>" lead the row already says:
+// "Line i1: x" reads "X", and "Line i1's x" reads "The line's x".
 function byRow(problem: string, id: string): string {
-  const lead = [`Line ${id} `, `Step ${id} `].find((lead) => problem.startsWith(lead));
+  const possessive = `Line ${id}'s `;
+  if (problem.startsWith(possessive)) return `The line's ${problem.slice(possessive.length)}`;
+  const lead = [`Line ${id}: `, `Line ${id} `, `Step ${id} `].find((lead) =>
+    problem.startsWith(lead),
+  );
   const rest = lead ? problem.slice(lead.length) : problem;
   return rest.charAt(0).toUpperCase() + rest.slice(1);
 }

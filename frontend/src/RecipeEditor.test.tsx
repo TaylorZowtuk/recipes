@@ -346,6 +346,18 @@ describe("the recipe editor", () => {
     expect(alerts()[0]?.textContent).toBe("Follows a step that isn't there");
   });
 
+  it("reads a colon-led refusal of a line without its id", () => {
+    const at = { part: "ingredients" as const, id: "i1" };
+    render(recipe(), "Line i1: food 999 is not in the FDC Snapshot", at);
+    expect(alerts()[0]?.textContent).toBe("Food 999 is not in the FDC Snapshot");
+  });
+
+  it("reads a possessive refusal of a line as the line's", () => {
+    const at = { part: "ingredients" as const, id: "i1" };
+    render(recipe(), "Line i1's FDC portion gives nothing to convert it by", at);
+    expect(alerts()[0]?.textContent).toBe("The line's FDC portion gives nothing to convert it by");
+  });
+
   it("shows a refusal of no line under the form", () => {
     render(recipe(), "An edited recipe is at most 350000 bytes as JSON");
     expect(alerts()).toHaveLength(1);
