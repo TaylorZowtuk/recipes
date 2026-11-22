@@ -136,7 +136,7 @@ function TimerRow({ timer }: { timer: TimerView }) {
           Step {stepNumber} · {written}
         </span>
         <span className="timer-countdown">
-          {paused && "Paused · "}
+          {paused && "Paused\u00a0· "}
           {timer.countdown}
         </span>
       </Link>

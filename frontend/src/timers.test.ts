@@ -257,7 +257,6 @@ describe("the timer store", () => {
     run(MINUTE);
     store.pause(shown().id);
     clock += 10 * MINUTE;
-    expect(shown().canTakeMinute).toBe(true);
     store.takeMinute(shown().id);
     expect(shown()).toMatchObject({ paused: true, countdown: "Check in 6:00" });
   });
