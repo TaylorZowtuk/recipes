@@ -151,6 +151,8 @@ function EditForm<E>({
   const { problem, shown, saving, save } = useSave(onSave);
   const noteId = useId();
   useEffect(() => {
+    // The form opens at the sheet's top, wherever what it replaced was scrolled to.
+    form.current?.closest("dialog")?.scrollTo(0, 0);
     form.current?.querySelector<HTMLElement>("input, textarea")?.focus();
   }, []);
   useSheetFoot(form);

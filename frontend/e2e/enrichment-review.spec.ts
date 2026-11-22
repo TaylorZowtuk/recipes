@@ -399,10 +399,13 @@ test("an editor edits a line's amount from its sheet, and it's Confirmed", async
   const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
   await ingredients.getByRole("button", { name: new RegExp(`^Flagged: ${rice}`) }).click();
   const sheet = page.getByRole("dialog", { name: "2 cups cooked rice" });
+  // Even from a detail scrolled down, the form opens at the sheet's top, its heading in view.
+  await sheet.evaluate((dialog) => dialog.scrollTo(0, dialog.scrollHeight));
   await sheet.getByRole("button", { name: "Edit" }).click();
   const amount = sheet.getByRole("textbox", { name: "Amount" });
   await expect(amount).toBeFocused();
   await expect(amount).toHaveValue("2");
+  await expect(sheet.getByRole("heading", { name: "2 cups cooked rice" })).toBeInViewport();
 
   // Cancel goes back to the detail; Edit again, and Save, saves it Confirmed.
   await sheet.getByRole("button", { name: "Cancel" }).click();

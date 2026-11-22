@@ -99,6 +99,7 @@ test("an editor edits Our Version in Edit, sees it marked, and removes it", asyn
   await ours.getByRole("button", { name: "Edit 1 tsp kosher salt" }).click();
   let sheet = page.getByRole("dialog", { name: "Edit 1 tsp kosher salt" });
   await expect(sheet.getByRole("textbox", { name: "Amount" })).toHaveValue("1");
+  await expect(sheet.getByRole("heading", { name: "Edit 1 tsp kosher salt" })).toBeInViewport();
   await sheet.getByRole("textbox", { name: "Amount" }).fill("1/2");
   await sheet.getByRole("button", { name: "Done" }).click();
   await expect(sheet).toBeHidden();
