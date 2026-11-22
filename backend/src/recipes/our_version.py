@@ -40,6 +40,7 @@ from recipes.models import (
     OurSteps,
     OurVersion,
     Recipe,
+    RecipeFacts,
 )
 
 if TYPE_CHECKING:
@@ -137,36 +138,33 @@ def save(
     _check_order("Step", step_ids, steps_draft.remove, added_steps)
 
     saved = Saved(recipe)
+    stored_facts = before.facts.ingredients if before else {}
     originals = recipe.facts.ingredients
-    edit = {
+    drafted = [
+        *((line_id, line, originals.get(line_id)) for line_id, line in lines_draft.edit.items()),
+        *((line_id, line, None) for line_id, _, line in added_lines),
+    ]
+    facts = {
         line_id: _line(
             line_id,
             line,
-            stored_lines.edit.get(line_id),
-            originals.get(line_id),
+            stored_facts.get(line_id),
+            original,
             store=store,
             saved=saved,
             snapshot=snapshot,
             now=now,
         )
+        for line_id, line, original in drafted
+    }
+    # A line Our Version writes always has a parse, as an edit gives one.
+    texts = {line_id: line_text(cast("ParseFact", f.parse)) for line_id, f in facts.items()}
+    edit = {
+        line_id: OurLine(text=texts[line_id], component=line.component)
         for line_id, line in lines_draft.edit.items()
     }
-    previous = {added.id: added for added in stored_lines.add}
     add = [
-        AddedLine(
-            id=line_id,
-            after=after,
-            **_line(
-                line_id,
-                line,
-                previous.get(line_id),
-                None,
-                store=store,
-                saved=saved,
-                snapshot=snapshot,
-                now=now,
-            ).model_dump(include=set(OurLine.model_fields)),
-        )
+        AddedLine(id=line_id, after=after, text=texts[line_id], component=line.component)
         for line_id, after, line in added_lines
     ]
     steps = OurSteps(
@@ -183,6 +181,7 @@ def save(
     ours = OurVersion(
         ingredients=OurLines(edit=edit, remove=lines_draft.remove, add=add),
         steps=steps,
+        facts=RecipeFacts(ingredients=facts),
         note=draft.note,
         edited_at=now,
     )
@@ -263,25 +262,22 @@ def _check_order(
 def _line(
     line_id: str,
     draft: OurLineDraft,
-    stored: OurLine | None,
+    stored: IngredientFacts | None,
     original: IngredientFacts | None,
     *,
     store: Store,
     saved: Saved,
     snapshot: Callable[[], fdc.Snapshot],
     now: datetime,
-) -> OurLine:
-    """The Our Version line as drafted: as stored if nothing but its component changed, else with
-    the editor's facts, built from the line it replaces as a Review line edit builds them. A line
-    Our Version adds needs a Canonical Ingredient.
+) -> IngredientFacts:
+    """The Our Version line's facts as drafted: as stored if only its component changed, else the
+    editor's, built from the line it replaces as a Review line edit builds them. A line Our
+    Version adds needs a Canonical Ingredient.
     """
     if stored and _unchanged(draft, stored):
-        return stored.model_copy(update={"component": draft.component})
-    old = (
-        IngredientFacts(parse=stored.parse, match=stored.match, conversion=stored.conversion)
-        if stored
-        else original
-    )
+        return stored
+    # The Original's substitutes are for its own line, not the one Our Version writes.
+    old = stored or (original.model_copy(update={"substitutions": None}) if original else None)
     if draft.canonical is None and (old is None or old.match is None) and original is None:
         raise HTTPException(422, f"Line {line_id} needs a Canonical Ingredient choice")
     fields = {name: getattr(draft, name) for name in LineFields.model_fields}
@@ -291,13 +287,11 @@ def _line(
         store, saved.recipe.id, edit, old, snapshot=snapshot, now=now, result=edited
     )
     saved.edits.append(edited)
-    parse = cast("ParseFact", facts.parse)  # an edit always gives the line a parse
-    return OurLine(
-        text=line_text(parse),
-        component=draft.component,
-        parse=parse,
-        match=_as_editors(facts.match, now),
-        conversion=_as_editors(facts.conversion, now),
+    return facts.model_copy(
+        update={
+            "match": _as_editors(facts.match, now),
+            "conversion": _as_editors(facts.conversion, now),
+        }
     )
 
 
@@ -306,11 +300,13 @@ def _as_editors[F: (MatchFact, ConversionFact)](fact: F | None, now: datetime) -
     return fact if fact is None or fact.provenance == "editor" else _by_editor(fact, now)
 
 
-def _unchanged(draft: OurLineDraft, stored: OurLine) -> bool:
+def _unchanged(draft: OurLineDraft, stored: IngredientFacts) -> bool:
     """Whether the draft is the stored line: its fields, food and Canonical Ingredient, and its
     weight kept or converted as it is.
     """
     parse, match, conversion = stored.parse, stored.match, stored.conversion
+    if parse is None:
+        return False
     canonical = draft.canonical
     same_canonical = canonical is None or (
         isinstance(canonical, ExistingCanonical)

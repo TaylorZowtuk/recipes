@@ -193,8 +193,8 @@ def _parse(
     )
 
 
-def _editors(facts: IngredientFacts, text: str) -> OurLine:
-    """An Our Version line with the parse as the editor gives it: Confirmed, provenance `editor`."""
+def _editors(facts: IngredientFacts) -> IngredientFacts:
+    """An Our Version line's facts as the editor gives them: Confirmed, provenance `editor`."""
     editors = {
         "provenance": "editor",
         "confidence": 1,
@@ -206,9 +206,7 @@ def _editors(facts: IngredientFacts, text: str) -> OurLine:
     parse = facts.parse.model_copy(update=editors) if facts.parse else None
     match = facts.match.model_copy(update=editors) if facts.match else None
     conversion = facts.conversion.model_copy(update=editors) if facts.conversion else None
-    return OurLine.model_validate(
-        {"text": text, "parse": parse, "match": match, "conversion": conversion}
-    )
+    return IngredientFacts(parse=parse, match=match, conversion=conversion)
 
 
 def _ingredient(ref: str, written: str, portion: float = 1.0) -> IngredientSegment:
@@ -311,40 +309,37 @@ RECIPES = [
         ),
         our_version=OurVersion(
             ingredients=OurLines(
-                edit={
-                    "i6": _editors(_parse(0.5, "tsp", "volume", "kosher salt"), "½ tsp kosher salt")
-                },
+                edit={"i6": OurLine(text="½ tsp kosher salt")},
                 remove=["i3"],
-                add=[
-                    AddedLine(
-                        id="i7",
-                        after="i2",
-                        **_editors(
-                            _parse(4, None, "count", "garlic cloves", "smashed").model_copy(
-                                update={
-                                    "match": MatchFact(
-                                        provenance="editor",
-                                        confidence=1,
-                                        estimated=False,
-                                        canonical_id=GARLIC.id,
-                                        fdc_id=GARLIC_FDC_ID,
-                                        portion_id=GARLIC_CLOVE,
-                                    ),
-                                    "conversion": ConversionFact(
-                                        provenance="editor",
-                                        confidence=1,
-                                        estimated=False,
-                                        fdc_id=GARLIC_FDC_ID,
-                                        **fdc.numbers(
-                                            fdc.snapshot(), GARLIC_FDC_ID, GARLIC_CLOVE
-                                        ).model_dump(),
-                                    ),
-                                }
-                            ),
-                            "4 garlic cloves, smashed",
-                        ).model_dump(),
-                    )
-                ],
+                add=[AddedLine(id="i7", after="i2", text="4 garlic cloves, smashed")],
+            ),
+            facts=RecipeFacts(
+                ingredients={
+                    "i6": _editors(_parse(0.5, "tsp", "volume", "kosher salt")),
+                    "i7": _editors(
+                        _parse(4, None, "count", "garlic cloves", "smashed").model_copy(
+                            update={
+                                "match": MatchFact(
+                                    provenance="editor",
+                                    confidence=1,
+                                    estimated=False,
+                                    canonical_id=GARLIC.id,
+                                    fdc_id=GARLIC_FDC_ID,
+                                    portion_id=GARLIC_CLOVE,
+                                ),
+                                "conversion": ConversionFact(
+                                    provenance="editor",
+                                    confidence=1,
+                                    estimated=False,
+                                    fdc_id=GARLIC_FDC_ID,
+                                    **fdc.numbers(
+                                        fdc.snapshot(), GARLIC_FDC_ID, GARLIC_CLOVE
+                                    ).model_dump(),
+                                ),
+                            }
+                        )
+                    ),
+                }
             ),
             steps=OurSteps(
                 edit={

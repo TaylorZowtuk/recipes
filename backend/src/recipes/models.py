@@ -522,14 +522,11 @@ class Enrichment(Model):
 
 class OurLine(Model):
     """An Our Version line, which replaces the Original's line or is added: its text, built from
-    its parse, and its facts, all the editor's.
+    its parse, which Our Version's facts hold with the line's other facts.
     """
 
     text: Line
     component: Label | None = None
-    parse: ParseFact
-    match: MatchFact | None = None
-    conversion: ConversionFact | None = None
 
 
 class AddedLine(OurLine):
@@ -572,11 +569,14 @@ Note = Annotated[str, StringConstraints(max_length=5000)]
 
 class OurVersion(Model):
     """The household's whole-line overlay on the Original, by line and step id. A line or step it
-    leaves alone keeps the Original's text and facts.
+    leaves alone keeps the Original's text and facts; one it edits or adds has its facts in
+    `facts`, addressed as the Original's are, so `our_version.i4.parse` is
+    `facts.ingredients["i4"].parse`.
     """
 
     ingredients: OurLines = OurLines()
     steps: OurSteps = OurSteps()
+    facts: RecipeFacts = RecipeFacts()
     note: Note | None = None
     edited_at: datetime
 

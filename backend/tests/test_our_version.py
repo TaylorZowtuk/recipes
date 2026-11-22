@@ -1,6 +1,6 @@
 """An editor saves or removes a recipe's Our Version in the batched Edit. Its edited and added
-lines carry the editor's own facts, Confirmed; its steps wait for enrich under the Our Version
-Status; the Original and its facts are never touched.
+lines carry the editor's own facts, Confirmed, in its own facts map; its steps wait for enrich
+under the Our Version Status. The Original's facts change only when a line's pick fixes a wording.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -126,15 +126,16 @@ def test_saving_our_version_stores_the_editors_lines_and_steps(
     body = response.json()
     assert body["version"] == recipe.version + 1
     ours = body["our_version"]
-    beef = ours["ingredients"]["edit"]["i1"]
-    assert beef["text"] == "450 g stewing beef"
+    assert ours["ingredients"]["edit"]["i1"] == {"text": "450 g stewing beef", "component": None}
+    beef = ours["facts"]["ingredients"]["i1"]
     assert beef["parse"]["quantity"] == {"low": 450, "high": 450}
     assert all(editors(beef[kind]) for kind in ("parse", "match", "conversion"))
     assert beef["match"]["canonical_id"] == BEEF.id
     assert ours["ingredients"]["remove"] == ["i9"]
-    [added] = ours["ingredients"]["add"]
-    assert (added["id"], added["after"]) == ("i10", "i1")
-    assert added["text"] == "2 can diced tomatoes, drained"
+    assert ours["ingredients"]["add"] == [
+        {"id": "i10", "after": "i1", "text": "2 can diced tomatoes, drained", "component": None}
+    ]
+    added = ours["facts"]["ingredients"]["i10"]
     assert all(editors(added[kind]) for kind in ("parse", "match", "conversion"))
     assert added["conversion"]["fdc_id"] == 1002
     assert ours["steps"]["edit"] == {
@@ -165,7 +166,9 @@ def test_our_version_leaves_the_originals_facts_as_they_were(
     assert saved.facts.model_dump_json() == recipe.facts.model_dump_json()
     assert saved.original == recipe.original
     assert saved.our_version is not None
-    assert saved.our_version.ingredients.edit["i9"].parse.name == "parsley"
+    parsley = saved.our_version.facts.ingredients["i9"].parse
+    assert parsley is not None
+    assert parsley.name == "parsley"
 
 
 def test_a_stale_version_is_a_conflict_that_changes_nothing(
@@ -209,7 +212,7 @@ def test_a_canonical_ingredient_chosen_in_our_version_fixes_the_wording_for_the_
     )
 
     assert response.status_code == 200, response.text
-    added = response.json()["our_version"]["ingredients"]["add"][0]
+    added = response.json()["our_version"]["facts"]["ingredients"]["i10"]
     canonical_id = added["match"]["canonical_id"]
     if choice == "existing":
         assert canonical_id == PORK.id
@@ -226,7 +229,7 @@ def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(
 ) -> None:
     recipe = ready(api_store)
     first = save(editor_client, recipe, {"ingredients": lines(add=[tomatoes()])}).json()
-    added = first["our_version"]["ingredients"]["add"][0]
+    added = first["our_version"]["facts"]["ingredients"]["i10"]
     sharing = other(api_store, 2, drained_tomatoes())
     again = tomatoes(id="i10", canonical={"kind": "existing", "id": added["match"]["canonical_id"]})
 
@@ -237,7 +240,9 @@ def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["our_version"]["ingredients"]["add"][0] == added
+    ours = response.json()["our_version"]
+    assert ours["facts"]["ingredients"]["i10"] == added
+    assert ours["ingredients"] == first["our_version"]["ingredients"]
     assert stored(api_store, sharing.id) == sharing
 
 
@@ -455,9 +460,13 @@ def test_the_seeds_roast_chicken_has_an_our_version_waiting_for_enrich(
     assert chicken.our_version is not None
     assert (chicken.status, chicken.our_version_status) == ("ready", "pending")
     assert card(store, CHICKEN_ID)["our_version_status"] == "pending"
-    ours = chicken.our_version.ingredients
-    for line in [*ours.edit.values(), *ours.add]:
-        assert line.text == line_text(line.parse)
+    ours = chicken.our_version
+    written = {**ours.ingredients.edit, **{line.id: line for line in ours.ingredients.add}}
+    assert written.keys() == ours.facts.ingredients.keys()
+    for line_id, line in written.items():
+        parse = ours.facts.ingredients[line_id].parse
+        assert parse is not None
+        assert line.text == line_text(parse)
     wording = store.wording("garlic cloves")
     assert wording is not None
     assert (wording.canonical_id, wording.confirmed) == (GARLIC.id, True)
