@@ -44,7 +44,6 @@ from recipes.models import (
     OurVersion,
     Recipe,
     RecipeFacts,
-    item_of,
     our_version_settled,
     resolve,
 )
@@ -229,16 +228,23 @@ def save(
     for edited in saved.edits:
         if edited.shared:
             changed = edited.shared.apply(changed) or changed
-    # The lines this save changed are the editor's own picks, so the spread passes them by, and
-    # their open issues, with those of lines it dropped, are settled.
+    # The lines this save changed are the editor's own picks, so the spread passes them by. The
+    # open issues of the lines and steps it changed or dropped are settled; the rest stay.
     ours = cast("OurVersion", changed.our_version)
     spread = ours.facts.ingredients
     facts = {line_id: fresh[line_id] if line_id in fresh else spread[line_id] for line_id in built}
+    before_steps, after_steps = _texts(stored_steps), _texts(steps)
+    touched = {
+        *fresh,
+        *(set(stored_facts) - set(built)),
+        *(i for i, text in before_steps.items() if after_steps.get(i) != text),
+        *(i for i, text in after_steps.items() if before_steps.get(i) != text),
+    }
     issues = resolve(
         changed,
         lambda fact_id: (
             fact_id.startswith(OUR_VERSION)
-            and item_of(fact_id.removeprefix(OUR_VERSION)) not in kept
+            and fact_id.removeprefix(OUR_VERSION).partition(".")[0] in touched
         ),
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
@@ -419,11 +425,15 @@ def _status(recipe: Recipe, stored: OurSteps, steps: OurSteps) -> EnrichmentStat
     """Pending when a step is new or its text changed, else as it was, or Ready for a new Our
     Version.
     """
-    before = {**{i: s.text for i, s in stored.edit.items()}, **{a.id: a.text for a in stored.add}}
-    after = {**{i: s.text for i, s in steps.edit.items()}, **{a.id: a.text for a in steps.add}}
+    before, after = _texts(stored), _texts(steps)
     if any(before.get(step_id) != text for step_id, text in after.items()):
         return "pending"
     return recipe.our_version_status or "ready"
+
+
+def _texts(steps: OurSteps) -> dict[str, str]:
+    """Each edited or added step's text, by its id."""
+    return {**{i: s.text for i, s in steps.edit.items()}, **{a.id: a.text for a in steps.add}}
 
 
 # The kitchen fractions a recipe shows, as the PWA's amount formatter has them.

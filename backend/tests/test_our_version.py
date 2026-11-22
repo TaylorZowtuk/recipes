@@ -389,6 +389,31 @@ def test_saving_our_version_settles_the_issues_of_the_lines_it_changes_or_drops(
     assert (issue.fact_id, issue.status) == ("our_version.i10.match", "resolved")
 
 
+def test_saving_our_version_keeps_the_issues_of_the_lines_and_steps_it_keeps(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = ready(api_store)
+    steps = {"s2": {"text": "Brown the beef."}, "s3": {"text": "Simmer."}}
+    draft = {"ingredients": lines(edit={"i1": line()}), "steps": lines(edit=steps)}
+    assert save(editor_client, recipe, draft).status_code == 200
+    paths = ["i1.match", "i1.substitutions", "i5.substitutions", "s2.segments", "s3.segments"]
+    asked = [issue(n, f"our_version.{path}", status="open") for n, path in enumerate(paths)]
+    api_store.update_recipe(stored(api_store, recipe.id).model_copy(update={"issues": asked}))
+    kept = {**draft, "steps": lines(edit={"s2": steps["s2"]}), "note": "More pepper"}
+
+    response = save(editor_client, stored(api_store, recipe.id), kept)
+
+    assert response.status_code == 200, response.text
+    found = {i.fact_id: i.status for i in stored(api_store, recipe.id).issues}
+    assert found == {
+        "our_version.i1.match": "open",
+        "our_version.i1.substitutions": "open",
+        "our_version.i5.substitutions": "open",
+        "our_version.s2.segments": "open",
+        "our_version.s3.segments": "resolved",
+    }
+
+
 def test_an_our_version_whose_last_issue_a_save_settles_is_ready(
     editor_client: TestClient, api_store: Store
 ) -> None:
