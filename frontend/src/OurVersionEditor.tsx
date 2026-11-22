@@ -135,7 +135,12 @@ export function OurVersionFields({
       {list("ingredients")}
       {rows.ingredients.length === 0 && <EmptyAdd part="ingredients" onOpen={onOpen} />}
       <h3 className="our-version-heading">Steps</h3>
-      <p className="field-hint">A changed step shows as written until enrichment reads it.</p>
+      {rows.steps.some((row) => row.change === "edited" || row.change === "added") && (
+        <p className="field-hint">
+          Changed steps show as you wrote them, without timers or scaled amounts, until enrichment
+          runs.
+        </p>
+      )}
       {list("steps")}
       {rows.steps.length === 0 && <EmptyAdd part="steps" onOpen={onOpen} />}
       <label htmlFor="our-version-note">Note</label>

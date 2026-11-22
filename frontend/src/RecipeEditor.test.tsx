@@ -209,6 +209,22 @@ describe("the recipe editor", () => {
     expect(document.activeElement?.textContent).toBe("Remove 2 cups flour or rice flour");
   });
 
+  it("says how a changed step shows only once a step is changed", () => {
+    const hint =
+      "Changed steps show as you wrote them, without timers or scaled amounts, until enrichment runs.";
+    const hints = () => [...host.querySelectorAll(".field-hint")].map((p) => p.textContent);
+    const r = recipe();
+    render(r);
+    expect(hints()).not.toContain(hint);
+    const draft = draftOf(r);
+    const edit = { s1: { text: "Brown the butter.", component: null } };
+    render(r, undefined, undefined, {
+      ...draft,
+      ours: { ...draft.ours, steps: { ...draft.ours.steps, edit } },
+    });
+    expect(hints()).toContain(hint);
+  });
+
   it("offers no Our Version on a Pending recipe", () => {
     render(recipe({ status: "pending" }));
     expect(host.querySelector(".our-version-field")).toBeNull();
