@@ -9,15 +9,14 @@ import {
   lineFor,
   type OurDraft,
   ourRows,
+  type Part,
+  type Place,
   type Row,
   removeItem,
   restoreItem,
 } from "./ourVersionDraft";
 import { byComponent } from "./recipeComponents";
 import { Sheet } from "./Sheet";
-
-type Part = "ingredients" | "steps";
-type Place = { after: string | null; component: string | null };
 
 // What the Our Version sheet edits: a line or step, or a new one at its place.
 export type OurTarget =

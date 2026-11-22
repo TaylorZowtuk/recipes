@@ -8,9 +8,9 @@ type StoredLine = Ours["ingredients"]["edit"][string];
 type Lines = OurVersionDraft["ingredients"];
 type Steps = OurVersionDraft["steps"];
 export type OurLineFields = Lines["edit"][string];
-type Part = "ingredients" | "steps";
+export type Part = "ingredients" | "steps";
 // Where an added line or step goes: after the effective one `after` names, or first for none.
-type Place = { after: string | null; component: string | null };
+export type Place = { after: string | null; component: string | null };
 
 // Our Version as Edit drafts it: what it edits, removes and adds, as the API takes them, and its
 // note as typed. `forms` keeps the edit form of each line edited or added in this Edit, so editing
