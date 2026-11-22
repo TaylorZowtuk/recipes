@@ -969,7 +969,7 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
             "one, adds one after a line or step it doesn't have or with an id already used, or "
             "has a line its Review line edit would refuse, naming it by the draft's id, or the "
             "edited recipe is too big to store, or its lines write more Canonical Ingredients "
-            "and wordings than one write holds"
+            "and wordings than one write holds",
         },
     },
 )

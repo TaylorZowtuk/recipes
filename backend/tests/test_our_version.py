@@ -277,6 +277,7 @@ BRAISING = {"kind": "new", "name": "Braising Beef", "family": "beef", "store_cat
 def with_ours(  # noqa: PLR0913 - each is a way the tests vary the stew
     store: Store,
     n: int,
+    *,
     preparation: str | None = None,
     status: EnrichmentStatus = "ready",
     unit: str | None = None,
@@ -395,7 +396,8 @@ def test_a_review_pick_on_an_original_line_reaches_the_our_version_line_with_its
     editor_client: TestClient, api_store: Store
 ) -> None:
     recipe = ready(api_store)
-    assert save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})}).status_code == 200
+    edited = save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})})
+    assert edited.status_code == 200
 
     response = braised(editor_client, stored(api_store, recipe.id), "review")
 
@@ -460,7 +462,8 @@ def test_an_edited_our_version_line_leaves_the_originals_substitutions_behind(
 ) -> None:
     swaps = SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [SWAP]})
     beef = FACTS.ingredients["i1"].model_copy(update={"substitutions": swaps})
-    recipe = ready(api_store, FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": beef}}))
+    facts = FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": beef}})
+    recipe = ready(api_store, facts)
 
     response = save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})})
 
@@ -724,10 +727,13 @@ def test_one_write_holds_every_canonical_ingredient_and_wording_a_save_writes(
     draft = {"ingredients": lines(edit={"i1": beef}, add=[tomatoes()])}
     monkeypatch.setattr(api, "MAX_LEARNED", limit)
     writes: list[int] = []
-    transact = api_store._transact  # pyright: ignore[reportPrivateUsage]
-    monkeypatch.setattr(
-        api_store, "_transact", lambda items: writes.append(len(items)) or transact(items)
-    )
+    transact = api_store.client.transact_write_items
+
+    def counted(**request: Any) -> Any:
+        writes.append(len(request["TransactItems"]))
+        return transact(**request)
+
+    monkeypatch.setattr(api_store.client, "transact_write_items", counted)
 
     response = save(editor_client, recipe, draft)
 
@@ -827,7 +833,8 @@ def test_an_added_id_an_issue_names_is_never_given_again_after_our_version_is_re
     braised(editor_client, awaiting(api_store, issues=[], status="ready"), "our_version")
     assert remove(editor_client, stored(api_store, recipe.id)).status_code == 200
 
-    response = save(editor_client, stored(api_store, recipe.id), {"ingredients": lines(add=[tomatoes()])})
+    draft = {"ingredients": lines(add=[tomatoes()])}
+    response = save(editor_client, stored(api_store, recipe.id), draft)
 
     assert response.status_code == 200, response.text
     assert [a["id"] for a in response.json()["our_version"]["ingredients"]["add"]] == ["i11"]
