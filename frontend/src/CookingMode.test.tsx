@@ -49,6 +49,7 @@ const card: Card = {
   tags: [],
   needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
+  our_version_status: null,
   host: null,
   schema_version: 1,
 };
@@ -433,5 +434,59 @@ describe("cooking mode", () => {
     tap(inCooking("Close"));
     cook();
     expect(stepShown()).toBe("Brown the butter.");
+  });
+});
+
+// The beans with an Our Version: s1 removed, s3 changed and s4 added first.
+function oursRecipe(): Recipe {
+  return {
+    ...cookRecipe(),
+    our_version: {
+      ingredients: { edit: {}, remove: [], add: [] },
+      steps: {
+        edit: { s3: { text: "Serve hot.", component: null } },
+        remove: ["s1"],
+        add: [{ id: "s4", after: null, text: "Rinse the beans.", component: null }],
+      },
+      facts: { ingredients: {}, steps: {}, difficulty: null },
+      note: null,
+      edited_at: "2026-11-02T00:00:00Z",
+      last_line: 0,
+      last_step: 4,
+    },
+    our_version_status: "ready",
+  };
+}
+
+describe("cooking mode on a recipe with Our Version", () => {
+  it("cooks Our Version's steps", () => {
+    open(oursRecipe());
+    cook();
+    expect(progress()).toBe("Step 1 of 3");
+    expect(stepShown()).toBe("Rinse the beans.");
+    tap(inCooking("Next"));
+    expect(stepShown()).toBe("Simmer for 8-10 minutes.");
+    tap(inCooking("Next"));
+    expect(stepShown()).toBe("Serve hot.");
+    expect(ticks()).toEqual(["s2", "s4"]);
+  });
+
+  it("cooks the Original when Adjust shows it, and says so", () => {
+    open(oursRecipe());
+    tap(pageButton(/^Adjust/));
+    tap(pageButton("Original"));
+    tap(pageButton("Done"));
+    cook();
+    expect(progress()).toBe("Step 1 of 3");
+    expect(stepShown()).toBe("Melt 2 tbsp butter.");
+    expect(cooking()?.querySelector(".cooking-adjusted")?.textContent).toBe("Original");
+  });
+
+  it("reads Resume only for a tick on a step of the version shown", () => {
+    stepTicks.tick(card.id, "s1");
+    open(oursRecipe());
+    expect(pageButton(/^(Cook|Resume)$/).textContent).toBe("Cook");
+    act(() => stepTicks.tick(card.id, "s4"));
+    expect(pageButton(/^(Cook|Resume)$/).textContent).toBe("Resume");
   });
 });

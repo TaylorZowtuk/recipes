@@ -170,6 +170,7 @@ function RecipePage() {
                           />
                           <CookButton
                             recipe={ready}
+                            version={choices.version ?? "ours"}
                             opener={cookOpener}
                             onCook={() =>
                               setCooking({ recipe: ready, choices: pending ? AS_WRITTEN : choices })
