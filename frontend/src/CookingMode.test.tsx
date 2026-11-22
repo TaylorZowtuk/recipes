@@ -437,14 +437,21 @@ describe("cooking mode", () => {
   });
 });
 
-// The beans with an Our Version: s1 removed, s3 changed and s4 added first.
+// The beans with an Our Version: s1 removed, s2 and s3 changed and s4 added first. The Original's
+// s2 uses the butter and simmers 8-10 minutes; Our Version's s2 is only its text until segmented.
 function oursRecipe(): Recipe {
+  const r = cookRecipe();
+  const s2 = r.facts.steps.s2;
+  if (s2?.uses) s2.uses.uses = [{ ref: "i1", portion: 1 }];
   return {
-    ...cookRecipe(),
+    ...r,
     our_version: {
       ingredients: { edit: {}, remove: [], add: [] },
       steps: {
-        edit: { s3: { text: "Serve hot.", component: null } },
+        edit: {
+          s2: { text: "Simmer for 20 minutes.", component: null },
+          s3: { text: "Serve hot.", component: null },
+        },
         remove: ["s1"],
         add: [{ id: "s4", after: null, text: "Rinse the beans.", component: null }],
       },
@@ -463,7 +470,9 @@ describe("cooking mode on a recipe with Our Version", () => {
     expect(progress()).toBe("Step 1 of 3");
     expect(stepShown()).toBe("Rinse the beans.");
     tap(inCooking("Next"));
-    expect(stepShown()).toBe("Simmer for 8-10 minutes.");
+    expect(stepShown()).toBe("Simmer for 20 minutes.");
+    expect(cooking()?.querySelector(".cooking-uses")).toBeNull();
+    expect(find(cooking(), /^Start a timer/)).toBeUndefined();
     tap(inCooking("Next"));
     expect(stepShown()).toBe("Serve hot.");
     expect(ticks()).toEqual(["s2", "s4"]);
