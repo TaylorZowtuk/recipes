@@ -89,7 +89,7 @@ describe("TimerDock", () => {
   it("offers Resume on a paused timer and says it's paused", () => {
     const markup = render([view({ paused: true })]);
     expect(names(markup)).toContain("Resume 8-10 minutes, step 3 of Synthetic Test Noodles");
-    expect(markup).toContain("Paused\u00a0· Check in 7:59");
+    expect(markup).toContain("Paused · Check in 7:59");
   });
 
   it("marks a chimed row, and offers no pause on an alarming one", () => {

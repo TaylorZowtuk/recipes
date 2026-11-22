@@ -178,10 +178,12 @@ test("the countdown shows whole beside four controls on a 320px screen", async (
   await startRange(page);
   await page.clock.fastForward("09:00");
   const countdown = row(page).locator(".timer-countdown");
+  const whole = () => countdown.evaluate((element) => element.scrollWidth <= element.clientWidth);
   await expect(countdown).toHaveText("Done in 1:00");
-  expect(await countdown.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-    true,
-  );
+  expect(await whole()).toBe(true);
+  await dock(page).getByRole("button", { name: /^Pause/ }).click();
+  await expect(countdown).toHaveText("Paused · Done in 1:00");
+  expect(await whole()).toBe(true);
   await expect(dock(page).getByRole("button", { name: /^Cancel/ })).toBeInViewport({ ratio: 1 });
 });
 
