@@ -287,6 +287,16 @@ describe("the recipe editor", () => {
     render(r, "Line new-1 needs a Canonical Ingredient choice", at, { ...draft, ours });
     expect(alerts()).toHaveLength(1);
     expect(alerts()[0]?.closest(".our-version-row")?.textContent).toContain("1 lemon");
+    // The row says which line it is, so the refusal leaves out the draft's id.
+    expect(alerts()[0]?.textContent).toBe("Needs a Canonical Ingredient choice");
+  });
+
+  it("keeps the line's id in a refusal shown under the form", () => {
+    const at = { part: "ingredients" as const, id: "new-1" };
+    render(recipe(), "Line new-1 needs a Canonical Ingredient choice", at);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.closest(".our-version-row")).toBeNull();
+    expect(alerts()[0]?.textContent).toBe("Line new-1 needs a Canonical Ingredient choice");
   });
 
   it("shows a refusal of no line under the form", () => {

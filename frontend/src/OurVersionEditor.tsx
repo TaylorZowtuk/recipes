@@ -107,7 +107,7 @@ export function OurVersionFields({
             >
               {problem && refusedAt?.part === part && refusedAt.id === row.id && (
                 <p role="alert" className="form-problem">
-                  {problem}
+                  {byRow(problem, row.id)}
                 </p>
               )}
             </OurRow>
@@ -170,6 +170,13 @@ export function OurVersionFields({
       )}
     </fieldset>
   );
+}
+
+// A refusal under its row, without the "Line <id>" or "Step <id>" lead the row already says.
+function byRow(problem: string, id: string): string {
+  const lead = [`Line ${id} `, `Step ${id} `].find((lead) => problem.startsWith(lead));
+  const rest = lead ? problem.slice(lead.length) : problem;
+  return rest.charAt(0).toUpperCase() + rest.slice(1);
 }
 
 function EmptyAdd({ part, onOpen }: { part: Part; onOpen: (target: OurTarget) => void }) {
