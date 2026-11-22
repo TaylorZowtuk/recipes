@@ -173,6 +173,18 @@ test("−1 takes a minute off a running timer, until a minute or less is left", 
   expect(await row(page).textContent()).toBe(left);
 });
 
+test("the countdown shows whole beside four controls on a 320px screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await startRange(page);
+  await page.clock.fastForward("09:00");
+  const countdown = row(page).locator(".timer-countdown");
+  await expect(countdown).toHaveText("Done in 1:00");
+  expect(await countdown.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+    true,
+  );
+  await expect(dock(page).getByRole("button", { name: /^Cancel/ })).toBeInViewport({ ratio: 1 });
+});
+
 test("focus moves from −1 to +1 minute when the alarm takes −1 away", async ({ page }) => {
   await page.clock.install();
   await page.goto("/recipes/01K7SEED000000000000000007/garlic-butter-green-beans");

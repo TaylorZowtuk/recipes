@@ -2426,6 +2426,12 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 .timer-step,
 .timer-countdown {
   display: block;
+}
+
+/* The countdown is what a Timer is for: it wraps when the controls leave it little room, where the
+   title and step are cut short. */
+.timer-title,
+.timer-step {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
