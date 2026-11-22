@@ -159,6 +159,10 @@ _Avoid_: Personal adjustment, variant, fork
 Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
 _Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
 
+**Effective lines**:
+A recipe's ingredient lines and steps as the household cooks them: the Original with Our Version applied. Removed lines and steps are left out, added ones sit where Our Version put them, and an unchanged line keeps the Original's facts. A recipe shows its effective lines by default, and the Original on request.
+_Avoid_: Merged recipe, current version
+
 ### Ratings and organization
 
 **Difficulty**:
