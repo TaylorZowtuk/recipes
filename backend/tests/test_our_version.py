@@ -3,7 +3,9 @@ lines carry the editor's own facts, Confirmed, in its own facts map; its steps w
 under the Our Version Status. The Original's facts change only when a line's pick fixes a wording.
 """
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -32,7 +34,6 @@ if TYPE_CHECKING:
     from httpx2 import Response
 
     from recipes.images import ImageStore
-    from recipes.models import ParseFact
     from recipes.store import Store
 
 NEW_TOMATOES = {
@@ -718,30 +719,23 @@ def test_a_quantity_reads_as_the_pwa_shows_it(value: float, shown: str) -> None:
     assert kitchen_number(value) == shown
 
 
-def parsed(quantity: Quantity | None, unit: str | None, name: str, **fields: Any) -> ParseFact:
-    return parse(name).model_copy(
-        update={"quantity": quantity, "unit": unit, "preparation": None, **fields}
-    )
+LINE_TEXT = json.loads((Path(__file__).parent / "fixtures" / "line_text.json").read_text())
 
 
 @pytest.mark.parametrize(
-    ("parse", "text"),
-    [
-        (
-            parsed(Quantity(low=2, high=2), "can", "diced tomatoes", preparation="drained"),
-            "2 can diced tomatoes, drained",
-        ),
-        (
-            parsed(Quantity(low=0.75, high=0.75), "cup", "onion", preparation="chopped"),
-            "¾ cup onion, chopped",
-        ),
-        (parsed(Quantity(low=2, high=3), "cup", "stock"), "2\N{EN DASH}3 cups stock"),
-        (parsed(Quantity(low=3, high=3), None, "eggs"), "3 eggs"),
-        (parsed(None, None, "salt", comment="to taste"), "salt, to taste"),
-    ],
+    "case", LINE_TEXT["cases"], ids=[case["name"] for case in LINE_TEXT["cases"]]
 )
-def test_a_lines_text_is_built_from_its_parse(parse: ParseFact, text: str) -> None:
-    assert line_text(parse) == text
+def test_a_lines_text_is_built_from_its_parse(case: dict[str, Any]) -> None:
+    fields = case["parse"]
+    quantity = Quantity.model_validate(fields["quantity"]) if fields["quantity"] else None
+    built = parse(fields["name"]).model_copy(
+        update={
+            "quantity": quantity,
+            **{key: fields[key] for key in ("unit", "preparation", "comment")},
+        }
+    )
+
+    assert line_text(built) == case["text"]
 
 
 def test_another_recipes_line_is_matched_with_the_snapshots_numbers(
