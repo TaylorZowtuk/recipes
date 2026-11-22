@@ -410,6 +410,32 @@ def test_an_our_version_whose_last_issue_a_save_settles_is_ready(
     assert response.json()["our_version_status"] == "ready"
 
 
+def test_an_our_version_whose_last_issue_a_wording_fix_settles_is_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, preparation="cubed")
+    braised(editor_client, recipe, "our_version")
+    assert stored(api_store, sharing.id).our_version_status == "awaiting_review"
+    braising = next(c for c in api_store.canonical_ingredients() if c.name == "Braising Beef")
+    cubed = other(api_store, 3, beef_line())
+
+    # The food picked for "stewing beef, cubed" on a third recipe reaches the asked line.
+    response = braised(
+        editor_client,
+        cubed,
+        "review",
+        canonical={"kind": "existing", "id": braising.id},
+        preparation="cubed",
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, sharing.id)
+    [asked] = changed.issues
+    assert (asked.fact_id, asked.status) == ("our_version.i10.match", "resolved")
+    assert changed.our_version_status == "ready"
+
+
 def test_a_save_reads_the_collection_once(
     editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:

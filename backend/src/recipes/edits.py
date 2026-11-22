@@ -54,6 +54,7 @@ from recipes.models import (
     item_of,
     new_ulid,
     normalize_wording,
+    our_version_settled,
     resolve,
     settled,
     unit_kind,
@@ -297,7 +298,8 @@ class SharedMatch:
         keeps its own food, unconfirmed since nobody confirmed that food for the new Canonical
         Ingredient (or takes the food, unconfirmed too, if it had none); its open issues on its
         match are resolved, and an open issue asks an editor to pick its food. An open issue on
-        an Our Version line makes a Ready Our Version Awaiting Review.
+        an Our Version line makes a Ready Our Version Awaiting Review, and one Awaiting Review
+        whose last open issue the match settles is Ready.
         """
         if not self.lines(recipe):
             return None
@@ -313,7 +315,7 @@ class SharedMatch:
             if len(asks) > asked and recipe.our_version_status == "ready":
                 changes["our_version_status"] = "awaiting_review"
         changes["issues"] = [*resolve(recipe, lambda fact_id: fact_id in fixed), *asks]
-        return settled(recipe.model_copy(update=changes))
+        return settled(our_version_settled(recipe.model_copy(update=changes)))
 
     def _matched(
         self,

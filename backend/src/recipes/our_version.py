@@ -45,6 +45,7 @@ from recipes.models import (
     Recipe,
     RecipeFacts,
     item_of,
+    our_version_settled,
     resolve,
 )
 
@@ -235,13 +236,8 @@ def save(
         ),
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
-    # Awaiting Review with no open issue on Our Version left, it has nothing to check.
-    status = changed.our_version_status
-    left = any(i.status == "open" and i.fact_id.startswith(OUR_VERSION) for i in issues)
-    if status == "awaiting_review" and not left:
-        status = "ready"
-    saved.recipe = changed.model_copy(
-        update={"our_version": ours, "issues": issues, "our_version_status": status}
+    saved.recipe = our_version_settled(
+        changed.model_copy(update={"our_version": ours, "issues": issues})
     )
     return saved
 

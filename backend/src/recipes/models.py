@@ -735,6 +735,16 @@ def settled(recipe: Recipe, ready_batch: str | None = None) -> Recipe:
     return recipe
 
 
+def our_version_settled(recipe: Recipe) -> Recipe:
+    """The recipe with its Our Version Ready if it was Awaiting Review and no open issue is left
+    on it.
+    """
+    left = any(i.status == "open" and i.fact_id.startswith(OUR_VERSION) for i in recipe.issues)
+    if recipe.our_version_status == "awaiting_review" and not left:
+        return recipe.model_copy(update={"our_version_status": "ready"})
+    return recipe
+
+
 def effective_difficulty(recipe: Recipe) -> tuple[Difficulty | None, bool]:
     """The recipe's Difficulty and whether it is only a suggestion: the editor's, or else
     enrichment's, which is a suggestion until an editor confirms it.
