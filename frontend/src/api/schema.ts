@@ -358,9 +358,10 @@ export interface paths {
          *     Our Version is saved whole: its edited and added lines take the editor's facts, Confirmed with
          *     provenance `editor`, built as a Review line edit builds them, with text built from them; a line
          *     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
-         *     its wording as a Review line edit does, for this recipe's Original lines and, once the recipe
-         *     is saved, every other recipe's. A new or changed step makes the Our Version Status Pending; a
-         *     new Our Version without one is Ready. The Original's facts and the Enrichment Status stay.
+         *     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
+         *     Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
+         *     Our Version Status Pending; a new Our Version without one is Ready. The Enrichment Status
+         *     stays.
          */
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
@@ -644,11 +645,8 @@ export interface components {
             after: string | null;
             /** Component */
             component: string | null;
-            conversion: components["schemas"]["ConversionFact"] | null;
             /** Id */
             id: string;
-            match: components["schemas"]["MatchFact-Output"] | null;
-            parse: components["schemas"]["ParseFact-Output"];
             /** Text */
             text: string;
         };
@@ -1776,14 +1774,11 @@ export interface components {
         /**
          * OurLine
          * @description An Our Version line, which replaces the Original's line or is added: its text, built from
-         *     its parse, and its facts, all the editor's.
+         *     its parse, which Our Version's facts hold with the line's other facts.
          */
         OurLine: {
             /** Component */
             component: string | null;
-            conversion: components["schemas"]["ConversionFact"] | null;
-            match: components["schemas"]["MatchFact-Output"] | null;
-            parse: components["schemas"]["ParseFact-Output"];
             /** Text */
             text: string;
         };
@@ -1871,7 +1866,10 @@ export interface components {
         /**
          * OurVersion
          * @description The household's whole-line overlay on the Original, by line and step id. A line or step it
-         *     leaves alone keeps the Original's text and facts.
+         *     leaves alone keeps the Original's text and facts; one it edits or adds has its facts in
+         *     `facts`, addressed as the Original's are, so `our_version.i4.parse` is
+         *     `facts.ingredients["i4"].parse`. `last_line` and `last_step` are the highest numbers it gave
+         *     an added line's or step's id, so no id is given twice.
          */
         OurVersion: {
             /**
@@ -1881,12 +1879,29 @@ export interface components {
             edited_at: string;
             /**
              * @default {
+             *       "ingredients": {},
+             *       "steps": {}
+             *     }
+             */
+            facts: components["schemas"]["RecipeFacts"];
+            /**
+             * @default {
              *       "add": [],
              *       "edit": {},
              *       "remove": []
              *     }
              */
             ingredients: components["schemas"]["OurLines"];
+            /**
+             * Last Line
+             * @default 0
+             */
+            last_line: number;
+            /**
+             * Last Step
+             * @default 0
+             */
+            last_step: number;
             /** Note */
             note: string | null;
             /**
@@ -3724,7 +3739,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not a valid edit, the preview isn't one of the recipe's images, Our Version edits or removes a line or step the Original lacks, both edits and removes one, adds one after a line or step it doesn't have or with an id already used, or has a line its Review line edit would refuse, or the edited recipe is too big to store */
+            /** @description Not a valid edit, the preview isn't one of the recipe's images, Our Version edits or removes a line or step the Original lacks, both edits and removes one, adds one after a line or step it doesn't have or with an id already used, or has a line its Review line edit would refuse, naming it by the draft's id, or the edited recipe is too big to store, or its lines write more Canonical Ingredients and wordings than one write holds */
             422: {
                 headers: {
                     [name: string]: unknown;
