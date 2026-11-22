@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Recipe } from "./api/client";
-import { type LineEdit, lineDraft, lineOf } from "./factEdits";
+import { EDITOR_KEPT, type LineEdit, lineDraft, lineEdit, lineOf } from "./factEdits";
 import {
   addLine,
   addStep,
@@ -13,7 +13,7 @@ import {
   removeItem,
   restoreItem,
 } from "./ourVersionDraft";
-import { GARLIC, KNOWN_CANONICAL, parse, recipe } from "./review.fixtures";
+import { conversion, GARLIC, KNOWN_CANONICAL, match, parse, recipe } from "./review.fixtures";
 
 const edit = (name: string, low = 1): LineEdit => ({
   kind: "line",
@@ -29,7 +29,8 @@ const edit = (name: string, low = 1): LineEdit => ({
 
 const form = lineDraft({ id: "new", text: "" });
 
-// The synthetic beans with an Our Version that edits i1 and adds i5 after it.
+// The synthetic beans with an Our Version that edits i1, matched and kept in tablespoons, and
+// adds i5 after it.
 const withOurs = (): Recipe =>
   recipe({
     our_version: {
@@ -43,11 +44,16 @@ const withOurs = (): Recipe =>
         ingredients: {
           i1: {
             parse: { ...parse("butter", true, "tbsp"), quantity: { low: 1, high: 1 } },
+            match: match(KNOWN_CANONICAL, true),
+            conversion: conversion(true, { density_g_per_ml: 0.96, refused: EDITOR_KEPT }),
+            substitutions: null,
+          },
+          i5: {
+            parse: parse("beans", true, "tbsp"),
             match: null,
             conversion: null,
             substitutions: null,
           },
-          i5: { parse: parse("beans", true, "tbsp"), match: null, conversion: null, substitutions: null },
         },
         steps: {},
         difficulty: null,
@@ -59,6 +65,15 @@ const withOurs = (): Recipe =>
     },
   });
 
+// The draft with the line saved from its edit form, opened as stored and changed by `change`.
+const fromForm = (r: Recipe, id: string, change: Partial<ReturnType<typeof lineDraft>> = {}) => {
+  const line = lineFor(r, id);
+  const draft = { ...lineDraft(line), ...change };
+  const built = lineEdit(line, draft);
+  if (!("edit" in built)) throw new Error(built.problem);
+  return editLine(r, ourDraftOf(r), id, built.edit, draft);
+};
+
 const saved = (r: Recipe, draft: ReturnType<typeof ourDraftOf>) => {
   const operation = ourOperation(r, draft);
   if (operation?.op !== "set_our_version") throw new Error(`no set_our_version: ${operation}`);
@@ -69,11 +84,29 @@ describe("the Our Version draft", () => {
   it("is no operation while unchanged, with or without a stored Our Version", () => {
     expect(ourOperation(recipe(), ourDraftOf(recipe()))).toBeUndefined();
     expect(ourOperation(withOurs(), ourDraftOf(withOurs()))).toBeUndefined();
-    // A stored line saved again from its own form is unchanged too.
+    // A stored line saved again from its own form is unchanged too: its food and kept weight.
     const r = withOurs();
-    const { canonical: _, ...asStored } = { ...edit("butter"), fdc_id: null };
-    const again = editLine(r, ourDraftOf(r), "i1", asStored, form);
-    expect(ourOperation(r, again)).toBeUndefined();
+    expect(ourOperation(r, fromForm(r, "i1"))).toBeUndefined();
+  });
+
+  it("sends a stored line whose weight is now converted", () => {
+    const r = withOurs();
+    const converted = fromForm(r, "i1", { keepWeight: false });
+    expect(saved(r, converted).ingredients.edit.i1?.keep_weight).toBe(false);
+  });
+
+  it("is no operation with the same lines removed in another order", () => {
+    const base = withOurs();
+    const ours = base.our_version as NonNullable<Recipe["our_version"]>;
+    const r = {
+      ...base,
+      our_version: { ...ours, ingredients: { ...ours.ingredients, remove: ["i2", "i3"] } },
+    };
+    let draft = ourDraftOf(r);
+    for (const id of ["i2", "i3"]) draft = restoreItem(draft, "ingredients", id);
+    for (const id of ["i3", "i2"]) draft = removeItem(draft, "ingredients", id);
+    expect(draft.ingredients.remove).toEqual(["i3", "i2"]);
+    expect(ourOperation(r, draft)).toBeUndefined();
   });
 
   it("names a new line by a draft id that a later new line's `after` follows", () => {

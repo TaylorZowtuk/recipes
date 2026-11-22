@@ -20,8 +20,7 @@ export type OurDraft = { ingredients: Lines; steps: Steps; note: string } & {
   removed: boolean;
 };
 
-// A line's fields as the API takes them, always in one order, so a line saved again as it was
-// compares equal to the stored one.
+// A line's fields as the API takes them.
 function fieldsOf(line: Omit<OurLineFields, "component">, component: string | null): OurLineFields {
   return {
     quantity: line.quantity,
@@ -49,6 +48,58 @@ function storedFields(facts: IngredientFacts | undefined, component: string | nu
       portion_id: match?.portion_id ?? null,
     },
     component,
+  );
+}
+
+type Canonical = OurLineFields["canonical"];
+const sameCanonical = (a: Canonical, b: Canonical) =>
+  !a || !b
+    ? !a && !b
+    : a.kind === "existing" && b.kind === "existing"
+      ? a.id === b.id
+      : a.kind === "new" &&
+        b.kind === "new" &&
+        a.name === b.name &&
+        a.family === b.family &&
+        a.store_category_id === b.store_category_id;
+
+// Whether two drafts of a line save the same, field by field: no weight choice is null, as is no
+// component.
+function sameLine(a: OurLineFields, b: OurLineFields): boolean {
+  return (
+    a.quantity?.low === b.quantity?.low &&
+    a.quantity?.high === b.quantity?.high &&
+    a.unit === b.unit &&
+    a.name === b.name &&
+    a.preparation === b.preparation &&
+    a.fdc_id === b.fdc_id &&
+    a.portion_id === b.portion_id &&
+    sameCanonical(a.canonical, b.canonical) &&
+    (a.keep_weight ?? null) === (b.keep_weight ?? null) &&
+    (a.component ?? null) === (b.component ?? null)
+  );
+}
+
+const sameStep = (a: Steps["edit"][string], b: Steps["edit"][string]) =>
+  a.text === b.text && (a.component ?? null) === (b.component ?? null);
+
+const sameList = <T>(a: T[], b: T[], same: (x: T, y: T) => boolean) =>
+  a.length === b.length && a.every((x, i) => i in b && same(x, b[i] as T));
+
+type Drafted<E> = { edit: Record<string, E>; remove: string[]; add: (E & Added)[] };
+type Added = { id?: string | null; after: string | null };
+
+// Whether two drafts of a part save the same: the same edits by id, the same removals in order
+// (`anchored` sorts them) and the same additions in order.
+function samePart<E>(a: Drafted<E>, b: Drafted<E>, same: (x: E, y: E) => boolean): boolean {
+  const edits = Object.entries(a.edit);
+  const sameAdded = (x: E & Added, y: E & Added) =>
+    (x.id ?? null) === (y.id ?? null) && x.after === y.after && same(x, y);
+  return (
+    edits.length === Object.keys(b.edit).length &&
+    edits.every(([id, x]) => id in b.edit && same(x, b.edit[id] as E)) &&
+    sameList(a.remove, b.remove, (x, y) => x === y) &&
+    sameList(a.add, b.add, sameAdded)
   );
 }
 
@@ -120,9 +171,11 @@ export function ourOperation(recipe: Recipe, draft: OurDraft): RecipeOperation |
   if (draft.removed) return recipe.our_version ? { op: "remove_our_version" } : undefined;
   const ours = asSaved(recipe, draft);
   const stored = asSaved(recipe, ourDraftOf(recipe));
-  return JSON.stringify(ours) === JSON.stringify(stored)
-    ? undefined
-    : { op: "set_our_version", our_version: ours };
+  const same =
+    samePart(ours.ingredients, stored.ingredients, sameLine) &&
+    samePart(ours.steps, stored.steps, sameStep) &&
+    ours.note === stored.note;
+  return same ? undefined : { op: "set_our_version", our_version: ours };
 }
 
 // A name for an added line or step until the API gives it an id.
@@ -234,8 +287,7 @@ function lineText(line: OurLineFields) {
 
 // The stored line's text while the draft has it as stored, else one built from its fields.
 function textOf(line: OurLineFields, stored: StoredLine | undefined, facts?: IngredientFacts) {
-  const same =
-    stored && JSON.stringify(storedFields(facts, stored.component)) === JSON.stringify(line);
+  const same = stored && sameLine(storedFields(facts, stored.component), line);
   return same ? stored.text : lineText(line);
 }
 
@@ -250,11 +302,7 @@ export function ourRows(recipe: Recipe, draft: OurDraft): Record<Part, Row[]> {
       const edit = lines.edit[line.id];
       if (lines.remove.includes(line.id)) return { ...line, change: "removed" };
       if (!edit) return line;
-      const text = textOf(
-        edit,
-        ours?.ingredients.edit[line.id],
-        ours?.facts.ingredients[line.id],
-      );
+      const text = textOf(edit, ours?.ingredients.edit[line.id], ours?.facts.ingredients[line.id]);
       return { id: line.id, component: edit.component ?? null, text, change: "edited" };
     },
     (line): Row => ({
