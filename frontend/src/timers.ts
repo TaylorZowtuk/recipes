@@ -102,8 +102,8 @@ function canTakeMinuteFrom(timer: Timer, now: number): boolean {
   return timer.alarmAt - (timer.pausedAt ?? now) > MINUTE_MS;
 }
 
-// A minute less on each threshold still ahead. A chime that goes into the past sounds on the next
-// tick, as it would after a gap in ticks.
+// A minute less on each threshold still ahead. A chime that goes into the past sounds at once, as
+// it would after a gap in ticks.
 function takeMinuteFrom(timer: Timer, now: number): Timer {
   if (!canTakeMinuteFrom(timer, now)) return timer;
   const { chimeAt, alarmAt } = timer;
