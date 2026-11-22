@@ -254,6 +254,45 @@ describe("the recipe editor", () => {
     expect(document.activeElement?.textContent).toBe("Add a line");
   });
 
+  it("moves the focus to the Add of the removed line's own group, not one with its heading", () => {
+    // Unnamed lines, then the glaze, then unnamed lines again: two groups with no heading.
+    const base = recipe();
+    const r = recipe({
+      original: {
+        ...base.original,
+        ingredients: base.original.ingredients.map((l) =>
+          l.id === "i2" ? { ...l, component: "For the glaze" } : l,
+        ),
+      },
+    });
+    const start = ourDraftOf(r);
+    const lemon = {
+      id: "new-1",
+      after: "i3",
+      quantity: { low: 1, high: 1 },
+      unit: null,
+      name: "lemon",
+      preparation: null,
+      fdc_id: null,
+      portion_id: null,
+      component: null,
+    };
+    function Fields() {
+      const [draft, setDraft] = useState<OurDraft>({
+        ...start,
+        ingredients: { ...start.ingredients, add: [lemon] },
+      });
+      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+    }
+    act(() => root.render(<Fields />));
+    const remove = button("Remove 1 lemon");
+    remove?.focus();
+    act(() => remove?.click());
+    const adds = [...host.querySelectorAll("button")].filter((b) => b.textContent === "Add a line");
+    expect(adds).toHaveLength(2);
+    expect(document.activeElement).toBe(adds[1]);
+  });
+
   it("offers no Our Version on a Pending recipe", () => {
     render(recipe({ status: "pending" }));
     expect(host.querySelector(".our-version-field")).toBeNull();

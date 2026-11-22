@@ -76,8 +76,9 @@ export function OurVersionFields({
       </fieldset>
     );
   const rows = ourRows(recipe, draft);
+  // Each group's Add is keyed by its part and place, as two groups can share a heading.
   const list = (part: Part) =>
-    byComponent(rows[part]).map(({ component, lines }) => (
+    byComponent(rows[part]).map(({ component, lines }, group) => (
       <div key={`${part}-${component ?? ""}-${lines[0]?.id}`} className="our-version-part">
         {component && <h4 className="our-version-component">{component}</h4>}
         <ul className="our-version-rows">
@@ -95,12 +96,12 @@ export function OurVersionFields({
                 })
               }
               onRemove={() => {
-                const add = `${part} ${component ?? ""}`;
+                const add = `${part} ${group}`;
                 swapped.current = { row: `${part} ${row.id}`, action: "Restore", add };
                 onChange(removeItem(draft, part, row.id));
               }}
               onRestore={() => {
-                const add = `${part} ${component ?? ""}`;
+                const add = `${part} ${group}`;
                 swapped.current = { row: `${part} ${row.id}`, action: "Remove", add };
                 onChange(restoreItem(draft, part, row.id));
               }}
@@ -116,7 +117,7 @@ export function OurVersionFields({
         <button
           type="button"
           className="text-button"
-          data-add={`${part} ${component ?? ""}`}
+          data-add={`${part} ${group}`}
           onClick={() =>
             onOpen({
               part,
@@ -185,7 +186,7 @@ function EmptyAdd({ part, onOpen }: { part: Part; onOpen: (target: OurTarget) =>
     <button
       type="button"
       className="text-button"
-      data-add={`${part} `}
+      data-add={`${part} 0`}
       onClick={() => onOpen({ part, place: { after: null, component: null }, title })}
     >
       {title}
