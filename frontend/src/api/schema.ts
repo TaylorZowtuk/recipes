@@ -360,8 +360,8 @@ export interface paths {
          *     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
          *     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
          *     Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
-         *     Our Version Status Pending; a new Our Version without one is Ready. The Enrichment Status
-         *     stays.
+         *     Our Version Status Pending; a new Our Version without one is Ready. Removing Our Version
+         *     settles its open issues. The Enrichment Status stays.
          */
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
         trace?: never;
@@ -1568,6 +1568,18 @@ export interface components {
             /** Written */
             written: string;
         };
+        /**
+         * InvalidField
+         * @description One of FastAPI's validation errors.
+         */
+        InvalidField: {
+            /** Loc */
+            loc: (string | number)[];
+            /** Msg */
+            msg: string;
+            /** Type */
+            type: string;
+        };
         /** KitchenSettings */
         KitchenSettings: {
             /** Schema Version */
@@ -2223,6 +2235,30 @@ export interface components {
             text: string;
             /** Unit */
             unit: string | null;
+        };
+        /**
+         * Refused
+         * @description A 422: why the API refused the edit, as a message, as FastAPI's validation errors, or as
+         *     the one Our Version line or step it refused, for the PWA to show it there.
+         */
+        Refused: {
+            /** Detail */
+            detail: string | components["schemas"]["RefusedAt"][] | components["schemas"]["InvalidField"][];
+        };
+        /**
+         * RefusedAt
+         * @description An Our Version line or step the API refused, by the id the draft gave it, and why.
+         */
+        RefusedAt: {
+            /** Id */
+            id: string;
+            /** Msg */
+            msg: string;
+            /**
+             * Part
+             * @enum {string}
+             */
+            part: "ingredients" | "steps";
         };
         /** RemoveEntry */
         RemoveEntry: {
@@ -3744,7 +3780,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Refused"];
+                };
             };
         };
     };
