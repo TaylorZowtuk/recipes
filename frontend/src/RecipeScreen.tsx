@@ -208,6 +208,7 @@ function RecipePage() {
           collection={collection.value}
           draft={draft}
           problem={edit.problem}
+          refusedAt={edit.at}
           dispatch={dispatch}
         />
       )}

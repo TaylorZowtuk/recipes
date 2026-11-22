@@ -1,7 +1,13 @@
 import { chosenDifficulty, type DifficultyChoice, parseTags } from "./addRecipe";
 import type { Difficulty, Preview, Recipe, RecipeOperation } from "./api/client";
-import { type OurDraft, ourDraftOf, ourOperation } from "./ourVersionDraft";
-import { type Answer, refusalMessage, versionedRefusal, type WriteRefusal } from "./writeOutcome";
+import { type OurDraft, ourDraftOf, ourOperation, type Part } from "./ourVersionDraft";
+import {
+  type Answer,
+  apiError,
+  refusalMessage,
+  versionedRefusal,
+  type WriteRefusal,
+} from "./writeOutcome";
 
 // An editor's Draft: the recipe's Difficulty, Tags, Preview Photo and Our Version as Edit shows
 // them. It lives only in the recipe page's state, so Cancel or leaving the page discards it.
@@ -78,10 +84,23 @@ export function draftOperations(recipe: Recipe, draft: Draft): RecipeOperation[]
 
 export const saveLabel = (count: number) => `Save ${count} ${count === 1 ? "change" : "changes"}`;
 
+// The Our Version line or step a refusal is about, by the id the draft gave it.
+export type RefusedAt = { part: Part; id: string };
+
 export type EditOutcome =
   | { kind: "saved"; recipe: Recipe }
-  | { kind: "invalid"; message: string }
+  | { kind: "invalid"; message: string; at?: RefusedAt }
   | WriteRefusal;
+
+// Where a 422 says the refused line or step is: `[{"msg", "part", "id"}]`, else nowhere.
+function refusedAt(error: unknown): RefusedAt | undefined {
+  const detail = (apiError(error) as { detail?: unknown } | undefined)?.detail;
+  const first = Array.isArray(detail) ? (detail[0] as Partial<RefusedAt> | undefined) : undefined;
+  const { part, id } = first ?? {};
+  return (part === "ingredients" || part === "steps") && typeof id === "string"
+    ? { part, id }
+    : undefined;
+}
 export type DeleteOutcome = { kind: "deleted" } | WriteRefusal;
 
 // What `PATCH /api/recipes/{id}` answered: the saved recipe (200), or why not. A 409 (a stale
@@ -91,7 +110,9 @@ export function editOutcome(answer: Answer<Recipe>): EditOutcome {
   const { data, response } = answer;
   if (response.status === 200 && data) return { kind: "saved", recipe: data };
   const message = response.status === 422 && refusalMessage(answer.error);
-  return message ? { kind: "invalid", message } : versionedRefusal(answer);
+  if (!message) return versionedRefusal(answer);
+  const at = refusedAt(answer.error);
+  return at ? { kind: "invalid", message, at } : { kind: "invalid", message };
 }
 
 export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
@@ -102,7 +123,8 @@ export function deleteOutcome(answer: Answer<unknown>): DeleteOutcome {
 // draft, since the newer recipe shows instead and nothing is merged; any other failure keeps it.
 // `refreshed` says whether the Collection reloaded after the write, so the notice never claims
 // the page shows what it doesn't.
-type EditState = { draft: Draft | null; problem?: string; notice?: string };
+// `at` is the Our Version line or step the problem is about, if any.
+type EditState = { draft: Draft | null; problem?: string; at?: RefusedAt; notice?: string };
 
 export type EditAction =
   | { type: "open"; recipe: Recipe }
@@ -125,7 +147,7 @@ export function editing(state: EditState, action: EditAction): EditState {
     case "cancel":
       return { draft: null };
     case "incomplete":
-      return { ...state, problem: RATE_ALL };
+      return { ...state, problem: RATE_ALL, at: undefined };
     case "settled":
       switch (action.outcome.kind) {
         case "saved":
@@ -139,11 +161,11 @@ export function editing(state: EditState, action: EditAction): EditState {
             notice: action.refreshed ? CHANGED_ELSEWHERE : CHANGED_NOT_REFRESHED,
           };
         case "invalid":
-          return { ...state, problem: action.outcome.message };
+          return { ...state, problem: action.outcome.message, at: action.outcome.at };
         case "not-an-editor":
-          return { ...state, problem: NOT_AN_EDITOR };
+          return { ...state, problem: NOT_AN_EDITOR, at: undefined };
         default:
-          return { ...state, problem: UNREACHABLE };
+          return { ...state, problem: UNREACHABLE, at: undefined };
       }
   }
 }

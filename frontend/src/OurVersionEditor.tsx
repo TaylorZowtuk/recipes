@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import type { Collection, Recipe } from "./api/client";
+import type { RefusedAt } from "./editRecipe";
 import { LineForm, StepTextForm } from "./ItemEditForm";
 import {
   addLine,
@@ -26,9 +27,6 @@ export type OurTarget =
 const MARKS = { edited: "Changed", added: "Added", removed: "Removed" } as const;
 const NOUN = { ingredients: "line", steps: "step" } as const;
 
-// The API names a line it refused at the start of what it says: "Line i3 needs an FDC food".
-export const refusedLine = (problem: string | undefined) => problem?.match(/^Line (\w+)/)?.[1];
-
 // Our Version in Edit: the effective lines and steps, each with its change marked, a removed one
 // left in place to restore, and the note. Editing or adding opens the sheet; Remove Our Version
 // asks first, and Save then removes it.
@@ -36,12 +34,15 @@ export function OurVersionFields({
   recipe,
   draft,
   problem,
+  refusedAt,
   onChange,
   onOpen,
 }: {
   recipe: Recipe;
   draft: OurDraft;
-  problem?: string;
+  // The API's refusal of a line or step, shown by it.
+  problem?: string | undefined;
+  refusedAt?: RefusedAt | undefined;
   onChange: (ours: OurDraft) => void;
   onOpen: (target: OurTarget) => void;
 }) {
@@ -60,7 +61,6 @@ export function OurVersionFields({
       </fieldset>
     );
   const rows = ourRows(recipe, draft);
-  const refused = refusedLine(problem);
   const list = (part: Part) =>
     byComponent(rows[part]).map(({ component, lines }) => (
       <div key={`${part}-${component ?? ""}-${lines[0]?.id}`} className="our-version-part">
@@ -82,7 +82,7 @@ export function OurVersionFields({
               onRemove={() => onChange(removeItem(draft, part, row.id))}
               onRestore={() => onChange(restoreItem(draft, part, row.id))}
             >
-              {refused === row.id && (
+              {problem && refusedAt?.part === part && refusedAt.id === row.id && (
                 <p role="alert" className="form-problem">
                   {problem}
                 </p>

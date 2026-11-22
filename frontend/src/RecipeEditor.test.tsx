@@ -101,7 +101,12 @@ describe("the recipe editor", () => {
     );
   });
 
-  const render = (r = recipe(), problem?: string) => {
+  const render = (
+    r = recipe(),
+    problem?: string,
+    at?: { part: "ingredients" | "steps"; id: string },
+    draft = draftOf(r),
+  ) => {
     const dispatch = vi.fn();
     act(() =>
       root.render(
@@ -110,8 +115,9 @@ describe("the recipe editor", () => {
             recipe={r}
             title={r.original.title}
             collection={collection}
-            draft={draftOf(r)}
+            draft={draft}
             problem={problem}
+            refusedAt={at}
             dispatch={dispatch}
           />
         </MemoryRouter>,
@@ -188,10 +194,39 @@ describe("the recipe editor", () => {
     expect(host.querySelector(".our-version-field")).toBeNull();
   });
 
+  const alerts = () => [...host.querySelectorAll('[role="alert"]')];
+
   it("shows the API's refusal of an Our Version line by that line", () => {
-    render(recipe(), "Line i2 needs an FDC food: the closest if none fits");
-    const alerts = [...host.querySelectorAll('[role="alert"]')];
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.closest(".our-version-row")?.textContent).toContain("2 cloves garlic");
+    const at = { part: "ingredients" as const, id: "i2" };
+    render(recipe(), "The closest FDC food is needed", at);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.closest(".our-version-row")?.textContent).toContain("2 cloves garlic");
+  });
+
+  it("shows the refusal of a line the draft adds by that line", () => {
+    const r = recipe();
+    const draft = draftOf(r);
+    const lemon = {
+      id: "new-1",
+      after: "i1",
+      quantity: { low: 1, high: 1 },
+      unit: null,
+      name: "lemon",
+      preparation: null,
+      fdc_id: null,
+      portion_id: null,
+      component: null,
+    };
+    const ours = { ...draft.ours, ingredients: { ...draft.ours.ingredients, add: [lemon] } };
+    const at = { part: "ingredients" as const, id: "new-1" };
+    render(r, "Line new-1 needs a Canonical Ingredient choice", at, { ...draft, ours });
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.closest(".our-version-row")?.textContent).toContain("1 lemon");
+  });
+
+  it("shows a refusal of no line under the form", () => {
+    render(recipe(), "An edited recipe is at most 350000 bytes as JSON");
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]?.closest(".our-version-row")).toBeNull();
   });
 });

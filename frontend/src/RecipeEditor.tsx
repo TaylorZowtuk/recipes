@@ -11,9 +11,10 @@ import {
   type EditAction,
   type EditOutcome,
   editOutcome,
+  type RefusedAt,
   saveLabel,
 } from "./editRecipe";
-import { type OurTarget, OurVersionFields, OurVersionSheet, refusedLine } from "./OurVersionEditor";
+import { type OurTarget, OurVersionFields, OurVersionSheet } from "./OurVersionEditor";
 import { ourRows } from "./ourVersionDraft";
 import {
   DifficultyField,
@@ -66,6 +67,7 @@ export function RecipeEditor({
   collection,
   draft,
   problem,
+  refusedAt,
   dispatch,
 }: {
   recipe: Recipe;
@@ -73,6 +75,7 @@ export function RecipeEditor({
   collection: Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
   draft: Draft;
   problem?: string;
+  refusedAt?: RefusedAt | undefined;
   dispatch: Dispatch<EditAction>;
 }) {
   const blocked = useEditBlock();
@@ -81,9 +84,9 @@ export function RecipeEditor({
   const [busy, setBusy] = useState<"saving" | "deleting">();
   const [target, setTarget] = useState<OurTarget>();
   const ours = recipe.status !== "pending";
-  // A refused Our Version line shows its problem by the line, while the draft still has it.
-  const byLine =
-    ours && ourRows(recipe, draft.ours).ingredients.some((row) => row.id === refusedLine(problem));
+  // A refused Our Version line or step shows its problem by it, while the draft still has it.
+  const at = ours && refusedAt;
+  const byLine = !!at && ourRows(recipe, draft.ours)[at.part].some((row) => row.id === at.id);
   const count = changeCount(recipe, draft);
   const change = (change: Partial<Draft>) => dispatch({ type: "change", change });
 
@@ -170,7 +173,8 @@ export function RecipeEditor({
             <OurVersionFields
               recipe={recipe}
               draft={draft.ours}
-              problem={problem}
+              problem={byLine ? problem : undefined}
+              refusedAt={refusedAt}
               onChange={(ours) => change({ ours })}
               onOpen={setTarget}
             />

@@ -203,6 +203,17 @@ describe("editOutcome and deleteOutcome", () => {
       message: "Line i3 needs a Canonical Ingredient choice",
     });
   });
+
+  it("say which line the API refused, by the id the draft gave it", () => {
+    const refused = {
+      detail: [{ msg: "Line new-1 needs an FDC food", part: "ingredients", id: "new-1" }],
+    };
+    expect(editOutcome({ error: refused, response: response(422) })).toEqual({
+      kind: "invalid",
+      message: "Line new-1 needs an FDC food",
+      at: { part: "ingredients", id: "new-1" },
+    });
+  });
 });
 
 describe("editing", () => {
@@ -294,6 +305,22 @@ describe("editing", () => {
     });
     expect(refused.draft).toEqual(open.draft);
     expect(refused.problem).toBe("Line i3 needs a Canonical Ingredient choice");
+  });
+
+  it("keeps where the refused line is until another problem replaces it", () => {
+    const at = { part: "ingredients" as const, id: "i3" };
+    const refused = editing(open, {
+      type: "settled",
+      outcome: { kind: "invalid", message: "Line i3 needs an FDC food", at },
+      refreshed: true,
+    });
+    expect(refused.at).toEqual(at);
+    const failed = editing(refused, {
+      type: "settled",
+      outcome: { kind: "failed" },
+      refreshed: true,
+    });
+    expect(failed.at).toBeUndefined();
   });
 
   it("clears an old notice when Edit opens again", () => {
