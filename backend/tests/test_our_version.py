@@ -502,6 +502,39 @@ def test_an_our_version_that_writes_more_than_one_transaction_holds_is_refused(
     assert api_store.wording("diced tomatoes") is None
 
 
+def test_an_edit_too_big_to_store_is_refused(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = ready(api_store)
+    monkeypatch.setattr(api, "MAX_RECIPE_BYTES", len(recipe.model_dump_json().encode()))
+
+    response = save(editor_client, recipe, {"note": "A little more"})
+
+    assert response.status_code == 422
+    assert response.json()["detail"].startswith("An edited recipe is at most")
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_an_edit_saves_our_version_or_removes_it_not_both(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = ready(api_store)
+    operations: list[dict[str, Any]] = [
+        {"op": "set_our_version", "our_version": {}},
+        {"op": "remove_our_version"},
+    ]
+
+    response = editor_client.patch(
+        f"/api/recipes/{recipe.id}",
+        json={"version": recipe.version, "operations": operations},
+        headers=EDITOR,
+    )
+
+    assert response.status_code == 422
+    assert "not both" in response.json()["detail"][0]["msg"]
+    assert stored(api_store, recipe.id) == recipe
+
+
 # Ids
 
 
@@ -579,6 +612,27 @@ def test_our_version_status_follows_its_step_edits(
     assert after["our_version_status"] == "pending"
     assert after["status"] == "ready"
     assert card(api_store, recipe.id)["our_version_status"] == "pending"
+
+
+@pytest.mark.parametrize("status", ["pending", "awaiting_review"])
+def test_a_lines_only_save_leaves_the_our_version_status_as_it_was(
+    editor_client: TestClient, api_store: Store, status: EnrichmentStatus
+) -> None:
+    recipe = ready(api_store)
+    steps = {"steps": lines(edit={"s2": {"text": "Brown the beef."}})}
+    assert save(editor_client, recipe, steps).json()["our_version_status"] == "pending"
+    api_store.update_recipe(
+        stored(api_store, recipe.id).model_copy(update={"our_version_status": status})
+    )
+
+    response = save(
+        editor_client,
+        stored(api_store, recipe.id),
+        {"ingredients": lines(edit={"i1": line()}), **steps},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["our_version_status"] == status
 
 
 def test_removing_our_version_clears_it_and_its_status(
