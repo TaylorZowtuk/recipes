@@ -15,7 +15,9 @@ from test_enrichment_review import (
     BEEF,
     CONFIRMED,
     FACTS,
+    LLM,
     STEW,
+    SWAP,
     awaiting,
     card,
     issue,
@@ -28,6 +30,7 @@ from recipes import api, our_version
 from recipes.edits import EDITOR_KEPT
 from recipes.models import (
     AddedLine,
+    EnrichmentIssue,
     EnrichmentStatus,
     IngredientFacts,
     OurLines,
@@ -35,6 +38,7 @@ from recipes.models import (
     Quantity,
     Recipe,
     RecipeFacts,
+    SubstitutionsFact,
 )
 from recipes.our_version import Refused, kitchen_number, line_text
 from recipes.seed import CHICKEN_ID, GARLIC, load
@@ -270,22 +274,34 @@ def test_a_canonical_ingredient_chosen_in_our_version_also_matches_the_recipes_o
 BRAISING = {"kind": "new", "name": "Braising Beef", "family": "beef", "store_category_id": "meat"}
 
 
-def with_ours(
-    store: Store, n: int, preparation: str | None = None, status: EnrichmentStatus = "ready"
+def with_ours(  # noqa: PLR0913 - each is a way the tests vary the stew
+    store: Store,
+    n: int,
+    preparation: str | None = None,
+    status: EnrichmentStatus = "ready",
+    unit: str | None = None,
+    original: RecipeFacts | None = None,
+    issues: tuple[EnrichmentIssue, ...] = (),
 ) -> Recipe:
     """Another stew, Ready, whose Our Version adds a "stewing beef" line (i10) matched as the
-    Original's beef line is.
+    Original's beef line is, with the `original` facts and `issues`.
     """
     facts = beef_line().ingredients["i1"].model_copy(deep=True)
     assert facts.parse is not None
-    facts.parse.preparation = preparation
+    facts.parse.preparation, facts.parse.unit = preparation, unit
     ours = OurVersion(
         ingredients=OurLines(add=[AddedLine(id="i10", after="i1", text="1 stewing beef")]),
         facts=RecipeFacts(ingredients={"i10": facts}),
         edited_at=datetime(2026, 11, 1, tzinfo=UTC),
     )
     return other(
-        store, n, RecipeFacts(), status="ready", our_version=ours, our_version_status=status
+        store,
+        n,
+        original or RecipeFacts(),
+        issues,
+        status="ready",
+        our_version=ours,
+        our_version_status=status,
     )
 
 
@@ -373,6 +389,83 @@ def test_an_our_version_line_prepared_another_way_is_asked_for_its_food(
     assert (issue.fact_id, issue.status) == ("our_version.i10.match", "open")
     assert (changed.status, changed.our_version_status) == ("ready", after)
     assert card(api_store, sharing.id)["needs_review"] == needs
+
+
+def test_a_review_pick_on_an_original_line_reaches_the_our_version_line_with_its_id(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = ready(api_store)
+    assert save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})}).status_code == 200
+
+    response = braised(editor_client, stored(api_store, recipe.id), "review")
+
+    assert response.status_code == 200, response.text
+    ours = stored(api_store, recipe.id).our_version
+    assert ours is not None
+    matched = ours.facts.ingredients["i1"].match
+    assert matched is not None
+    assert matched.fdc_id == 1002
+
+
+def test_an_our_version_line_no_portion_fits_is_asked_for_one_on_its_own_path(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, unit="can")
+
+    response = braised(editor_client, recipe, "our_version")
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, sharing.id)
+    assert [(i.fact_id, i.status) for i in changed.issues] == [
+        ("our_version.i10.conversion", "open")
+    ]
+    assert changed.our_version_status == "awaiting_review"
+
+
+def test_an_ask_on_an_original_line_leaves_our_version_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    cubed = beef_line()
+    cubed_line = cubed.ingredients["i1"]
+    assert cubed_line.parse is not None
+    cubed_line.parse.preparation = "cubed"
+    sharing = with_ours(api_store, 2, original=cubed)
+
+    response = braised(editor_client, recipe, "our_version")
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, sharing.id)
+    assert [(i.fact_id, i.status) for i in changed.issues] == [("i1.match", "open")]
+    assert changed.our_version_status == "ready"
+
+
+def test_an_open_original_issue_doesnt_keep_our_version_from_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    asked = issue(1, "our_version.i10.match", status="open")
+    recipe = with_ours(
+        api_store, 2, status="awaiting_review", issues=(issue(2, status="open"), asked)
+    )
+
+    response = save(editor_client, recipe, {"ingredients": lines(remove=["i9"])})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["our_version_status"] == "ready"
+
+
+def test_an_edited_our_version_line_leaves_the_originals_substitutions_behind(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    swaps = SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [SWAP]})
+    beef = FACTS.ingredients["i1"].model_copy(update={"substitutions": swaps})
+    recipe = ready(api_store, FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": beef}}))
+
+    response = save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["our_version"]["facts"]["ingredients"]["i1"]["substitutions"] is None
 
 
 def test_saving_our_version_settles_the_issues_of_the_lines_it_changes_or_drops(
