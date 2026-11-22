@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api/client";
 import { draftOf } from "./editRecipe";
 import { OurVersionFields } from "./OurVersionEditor";
-import { ourDraftOf } from "./ourVersionDraft";
+import { type OurDraft, ourDraftOf } from "./ourVersionDraft";
 import { RecipeEditor } from "./RecipeEditor";
 import { collection, recipe } from "./review.fixtures";
 
@@ -223,6 +223,35 @@ describe("the recipe editor", () => {
       ours: { ...draft.ours, steps: { ...draft.ours.steps, edit } },
     });
     expect(hints()).toContain(hint);
+  });
+
+  it("moves the focus to the group's Add a line once an added line is removed", () => {
+    const r = recipe();
+    const start = ourDraftOf(r);
+    const lemon = {
+      id: "new-1",
+      after: "i1",
+      quantity: { low: 1, high: 1 },
+      unit: null,
+      name: "lemon",
+      preparation: null,
+      fdc_id: null,
+      portion_id: null,
+      component: null,
+    };
+    function Fields() {
+      const [draft, setDraft] = useState<OurDraft>({
+        ...start,
+        ingredients: { ...start.ingredients, add: [lemon] },
+      });
+      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+    }
+    act(() => root.render(<Fields />));
+    const remove = button("Remove 1 lemon");
+    remove?.focus();
+    act(() => remove?.click());
+    expect(button("Remove 1 lemon")).toBeUndefined();
+    expect(document.activeElement?.textContent).toBe("Add a line");
   });
 
   it("offers no Our Version on a Pending recipe", () => {

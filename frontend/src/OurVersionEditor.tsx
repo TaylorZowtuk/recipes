@@ -47,17 +47,19 @@ export function OurVersionFields({
   onOpen: (target: OurTarget) => void;
 }) {
   // Remove and Restore each swap themselves out of their row, so the one that takes its place
-  // gets the focus once the draft changes.
+  // gets the focus once the draft changes. A removed added row goes, so its group's Add does.
   const field = useRef<HTMLFieldSetElement>(null);
-  const swapped = useRef<{ row: string; action: "Remove" | "Restore" }>(undefined);
+  const swapped = useRef<{ row: string; action: "Remove" | "Restore"; add: string }>(undefined);
   useEffect(() => {
     const focus = swapped.current;
     if (!focus) return;
     swapped.current = undefined;
-    field.current
-      ?.querySelector(`[data-row="${CSS.escape(focus.row)}"]`)
-      ?.querySelector<HTMLElement>(`[data-action="${focus.action}"]`)
-      ?.focus();
+    const row = field.current?.querySelector(`[data-row="${CSS.escape(focus.row)}"]`);
+    const add = `[data-add="${CSS.escape(focus.add)}"]`;
+    (row
+      ? row.querySelector<HTMLElement>(`[data-action="${focus.action}"]`)
+      : field.current?.querySelector<HTMLElement>(add)
+    )?.focus();
   });
   if (draft.removed)
     return (
@@ -93,11 +95,13 @@ export function OurVersionFields({
                 })
               }
               onRemove={() => {
-                swapped.current = { row: `${part} ${row.id}`, action: "Restore" };
+                const add = `${part} ${component ?? ""}`;
+                swapped.current = { row: `${part} ${row.id}`, action: "Restore", add };
                 onChange(removeItem(draft, part, row.id));
               }}
               onRestore={() => {
-                swapped.current = { row: `${part} ${row.id}`, action: "Remove" };
+                const add = `${part} ${component ?? ""}`;
+                swapped.current = { row: `${part} ${row.id}`, action: "Remove", add };
                 onChange(restoreItem(draft, part, row.id));
               }}
             >
@@ -112,6 +116,7 @@ export function OurVersionFields({
         <button
           type="button"
           className="text-button"
+          data-add={`${part} ${component ?? ""}`}
           onClick={() =>
             onOpen({
               part,
@@ -173,6 +178,7 @@ function EmptyAdd({ part, onOpen }: { part: Part; onOpen: (target: OurTarget) =>
     <button
       type="button"
       className="text-button"
+      data-add={`${part} `}
       onClick={() => onOpen({ part, place: { after: null, component: null }, title })}
     >
       {title}
