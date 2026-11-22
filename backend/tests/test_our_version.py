@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from test_enrichment_review import BEEF, CONFIRMED, FACTS, STEW, awaiting, card, parse, stored
 from test_review_edits import PORK, beef_line, edit, line_edit, numbers, other
 
-from recipes import api
+from recipes import api, our_version
 from recipes.edits import EDITOR_KEPT
 from recipes.models import (
     AddedLine,
@@ -375,6 +375,34 @@ def test_saving_our_version_settles_the_issues_of_the_lines_it_changes_or_drops(
     assert response.status_code == 200, response.text
     [issue] = stored(api_store, sharing.id).issues
     assert (issue.fact_id, issue.status) == ("our_version.i10.match", "resolved")
+
+
+def test_a_save_reads_the_collection_once(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = ready(api_store)
+    reads: list[None] = []
+    read = api_store.recipes
+    monkeypatch.setattr(api_store, "recipes", lambda: reads.append(None) or read())
+    onions = tomatoes(name="onions", canonical=NEW_TOMATOES | {"name": "Onion"}, after="i10")
+
+    response = save(editor_client, recipe, {"ingredients": lines(add=[tomatoes(), onions])})
+
+    assert response.status_code == 200, response.text
+    assert len(reads) == 1
+
+
+def test_a_draft_too_big_to_store_is_refused_before_its_lines_are_read(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = ready(api_store)
+    monkeypatch.setattr(our_version, "MAX_RECIPE_BYTES", 100)
+    monkeypatch.setattr(api_store, "recipes", pytest.fail)
+
+    response = save(editor_client, recipe, {"ingredients": lines(add=[tomatoes()])})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "An edited recipe is at most 100 bytes as JSON"
 
 
 def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(

@@ -444,7 +444,14 @@ def _edit_line(
     facts = recipe.facts.model_copy(deep=True)
     old = facts.ingredients.get(edit.line_id)
     facts.ingredients[edit.line_id] = edited_line(
-        store, recipe.id, edit, old, snapshot=snapshot, now=now, result=result
+        store,
+        recipe.id,
+        edit,
+        old,
+        snapshot=snapshot,
+        recipes=store.recipes,
+        now=now,
+        result=result,
     )
     base = recipe.model_copy(update={"facts": facts})
     if result.shared:
@@ -462,12 +469,14 @@ def edited_line(
     old: IngredientFacts | None,
     *,
     snapshot: Callable[[], fdc.Snapshot],
+    recipes: Callable[[], list[Recipe]],
     now: datetime,
     result: Edited,
 ) -> IngredientFacts:
     """The line's facts as the editor gives them, in place of `old`. A new Canonical Ingredient,
-    FDC food or portion goes in `result` with the wording it fixes and the other recipes it reaches;
-    an unchanged one is Confirmed as it stands, with its Canonical Ingredient and wording.
+    FDC food or portion goes in `result` with the wording it fixes and the other recipes it
+    reaches, of the Collection `recipes` reads; an unchanged one is Confirmed as it stands, with
+    its Canonical Ingredient and wording.
     """
     line = old.model_copy(deep=True) if old else IngredientFacts()
     old_parse = line.parse
@@ -514,8 +523,7 @@ def edited_line(
                     schema_version=SCHEMA_VERSION,
                 )
             ]
-            recipes = store.recipes()
-            result.others = [o.id for o in recipes if o.id != recipe_id and shared.lines(o)]
+            result.others = [o.id for o in recipes() if o.id != recipe_id and shared.lines(o)]
     else:
         # The same food and portion: the line's match and conversion are Confirmed as they stand.
         line.match, line.conversion = _checked(line.match, now), _checked(line.conversion, now)

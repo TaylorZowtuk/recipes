@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
+from functools import cache
 from typing import TYPE_CHECKING, Annotated, Literal, NoReturn, cast
 
 from fastapi import HTTPException
@@ -26,6 +27,7 @@ from recipes.edits import (
 )
 from recipes.models import (
     MAX_LINES,
+    MAX_RECIPE_BYTES,
     OUR_VERSION,
     AddedLine,
     AddedStep,
@@ -127,6 +129,9 @@ def save(
     Original lines with the wording. A new or changed step makes Our Version Pending.
     Raises a 422 for a draft it can't take.
     """
+    if len(draft.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        # Too big for the recipe to hold, so refused before its lines reach the store.
+        raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     before = recipe.our_version
     lines_draft, steps_draft = draft.ingredients, draft.steps
     line_ids = [line.id for line in recipe.original.ingredients]
@@ -153,6 +158,7 @@ def save(
     _check_order("steps", step_ids, steps_draft.remove, added_steps)
 
     saved = Saved(recipe)
+    collection = cache(store.recipes)  # read once, for every line whose wording a pick fixes
     stored_facts = before.facts.ingredients if before else {}
     originals = recipe.facts.ingredients
     drafted = [
@@ -170,6 +176,7 @@ def save(
             store=store,
             saved=saved,
             snapshot=snapshot,
+            recipes=collection,
             now=now,
         )
         for line_id, line, original in drafted
@@ -325,6 +332,7 @@ def _line(
     store: Store,
     saved: Saved,
     snapshot: Callable[[], fdc.Snapshot],
+    recipes: Callable[[], list[Recipe]],
     now: datetime,
 ) -> IngredientFacts | None:
     """The Our Version line's facts as drafted: None if they stay as stored, since only its
@@ -343,7 +351,14 @@ def _line(
         edit = EditLine(kind="line", line_id=line_id, **fields)
         edited = Edited(saved.recipe)
         facts = edited_line(
-            store, saved.recipe.id, edit, old, snapshot=snapshot, now=now, result=edited
+            store,
+            saved.recipe.id,
+            edit,
+            old,
+            snapshot=snapshot,
+            recipes=recipes,
+            now=now,
+            result=edited,
         )
         saved.edits.append(edited)
         return facts.model_copy(
