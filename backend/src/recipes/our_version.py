@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Literal, NoReturn, cast
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, StringConstraints
@@ -131,14 +131,26 @@ def save(
     lines_draft, steps_draft = draft.ingredients, draft.steps
     line_ids = [line.id for line in recipe.original.ingredients]
     step_ids = [step.id for step in recipe.original.steps]
-    _check_changes("Line", "line", line_ids, lines_draft.edit, lines_draft.remove)
-    _check_changes("Step", "step", step_ids, steps_draft.edit, steps_draft.remove)
+    _check_changes("ingredients", line_ids, lines_draft.edit, lines_draft.remove)
+    _check_changes("steps", step_ids, steps_draft.edit, steps_draft.remove)
     stored_lines = before.ingredients if before else OurLines()
     stored_steps = before.steps if before else OurSteps()
-    added_lines = _ids("i", "Line", line_ids, [a.id for a in stored_lines.add], lines_draft.add)
-    added_steps = _ids("s", "Step", step_ids, [a.id for a in stored_steps.add], steps_draft.add)
-    _check_order("Line", line_ids, lines_draft.remove, added_lines)
-    _check_order("Step", step_ids, steps_draft.remove, added_steps)
+    added_lines, last_line = _ids(
+        "ingredients",
+        line_ids,
+        [a.id for a in stored_lines.add],
+        lines_draft.add,
+        before.last_line if before else 0,
+    )
+    added_steps, last_step = _ids(
+        "steps",
+        step_ids,
+        [a.id for a in stored_steps.add],
+        steps_draft.add,
+        before.last_step if before else 0,
+    )
+    _check_order("ingredients", line_ids, lines_draft.remove, added_lines)
+    _check_order("steps", step_ids, steps_draft.remove, added_steps)
 
     saved = Saved(recipe)
     stored_facts = before.facts.ingredients if before else {}
@@ -147,9 +159,11 @@ def save(
         *((line_id, line, originals.get(line_id)) for line_id, line in lines_draft.edit.items()),
         *((line_id, line, None) for line_id, _, line in added_lines),
     ]
+    # A refusal names an added line by the id the draft gave it, if it gave one.
+    named = {line_id: line.id or line_id for line_id, _, line in added_lines}
     built = {
         line_id: _line(
-            line_id,
+            named.get(line_id, line_id),
             line,
             stored_facts.get(line_id),
             original,
@@ -192,6 +206,8 @@ def save(
         facts=RecipeFacts(ingredients=kept),
         note=draft.note,
         edited_at=now,
+        last_line=last_line,
+        last_step=last_step,
     )
     status = _status(recipe, stored_steps, steps)
     changed = recipe.model_copy(update={"our_version": ours, "our_version_status": status})
@@ -215,35 +231,51 @@ def save(
     return saved
 
 
+Part = Literal["ingredients", "steps"]
+KIND: dict[Part, str] = {"ingredients": "Line", "steps": "Step"}
+PREFIX: dict[Part, str] = {"ingredients": "i", "steps": "s"}
+
+
+def refuse(part: Part, item_id: str, message: str) -> NoReturn:
+    """A 422 naming the draft's line or step by the id the draft gave it, so the PWA can show it
+    at that line or step: `[{"msg", "part", "id"}]`, as a validation error's `msg` reads.
+    """
+    raise HTTPException(422, [{"msg": message, "part": part, "id": item_id}])
+
+
 def _check_changes(
-    kind: str, noun: str, original: list[str], edit: Mapping[str, object], removed: list[str]
+    part: Part, original: list[str], edit: Mapping[str, object], removed: list[str]
 ) -> None:
     """A 422 unless Our Version edits and removes only the Original's lines or steps, each once."""
+    kind = KIND[part]
     ids = set(original)
     for item_id in [*edit, *removed]:
         if item_id not in ids:
-            raise HTTPException(422, f"The recipe has no {noun} {item_id}")
+            refuse(part, item_id, f"The recipe has no {kind.lower()} {item_id}")
     for item_id in set(edit) & set(removed):
-        raise HTTPException(422, f"{kind} {item_id} is both edited and removed")
-    if len(set(removed)) < len(removed):
-        raise HTTPException(422, f"{kind}s are removed once each")
+        refuse(part, item_id, f"{kind} {item_id} is both edited and removed")
+    for item_id in removed:
+        if removed.count(item_id) > 1:
+            refuse(part, item_id, f"{kind}s are removed once each")
 
 
 def _ids[A: AddedLineDraft | AddedStepDraft](
-    prefix: str, kind: str, original: list[str], stored: list[str], added: list[A]
-) -> list[tuple[str, str | None, A]]:
-    """Each added line's or step's id and the id it follows. It keeps an id Our Version already
-    gave it; any other gets the next in the sequence past every id the Original and Our Version
-    used, and the draft's `after`s that named it name that id.
+    part: Part, original: list[str], stored: list[str], added: list[A], last: int
+) -> tuple[list[tuple[str, str | None, A]], int]:
+    """Each added line's or step's id and the id it follows, and the highest number given. It
+    keeps an id Our Version already gave it; any other gets the next in the sequence past every
+    id the Original used and every number Our Version gave (`last`), and the draft's `after`s
+    that named it name that id.
     """
+    kind, prefix = KIND[part], PREFIX[part]
     given = [a.id for a in added if a.id is not None]
     for item_id in given:
         if item_id in original:
-            raise HTTPException(422, f"{kind} {item_id} is the Original's, so it can't be added")
+            refuse(part, item_id, f"{kind} {item_id} is the Original's, so it can't be added")
         if given.count(item_id) > 1:
-            raise HTTPException(422, f"{kind} {item_id} is added twice")
+            refuse(part, item_id, f"{kind} {item_id} is added twice")
     used = [int(m[1]) for i in [*original, *stored] if (m := re.fullmatch(rf"{prefix}(\d+)", i))]
-    following = max(used, default=0)
+    following = max([*used, last])
     renamed: dict[str, str] = {}
     ids: list[str] = []
     for a in added:
@@ -254,17 +286,18 @@ def _ids[A: AddedLineDraft | AddedStepDraft](
         ids.append(f"{prefix}{following}")
         if a.id is not None:
             renamed[a.id] = ids[-1]
-    return [
+    placed = [
         (item_id, renamed.get(a.after, a.after) if a.after else None, a)
         for item_id, a in zip(ids, added, strict=True)
     ]
+    return placed, following
 
 
 def _check_order(
-    kind: str,
+    part: Part,
     original: list[str],
     removed: list[str],
-    added: Sequence[tuple[str, str | None, object]],
+    added: Sequence[tuple[str, str | None, AddedLineDraft | AddedStepDraft]],
 ) -> None:
     """A 422 unless each added line or step follows one in the effective list, or is first."""
     placed = set(original) - set(removed)
@@ -272,9 +305,12 @@ def _check_order(
     while waiting:
         ready = [a for a in waiting if a[1] is None or a[1] in placed]
         if not ready:
-            item_id, after, _ = waiting[0]
-            raise HTTPException(
-                422, f"{kind} {item_id} follows {after}, which isn't in Our Version"
+            item_id, _, draft = waiting[0]
+            item_id = draft.id or item_id
+            refuse(
+                part,
+                item_id,
+                f"{KIND[part]} {item_id} follows {draft.after}, which isn't in Our Version",
             )
         placed |= {item_id for item_id, _, _ in ready}
         waiting = [a for a in waiting if a not in ready]
@@ -300,20 +336,24 @@ def _line(
     # The Original's substitutes are for its own line, not the one Our Version writes.
     old = stored or (original.model_copy(update={"substitutions": None}) if original else None)
     if draft.canonical is None and (old is None or old.match is None) and original is None:
-        raise HTTPException(422, f"Line {line_id} needs a Canonical Ingredient choice")
-    fields = {name: getattr(draft, name) for name in LineFields.model_fields}
-    edit = EditLine(kind="line", line_id=line_id, **fields)
-    edited = Edited(saved.recipe)
-    facts = edited_line(
-        store, saved.recipe.id, edit, old, snapshot=snapshot, now=now, result=edited
-    )
-    saved.edits.append(edited)
-    return facts.model_copy(
-        update={
-            "match": _as_editors(facts.match, now),
-            "conversion": _as_editors(facts.conversion, now),
-        }
-    )
+        refuse("ingredients", line_id, f"Line {line_id} needs a Canonical Ingredient choice")
+    # A Review line edit's refusal names the line by the draft's id, for the PWA to show it there.
+    try:
+        fields = {name: getattr(draft, name) for name in LineFields.model_fields}
+        edit = EditLine(kind="line", line_id=line_id, **fields)
+        edited = Edited(saved.recipe)
+        facts = edited_line(
+            store, saved.recipe.id, edit, old, snapshot=snapshot, now=now, result=edited
+        )
+        saved.edits.append(edited)
+        return facts.model_copy(
+            update={
+                "match": _as_editors(facts.match, now),
+                "conversion": _as_editors(facts.conversion, now),
+            }
+        )
+    except HTTPException as refusal:
+        refuse("ingredients", line_id, refusal.detail)
 
 
 def _as_editors[F: (MatchFact, ConversionFact)](fact: F | None, now: datetime) -> F | None:

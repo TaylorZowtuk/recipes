@@ -571,7 +571,8 @@ class OurVersion(Model):
     """The household's whole-line overlay on the Original, by line and step id. A line or step it
     leaves alone keeps the Original's text and facts; one it edits or adds has its facts in
     `facts`, addressed as the Original's are, so `our_version.i4.parse` is
-    `facts.ingredients["i4"].parse`.
+    `facts.ingredients["i4"].parse`. `last_line` and `last_step` are the highest numbers it gave
+    an added line's or step's id, so no id is given twice.
     """
 
     ingredients: OurLines = OurLines()
@@ -579,6 +580,8 @@ class OurVersion(Model):
     facts: RecipeFacts = RecipeFacts()
     note: Note | None = None
     edited_at: datetime
+    last_line: int = 0
+    last_step: int = 0
 
 
 class Recipe(Model):
@@ -603,6 +606,13 @@ class Recipe(Model):
     our_version: OurVersion | None = None
     # Where Our Version is in enrichment, apart from `status`; none without Our Version.
     our_version_status: EnrichmentStatus | None = None
+
+    @model_validator(mode="after")
+    def _our_version_with_its_status(self) -> Recipe:
+        if (self.our_version is None) != (self.our_version_status is None):
+            msg = "A recipe has Our Version and its status together, or neither"
+            raise ValueError(msg)
+        return self
 
 
 # The prefix of a fact's path in Our Version: `our_version.i4.match`.

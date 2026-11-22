@@ -964,7 +964,9 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
             "description": "Not a valid edit, the preview isn't one of the recipe's images, Our "
             "Version edits or removes a line or step the Original lacks, both edits and removes "
             "one, adds one after a line or step it doesn't have or with an id already used, or "
-            "has a line its Review line edit would refuse, or the edited recipe is too big to store"
+            "has a line its Review line edit would refuse, naming it by the draft's id, or the "
+            "edited recipe is too big to store, or its lines write more Canonical Ingredients "
+            "and wordings than one write holds"
         },
     },
 )
@@ -1030,15 +1032,20 @@ def _check_our_version(recipe: Recipe, version: int) -> None:
 
 def _save_edit(store: Store, recipe: Recipe, edits: list[Edited]) -> Recipe:
     """Save the edited recipe with the Canonical Ingredients and wordings its Our Version lines
-    confirm, create or fix, then match the other recipes with each fixed wording.
+    confirm, create or fix, then match the other recipes with each fixed wording. A 422 for more
+    of them than one write holds.
     """
     fixed = {wording.wording: wording for edit in edits for wording in edit.fixed}
     learned = {w.wording: w for edit in edits for w in edit.learned if w.wording not in fixed}
+    confirmed = {c.id: c for edit in edits for c in edit.confirmed}
+    created = [canonical for edit in edits for canonical in edit.created]
+    if len(fixed) + len(learned) + len(confirmed) + len(created) > MAX_LEARNED:
+        raise HTTPException(422, "Save fewer changed lines at once")
     written = store.review_recipe(
         recipe,
-        list({c.id: c for edit in edits for c in edit.confirmed}.values()),
+        list(confirmed.values()),
         list(learned.values()),
-        created=[canonical for edit in edits for canonical in edit.created],
+        created=created,
         overwrite_wordings=list(fixed.values()),
     )
     for edit in edits:

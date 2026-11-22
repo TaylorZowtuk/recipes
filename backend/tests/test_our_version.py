@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR
+from pydantic import ValidationError
 from test_enrichment_review import BEEF, CONFIRMED, FACTS, STEW, awaiting, card, parse, stored
 from test_review_edits import PORK, beef_line, edit, line_edit, numbers, other
 
+from recipes import api
 from recipes.edits import EDITOR_KEPT
 from recipes.models import (
     AddedLine,
@@ -19,6 +21,7 @@ from recipes.models import (
     OurLines,
     OurVersion,
     Quantity,
+    Recipe,
     RecipeFacts,
 )
 from recipes.our_version import kitchen_number, line_text
@@ -29,7 +32,7 @@ if TYPE_CHECKING:
     from httpx2 import Response
 
     from recipes.images import ImageStore
-    from recipes.models import ParseFact, Recipe
+    from recipes.models import ParseFact
     from recipes.store import Store
 
 NEW_TOMATOES = {
@@ -396,39 +399,64 @@ def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(
     assert stored(api_store, sharing.id) == sharing
 
 
+def refused(part: str, item_id: str, msg: str) -> list[dict[str, str]]:
+    return [{"msg": msg, "part": part, "id": item_id}]
+
+
 @pytest.mark.parametrize(
     ("our_version", "detail"),
     [
-        ({"ingredients": lines(edit={"i99": line()})}, "The recipe has no line i99"),
-        ({"ingredients": lines(remove=["i99"])}, "The recipe has no line i99"),
-        ({"steps": lines(edit={"s99": {"text": "Stir."}})}, "The recipe has no step s99"),
         (
-            {"ingredients": lines(edit={"i1": line()}, remove=["i1"])},
-            "Line i1 is both edited and removed",
+            {"ingredients": lines(edit={"i99": line()})},
+            refused("ingredients", "i99", "The recipe has no line i99"),
         ),
         (
-            {"ingredients": lines(remove=["i1"], add=[tomatoes()])},
-            "Line i10 follows i1, which isn't in Our Version",
+            {"ingredients": lines(remove=["i99"])},
+            refused("ingredients", "i99", "The recipe has no line i99"),
+        ),
+        (
+            {"steps": lines(edit={"s99": {"text": "Stir."}})},
+            refused("steps", "s99", "The recipe has no step s99"),
+        ),
+        (
+            {"ingredients": lines(edit={"i1": line()}, remove=["i1"])},
+            refused("ingredients", "i1", "Line i1 is both edited and removed"),
+        ),
+        (
+            {"ingredients": lines(remove=["i9", "i9"])},
+            refused("ingredients", "i9", "Lines are removed once each"),
+        ),
+        (
+            {"ingredients": lines(remove=["i1"], add=[tomatoes(id="new-1")])},
+            refused("ingredients", "new-1", "Line new-1 follows i1, which isn't in Our Version"),
         ),
         (
             {"steps": lines(add=[{"text": "Rest.", "after": "s9"}])},
-            "Step s5 follows s9, which isn't in Our Version",
+            refused("steps", "s5", "Step s5 follows s9, which isn't in Our Version"),
         ),
         (
             {"ingredients": lines(add=[tomatoes(id="x"), tomatoes(id="x", after="x")])},
-            "Line x is added twice",
+            refused("ingredients", "x", "Line x is added twice"),
         ),
         (
             {"ingredients": lines(add=[tomatoes(id="i2")])},
-            "Line i2 is the Original's, so it can't be added",
+            refused("ingredients", "i2", "Line i2 is the Original's, so it can't be added"),
         ),
         (
             {"ingredients": lines(edit={"i1": line(name="beef chuck")})},
-            "Changing the wording needs a Canonical Ingredient choice",
+            refused(
+                "ingredients", "i1", "Changing the wording needs a Canonical Ingredient choice"
+            ),
         ),
         (
-            {"ingredients": lines(add=[tomatoes(canonical=None)])},
-            "Line i10 needs a Canonical Ingredient choice",
+            {"ingredients": lines(add=[tomatoes(id="new-1", canonical=None)])},
+            refused("ingredients", "new-1", "Line new-1 needs a Canonical Ingredient choice"),
+        ),
+        (
+            {"ingredients": lines(add=[tomatoes(id="new-1", fdc_id=None)])},
+            refused(
+                "ingredients", "new-1", "Line new-1 needs an FDC food: the closest if none fits"
+            ),
         ),
     ],
     ids=[
@@ -436,16 +464,18 @@ def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(
         "remove unknown line",
         "edit unknown step",
         "edit and remove",
+        "remove twice",
         "after removed",
         "after unknown",
         "duplicate id",
         "original id",
         "renamed without canonical",
         "added without canonical",
+        "added without food",
     ],
 )
-def test_an_our_version_it_cant_take_is_refused(
-    editor_client: TestClient, api_store: Store, our_version: dict[str, Any], detail: str
+def test_an_our_version_it_cant_take_is_refused_naming_the_drafts_line(
+    editor_client: TestClient, api_store: Store, our_version: dict[str, Any], detail: Any
 ) -> None:
     recipe = ready(api_store)
 
@@ -454,6 +484,22 @@ def test_an_our_version_it_cant_take_is_refused(
     assert response.status_code == 422
     assert response.json()["detail"] == detail
     assert stored(api_store, recipe.id) == recipe
+
+
+def test_an_our_version_that_writes_more_than_one_transaction_holds_is_refused(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe = ready(api_store)
+    # Each new Canonical Ingredient is created and fixes its wording: four items for two lines.
+    monkeypatch.setattr(api, "MAX_LEARNED", 3)
+    onions = tomatoes(name="onions", canonical=NEW_TOMATOES | {"name": "Onion"}, after="i10")
+
+    response = save(editor_client, recipe, {"ingredients": lines(add=[tomatoes(), onions])})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Save fewer changed lines at once"
+    assert stored(api_store, recipe.id) == recipe
+    assert api_store.wording("diced tomatoes") is None
 
 
 # Ids
@@ -488,6 +534,23 @@ def test_added_lines_and_steps_continue_the_ids_and_keep_them_across_saves(
     assert second.status_code == 200, second.text
     again = second.json()["our_version"]["ingredients"]["add"]
     assert [(a["id"], a["after"]) for a in again] == [("i11", "i1"), ("i12", "i11")]
+
+
+def test_an_added_id_is_never_given_again_after_its_line_is_dropped(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = ready(api_store)
+    step = {"text": "Rest.", "after": None}
+    first = {"ingredients": lines(add=[tomatoes()]), "steps": lines(add=[step])}
+    assert save(editor_client, recipe, first).status_code == 200
+    assert save(editor_client, stored(api_store, recipe.id), {"note": "None"}).status_code == 200
+
+    response = save(editor_client, stored(api_store, recipe.id), first)
+
+    assert response.status_code == 200, response.text
+    ours = response.json()["our_version"]
+    assert [a["id"] for a in ours["ingredients"]["add"]] == ["i11"]
+    assert [a["id"] for a in ours["steps"]["add"]] == ["s6"]
 
 
 # Our Version Status
@@ -530,6 +593,18 @@ def test_removing_our_version_clears_it_and_its_status(
     assert (response.json()["our_version"], response.json()["our_version_status"]) == (None, None)
     assert card(api_store, recipe.id)["our_version_status"] is None
     assert stored(api_store, recipe.id).facts == recipe.facts
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"our_version": OurVersion(edited_at=datetime(2026, 11, 1, tzinfo=UTC))},
+        {"our_version_status": "ready"},
+    ],
+)
+def test_a_recipe_has_our_version_and_its_status_together(fields: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError, match="Our Version and its status"):
+        Recipe.model_validate(STEW.model_dump() | fields)
 
 
 def test_a_card_without_our_version_has_no_our_version_status(
