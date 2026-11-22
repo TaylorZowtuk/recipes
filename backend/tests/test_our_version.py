@@ -38,6 +38,7 @@ from recipes.models import (
 )
 from recipes.our_version import kitchen_number, line_text
 from recipes.seed import CHICKEN_ID, GARLIC, load
+from recipes.store import ENRICH_FIXED_ITEMS
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -587,6 +588,33 @@ def test_an_our_version_that_writes_more_than_one_transaction_holds_is_refused(
     assert response.json()["detail"] == "Save fewer changed lines at once"
     assert stored(api_store, recipe.id) == recipe
     assert api_store.wording("diced tomatoes") is None
+
+
+@pytest.mark.parametrize(("limit", "status"), [(4, 200), (3, 422)])
+def test_one_write_holds_every_canonical_ingredient_and_wording_a_save_writes(
+    editor_client: TestClient,
+    api_store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+    limit: int,
+    status: int,
+) -> None:
+    recipe = ready(api_store)
+    # Four items besides the recipe's own: a new Canonical Ingredient and the wording it fixes,
+    # and the unconfirmed stewing beef Canonical Ingredient and wording the beef line confirms.
+    beef = line(canonical={"kind": "existing", "id": BEEF.id})
+    draft = {"ingredients": lines(edit={"i1": beef}, add=[tomatoes()])}
+    monkeypatch.setattr(api, "MAX_LEARNED", limit)
+    writes: list[int] = []
+    transact = api_store._transact  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(
+        api_store, "_transact", lambda items: writes.append(len(items)) or transact(items)
+    )
+
+    response = save(editor_client, recipe, draft)
+
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert writes[0] == limit + len(ENRICH_FIXED_ITEMS)
 
 
 def test_an_edit_too_big_to_store_is_refused(
