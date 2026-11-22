@@ -108,7 +108,7 @@ The version of enrichment a recipe was enriched with, recorded on the recipe so 
 _Avoid_: Enrichment run, parser version
 
 **Re-enrichment**:
-An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status.
+An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status. It enriches only the Original: Our Version, its Our Version Status and its issues stay as they are.
 _Avoid_: Refresh, backfill
 
 **Ingest Channel**:
@@ -228,7 +228,7 @@ A cook's mark that one step of a recipe is done, set and cleared with the tick u
 _Avoid_: Checkbox, progress, done mark
 
 **Cooking mode**:
-A recipe shown full-screen, one step at a time, for cooking from. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
+A recipe shown full-screen, one step at a time, for cooking from: its effective steps, or the Original's when Adjust shows the Original. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
 _Avoid_: Cook view, step-by-step mode
 
 **Confidence Threshold**:
