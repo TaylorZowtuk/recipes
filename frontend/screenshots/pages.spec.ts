@@ -256,6 +256,22 @@ const pages: Shot[] = [
     shows: "Step 3 · 8-10 minutes",
   },
   {
+    name: "recipe-cooking",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    click: "Cook",
+    shows: "Step 1 of 5",
+  },
+  {
+    name: "recipe-cooking-timer",
+    path: "/recipes/01K7SEED000000000000000002/sesame-noodles-with-crispy-tofu",
+    ready: "Sesame Noodles with Crispy Tofu",
+    loaded: "For the sauce",
+    click: ["Cook", "Next", "Next", "Start a timer for 8-10 minutes"],
+    shows: "Step 3 · 8-10 minutes",
+  },
+  {
     name: "recipe-steps-timer-editor",
     path: "/recipes/01K7SEED000000000000000001/lemon-herb-roast-chicken",
     ready: "Lemon Herb Roast Chicken",

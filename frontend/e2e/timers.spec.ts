@@ -108,7 +108,7 @@ test("an editor starts a timer from the row after a Review Item", async ({ page 
   await startRange(page);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator("#step-s3 .review-item .step-timer")).toHaveCount(0);
-  await expect(page.locator("#step-s3 > .step-timers .step-timer")).toBeInViewport();
+  await expect(page.locator("#step-s3 > .step-body > .step-timers .step-timer")).toBeInViewport();
 });
 
 test("a second start is refused, leaving the timer running", async ({ page }) => {
