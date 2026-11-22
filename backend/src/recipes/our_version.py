@@ -126,7 +126,8 @@ def save(
 ) -> Saved:
     """The recipe with Our Version as drafted. A line left as it was keeps its facts; a changed
     one takes the editor's, and a Canonical Ingredient chosen for it also matches the recipe's own
-    Original lines with the wording. A new or changed step makes Our Version Pending.
+    Original lines with the wording. A new or changed step makes Our Version Pending, and one
+    Awaiting Review whose last open issue the save settles is Ready.
     Raises a 422 for a draft it can't take.
     """
     if len(draft.model_dump_json().encode()) > MAX_RECIPE_BYTES:
@@ -234,7 +235,14 @@ def save(
         ),
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
-    saved.recipe = changed.model_copy(update={"our_version": ours, "issues": issues})
+    # Awaiting Review with no open issue on Our Version left, it has nothing to check.
+    status = changed.our_version_status
+    left = any(i.status == "open" and i.fact_id.startswith(OUR_VERSION) for i in issues)
+    if status == "awaiting_review" and not left:
+        status = "ready"
+    saved.recipe = changed.model_copy(
+        update={"our_version": ours, "issues": issues, "our_version_status": status}
+    )
     return saved
 
 

@@ -11,7 +11,17 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from conftest import EDITOR
 from pydantic import ValidationError
-from test_enrichment_review import BEEF, CONFIRMED, FACTS, STEW, awaiting, card, parse, stored
+from test_enrichment_review import (
+    BEEF,
+    CONFIRMED,
+    FACTS,
+    STEW,
+    awaiting,
+    card,
+    issue,
+    parse,
+    stored,
+)
 from test_review_edits import PORK, beef_line, edit, line_edit, numbers, other
 
 from recipes import api, our_version
@@ -378,6 +388,28 @@ def test_saving_our_version_settles_the_issues_of_the_lines_it_changes_or_drops(
     assert (issue.fact_id, issue.status) == ("our_version.i10.match", "resolved")
 
 
+def test_an_our_version_whose_last_issue_a_save_settles_is_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, preparation="cubed")
+    braised(editor_client, recipe, "our_version")
+    asked = stored(api_store, sharing.id)
+    assert asked.our_version_status == "awaiting_review"
+    matched = our_line(api_store, sharing.id).match
+    assert matched is not None
+    beef = line(preparation="cubed", fdc_id=matched.fdc_id, portion_id=matched.portion_id)
+
+    response = save(
+        editor_client, asked, {"ingredients": lines(add=[{**beef, "id": "i10", "after": "i1"}])}
+    )
+
+    assert response.status_code == 200, response.text
+    [issue] = stored(api_store, sharing.id).issues
+    assert issue.status == "resolved"
+    assert response.json()["our_version_status"] == "ready"
+
+
 def test_a_save_reads_the_collection_once(
     editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -649,15 +681,21 @@ def test_a_lines_only_save_leaves_the_our_version_status_as_it_was(
 ) -> None:
     recipe = ready(api_store)
     steps = {"steps": lines(edit={"s2": {"text": "Brown the beef."}})}
-    assert save(editor_client, recipe, steps).json()["our_version_status"] == "pending"
+    beef = lines(edit={"i1": line()})
+    saved = save(editor_client, recipe, {"ingredients": beef, **steps})
+    assert saved.json()["our_version_status"] == "pending"
+    # Awaiting Review on an issue of a line the next save leaves as it is.
+    asked = [issue(1, "our_version.i1.match", status="open")]
     api_store.update_recipe(
-        stored(api_store, recipe.id).model_copy(update={"our_version_status": status})
+        stored(api_store, recipe.id).model_copy(
+            update={"our_version_status": status, "issues": asked}
+        )
     )
 
     response = save(
         editor_client,
         stored(api_store, recipe.id),
-        {"ingredients": lines(edit={"i1": line()}), **steps},
+        {"ingredients": {**beef, "remove": ["i9"]}, **steps},
     )
 
     assert response.status_code == 200, response.text
