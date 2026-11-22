@@ -72,14 +72,17 @@ export function forgetCollection() {
 }
 
 // Loads the Collection this device just changed, so the page shows the newer recipe at once.
-// Says whether it loaded; if not, the page still shows the old one.
+// Says whether it loaded; if not, the page still shows the old one. Another device's write can
+// move the bundle past the poll, whose redirect then lands on a newer version: that loaded too.
 export async function reloadCollection(): Promise<boolean> {
   return engine
     .refresh()
     .then(engine.collection)
     .then(
-      (collection) =>
-        collection.collection_version === engine.getSnapshot().sync?.collection_version,
+      (collection) => {
+        const polled = engine.getSnapshot().sync?.collection_version;
+        return polled !== undefined && collection.collection_version >= polled;
+      },
       () => false,
     );
 }
