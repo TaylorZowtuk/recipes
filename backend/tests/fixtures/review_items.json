@@ -61,6 +61,15 @@
       },
       "unconfirmed": 2,
       "flagged": 2
+    },
+    {
+      "name": "an open issue on an Our Version line is left out, until Our Version has Review Items",
+      "facts": { "i1.match": false },
+      "editor_difficulty": false,
+      "open_issues": ["i1.match", "our_version.i1.match", "our_version.i5.parse"],
+      "items": { "i1": ["i1.match"] },
+      "unconfirmed": 1,
+      "flagged": 1
     }
   ]
 }

@@ -207,7 +207,7 @@ describe.each(shared.cases)("the shared Review Items case: $name", (c) => {
 
   it("leaves as much to review as the card counts", () => {
     expect(reviewLeft(reviewOf(shown))).toEqual({
-      open_issues: c.open_issues.length,
+      open_issues: c.open_issues.filter((id) => !id.startsWith("our_version.")).length,
       unconfirmed: c.unconfirmed,
       flagged: c.flagged,
     });
