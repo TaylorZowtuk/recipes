@@ -34,31 +34,28 @@ const withOurs = (): Recipe =>
   recipe({
     our_version: {
       ingredients: {
-        edit: {
+        edit: { i1: { text: "1 tbsp butter", component: null } },
+        remove: [],
+        add: [{ id: "i5", after: "i1", text: "2 tbsp beans", component: null }],
+      },
+      steps: { edit: {}, remove: [], add: [] },
+      facts: {
+        ingredients: {
           i1: {
-            text: "1 tbsp butter",
-            component: null,
             parse: { ...parse("butter", true, "tbsp"), quantity: { low: 1, high: 1 } },
             match: null,
             conversion: null,
+            substitutions: null,
           },
+          i5: { parse: parse("beans", true, "tbsp"), match: null, conversion: null, substitutions: null },
         },
-        remove: [],
-        add: [
-          {
-            id: "i5",
-            after: "i1",
-            text: "2 tbsp beans",
-            component: null,
-            parse: parse("beans", true, "tbsp"),
-            match: null,
-            conversion: null,
-          },
-        ],
+        steps: {},
+        difficulty: null,
       },
-      steps: { edit: {}, remove: [], add: [] },
       note: "Less butter.",
       edited_at: "2026-11-02T00:00:00Z",
+      last_line: 5,
+      last_step: 0,
     },
   });
 

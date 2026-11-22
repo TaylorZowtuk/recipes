@@ -1,5 +1,5 @@
 import { formatAmount } from "./amount";
-import type { OurVersionDraft, Recipe, RecipeOperation } from "./api/client";
+import type { IngredientFacts, OurVersionDraft, Recipe, RecipeOperation } from "./api/client";
 import { type LineDraft, type LineEdit, type LineOf, lineOf } from "./factEdits";
 import { effective, overlay } from "./ourVersion";
 
@@ -36,33 +36,41 @@ function fieldsOf(line: Omit<OurLineFields, "component">, component: string | nu
   };
 }
 
-const storedFields = ({ parse, match, component }: StoredLine) =>
-  fieldsOf(
+// A stored Our Version line's fields, from its facts in Our Version's map.
+function storedFields(facts: IngredientFacts | undefined, component: string | null): OurLineFields {
+  const { parse, match } = facts ?? {};
+  return fieldsOf(
     {
-      quantity: parse.quantity,
-      unit: parse.unit,
-      name: parse.name,
-      preparation: parse.preparation,
+      quantity: parse?.quantity ?? null,
+      unit: parse?.unit ?? null,
+      name: parse?.name ?? "",
+      preparation: parse?.preparation ?? null,
       fdc_id: match?.fdc_id ?? null,
       portion_id: match?.portion_id ?? null,
     },
     component,
   );
+}
 
-const mapValues = <T, R>(record: Record<string, T>, f: (value: T) => R): Record<string, R> =>
-  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, f(value)]));
+const mapValues = <T, R>(
+  record: Record<string, T>,
+  f: (value: T, key: string) => R,
+): Record<string, R> =>
+  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, f(value, key)]));
 
 // The draft of the recipe's stored Our Version, or an empty one.
 export function ourDraftOf(recipe: Recipe): OurDraft {
   const ours = recipe.our_version;
   return {
     ingredients: {
-      edit: mapValues(ours?.ingredients.edit ?? {}, storedFields),
+      edit: mapValues(ours?.ingredients.edit ?? {}, (line, id) =>
+        storedFields(ours?.facts.ingredients[id], line.component),
+      ),
       remove: [...(ours?.ingredients.remove ?? [])],
       add: (ours?.ingredients.add ?? []).map((line) => ({
         id: line.id,
         after: line.after,
-        ...storedFields(line),
+        ...storedFields(ours?.facts.ingredients[line.id], line.component),
       })),
     },
     steps: {
@@ -225,8 +233,9 @@ function lineText(line: OurLineFields) {
 }
 
 // The stored line's text while the draft has it as stored, else one built from its fields.
-function textOf(line: OurLineFields, stored: StoredLine | undefined) {
-  const same = stored && JSON.stringify(storedFields(stored)) === JSON.stringify(line);
+function textOf(line: OurLineFields, stored: StoredLine | undefined, facts?: IngredientFacts) {
+  const same =
+    stored && JSON.stringify(storedFields(facts, stored.component)) === JSON.stringify(line);
   return same ? stored.text : lineText(line);
 }
 
@@ -241,13 +250,17 @@ export function ourRows(recipe: Recipe, draft: OurDraft): Record<Part, Row[]> {
       const edit = lines.edit[line.id];
       if (lines.remove.includes(line.id)) return { ...line, change: "removed" };
       if (!edit) return line;
-      const text = textOf(edit, ours?.ingredients.edit[line.id]);
+      const text = textOf(
+        edit,
+        ours?.ingredients.edit[line.id],
+        ours?.facts.ingredients[line.id],
+      );
       return { id: line.id, component: edit.component ?? null, text, change: "edited" };
     },
     (line): Row => ({
       id: line.id,
       component: line.component ?? null,
-      text: textOf(line, storedAdds.get(line.id)),
+      text: textOf(line, storedAdds.get(line.id), ours?.facts.ingredients[line.id]),
       change: "added",
     }),
   );

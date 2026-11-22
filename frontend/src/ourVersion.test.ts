@@ -11,12 +11,11 @@ const editors = (name: string, quantity: number, unit: string | null) => ({
   quantity: { low: quantity, high: quantity },
 });
 
-const ourLine = (text: string, name: string, quantity: number, unit: string | null) => ({
-  text,
-  component: null,
+const facts = (name: string, quantity: number, unit: string | null) => ({
   parse: editors(name, quantity, unit),
   match: null,
   conversion: null,
+  substitutions: null,
 });
 
 // The synthetic beans with an Our Version: i1 at 1 tbsp, i2 renamed, i3 removed, two lines added
@@ -26,14 +25,14 @@ const ours = (fields: Partial<NonNullable<Recipe["our_version"]>> = {}): Recipe 
     our_version: {
       ingredients: {
         edit: {
-          i1: ourLine("1 tbsp butter", "butter", 1, "tbsp"),
-          i2: ourLine("2 cloves shallot", "shallot", 2, "cloves"),
+          i1: { text: "1 tbsp butter", component: null },
+          i2: { text: "2 cloves shallot", component: null },
         },
         remove: ["i3"],
         add: [
-          { id: "i6", after: "i5", ...ourLine("1 lemon", "lemon", 1, null) },
-          { id: "i5", after: "i1", ...ourLine("2 cups beans", "beans", 2, "cups") },
-          { id: "i7", after: null, ...ourLine("1 onion", "onion", 1, null) },
+          { id: "i6", after: "i5", text: "1 lemon", component: null },
+          { id: "i5", after: "i1", text: "2 cups beans", component: null },
+          { id: "i7", after: null, text: "1 onion", component: null },
         ],
       },
       steps: {
@@ -41,8 +40,21 @@ const ours = (fields: Partial<NonNullable<Recipe["our_version"]>> = {}): Recipe 
         remove: [],
         add: [{ id: "s3", after: null, text: "Soak the beans.", component: null }],
       },
+      facts: {
+        ingredients: {
+          i1: facts("butter", 1, "tbsp"),
+          i2: facts("shallot", 2, "cloves"),
+          i5: facts("beans", 2, "cups"),
+          i6: facts("lemon", 1, null),
+          i7: facts("onion", 1, null),
+        },
+        steps: {},
+        difficulty: null,
+      },
       note: "More beans, less butter.",
       edited_at: "2026-11-02T00:00:00Z",
+      last_line: 7,
+      last_step: 3,
       ...fields,
     },
   });
@@ -143,7 +155,8 @@ describe("lineNote", () => {
 
   it("says the whole replaced line when it had no parse", () => {
     const recipe = ours({
-      ingredients: { edit: { i4: ourLine("1 tsp salt", "salt", 1, "tsp") }, remove: [], add: [] },
+      ingredients: { edit: { i4: { text: "1 tsp salt", component: null } }, remove: [], add: [] },
+      facts: { ingredients: { i4: facts("salt", 1, "tsp") }, steps: {}, difficulty: null },
     });
     expect(shown(recipe, "i4")).toBe("was salt");
   });

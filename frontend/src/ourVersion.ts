@@ -5,7 +5,6 @@ import type { IngredientFacts, Original, Recipe, RecipeFacts, Step, StepFacts } 
 export type Version = "ours" | "original";
 
 type IngredientLine = Original["ingredients"][number];
-type OurVersion = NonNullable<Recipe["our_version"]>;
 
 // How Our Version changed a line: edited, with the Original line it replaces and that line's
 // facts, or added. An unchanged line has none.
@@ -33,12 +32,11 @@ export function effective(
   const ours = recipe.our_version;
   if (!ours || version === "original") return { original: recipe.original, facts: recipe.facts };
   const lineFacts: Record<string, IngredientFacts> = {};
-  const factsOf = ({ parse, match, conversion }: OurVersion["ingredients"]["edit"][string]) => ({
-    parse,
-    match,
-    conversion,
-    substitutions: null,
-  });
+  // An edited or added line's facts are Our Version's own.
+  const ourFacts = (id: string) => {
+    const facts = ours.facts.ingredients[id];
+    if (facts) lineFacts[id] = facts;
+  };
   const ingredients = overlay(
     recipe.original.ingredients,
     ours.ingredients,
@@ -49,12 +47,12 @@ export function effective(
         if (original) lineFacts[line.id] = original;
         return line;
       }
-      lineFacts[line.id] = factsOf(edit);
+      ourFacts(line.id);
       const change = { kind: "edited" as const, was: line, wasFacts: original };
       return { id: line.id, component: edit.component, text: edit.text, change };
     },
     (added): EffectiveLine => {
-      lineFacts[added.id] = factsOf(added);
+      ourFacts(added.id);
       return {
         id: added.id,
         component: added.component,

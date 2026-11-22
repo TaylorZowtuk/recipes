@@ -353,9 +353,7 @@ describe("a Week Plan link's scale", () => {
 });
 
 // Less butter (i1 at 1 tbsp), no garlic (i2), a lemon added after the butter, and the oven lower.
-const ourLine = (text: string, name: string, quantity: number, unit: string | null) => ({
-  text,
-  component: null,
+const ourFacts = (name: string, quantity: number, unit: string | null) => ({
   parse: {
     ...parse(name, true, unit),
     provenance: "editor" as const,
@@ -363,20 +361,28 @@ const ourLine = (text: string, name: string, quantity: number, unit: string | nu
   },
   match: null,
   conversion: null,
+  substitutions: null,
 });
 const OUR_VERSION: Recipe["our_version"] = {
   ingredients: {
-    edit: { i1: ourLine("1 tbsp butter", "butter", 1, "tbsp") },
+    edit: { i1: { text: "1 tbsp butter", component: null } },
     remove: ["i2"],
-    add: [{ id: "i5", after: "i1", ...ourLine("1 lemon", "lemon", 1, null) }],
+    add: [{ id: "i5", after: "i1", text: "1 lemon", component: null }],
   },
   steps: {
     edit: { s2: { text: "Heat the oven to 400°F.", component: null } },
     remove: [],
     add: [],
   },
+  facts: {
+    ingredients: { i1: ourFacts("butter", 1, "tbsp"), i5: ourFacts("lemon", 1, null) },
+    steps: {},
+    difficulty: null,
+  },
   note: "Less butter, and a lemon.",
   edited_at: "2026-11-02T00:00:00Z",
+  last_line: 5,
+  last_step: 0,
 };
 const names = () =>
   [...host.querySelectorAll(".ingredients .ingredient-name")].map((name) => name.textContent);
