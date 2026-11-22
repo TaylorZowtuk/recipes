@@ -259,11 +259,35 @@ KIND: dict[Part, str] = {"ingredients": "Line", "steps": "Step"}
 PREFIX: dict[Part, str] = {"ingredients": "i", "steps": "s"}
 
 
+class RefusedAt(BaseModel):
+    """An Our Version line or step the API refused, by the id the draft gave it, and why."""
+
+    msg: str
+    part: Part
+    id: str
+
+
+class InvalidField(BaseModel):
+    """One of FastAPI's validation errors."""
+
+    loc: list[str | int]
+    msg: str
+    type: str
+
+
+class Refused(BaseModel):
+    """A 422: why the API refused the edit, as a message, as FastAPI's validation errors, or as
+    the one Our Version line or step it refused, for the PWA to show it there.
+    """
+
+    detail: str | list[RefusedAt] | list[InvalidField]
+
+
 def refuse(part: Part, item_id: str, message: str) -> NoReturn:
     """A 422 naming the draft's line or step by the id the draft gave it, so the PWA can show it
-    at that line or step: `[{"msg", "part", "id"}]`, as a validation error's `msg` reads.
+    at that line or step.
     """
-    raise HTTPException(422, [{"msg": message, "part": part, "id": item_id}])
+    raise HTTPException(422, [RefusedAt(msg=message, part=part, id=item_id).model_dump()])
 
 
 def _check_changes(

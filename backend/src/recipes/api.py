@@ -112,7 +112,7 @@ from recipes.models import (
     unit_kind as kind_of,
 )
 from recipes.offers import find_offers
-from recipes.our_version import OurVersionDraft
+from recipes.our_version import OurVersionDraft, Refused
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -963,6 +963,7 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
             "Our Version yet"
         },
         422: {
+            "model": Refused,
             "description": "Not a valid edit, the preview isn't one of the recipe's images, Our "
             "Version edits or removes a line or step the Original lacks, both edits and removes "
             "one, adds one after a line or step it doesn't have or with an id already used, or "

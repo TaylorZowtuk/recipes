@@ -36,7 +36,7 @@ from recipes.models import (
     Recipe,
     RecipeFacts,
 )
-from recipes.our_version import kitchen_number, line_text
+from recipes.our_version import Refused, kitchen_number, line_text
 from recipes.seed import CHICKEN_ID, GARLIC, load
 from recipes.store import ENRICH_FIXED_ITEMS
 
@@ -596,6 +596,7 @@ def test_an_our_version_it_cant_take_is_refused_naming_the_drafts_line(
 
     assert response.status_code == 422
     assert response.json()["detail"] == detail
+    assert Refused.model_validate(response.json()).model_dump()["detail"] == detail
     assert stored(api_store, recipe.id) == recipe
 
 
