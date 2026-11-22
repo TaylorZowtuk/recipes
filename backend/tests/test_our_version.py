@@ -224,6 +224,24 @@ def test_a_canonical_ingredient_chosen_in_our_version_fixes_the_wording_for_the_
     assert (shared.match.canonical_id, shared.match.fdc_id) == (canonical_id, 1002)
 
 
+def test_a_canonical_ingredient_chosen_in_our_version_also_matches_the_recipes_own_original(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    facts = FACTS.model_copy(deep=True)
+    facts.ingredients["i9"] = drained_tomatoes().ingredients["i1"]
+    recipe = ready(api_store, facts)
+
+    response = save(editor_client, recipe, {"ingredients": lines(add=[tomatoes()])})
+
+    assert response.status_code == 200, response.text
+    added = response.json()["our_version"]["facts"]["ingredients"]["i10"]["match"]
+    saved = stored(api_store, recipe.id).facts
+    original = saved.ingredients["i9"].match
+    assert original is not None
+    assert (original.canonical_id, original.fdc_id) == (added["canonical_id"], 1002)
+    assert saved.ingredients["i1"] == recipe.facts.ingredients["i1"]
+
+
 def test_resaving_an_unchanged_line_keeps_its_facts_and_reaches_no_other_recipe(
     editor_client: TestClient, api_store: Store
 ) -> None:
