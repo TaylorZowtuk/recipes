@@ -112,11 +112,11 @@ How a recipe came into the collection: *Add a recipe*, where an editor adds one 
 _Avoid_: Origin, import type
 
 **Enrichment Status**:
-Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. Only a Ready recipe is used for the grocery list and fridge matching.
+Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. Only a Ready recipe is used for the grocery list and fridge matching. Our Version has its own Our Version Status, which never changes it.
 _Avoid_: Processing state
 
 **Enrichment Issue**:
-Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An editor's FDC food pick on another line with its wording can also leave an issue that proposes no correction (it has no before or after) and is settled by editing the line: on a line that took the food but no FDC portion fits its unit, asking for one, or on a line prepared another way, asking for its FDC food.
+Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An editor's FDC food pick on another line with its wording can also leave an issue that proposes no correction (it has no before or after) and is settled by editing the line: on a line that took the food but no FDC portion fits its unit, asking for one, or on a line prepared another way, asking for its FDC food. An Our Version edit leaves one that proposes no correction on an unchanged step that mentions a line Our Version removed or renamed, settled by editing the step or confirming it as it is.
 _Avoid_: Warning, error
 
 **Work Packet**:
@@ -136,7 +136,7 @@ What editors still have to check, across all recipes: each recipe's Review Items
 _Avoid_: Inbox, queue
 
 **Review Item**:
-What an editor checks and confirms as one, in one tap, when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty, unless the editor set the recipe's own Difficulty. It is unconfirmed while any of its facts is. An open Enrichment Issue belongs to the item of the line, step or suggestion its fact is on, flags it, and that item exists for it even when the recipe lacks the fact. An item is left to check while it is unconfirmed or flagged, and Needs Review counts those items, not facts or issues. A recipe Awaiting Review becomes Ready once it has no Review Item left to check.
+What an editor checks and confirms as one, in one tap, when reviewing a recipe's enrichment: an ingredient line (its parse, match and conversion), a line's substitutions, a step (its segments and uses) or the Suggested Difficulty, unless the editor set the recipe's own Difficulty. It is unconfirmed while any of its facts is. An open Enrichment Issue belongs to the item of the line, step or suggestion its fact is on, flags it, and that item exists for it even when the recipe lacks the fact. An item is left to check while it is unconfirmed or flagged, and Needs Review counts those items, not facts or issues. A recipe Awaiting Review becomes Ready once it has no Review Item left to check, and so does an Our Version Awaiting Review; a Ready recipe can still have Review Items from Our Version.
 _Avoid_: Review row, fact group
 
 **Confirmed**:
@@ -152,8 +152,12 @@ The recipe exactly as captured from its source. It never changes after ingest, e
 _Avoid_: Source version, scraped version
 
 **Our Version**:
-The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one.
+The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed; its edited and added steps wait for enrichment.
 _Avoid_: Personal adjustment, variant, fork
+
+**Our Version Status**:
+Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
+_Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
 
 ### Ratings and organization
 

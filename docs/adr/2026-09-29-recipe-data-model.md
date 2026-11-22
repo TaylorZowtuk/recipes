@@ -10,6 +10,8 @@ Superseded in part by [An editor's edit is Confirmed, not undoable, and fixes a 
 
 Superseded in part by [Editors pick FDC foods; the FDC Snapshot ships in the Lambda](2026-11-11-editors-pick-fdc-foods.md): a match's `fdc_id` is required again, since an editor picks the FDC food.
 
+Superseded in part by [Our Version's lines are the editor's, and its steps wait for enrich under an Our Version Status](2026-11-18-our-version-lines-are-the-editors-steps-wait-for-enrich.md): an Our Version edit isn't re-parsed on save. The editor gives an edited or added line's facts, and an edited or added step gets its Segments from the next `enrich` run, under the recipe's Our Version Status.
+
 A recipe is stored as one JSON document, defined once as Pydantic v2 models in `backend/` with `snake_case` names. The same shape goes into DynamoDB, into the nightly JSON Lines backups and out of the API, and the TypeScript client is generated from the OpenAPI schema. The item holds everything the phone needs to scale, convert units, compute nutrition and render cooking mode **offline**, including the FoodData Central (FDC) numbers enrichment used. We chose this over storing only FDC ids and looking the numbers up when read, because the lookup would mean shipping the FDC snapshot to the PWA, and a newer FDC release would silently change recipes the [enrichment ADR](2026-09-26-enrichment-pipeline.md) says are frozen.
 
 ## Ids and layout
