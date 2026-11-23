@@ -14,6 +14,8 @@ from conftest import SERVICE_TOKEN
 from requests.adapters import BaseAdapter
 from requests.models import PreparedRequest, Response
 from requests.structures import CaseInsensitiveDict
+from test_enrichment_review import FACTS, LLM
+from test_our_version_enrichment import pending as our_version_pending
 
 from recipes import fdc
 from recipes.auth import SERVICE_TOKEN_HEADER
@@ -37,8 +39,11 @@ from recipes.models import (
     Original,
     Recipe,
     Step,
+    StepFacts,
+    UsesFact,
     WebsiteSource,
     Wording,
+    effective,
     new_ulid,
 )
 from recipes.packet import ENRICHMENT_VERSION
@@ -1299,3 +1304,141 @@ def test_reenriching_refuses_portions_that_with_a_confirmed_steps_use_more_than_
         "Oil Stew → rejected, nothing written:\n"
         "  i1: its portions add up to 1.2 with the confirmed steps' 0.7, more than all of it"
     ) in capsys.readouterr().out
+
+
+# Our Version
+
+
+def our_answer(offered: dict[str, Any], *steps: dict[str, Any]) -> str:
+    """A model's answer to the packet's one Our Version: `steps`, or the stew's s2 using half the
+    beef and s5 left as its text.
+    """
+    (ours,) = offered["our_versions"]
+    answered = steps or (
+        {"step_id": "s2", "ingredients": [{"ref": "i1", "written": "beef", "portion": 0.5}]},
+        {"step_id": "s5"},
+    )
+    return json.dumps(
+        {
+            "model": "a-model",
+            "recipes": [],
+            "our_versions": [
+                {"recipe_id": ours["recipe_id"], "offer_id": ours["offer_id"], "steps": answered}
+            ],
+        }
+    )
+
+
+def test_packet_offers_our_versions_waiting_steps_against_the_effective_lines_unparsed(
+    editor_client: TestClient,
+    api_store: Store,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recipe = our_version_pending(api_store)
+    monkeypatch.setattr("recipes.packet.parse_line", unparseable)
+
+    offered = work_packet(through(api(editor_client)), capsys)
+
+    assert offered["recipes"] == []
+    (ours,) = offered["our_versions"]
+    assert (ours["recipe_id"], ours["version"]) == (recipe.id, recipe.version)
+    assert [s["step_id"] for s in ours["steps"]] == ["s2", "s5"]
+    assert ours["steps"][0]["text"] == "Brown the beef well."
+    shown = effective(recipe)
+    assert [ln["line_id"] for ln in ours["lines"]] == [line.id for line in shown.ingredients]
+    beef = ours["lines"][0]
+    assert (beef["parse"]["name"], beef["parse"]["quantity"]) == (
+        "stewing beef",
+        {"low": 1, "high": 1},
+    )
+    assert "our_versions" in offered["instructions"]
+
+
+def unparseable(text: str) -> None:
+    msg = f"parsed {text}"
+    raise AssertionError(msg)
+
+
+def test_apply_writes_our_versions_steps_through_its_endpoint_and_it_awaits_review(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = our_version_pending(api_store)
+    adapter = api(editor_client)
+    send = through(adapter)
+    offered = work_packet(send, capsys)
+
+    failed = apply(BASE_URL, send, SNAPSHOT, our_answer(offered))
+
+    assert failed == 0
+    assert f"{recipe.original.title} → Our Version awaiting_review" in capsys.readouterr().out
+    assert [r.url for r in adapter.requests if r.method == "PUT"] == [
+        f"{BASE_URL}/api/recipes/{recipe.id}/our-version/enrichment"
+    ]
+    after = stored(editor_client, recipe.id)
+    assert (after["status"], after["our_version_status"]) == ("ready", "awaiting_review")
+    assert after["facts"] == recipe.facts.model_dump(mode="json")
+    steps = after["our_version"]["facts"]["steps"]
+    assert [(s["t"], s.get("v") or s["written"]) for s in steps["s2"]["segments"]["segments"]] == [
+        ("text", "Brown the "),
+        ("ingredient", "beef"),
+        ("text", " well."),
+    ]
+    assert steps["s2"]["uses"]["uses"] == [{"ref": "i1", "portion": 0.5}]
+    assert [s["t"] for s in steps["s5"]["segments"]["segments"]] == ["text"]
+
+
+def test_our_versions_portions_past_1_are_left_for_the_api_to_cap_and_its_issue_printed(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    all_of_it = [{"ref": "i1", "portion": 1}]
+    all_the_beef = StepFacts(uses=UsesFact.model_validate({**LLM, "uses": all_of_it}))
+    facts = FACTS.model_copy(update={"steps": {"s1": all_the_beef}})
+    recipe = our_version_pending(api_store, facts)
+    send = through(api(editor_client))
+    offered = work_packet(send, capsys)
+
+    failed = apply(BASE_URL, send, SNAPSHOT, our_answer(offered))
+
+    assert failed == 0
+    out = capsys.readouterr().out
+    assert f"{recipe.original.title} → Our Version awaiting_review\n  our_version.s2." in out
+    after = stored(editor_client, recipe.id)
+    assert after["our_version"]["facts"]["steps"]["s2"]["uses"]["uses"] == []
+
+
+def test_an_our_version_whose_offer_changed_is_rejected_and_nothing_written(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = our_version_pending(api_store)
+    adapter = api(editor_client)
+    offered = work_packet(through(adapter), capsys)
+    # Meanwhile, an editor writes a note on Our Version.
+    assert recipe.our_version is not None
+    ours = recipe.our_version.model_copy(update={"note": "Brown it hard."})
+    api_store.update_recipe(recipe.model_copy(update={"our_version": ours}))
+
+    failed = apply(BASE_URL, through(adapter), SNAPSHOT, our_answer(offered))
+
+    assert failed == 1
+    rejected = f"{recipe.original.title} → rejected, nothing written:\n  its offer changed"
+    assert rejected in capsys.readouterr().out
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
+    assert stored(editor_client, recipe.id)["our_version_status"] == "pending"
+
+
+def test_an_our_version_answer_leaving_out_a_waiting_step_is_rejected(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = our_version_pending(api_store)
+    adapter = api(editor_client)
+    send = through(adapter)
+    offered = work_packet(send, capsys)
+
+    failed = apply(BASE_URL, send, SNAPSHOT, our_answer(offered, {"step_id": "s2"}))
+
+    assert failed == 1
+    assert (
+        f"{recipe.original.title} → rejected, nothing written:\n  s5: answer every step"
+    ) in capsys.readouterr().out
+    assert [r.method for r in adapter.requests if r.method != "GET"] == []
