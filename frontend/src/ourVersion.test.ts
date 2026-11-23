@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AS_WRITTEN } from "./adjust";
 import type { Recipe } from "./api/client";
@@ -129,6 +130,34 @@ describe("effective", () => {
     });
     const plain = awaitingReview();
     expect(effective(plain, "ours")).toEqual({ original: plain.original, facts: plain.facts });
+  });
+});
+
+// Cases the API's test_our_version_review.py checks too, so the two effective recipes can't drift.
+type SharedCase = {
+  name: string;
+  recipe: Pick<Recipe, "facts" | "our_version"> & {
+    original: Pick<Recipe["original"], "ingredients" | "steps">;
+  };
+  expected: { ingredients: object[]; steps: object[]; facts: object };
+};
+const shared: { cases: SharedCase[] } = JSON.parse(
+  readFileSync(
+    new URL("../../backend/tests/fixtures/effective_lines.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+describe.each(shared.cases)("the shared effective case: $name", ({ recipe, expected }) => {
+  it("shows the lines, steps and facts the API does", () => {
+    const given = { ...recipe, original: { ...awaitingReview().original, ...recipe.original } };
+    const { original, facts } = effective(given, "ours");
+    // The API marks a line's change by its kind alone, and keeps no Difficulty beside the facts.
+    const lines = original.ingredients.map(({ change, ...line }) =>
+      change ? { ...line, change: change.kind } : line,
+    );
+    const { difficulty: _, ...stepsAndLines } = facts;
+    expect({ ingredients: lines, steps: original.steps, facts: stepsAndLines }).toEqual(expected);
   });
 });
 

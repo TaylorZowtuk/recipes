@@ -23,8 +23,9 @@ export const CHANGED = "changed in Our Version";
 
 // The recipe as `version` shows it: its lines and steps in order and their facts by id. Our
 // Version leaves out what it removes, replaces what it edits with its own line (and facts) or step
-// (raw text until enrich segments it) and puts each added one after the one it names. An unchanged
-// line or step keeps the Original's facts, so a step's segment for a removed line shows its words.
+// (raw text, with no facts, until enrich segments it) and puts each added one after the one it
+// names. An unchanged line or step keeps the Original's facts; a step's segment for a removed line
+// shows as its words, with no amount, and its uses drop that line, as the API's `effective`.
 export function effective(
   recipe: Pick<Recipe, "original" | "facts" | "our_version">,
   version: Version,
@@ -62,22 +63,50 @@ export function effective(
     },
   );
   const stepFacts: Record<string, StepFacts> = {};
+  // An edited or added step's facts are Our Version's own, none until enrich segments it.
+  const factsOf = (id: string, held: Record<string, StepFacts>) => {
+    const facts = held[id];
+    if (facts) stepFacts[id] = without(facts, ours.ingredients.remove);
+  };
   const steps = overlay(
     recipe.original.steps,
     ours.steps,
     (step): EffectiveStep => {
       const edit = ours.steps.edit[step.id];
+      factsOf(step.id, edit ? ours.facts.steps : recipe.facts.steps);
       if (edit)
         return { id: step.id, component: edit.component, text: edit.text, change: "edited" };
-      const facts = recipe.facts.steps[step.id];
-      if (facts) stepFacts[step.id] = facts;
       return step;
     },
-    ({ id, component, text }): EffectiveStep => ({ id, component, text, change: "added" }),
+    ({ id, component, text }): EffectiveStep => {
+      factsOf(id, ours.facts.steps);
+      return { id, component, text, change: "added" };
+    },
   );
   return {
     original: { ...recipe.original, ingredients, steps },
     facts: { ...recipe.facts, ingredients: lineFacts, steps: stepFacts },
+  };
+}
+
+// The step's facts with each Segment for a removed line shown as its words, with no amount, and
+// its uses less the removed lines, as the API's `_without`.
+function without(facts: StepFacts, removed: string[]): StepFacts {
+  if (!removed.length) return facts;
+  const { segments, uses } = facts;
+  return {
+    ...facts,
+    ...(segments && {
+      segments: {
+        ...segments,
+        segments: segments.segments.map((segment) =>
+          segment.t === "ingredient" && removed.includes(segment.ref)
+            ? { t: "text" as const, v: segment.written }
+            : segment,
+        ),
+      },
+    }),
+    ...(uses && { uses: { ...uses, uses: uses.uses.filter((use) => !removed.includes(use.ref)) } }),
   };
 }
 
