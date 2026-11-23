@@ -8,7 +8,8 @@ import { TimerDock, TimerDockHost } from "./TimerDock";
 import type { TimerView } from "./timers";
 
 const shown: { timers: TimerView[]; notice: string | null } = { timers: [], notice: null };
-vi.mock("./timers", () => ({ useTimers: () => shown, timers: {} }));
+const store = vi.hoisted(() => ({ takeMinute: vi.fn() }));
+vi.mock("./timers", () => ({ useTimers: () => shown, timers: store }));
 
 const view = (fields: Partial<TimerView>): TimerView => ({
   id: "r1/s3/1",
@@ -24,8 +25,17 @@ const view = (fields: Partial<TimerView>): TimerView => ({
   paused: false,
   countdown: "Check in 7:59",
   named: "8-10 minutes, step 3 of Synthetic Test Noodles",
+  canTakeMinute: true,
   ...fields,
 });
+
+// For the tests that mount the dock in jsdom.
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 function render(timers: TimerView[], notice: string | null = null) {
   shown.timers = timers;
@@ -66,9 +76,11 @@ describe("TimerDock", () => {
     expect(names(markup)).toEqual([
       "Timers",
       "Pause 8-10 minutes, step 3 of Synthetic Test Noodles",
+      "−1 minute on 8-10 minutes, step 3 of Synthetic Test Noodles",
       "+1 minute on 8-10 minutes, step 3 of Synthetic Test Noodles",
       "Cancel 8-10 minutes, step 3 of Synthetic Test Noodles",
       "Pause 10 minutes, step 3 of Synthetic Test Noodles",
+      "−1 minute on 10 minutes, step 3 of Synthetic Test Noodles",
       "+1 minute on 10 minutes, step 3 of Synthetic Test Noodles",
       "Cancel 10 minutes, step 3 of Synthetic Test Noodles",
     ]);
@@ -85,6 +97,28 @@ describe("TimerDock", () => {
     const alarming = render([view({ phase: "alarming", countdown: "Time’s up" })]);
     expect(alarming).toContain("timer-row timer-alarming");
     expect(names(alarming).filter((name) => name?.startsWith("Pause"))).toEqual([]);
+    expect(names(alarming).filter((name) => name?.startsWith("−1"))).toEqual([]);
+  });
+
+  it("keeps −1 focusable but inert with a minute or less to go", () => {
+    shown.timers = [view({ canTakeMinute: false, countdown: "Done in 0:59" })];
+    const page = document.createElement("div");
+    document.body.append(page);
+    const root = createRoot(page);
+    act(() =>
+      root.render(
+        <MemoryRouter>
+          <TimerDock />
+        </MemoryRouter>,
+      ),
+    );
+    const take = page.querySelector<HTMLButtonElement>('[aria-label^="−1 minute on"]');
+    expect(take?.getAttribute("aria-disabled")).toBe("true");
+    expect(take?.disabled).toBe(false);
+    act(() => take?.click());
+    expect(store.takeMinute).not.toHaveBeenCalled();
+    act(() => root.unmount());
+    page.remove();
   });
 
   it("shows its notice in the status region", () => {
@@ -93,12 +127,6 @@ describe("TimerDock", () => {
   });
 
   it("stays in the place shown last when an earlier place goes", () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    globalThis.ResizeObserver ??= class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    };
     shown.timers = [view({})];
     const page = document.createElement("div");
     document.body.append(page);

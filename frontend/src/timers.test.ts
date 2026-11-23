@@ -55,6 +55,7 @@ describe("the timer store", () => {
       () => store.pause(shown().id),
       () => store.resume(shown().id),
       () => store.addMinute(shown().id),
+      () => store.takeMinute(shown().id),
       () => store.cancel(shown().id),
     ];
     commands.forEach((command, done) => {
@@ -202,6 +203,84 @@ describe("the timer store", () => {
     expect(store.snapshot().notice).toBe(
       "Time’s up for the 8-10 minutes, step 3 of Synthetic Test Noodles.",
     );
+  });
+
+  it("takes a minute off a single duration", () => {
+    store.start(rest);
+    run(MINUTE);
+    expect(shown().canTakeMinute).toBe(true);
+    store.takeMinute(shown().id);
+    expect(shown().countdown).toBe("Done in 8:00");
+    run(8 * MINUTE);
+    expect(sounds).toEqual(["alarm"]);
+  });
+
+  it("takes a minute off both ends before the chime", () => {
+    store.start(fry);
+    store.takeMinute(shown().id);
+    expect(shown().countdown).toBe("Check in 7:00");
+    run(7 * MINUTE - 1000);
+    expect(sounds).toEqual([]);
+    run(1000);
+    expect(sounds).toEqual(["chime"]);
+    expect(shown().countdown).toBe("Done in 2:00");
+  });
+
+  it("takes a minute off the high end after the chime, without repeating it", () => {
+    store.start(fry);
+    run(8 * MINUTE + 30_000);
+    store.takeMinute(shown().id);
+    expect(shown()).toMatchObject({ phase: "chimed", countdown: "Done in 0:30" });
+    run(30_000);
+    expect(sounds).toEqual(["chime", "alarm"]);
+  });
+
+  it("sounds a chime taken into the past once, with its notice, as a gap would", () => {
+    store.start(fry);
+    run(7 * MINUTE + 30_000);
+    expect(shown().countdown).toBe("Check in 0:30");
+    store.takeMinute(shown().id);
+    passing(0);
+    expect(sounds).toEqual(["chime"]);
+    expect(shown()).toMatchObject({ phase: "chimed", countdown: "Done in 1:30" });
+    expect(store.snapshot().notice).toBe(
+      "Check the 8-10 minutes, step 3 of Synthetic Test Noodles.",
+    );
+    run(MINUTE + 29_000);
+    expect(sounds).toEqual(["chime"]);
+    run(1000);
+    expect(sounds).toEqual(["chime", "alarm"]);
+  });
+
+  it("takes a minute off a paused timer, which stays paused", () => {
+    store.start(fry);
+    run(MINUTE);
+    store.pause(shown().id);
+    clock += 10 * MINUTE;
+    store.takeMinute(shown().id);
+    expect(shown()).toMatchObject({ paused: true, countdown: "Check in 6:00" });
+  });
+
+  it("takes nothing off a timer with a minute or less to go, which the countdown alone decides", () => {
+    store.start(rest);
+    run(9 * MINUTE - 1000);
+    expect(shown()).toMatchObject({ countdown: "Done in 1:01", canTakeMinute: true });
+    run(1000);
+    expect(shown()).toMatchObject({ countdown: "Done in 1:00", canTakeMinute: false });
+    store.takeMinute(shown().id);
+    expect(shown().countdown).toBe("Done in 1:00");
+    store.pause(shown().id);
+    expect(shown().canTakeMinute).toBe(false);
+  });
+
+  it("takes nothing off an alarming timer", () => {
+    store.start(rest);
+    run(10 * MINUTE);
+    expect(shown().canTakeMinute).toBe(false);
+    store.takeMinute(shown().id);
+    expect(shown()).toMatchObject({ phase: "alarming", countdown: "Time’s up" });
+    run(MINUTE);
+    expect(shown().phase).toBe("alarming");
   });
 
   it("refuses a duplicate start, leaving the timer as it was and saying so", () => {
