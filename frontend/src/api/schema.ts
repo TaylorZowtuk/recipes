@@ -378,12 +378,15 @@ export interface paths {
         /**
          * Confirm Facts
          * @description Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-         *     resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
-         *     none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
-         *     can't be Ready while it is. A fact already Confirmed keeps its own batch.
+         *     resolve the open Enrichment Issues on them that propose a correction. An issue on a line that
+         *     proposes none, an ask to pick a line's portion or food, stays open: only an edit settles it,
+         *     so the recipe can't be Ready while it is. One on a step that proposes none, a step an Our
+         *     Version edit affects, is settled by confirming the step as it is. A fact already Confirmed
+         *     keeps its own batch. Our Version's facts are confirmed at their `our_version.` paths.
          *
          *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
-         *     wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+         *     wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
+         *     review is Ready, and an Our Version Awaiting Review with nothing of its own left is Ready.
          */
         post: operations["confirm_facts_api_recipes__recipe_id__confirm_post"];
         delete?: never;
@@ -404,8 +407,9 @@ export interface paths {
         /**
          * Undo Confirm Batch
          * @description Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
-         *     Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
-         *     unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+         *     Enrichment Issues, move the recipe, or its Ready Our Version, back to Awaiting Review if the
+         *     batch made it Ready, and unconfirm each Canonical Ingredient it confirmed that still carries
+         *     it. Wordings stay.
          */
         post: operations["undo_confirm_batch_api_recipes__recipe_id__confirm_batches__batch__undo_post"];
         delete?: never;
@@ -2174,6 +2178,8 @@ export interface components {
              * @default 0
              */
             our_version_last_step: number;
+            /** Our Version Ready Batch */
+            our_version_ready_batch: string | null;
             /** Our Version Status */
             our_version_status: ("pending" | "awaiting_review" | "ready") | null;
             preview: components["schemas"]["Preview"] | null;
