@@ -41,7 +41,7 @@ import {
   withWording,
 } from "./factEdits";
 import { DifficultyField } from "./RecipeFields";
-import type { FactEdit, ReviewItem } from "./review";
+import { type FactEdit, ownerOf, type ReviewItem } from "./review";
 import { alphabetical, titleMatches } from "./titleSearch";
 
 type Kitchen = Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
@@ -60,10 +60,12 @@ type FormProps = {
   onCancel: () => void;
 };
 
-// Whether the item has facts an editor can edit: a line always, a step with portions or timers,
-// substitutions while there are any, and the Difficulty.
+// Whether the item has facts an editor can edit: one of the Original's lines always, a step with
+// portions or timers, substitutions while there are any, and the Difficulty.
 export function canEdit(item: ReviewItem, recipe: Recipe): boolean {
-  const [owner = ""] = item.id.split(".");
+  const { owner, ours } = ownerOf(item.id);
+  // Our Version's lines and steps are edited in Our Version itself.
+  if (ours) return false;
   switch (item.kind) {
     case "difficulty":
     case "line":

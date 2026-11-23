@@ -10,7 +10,13 @@ import { DifficultyMeters } from "./DifficultyMeters";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { CheckIcon, ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
-import { type EffectiveOriginal, effective, lineNote, stepNote } from "./ourVersion";
+import {
+  type EffectiveLine,
+  type EffectiveOriginal,
+  effective,
+  lineNote,
+  stepNote,
+} from "./ourVersion";
 import { Plate } from "./Plate";
 import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
 import { PAUSED, useEditBlock, useMounted } from "./RecipeFields";
@@ -24,6 +30,7 @@ import {
   reviewOf,
   runEdit,
   runReview,
+  shownItem,
   tabCounts,
   undoBatch,
 } from "./review";
@@ -289,6 +296,7 @@ function RecipeTabs({
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
     items,
+    ours: version === "ours" && !!recipe.our_version,
     newCanonicals: new Set(
       collection.canonical_ingredients.filter((c) => !c.confirmed).map((c) => c.id),
     ),
@@ -452,8 +460,8 @@ function RecipeTabs({
 // shows its raw text. With `onTap`, an amount with another unit to show is a button that moves it
 // on, and one that stays in its unit for want of a weight says why when tapped. To an editor, a
 // line with facts is a marked Review Item, its amount plain text, and the substitutions follow the
-// lines. In Our Version, an edited or added line says so quietly under it, and isn't a Review Item:
-// review stays on the Original's lines.
+// lines. In Our Version, an edited or added line says so quietly under it, and is Our Version's
+// own Review Item.
 export function Ingredients({
   original,
   facts,
@@ -474,7 +482,7 @@ export function Ingredients({
         {part.lines.map((line) => {
           const lineFacts = facts?.ingredients[line.id];
           const { parse, match } = lineFacts ?? {};
-          const item = line.change ? undefined : review?.items.get(line.id);
+          const item = review && shownItem(review, line.id, !!line.change);
           const note = lineNote(line, lineFacts, choices);
           const isNew = !!(item && match && review?.newCanonicals.has(match.canonical_id));
           const tapped = choices.taps?.[line.id];
@@ -533,9 +541,9 @@ function Substitutions({
   facts: RecipeFacts;
   review: ReviewTarget;
 }) {
-  const lines = original.ingredients.filter(
-    (line) => !line.change && review.items.has(`${line.id}.substitutions`),
-  );
+  const itemOf = (line: EffectiveLine) =>
+    shownItem(review, `${line.id}.substitutions`, !!line.change);
+  const lines = original.ingredients.filter((line) => itemOf(line));
   if (lines.length === 0) return null;
   return (
     <section className="component review-substitutions">
@@ -544,7 +552,7 @@ function Substitutions({
       </h2>
       <ul className="ingredients">
         {lines.map((line) => {
-          const item = review.items.get(`${line.id}.substitutions`);
+          const item = itemOf(line);
           const subs = facts.ingredients[line.id]?.substitutions?.items ?? [];
           const name = facts.ingredients[line.id]?.parse?.name ?? line.text;
           return (
@@ -644,7 +652,8 @@ function ParsedLine({
 // is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
 // buttons follow in a row. Under each step's number, its Step tick: a ticked step dims. A captured
 // recipe has no `recipeId` yet, so no Timers and no ticks. In Our Version, an edited or added step
-// says so under it, and isn't a Review Item.
+// says so under it, and is Our Version's own Review Item, as is an unchanged step an Our Version
+// edit flagged.
 export function Steps({
   recipeId,
   original,
@@ -665,7 +674,7 @@ export function Steps({
       {part.component && <h2>{part.component}</h2>}
       <ol className="steps" start={part.start}>
         {part.lines.map((step, index) => {
-          const item = step.change ? undefined : review?.items.get(step.id);
+          const item = review && shownItem(review, step.id, !!step.change);
           const note = stepNote(step);
           const timer = (piece: DurationPiece, n: number) =>
             recipeId && (

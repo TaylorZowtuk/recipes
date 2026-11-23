@@ -271,6 +271,100 @@ test("an editor adds a recipe, then reviews it to Ready", async ({ page }, testI
   expect(await statusOf(page, id)).toBe("ready");
 });
 
+// Every fact path of the recipe's own facts, to confirm them all at once.
+const factPaths = (facts: { ingredients: object; steps: object; difficulty: unknown }) => [
+  ...[...Object.entries(facts.ingredients), ...Object.entries(facts.steps)].flatMap(
+    ([owner, held]) =>
+      Object.entries(held as object).flatMap(([kind, fact]) => (fact ? [`${owner}.${kind}`] : [])),
+  ),
+  ...(facts.difficulty ? ["difficulty"] : []),
+];
+
+test("an editor reviews Our Version's enriched step to Ready on a Ready recipe", async ({
+  page,
+}, testInfo) => {
+  const path = `rice-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`pilaf rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  const current = async () => (await page.request.get(`/api/recipes/${id}`)).json();
+  let recipe = await current();
+  const confirmed = await page.request.post(`/api/recipes/${id}/confirm`, {
+    data: { version: recipe.version, fact_ids: factPaths(recipe.facts) },
+  });
+  expect(confirmed.status(), await confirmed.text()).toBe(200);
+  expect(await statusOf(page, id)).toBe("ready");
+
+  // Our Version rewrites the second step, and enrich segments it.
+  const text = "Add the rice and salt, and stir until steaming.";
+  recipe = await current();
+  const saved = await page.request.patch(`/api/recipes/${id}`, {
+    data: {
+      version: recipe.version,
+      operations: [{ op: "set_our_version", our_version: { steps: { edit: { s2: { text } } } } }],
+    },
+  });
+  expect(saved.status(), await saved.text()).toBe(200);
+  recipe = await current();
+  const segmented = await page.request.put(`/api/recipes/${id}/our-version/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: {
+      version: recipe.version,
+      steps: {
+        s2: {
+          segments: {
+            ...stamp("llm"),
+            segments: [
+              { t: "text", v: "Add the " },
+              { t: "ingredient", ref: "i1", written: "rice", portion: 1 },
+              { t: "text", v: " and " },
+              { t: "ingredient", ref: "i3", written: "salt", portion: 1 },
+              { t: "text", v: ", and stir until steaming." },
+            ],
+          },
+          uses: {
+            ...stamp("llm"),
+            uses: [
+              { ref: "i1", portion: 1 },
+              { ref: "i3", portion: 1 },
+            ],
+          },
+        },
+      },
+    },
+  });
+  expect(segmented.status(), await segmented.text()).toBe(200);
+  const ourStatus = async () => (await current()).our_version_status;
+  expect(await ourStatus()).toBe("awaiting_review");
+
+  // The Ready recipe is in Needs Review for Our Version's step alone.
+  await page.goto("/recipes");
+  await page.getByRole("button", { name: /^Needs Review · \d+$/ }).click();
+  const card = cardOf(page, titleOf(path));
+  await expect(card).toContainText("1 to check");
+  await expect(card).not.toContainText("Awaiting Review");
+  await card.click();
+
+  // Our Version's step is the Review Item on the step it shows, and confirming it makes Our
+  // Version Ready; undoing that moves it back.
+  await page.getByRole("tab", { name: "Steps, 1 to check", exact: true }).click();
+  const steps = page.getByRole("tabpanel", { name: /^Steps/ });
+  await expect(steps.getByRole("button", { name: /^Unchecked: Add the/ })).toContainText(
+    "stir until steaming",
+  );
+  await steps.getByRole("button", { name: "Confirm 1 on this tab" }).click();
+  await expect(toast(page, "Confirmed.")).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^Confirmed: Add the/ })).toBeVisible();
+  expect(await ourStatus()).toBe("ready");
+  await undo(page).click();
+  await expect(toast(page, "Undone.")).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^Unchecked: Add the/ })).toBeVisible();
+  expect(await ourStatus()).toBe("awaiting_review");
+});
+
 test("a review write that lost a race shows the newer recipe, says so, and stays on the tab", async ({
   page,
 }, testInfo) => {
