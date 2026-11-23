@@ -134,7 +134,9 @@ OUR_VERSION_INSTRUCTIONS = (
     " Each of our_versions is the household's own steps for a recipe, offered against its lines "
     "as they are, each with the parse it has. Answer every one of its steps as you would a "
     "recipe's, under our_versions with its recipe_id and offer_id, and no lines or difficulty. "
-    "Its default_uses already leave out what the recipe's other steps use."
+    "Its context_steps are the recipe's other steps in order, with how much of each line they "
+    'use: read them to understand phrases such as "the rest of the garlic", but never answer '
+    "them. Its default_uses already leave out what the context_steps use."
 )
 # Added to the instructions when a recipe has Review Items an editor confirmed.
 KEPT_INSTRUCTIONS = (
@@ -416,6 +418,14 @@ class OurVersionLine(Strict):
     parse: OfferedParse | None
 
 
+class ContextStep(Strict):
+    """An effective step Our Version doesn't ask about, shown so the waiting ones read right."""
+
+    step_id: str
+    text: str
+    uses: list[OfferedUse]
+
+
 class PacketOurVersion(Strict):
     """A Ready recipe's Our Version steps waiting for enrich, offered against its effective lines
     with the parses they have: no line is parsed again.
@@ -427,6 +437,8 @@ class PacketOurVersion(Strict):
     version: int
     title: str
     lines: list[OurVersionLine]
+    # The other effective steps, in order, with their uses: context, never answered.
+    context_steps: list[ContextStep]
     steps: list[PacketStep]
 
 
@@ -1311,6 +1323,19 @@ def _offer_ours(recipe: Recipe, shown: Effective) -> PacketOurVersion:
     """
     waiting = [s for s in shown.steps if s.change and s.id not in shown.facts.steps]
     uses = our_default_uses(shown, waiting)
+    context: list[ContextStep] = []
+    for step in shown.steps:
+        if step.id in uses:
+            continue
+        facts = shown.facts.steps.get(step.id)
+        used = facts.uses.uses if facts and facts.uses else []
+        context.append(
+            ContextStep(
+                step_id=step.id,
+                text=step.text,
+                uses=[OfferedUse(ref=u.ref, portion=u.portion) for u in used],
+            )
+        )
     return PacketOurVersion(
         recipe_id=recipe.id,
         version=recipe.version,
@@ -1323,6 +1348,7 @@ def _offer_ours(recipe: Recipe, shown: Effective) -> PacketOurVersion:
             )
             for line in shown.ingredients
         ],
+        context_steps=context,
         steps=[_offer_step(step, uses[step.id]) for step in waiting],
     )
 

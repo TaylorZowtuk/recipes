@@ -1355,6 +1355,24 @@ def test_packet_offers_our_versions_waiting_steps_against_the_effective_lines_un
     assert "our_versions" in offered["instructions"]
 
 
+def test_the_our_version_offer_shows_the_other_effective_steps_as_context(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    half_the_beef = [{"ref": "i1", "portion": 0.5}]
+    used = StepFacts(uses=UsesFact.model_validate({**LLM, "uses": half_the_beef}))
+    recipe = our_version_pending(api_store, FACTS.model_copy(update={"steps": {"s1": used}}))
+
+    (ours,) = work_packet(through(api(editor_client)), capsys)["our_versions"]
+
+    shown = effective(recipe)
+    others = [step for step in shown.steps if step.id not in {"s2", "s5"}]
+    assert [(s["step_id"], s["text"]) for s in ours["context_steps"]] == [
+        (step.id, step.text) for step in others
+    ]
+    assert ours["context_steps"][0]["uses"] == half_the_beef
+    assert "context_steps" in work_packet(through(api(editor_client)), capsys)["instructions"]
+
+
 def unparseable(text: str) -> None:
     msg = f"parsed {text}"
     raise AssertionError(msg)
