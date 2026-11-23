@@ -45,19 +45,20 @@ Done when apply has accepted, rejected or failed every item and every rejection 
 
 1. `enrich substitutes <BASE>` > `backend/ask.json`. Read it and answer per its `instructions` into `backend/substitutes.json`.
 2. `enrich packet <BASE> --substitutes substitutes.json` > `backend/packet.json`. A bad quote prints every error and no packet: fix those quotes in `substitutes.json` and rerun until the packet prints.
-3. Read the Work Packet and answer per its `instructions` into `backend/answer.json`. For a large packet, answer a batch of recipes: those left out stay Pending for the next loop. Each `apply` can change every other recipe's offer, since a Canonical Ingredient or wording it writes becomes a candidate elsewhere, so answer each batch from the packet made after the last `apply`, never several batches from one packet.
-4. `enrich apply <BASE> answer.json --substitutes substitutes.json`. It prints each recipe as `title → status` with its Enrichment Issues indented under it; record them all for the summary.
-5. A rejected recipe printed its errors and wrote nothing. Correct its answer from the errors and apply it again; one whose offer changed needs a fresh `packet`. A recipe you can't make pass stays Pending: record why.
+3. Read the Work Packet and answer per its `instructions` into `backend/answer.json`. Besides `recipes`, the packet's `our_versions` holds each Ready recipe whose Our Version Status is Pending: its edited and added steps without Segments (`steps`, each as a recipe's step) its effective lines with the parses they have (`lines`, no candidates), and the recipe's other effective steps in order with their uses (`context_steps`, read-only context for phrases like "the rest of the garlic", never answered). Answer each under the answer's `our_versions` as `{"recipe_id", "offer_id", "steps": [...]}`, every one of its steps, each as you would a recipe's step (`keep`, `ingredients`); it has no lines or difficulty to answer. Its `default_uses` already leave out what the recipe's other steps use; a share past 1 isn't refused, the API stores what's left and flags the step. For a large packet, answer a batch of recipes: those left out stay Pending for the next loop. Each `apply` can change every other recipe's offer, since a Canonical Ingredient or wording it writes becomes a candidate elsewhere, so answer each batch from the packet made after the last `apply`, never several batches from one packet.
+4. `enrich apply <BASE> answer.json --substitutes substitutes.json`. It prints each recipe as `title → status`, and each Our Version as `title → Our Version awaiting_review`, with the Enrichment Issues it added indented under it; record them all for the summary.
+5. A rejected recipe or Our Version printed its errors and wrote nothing. Correct its answer from the errors and apply it again; one whose offer changed needs a fresh `packet`. A recipe or Our Version you can't make pass stays Pending: record why.
 6. Loop to 2 while answered batches remain.
 
-Done when every Pending recipe in the first Work Packet is written or recorded as left Pending with its reason.
+Done when every Pending recipe and Our Version in the first Work Packet is written or recorded as left Pending with its reason.
 
-To re-enrich recipes that aren't Pending, when the user asks, run the same steps with `--recipe <id>` or `--stale` on all three commands (`enrich stale <BASE>` lists the stale ones). `apply` then prints each recipe's fact changes and writes nothing: show them to the user, and only once they agree, apply again with `--write`. A recipe that changed in any way since its packet, and so since that dry run, is refused because its offer changed: make a fresh packet, answer it and dry-run it again.
+To re-enrich recipes that aren't Pending, when the user asks, run the same steps with `--recipe <id>` or `--stale` on all three commands (they re-enrich only the Original: such a packet has no `our_versions`) (`enrich stale <BASE>` lists the stale ones). `apply` then prints each recipe's fact changes and writes nothing: show them to the user, and only once they agree, apply again with `--write`. A recipe that changed in any way since its packet, and so since that dry run, is refused because its offer changed: make a fresh packet, answer it and dry-run it again.
 
 ## 5. Summarise in chat
 
 - The Fallback Chain's counts, and the URL of each Queued Ingest that now needs its page or failed.
 - Per recipe, grouped: its Enrichment Status after apply, then each of its Enrichment Issues. Recipes left Pending, each with its reason.
+- Per Our Version, likewise: its Our Version Status after apply and the Enrichment Issues apply printed under it, and those left Pending, each with its reason.
 - Note that a recipe the Fallback Chain read through the model has the extractor `llm`, so it stops at Awaiting Review even from the bulk import.
 
 ## 6. Clean up

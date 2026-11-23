@@ -124,11 +124,11 @@ Something enrichment corrected or was unsure about, and which an editor should c
 _Avoid_: Warning, error
 
 **Work Packet**:
-The JSON that a CLI hands a model to answer, checked against the packet before anything is written. Enrichment's holds, for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it, each with an id, and default uses. The answer keeps those that really are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written. The fallback chain's holds the visible text of each page that recipe-scrapers couldn't read, and its answer is the recipe on that page, which is not written unless its title, ingredient lines and steps, and any description, author, yield and Stated Times it gives, appear in that text word for word. It is printed to stdout, holds page text, and is never committed.
+The JSON that a CLI hands a model to answer, checked against the packet before anything is written. Enrichment's holds, for every Pending recipe: each ingredient line with its parse, the numbers a quantity can be read as from it, and the Canonical Ingredients and FDC foods (with their portions) it may choose among; and each step's text, the durations and temperatures code found in it, each with an id, and default uses. For every Pending Our Version it holds the steps without Segments, against the effective lines with the parses they already have, none parsed again. The answer keeps those that really are durations and temperatures, and gives each phrase in a step that names an ingredient line, with its Step Portion. The model's answer is checked against the packet, and a recipe whose answer chose anything it wasn't offered, or whose offer changed since the packet was made, is not written. The fallback chain's holds the visible text of each page that recipe-scrapers couldn't read, and its answer is the recipe on that page, which is not written unless its title, ingredient lines and steps, and any description, author, yield and Stated Times it gives, appear in that text word for word. It is printed to stdout, holds page text, and is never committed.
 _Avoid_: Prompt, batch
 
 **Step Portion**:
-The share of an ingredient line that one mention of it in a step uses, e.g. 0.5 for "half the garlic". The step shows the line's amount times it. Across all of a recipe's steps, a line's step portions add up to at most 1. It has nothing to do with an FDC food's portion, a household measure with its gram weight.
+The share of an ingredient line that one mention of it in a step uses, e.g. 0.5 for "half the garlic". The step shows the line's amount times it. Across all of a recipe's effective steps, a line's step portions add up to at most 1; enrichment of Our Version's steps stores a share past that at what's left, with an Enrichment Issue naming the other steps. It has nothing to do with an FDC food's portion, a household measure with its gram weight.
 _Avoid_: Portion (alone), share, fraction
 
 **FDC Snapshot**:
@@ -136,7 +136,7 @@ The pinned copy of USDA FoodData Central's Foundation Foods and SR Legacy kept i
 _Avoid_: Nutrition database, USDA API
 
 **Needs Review**:
-What editors still have to check, across all recipes: each recipe's Review Items left to check, counted on its card as "M to check, incl. N flagged", where N is those of the M that carry an open Enrichment Issue.
+What editors still have to check, across all recipes: each recipe's Review Items left to check, its Our Version's included, counted on its card as "M to check, incl. N flagged", where N is those of the M that carry an open Enrichment Issue.
 _Avoid_: Inbox, queue
 
 **Review Item**:
@@ -148,7 +148,7 @@ Describes an enriched fact that an editor has accepted or corrected. Confirmed f
 _Avoid_: Approved, verified
 
 **Confirm Batch**:
-The Review Items an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe Ready, undo moves it back to Awaiting Review.
+The Review Items an editor confirms in one go, with the Enrichment Issues they resolve and the Canonical Ingredients they confirm, all stamped with one id so that undo reverses exactly that batch. If the batch made the recipe, or its Our Version, Ready, undo moves it back to Awaiting Review.
 _Avoid_: Approval, transaction
 
 **Original**:
@@ -160,11 +160,11 @@ The household's own changes to a recipe's ingredients and steps, stored as a lay
 _Avoid_: Personal adjustment, variant, fork
 
 **Our Version Status**:
-Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched, or given an issue by a wording fixed elsewhere, and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
+Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched, or given an issue by a wording fixed elsewhere, and waiting for an editor to check it) or *Ready*. Saving an edited or added step makes it Pending, enrichment then makes it Awaiting Review, and confirming its last Review Item makes it Ready. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
 _Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
 
 **Effective lines**:
-A recipe's ingredient lines and steps as the household cooks them: the Original with Our Version applied. Removed lines and steps are left out, added ones sit where Our Version put them, and an unchanged line keeps the Original's facts. A recipe shows its effective lines by default, and the Original on request.
+A recipe's ingredient lines and steps as the household cooks them: the Original with Our Version applied. Removed lines and steps are left out, added ones sit where Our Version put them, and an unchanged line or step keeps the Original's facts, except that a step's Segment for a removed line shows as its text and its uses drop that line. A recipe shows its effective lines by default, and the Original on request.
 _Avoid_: Merged recipe, current version
 
 ### Ratings and organization
