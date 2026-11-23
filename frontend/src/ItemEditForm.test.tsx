@@ -3,8 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Collection, type FdcFood, type Recipe } from "./api/client";
-import { EDITOR_KEPT, normalizeWording } from "./factEdits";
-import { ItemEditForm } from "./ItemEditForm";
+import { EDITOR_KEPT, lineDraft, lineOf, normalizeWording } from "./factEdits";
+import { ItemEditForm, LineForm, StepTextForm } from "./ItemEditForm";
 import { reviewOf } from "./review";
 import {
   BUTTER,
@@ -868,5 +868,91 @@ describe("an edit form, as an editor uses it", () => {
     await click(three);
     await click(button("Save"));
     expect(saved()).toEqual([{ kind: "difficulty", prep: 2, cook: 1, cleanup: 3 }]);
+  });
+
+  const lineForm = (props: Partial<Parameters<typeof LineForm>[0]>) =>
+    act(() =>
+      root.render(
+        <LineForm
+          line={{ id: "new-1", text: "" }}
+          collection={collection}
+          disabled={false}
+          onSave={onSave}
+          onCancel={() => {}}
+          {...props}
+        />,
+      ),
+    );
+
+  it("makes a line Our Version adds pick a Canonical Ingredient, and starts it empty", async () => {
+    lineForm({ required: true, submit: "Done" });
+    expect(field("Name").value).toBe("");
+    expect(field("Amount").value).toBe("");
+    expect(choice("Keep none")).toBeUndefined();
+    type("Name", "garlic cloves");
+    await click(button("Done"));
+    expect(onSave).not.toHaveBeenCalled();
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Choose the line’s Canonical Ingredient.",
+    );
+    expect(document.activeElement).toBe(field("Find or create one"));
+    type("Find or create one", "garl");
+    await click(choice("garlic") as HTMLInputElement);
+    await settle();
+    await click(button("Done"));
+    expect(saved()).toEqual([
+      expect.objectContaining({
+        name: "garlic cloves",
+        canonical: { kind: "existing", id: KNOWN_CANONICAL },
+        fdc_id: GARLIC.fdcId,
+      }),
+    ]);
+  });
+
+  it("starts a line from where an earlier edit left it, and saves that form with the edit", async () => {
+    const line = lineOf(recipe(), "i1");
+    const start = { ...lineDraft(line), low: "3", preparation: "soft" };
+    lineForm({ line, start });
+    expect(field("Amount").value).toBe("3");
+    expect(field("Preparation").value).toBe("soft");
+    await click(button("Save"));
+    expect(onSave.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        line_id: "i1",
+        quantity: { low: 3, high: 3 },
+        preparation: "soft",
+      }),
+      expect.objectContaining({ low: "3", preparation: "soft" }),
+    ]);
+  });
+
+  it("saves a step's text, trimmed, and won't save an empty one", async () => {
+    act(() =>
+      root.render(
+        <StepTextForm
+          text="Melt the butter."
+          submit="Done"
+          disabled={false}
+          onSave={onSave}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+    const step = host.querySelector("textarea") as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(step);
+    const write = (value: string) =>
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(
+          step,
+          value,
+        );
+        step.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    write("  ");
+    await click(button("Done"));
+    expect(onSave).not.toHaveBeenCalled();
+    write(" Brown the butter. ");
+    await click(button("Done"));
+    expect(saved()).toEqual(["Brown the butter."]);
   });
 });

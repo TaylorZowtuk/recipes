@@ -1,10 +1,11 @@
-import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { adjustSummary } from "./AdjustSheet";
 import { type AdjustChoices, lineView } from "./adjust";
 import type { Recipe } from "./api/client";
 import { openCookingMode } from "./cookingMode";
 import { BackIcon, CloseIcon, ForwardIcon } from "./icons";
+import { effective, type Version } from "./ourVersion";
 import { stepNodes, TimerButton } from "./StepPieces";
 import { stepText } from "./stepText";
 import { stepTicks, useStepTicks } from "./stepTicks";
@@ -38,18 +39,21 @@ const SCREEN: Record<ScreenStatus, string> = {
 
 export type Cooking = { recipe: Recipe; choices: AdjustChoices };
 
-// The recipe page's Cook button, Resume once any of the recipe's steps has a Step tick.
+// The recipe page's Cook button, Resume once any of the steps of the `version` shown has a Step
+// tick.
 export function CookButton({
   recipe,
+  version,
   opener,
   onCook,
 }: {
   recipe: Recipe;
+  version: Version;
   opener: RefObject<HTMLButtonElement | null>;
   onCook: () => void;
 }) {
   const ticks = useStepTicks(recipe.id);
-  const { steps } = recipe.original;
+  const { steps } = effective(recipe, version).original;
   if (steps.length === 0) return null;
   return (
     <button
@@ -64,11 +68,11 @@ export function CookButton({
   );
 }
 
-// Cooking mode: the recipe full-screen, one step at a time, from the first without a Step tick.
-// Next ticks the step it leaves; Finish ticks the last, clears the recipe's ticks and closes; Back
-// and Close change no tick. It keeps the recipe and Adjust choices it opened with, whatever the page
-// under it loads, until it closes, and focus then returns to `opener`, or to `fallback` when the
-// page no longer shows it. The screen is kept on,
+// Cooking mode: the recipe full-screen, in the version its Adjust choices show, one step at a
+// time, from the first without a Step tick. Next ticks the step it leaves; Finish ticks the last,
+// clears the recipe's ticks and closes; Back and Close change no tick. It keeps the recipe and
+// Adjust choices it opened with, whatever the page under it loads, until it closes, and focus then
+// returns to `opener`, or to `fallback` when the page no longer shows it. The screen is kept on,
 // running Timers show above Back and Next, and a Timer's link to one of its steps goes there.
 export function CookingMode({
   recipe,
@@ -81,7 +85,9 @@ export function CookingMode({
   fallback: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
-  const { steps, ingredients, title } = recipe.original;
+  const version = choices.version ?? "ours";
+  const { original, facts } = useMemo(() => effective(recipe, version), [recipe, version]);
+  const { steps, ingredients, title } = original;
   const [at, setAt] = useState(() => {
     const ticked = stepTicks.ticked(
       recipe.id,
@@ -125,7 +131,7 @@ export function CookingMode({
   if (!step) return null;
   const number = at + 1;
   const last = number === steps.length;
-  const uses = recipe.facts?.steps[step.id]?.uses?.uses ?? [];
+  const uses = facts?.steps[step.id]?.uses?.uses ?? [];
   const next = () => {
     stepTicks.tick(recipe.id, step.id);
     if (!last) return setAt(at + 1);
@@ -175,7 +181,7 @@ export function CookingMode({
         {step.component && <p className="cooking-component">{step.component}</p>}
         <p className="cooking-step" aria-live="polite">
           <span className="visually-hidden">{`Step ${number} of ${steps.length}. `}</span>
-          {stepNodes(stepText(step, recipe.facts, choices), (piece, n) => (
+          {stepNodes(stepText(step, facts, choices), (piece, n) => (
             <TimerButton
               key={n}
               recipeId={recipe.id}
@@ -192,7 +198,7 @@ export function CookingMode({
             <h3 id={`${id}-uses`}>In this step</h3>
             <ul className="ingredients">
               {uses.map(({ ref, portion }) => {
-                const line = recipe.facts.ingredients[ref];
+                const line = facts.ingredients[ref];
                 const parse = line?.parse;
                 return (
                   <li key={ref}>

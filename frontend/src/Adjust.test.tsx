@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Card, Recipe } from "./api/client";
 import { RecipeScreen } from "./RecipeScreen";
-import { conversion, recipe as reviewRecipe, stamp } from "./review.fixtures";
+import { conversion, parse, recipe as reviewRecipe, stamp } from "./review.fixtures";
 
 // The recipe page's Adjust choices, tapped through in a DOM: the sheet's scale and units, an
 // ingredient's own unit, and the scale a Week Plan link starts at.
@@ -44,6 +44,7 @@ const card: Card = {
   needs_review: { open_issues: 0, unconfirmed: 0, flagged: 0 },
   recipe_version: 1,
   host: null,
+  our_version_status: null,
   schema_version: 1,
 };
 
@@ -118,8 +119,13 @@ afterEach(() => {
   shown.editor = false;
 });
 
-function open(search = "", status: Recipe["status"] = "ready", slug = "synthetic-test-beans") {
-  shown.recipe = adjustRecipe(status);
+function open(
+  search = "",
+  status: Recipe["status"] = "ready",
+  slug = "synthetic-test-beans",
+  ourVersion: Recipe["our_version"] = null,
+) {
+  shown.recipe = { ...adjustRecipe(status), our_version: ourVersion };
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -347,5 +353,96 @@ describe("a Week Plan link's scale", () => {
       host.remove();
     }
     open();
+  });
+});
+
+// Less butter (i1 at 1 tbsp), no garlic (i2), a lemon added after the butter, and the oven lower.
+const ourFacts = (name: string, quantity: number, unit: string | null) => ({
+  parse: {
+    ...parse(name, true, unit),
+    provenance: "editor" as const,
+    quantity: { low: quantity, high: quantity },
+  },
+  match: null,
+  conversion: null,
+  substitutions: null,
+});
+const OUR_VERSION: Recipe["our_version"] = {
+  ingredients: {
+    edit: { i1: { text: "1 tbsp butter", component: null } },
+    remove: ["i2"],
+    add: [{ id: "i5", after: "i1", text: "1 lemon", component: null }],
+  },
+  steps: {
+    edit: { s2: { text: "Heat the oven to 400°F.", component: null } },
+    remove: [],
+    add: [],
+  },
+  facts: {
+    ingredients: { i1: ourFacts("butter", 1, "tbsp"), i5: ourFacts("lemon", 1, null) },
+    steps: {},
+    difficulty: null,
+  },
+  note: "Less butter, and a lemon.",
+  edited_at: "2026-11-02T00:00:00Z",
+};
+const names = () =>
+  [...host.querySelectorAll(".ingredients .ingredient-name")].map((name) => name.textContent);
+const notes = () => [...host.querySelectorAll(".our-version-note")].map((note) => note.textContent);
+const tab = (name: string) =>
+  act(() =>
+    [...host.querySelectorAll<HTMLElement>('[role="tab"]')]
+      .find((t) => t.textContent?.startsWith(name))
+      ?.click(),
+  );
+
+describe("Our Version", () => {
+  it("shows by default, marking what it changed, with its note in About", () => {
+    open("", "ready", undefined, OUR_VERSION);
+    expect(names()).toEqual(["butter", "lemon", "flour"]);
+    expect(amount("butter")).toBe("1 tbsp");
+    expect(notes()).toEqual(["was 2 tbsp", "added in Our Version", "changed in Our Version"]);
+    expect(steps()).toEqual([
+      "Melt 1 tbsp butter.",
+      "Heat the oven to 400°F.changed in Our Version",
+    ]);
+    tab("About");
+    expect(host.textContent).toContain("Less butter, and a lemon.");
+  });
+
+  it("switches to the Original in the Adjust sheet, with no marks or note", () => {
+    open("", "ready", undefined, OUR_VERSION);
+    tap(/^Adjust/);
+    expect(button("Our Version").getAttribute("aria-pressed")).toBe("true");
+    tap("Original");
+    expect(names()).toEqual(["butter", "garlic", "flour"]);
+    expect(amount("butter")).toBe("2 tbsp");
+    expect(notes()).toEqual([]);
+    expect(button(/^Adjust/).textContent).toBe("Adjust · Original");
+    tab("About");
+    expect(host.textContent).not.toContain("Less butter, and a lemon.");
+  });
+
+  it("keeps the scale and units when the version changes", () => {
+    open("?scale=2", "ready", undefined, OUR_VERSION);
+    tap(/^Adjust/);
+    tap("Metric");
+    tap("Original");
+    expect(button("2×").getAttribute("aria-pressed")).toBe("true");
+    expect(button("Metric").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("offers no version choice for a recipe without Our Version", () => {
+    open();
+    tap(/^Adjust/);
+    expect(() => button("Original")).toThrow();
+  });
+
+  it("never opens an Original line's Review Item from an Our Version line", () => {
+    shown.editor = true;
+    open("", "awaiting_review", undefined, OUR_VERSION);
+    const butter = lineOf("butter");
+    expect(butter?.querySelector("button")).toBeNull();
+    expect(lineOf("flour")?.querySelector(".review-item")).not.toBeNull();
   });
 });

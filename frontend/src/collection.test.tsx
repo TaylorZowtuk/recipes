@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Card, Recipe } from "./api/client";
-import { engine, rememberRecipe, useRecipe } from "./collection";
+import { engine, reloadCollection, rememberRecipe, useRecipe } from "./collection";
 import { SCHEMA_VERSION } from "./schemaVersion";
 
 // A session whose role the test sets, telling its subscribers.
@@ -80,5 +80,28 @@ describe("signing in", () => {
     expect(requests.filter((path) => path.startsWith("/api/v/recipes/"))).toEqual(
       ids.map((id) => `/api/v/recipes/${id}/1/${SCHEMA_VERSION}`),
     );
+  });
+});
+
+describe("reloadCollection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("counts a bundle the API redirected to a newer version as reloaded", async () => {
+    vi.stubGlobal("fetch", async (path: string) => {
+      if (path === "/api/sync")
+        return Response.json({ collection_version: 20, schema_version: SCHEMA_VERSION });
+      if (path === "/api/v/collection/20") {
+        // Another device wrote between the poll and the bundle, so the API redirected to 21.
+        const response = Response.json({ collection_version: 21, cards: [] });
+        return Object.defineProperty(response, "url", {
+          value: "http://localhost/api/v/collection/21",
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    expect(await reloadCollection()).toBe(true);
+    expect((await engine.collection()).collection_version).toBe(21);
+    await engine.settled();
   });
 });

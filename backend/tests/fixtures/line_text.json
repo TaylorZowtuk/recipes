@@ -1,0 +1,40 @@
+{
+  "about": "An Our Version line's text, built from its parse, shared by the API's line_text (test_our_version.py) and the PWA's draft rows. parse holds the fields the text is built from: quantity (low and high, or null for no amount), unit, name, preparation and comment; text is the line as it reads.",
+  "cases": [
+    {
+      "name": "a can, prepared",
+      "parse": {"quantity": {"low": 2, "high": 2}, "unit": "can", "name": "diced tomatoes", "preparation": "drained", "comment": null},
+      "text": "2 can diced tomatoes, drained"
+    },
+    {
+      "name": "exactly one cup",
+      "parse": {"quantity": {"low": 1, "high": 1}, "unit": "cup", "name": "flour", "preparation": null, "comment": null},
+      "text": "1 cup flour"
+    },
+    {
+      "name": "a fraction",
+      "parse": {"quantity": {"low": 0.75, "high": 0.75}, "unit": "cup", "name": "onion", "preparation": "chopped", "comment": null},
+      "text": "¾ cup onion, chopped"
+    },
+    {
+      "name": "a range",
+      "parse": {"quantity": {"low": 2, "high": 3}, "unit": "cup", "name": "stock", "preparation": null, "comment": null},
+      "text": "2–3 cups stock"
+    },
+    {
+      "name": "no unit",
+      "parse": {"quantity": {"low": 3, "high": 3}, "unit": null, "name": "eggs", "preparation": null, "comment": null},
+      "text": "3 eggs"
+    },
+    {
+      "name": "no amount, with a comment",
+      "parse": {"quantity": null, "unit": null, "name": "salt", "preparation": null, "comment": "to taste"},
+      "text": "salt, to taste"
+    },
+    {
+      "name": "a preparation and a comment",
+      "parse": {"quantity": {"low": 0.5, "high": 0.5}, "unit": "tsp", "name": "salt", "preparation": "fine", "comment": "or to taste"},
+      "text": "½ tsp salt, fine, or to taste"
+    }
+  ]
+}

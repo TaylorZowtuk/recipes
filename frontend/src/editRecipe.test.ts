@@ -14,6 +14,7 @@ import {
   SAVED_NOT_REFRESHED,
   saveLabel,
 } from "./editRecipe";
+import { ourDraftOf, removeItem } from "./ourVersionDraft";
 
 const recipe = (fields: Partial<Recipe> = {}): Recipe =>
   ({
@@ -23,6 +24,9 @@ const recipe = (fields: Partial<Recipe> = {}): Recipe =>
     tags: ["weeknight", "rice"],
     images: [{ id: "img1", width: 800, height: 600 }],
     preview: { image_id: "img1", focal_x: 0.5, focal_y: 0.5 },
+    original: { ingredients: [{ id: "i1", text: "1 cup rice", component: null }], steps: [] },
+    facts: { ingredients: {}, steps: {}, difficulty: null },
+    our_version: null,
     ...fields,
   }) as Recipe;
 
@@ -35,8 +39,9 @@ describe("draftOf", () => {
       difficulty: { prep: 1, cook: 2, cleanup: 3 },
       tags: "weeknight, rice",
       preview: { image_id: "img1", focal_x: 0.5, focal_y: 0.5 },
+      ours: ourDraftOf(recipe()),
     });
-    expect(draftOf(recipe({ difficulty: null, tags: [], preview: null }))).toEqual({
+    expect(draftOf(recipe({ difficulty: null, tags: [], preview: null }))).toMatchObject({
       difficulty: {},
       tags: "",
       preview: null,
@@ -78,6 +83,17 @@ describe("a Suggested Difficulty", () => {
 });
 
 describe("changeCount and draftOperations", () => {
+  it("count Our Version as one change, sent after the others", () => {
+    const r = recipe();
+    const ours = removeItem(ourDraftOf(r), "ingredients", "i1");
+    const draft = edited(r, { tags: "rice", ours });
+    expect(changeCount(r, draft)).toBe(2);
+    expect(draftOperations(r, draft)?.map((operation) => operation.op)).toEqual([
+      "set_tags",
+      "set_our_version",
+    ]);
+  });
+
   it("count nothing and send nothing for an untouched draft", () => {
     const r = recipe();
     expect(changeCount(r, draftOf(r))).toBe(0);
@@ -179,6 +195,41 @@ describe("editOutcome and deleteOutcome", () => {
     });
     expect(deleteOutcome({ response: response(503) })).toEqual({ kind: "failed" });
   });
+
+  it("say what the API refused on a 422, such as an Our Version line", () => {
+    const refused = { detail: "Line i3 needs a Canonical Ingredient choice" };
+    expect(editOutcome({ error: refused, response: response(422) })).toEqual({
+      kind: "invalid",
+      message: "Line i3 needs a Canonical Ingredient choice",
+    });
+  });
+
+  it("say which line the API refused, by the id the draft gave it", () => {
+    const refused = {
+      detail: [{ msg: "Line new-1 needs an FDC food", part: "ingredients", id: "new-1" }],
+    };
+    expect(editOutcome({ error: refused, response: response(422) })).toEqual({
+      kind: "invalid",
+      message: "Line new-1 needs an FDC food",
+      at: { part: "ingredients", id: "new-1" },
+    });
+  });
+});
+
+describe("a refusal's place", () => {
+  it("is the step when the 422 names one", () => {
+    const refused = { detail: [{ msg: "Step s3 is wrong", part: "steps", id: "s3" }] };
+    const outcome = editOutcome({ error: refused, response: response(422) });
+    expect(outcome).toMatchObject({ kind: "invalid", at: { part: "steps", id: "s3" } });
+  });
+
+  it("is nowhere when the 422 names a part that isn't one", () => {
+    const refused = { detail: [{ msg: "Line i1 is wrong", part: "bogus", id: "i1" }] };
+    expect(editOutcome({ error: refused, response: response(422) })).toEqual({
+      kind: "invalid",
+      message: "Line i1 is wrong",
+    });
+  });
 });
 
 describe("editing", () => {
@@ -260,6 +311,48 @@ describe("editing", () => {
     });
     expect(failed.draft).toEqual(open.draft);
     expect(failed.problem).toBe("Couldn’t reach Plateful. Try again.");
+  });
+
+  it("keeps the draft and shows what the API refused", () => {
+    const refused = editing(open, {
+      type: "settled",
+      outcome: { kind: "invalid", message: "Line i3 needs a Canonical Ingredient choice" },
+      refreshed: true,
+    });
+    expect(refused.draft).toEqual(open.draft);
+    expect(refused.problem).toBe("Line i3 needs a Canonical Ingredient choice");
+  });
+
+  it("keeps where the refused line is until another problem replaces it", () => {
+    const at = { part: "ingredients" as const, id: "i3" };
+    const refused = editing(open, {
+      type: "settled",
+      outcome: { kind: "invalid", message: "Line i3 needs an FDC food", at },
+      refreshed: true,
+    });
+    expect(refused.at).toEqual(at);
+    const failed = editing(refused, {
+      type: "settled",
+      outcome: { kind: "failed" },
+      refreshed: true,
+    });
+    expect(failed.at).toBeUndefined();
+  });
+
+  it("forgets where the refused line is once a whole Difficulty or a sign-in is asked for", () => {
+    const at = { part: "ingredients" as const, id: "i3" };
+    const refused = editing(open, {
+      type: "settled",
+      outcome: { kind: "invalid", message: "Line i3 needs an FDC food", at },
+      refreshed: true,
+    });
+    expect(editing(refused, { type: "incomplete" }).at).toBeUndefined();
+    const signedOut = editing(refused, {
+      type: "settled",
+      outcome: { kind: "not-an-editor" },
+      refreshed: true,
+    });
+    expect(signedOut.at).toBeUndefined();
   });
 
   it("clears an old notice when Edit opens again", () => {

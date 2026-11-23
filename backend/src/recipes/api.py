@@ -20,12 +20,13 @@ from pydantic import (
     model_validator,
 )
 
-from recipes import fdc
+from recipes import fdc, our_version
 from recipes.auth import Auth, CurrentEditor, require_editor
 from recipes.auth import router as auth_router
 from recipes.backup import BackupBucket, BackupLinks
 from recipes.edits import (
     CONFIRMED_BY,
+    Edited,
     FactEdit,
     confirm_matches,
     edit_recipe,
@@ -54,6 +55,7 @@ from recipes.models import (
     MAX_LINES,
     MAX_RECIPE_BYTES,
     MAX_SITE_NOTE,
+    OUR_VERSION,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
@@ -103,6 +105,7 @@ from recipes.models import (
     kept_items,
     new_ulid,
     normalize_wording,
+    resolve,
     settled,
     site_host,
     written_as,
@@ -111,6 +114,7 @@ from recipes.models import (
     unit_kind as kind_of,
 )
 from recipes.offers import find_offers
+from recipes.our_version import OurVersionDraft, Refused
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -264,7 +268,22 @@ class SetPreview(BaseModel):
     preview: Preview | None
 
 
-Operation = Annotated[SetTags | SetDifficulty | SetPreview, Field(discriminator="op")]
+class SetOurVersion(BaseModel):
+    """Save Our Version as the editor wants it, whole, in place of any the recipe has."""
+
+    op: Literal["set_our_version"]
+    our_version: OurVersionDraft
+
+
+class RemoveOurVersion(BaseModel):
+    op: Literal["remove_our_version"]
+
+
+Operation = Annotated[
+    SetTags | SetDifficulty | SetPreview | SetOurVersion | RemoveOurVersion,
+    Field(discriminator="op"),
+]
+OUR_VERSION_OPS = {"set_our_version", "remove_our_version"}
 
 
 # A version DynamoDB can compare: it rejects numbers of more than 38 digits.
@@ -282,6 +301,9 @@ class RecipeEdit(BaseModel):
         ops = [operation.op for operation in self.operations]
         if len(set(ops)) < len(ops):
             msg = "Each operation is in an edit once"
+            raise ValueError(msg)
+        if set(ops) >= OUR_VERSION_OPS:
+            msg = "An edit saves Our Version or removes it, not both"
             raise ValueError(msg)
         return self
 
@@ -904,7 +926,8 @@ def put_enrichment(
 
 def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
     """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
-    (a Pending recipe has none), refused if the facts don't fit together.
+    (a Pending recipe has none), refused if the facts don't fit together. Our Version's issues
+    are its own, and stay.
     """
     new, stored = _filled(body, snapshot), recipe.facts
     kept = kept_items(stored)
@@ -914,7 +937,13 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
         difficulty=stored.difficulty if "difficulty" in kept else new.difficulty,
     )
     issues = [
-        *(i for i in recipe.issues if i.status == "resolved" or item_of(i.fact_id) in kept),
+        *(
+            i
+            for i in recipe.issues
+            if i.status == "resolved"
+            or i.fact_id.startswith(OUR_VERSION)
+            or item_of(i.fact_id) in kept
+        ),
         *(i for i in body.issues if item_of(i.fact_id) not in kept),
     ]
     _check_together(facts)
@@ -1020,17 +1049,42 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
     responses={
         403: DUPLICATE[403],
         **NO_SUCH_RECIPE,
-        409: {"description": "The recipe changed since the editor read it"},
-        422: {"description": "Not a valid edit, or the preview isn't one of the recipe's images"},
+        409: {
+            "description": "The recipe, or a Canonical Ingredient or wording Our Version "
+            "confirms, changed since the editor read it, or the recipe is Pending and can't have "
+            "Our Version yet"
+        },
+        422: {
+            "model": Refused,
+            "description": "Not a valid edit, the preview isn't one of the recipe's images, Our "
+            "Version edits or removes a line or step the Original lacks, both edits and removes "
+            "one, adds one after a line or step it doesn't have or with an id already used, or "
+            "has a line its Review line edit would refuse, naming it by the draft's id, or the "
+            "edited recipe is too big to store, or its lines write more Canonical Ingredients "
+            "and wordings than one write holds",
+        },
     },
 )
-def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: StoreDep) -> Recipe:
-    """Apply an editor's Tags, Difficulty and Preview Photo changes to the recipe at
+def patch_recipe(
+    recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: StoreDep, snapshot: SnapshotDep
+) -> Recipe:
+    """Apply an editor's Tags, Difficulty, Preview Photo and Our Version changes to the recipe at
     `body.version`, with its card, in one write. A recipe Awaiting Review with nothing left to
     review is Ready.
+
+    Our Version is saved whole: its edited and added lines take the editor's facts, Confirmed with
+    provenance `editor`, built as a Review line edit builds them, with text built from them; a line
+    saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
+    its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
+    Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
+    Our Version Status Pending; a new Our Version without one is Ready. Removing Our Version
+    settles its open issues. The Enrichment Status stays.
     """
     recipe = _recipe(store, recipe_id)
+    if {operation.op for operation in body.operations} & OUR_VERSION_OPS:
+        _check_our_version(recipe, body.version)
     changes: dict[str, object] = {"version": body.version}
+    saved = None
     for operation in body.operations:
         match operation:
             case SetTags():
@@ -1042,9 +1096,60 @@ def patch_recipe(recipe_id: Annotated[Ulid, Path()], body: RecipeEdit, store: St
                 if preview and preview.image_id not in {image.id for image in recipe.images}:
                     raise HTTPException(422, "The preview shows one of the recipe's images")
                 changes["preview"] = preview
+            case SetOurVersion():
+                now = datetime.now(UTC)
+                saved = our_version.save(store, recipe, operation.our_version, snapshot, now)
+                changes |= {
+                    "our_version": saved.recipe.our_version,
+                    "our_version_status": saved.recipe.our_version_status,
+                    "our_version_last_line": saved.recipe.our_version_last_line,
+                    "our_version_last_step": saved.recipe.our_version_last_step,
+                    "facts": saved.recipe.facts,
+                    "issues": saved.recipe.issues,
+                }
+            case RemoveOurVersion():
+                # Its open issues go with it, settled.
+                issues = resolve(recipe, lambda fact_id: fact_id.startswith(OUR_VERSION))
+                changes |= {"our_version": None, "our_version_status": None, "issues": issues}
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
-    return store.update_recipe(settled(recipe.model_copy(update=changes)))
+    edited = settled(recipe.model_copy(update=changes))
+    if len(edited.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
+    return _save_edit(store, edited, saved.edits if saved else [])
+
+
+def _check_our_version(recipe: Recipe, version: int) -> None:
+    """A 409 for Our Version on a Pending recipe, or on a version the recipe has moved past, before
+    its lines reach anything.
+    """
+    if recipe.status == "pending":
+        raise HTTPException(409, "A Pending recipe has no Our Version until it's enriched")
+    if recipe.version != version:
+        raise VersionConflict(recipe.id)
+
+
+def _save_edit(store: Store, recipe: Recipe, edits: list[Edited]) -> Recipe:
+    """Save the edited recipe with the Canonical Ingredients and wordings its Our Version lines
+    confirm, create or fix, then match the other recipes with each fixed wording. A 422 for more
+    of them than one write holds.
+    """
+    fixed = {wording.wording: wording for edit in edits for wording in edit.fixed}
+    learned = {w.wording: w for edit in edits for w in edit.learned if w.wording not in fixed}
+    confirmed = {c.id: c for edit in edits for c in edit.confirmed}
+    created = [canonical for edit in edits for canonical in edit.created]
+    if len(fixed) + len(learned) + len(confirmed) + len(created) > MAX_LEARNED:
+        raise HTTPException(422, "Save fewer changed lines at once")
+    written = store.review_recipe(
+        recipe,
+        list(confirmed.values()),
+        list(learned.values()),
+        created=created,
+        overwrite_wordings=list(fixed.values()),
+    )
+    for edit in edits:
+        share_all(store, edit)
+    return written
 
 
 @router.delete(

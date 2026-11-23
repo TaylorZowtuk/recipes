@@ -24,9 +24,12 @@ import {
   foodOf,
   foodQuery,
   type LineDraft,
+  type LineEdit,
+  type LineOf,
   lineDraft,
   lineEdit,
   lineName,
+  lineOf,
   needsFood,
   pickKey,
   portionMisfit,
@@ -83,7 +86,7 @@ export function ItemEditForm(props: FormProps) {
     case "substitutions":
       return <SubstitutionsForm lineId={owner} {...props} />;
     case "line":
-      return <LineForm lineId={owner} {...props} />;
+      return <LineForm line={lineOf(props.recipe, owner)} {...props} />;
     case "step":
       return <StepForm stepId={owner} {...props} />;
   }
@@ -94,11 +97,11 @@ type Problem = { problem: string; field?: string };
 // Why the last Save didn't save, by the id of the text that says so, and the field at fault.
 const ProblemOf = createContext<{ id: string; field?: string } | null>(null);
 
-function useSave(onSave: SaveEdit) {
+function useSave<E>(onSave: (edit: E) => Promise<string | null>) {
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saving, setSaving] = useState(false);
   const id = useId();
-  const save = async (built: Built) => {
+  const save = async (built: Built<E>) => {
     if ("problem" in built) return setProblem(built);
     setProblem(null);
     setSaving(true);
@@ -130,22 +133,27 @@ function Note({ id, note }: { id: string; note: ReactNode }) {
 
 // The form, its first field focused as it opens, with Cancel and Save pinned at the sheet's foot,
 // and above them any offline or paused note and why the last Save didn't save.
-function EditForm({
+function EditForm<E>({
   build,
   onSave,
   onCancel,
   disabled,
   note,
+  submit = "Save",
   children,
 }: {
-  build: () => Built;
+  build: () => Built<E>;
+  onSave: (edit: E) => Promise<string | null>;
+  submit?: string;
   children: ReactNode;
-} & Pick<FormProps, "onSave" | "onCancel" | "disabled" | "note">) {
+} & Pick<FormProps, "onCancel" | "disabled" | "note">) {
   const form = useRef<HTMLFormElement>(null);
   const { problem, shown, saving, save } = useSave(onSave);
   const noteId = useId();
   useEffect(() => {
-    form.current?.querySelector<HTMLElement>("input")?.focus();
+    // The form opens at the sheet's top, wherever what it replaced was scrolled to.
+    form.current?.closest("dialog")?.scrollTo(0, 0);
+    form.current?.querySelector<HTMLElement>("input, textarea")?.focus();
   }, []);
   useSheetFoot(form);
   return (
@@ -172,7 +180,7 @@ function EditForm({
             disabled={disabled || saving}
             aria-describedby={note ? noteId : undefined}
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Saving…" : submit}
           </button>
         </div>
       </form>
@@ -284,20 +292,47 @@ function Choice({
   );
 }
 
-function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId: string }) {
-  const [draft, setDraft] = useState(() => lineDraft(recipe, lineId));
+type LineFormProps = Pick<FormProps, "collection" | "disabled" | "note" | "onCancel"> & {
+  line: LineOf;
+  // Where the form starts, else at the line's own fields.
+  start?: LineDraft;
+  // Whether the line must be given a Canonical Ingredient, as a line Our Version adds must.
+  required?: boolean;
+  submit?: string;
+  onSave: (edit: LineEdit, draft: LineDraft) => Promise<string | null>;
+};
+
+// A line's edit form: its amount, unit, name and preparation, Canonical Ingredient, FDC food,
+// portion and weight. A Review line edit saves it, and so does an Our Version line.
+export function LineForm({
+  line,
+  start,
+  required = false,
+  collection,
+  onSave,
+  ...props
+}: LineFormProps) {
+  const [draft, setDraft] = useState(() => start ?? lineDraft(line));
   const set = (patch: Partial<LineDraft>) => setDraft((was) => ({ ...was, ...patch }));
   const weight = useId();
   const amountHint = useId();
   // What saving sends, which picks a Canonical Ingredient once the name's wording changed.
-  const saved = withWording(recipe, lineId, draft, collection);
-  const pickedFor = pickKey(recipe, lineId, saved.canonical);
-  const parse = recipe.facts.ingredients[lineId]?.parse;
+  const saved = withWording(line, draft, collection);
+  const pickedFor = pickKey(line, saved.canonical);
+  const parse = line.facts?.parse;
   const unit = draft.unit.trim() || null;
   // The unit's kind as the parser read it, while the unit is as it read it.
   const unitKind = parse && parse.unit === unit ? parse.unit_kind : null;
   return (
-    <EditForm build={() => lineEdit(recipe, lineId, saved)} {...props}>
+    <EditForm
+      build={() =>
+        required && saved.canonical.kind === "keep"
+          ? { problem: "Choose the line’s Canonical Ingredient.", field: CANONICAL_SEARCH }
+          : lineEdit(line, saved)
+      }
+      onSave={(edit) => onSave(edit, draft)}
+      {...props}
+    >
       <fieldset className="sheet-section">
         <legend>Line</legend>
         <div className="edit-pair">
@@ -328,29 +363,29 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
         />
       </fieldset>
       <CanonicalPicker
-        recipe={recipe}
-        lineId={lineId}
+        line={line}
         collection={collection}
         pick={saved.canonical}
+        required={required}
         reach={canonicalNote(saved, collection)}
-        renamed={renamed(recipe, lineId, draft.name)}
+        renamed={renamed(line, draft.name)}
         onPick={(canonical) => set({ canonical })}
       />
-      {needsFood(recipe, lineId, saved.canonical) && (
+      {needsFood(line, saved.canonical) && (
         <FoodPicker
           // A new Canonical Ingredient pick starts the food's search afresh.
           key={pickedFor}
           of="line"
-          current={lineDraft(recipe, lineId).food}
-          food={foodOf(recipe, lineId, saved)}
-          startQuery={foodQuery(recipe, lineId, saved.canonical, collection)}
-          defaultFrom={defaultFrom(recipe, lineId, saved.canonical)}
+          current={lineDraft(line).food}
+          food={foodOf(line, saved)}
+          startQuery={foodQuery(line, saved.canonical, collection)}
+          defaultFrom={defaultFrom(line, saved.canonical)}
           unit={unit}
           unitKind={unitKind}
           hasAmount={draft.low.trim() !== ""}
           onPick={(food) => set({ food, foodFor: pickedFor })}
         >
-          {canChooseWeight(recipe, lineId, saved) && (
+          {canChooseWeight(line, saved) && (
             <fieldset className="sheet-section">
               <legend>Weight</legend>
               <div className="choices">
@@ -377,34 +412,35 @@ function LineForm({ lineId, recipe, collection, ...props }: FormProps & { lineId
   );
 }
 
+const CANONICAL_SEARCH = "Find or create one";
 const SHOWN_MATCHES = 6;
 
 // Keep the line's Canonical Ingredient, pick it again, pick another found by name, or create one
 // from the search, and under the choices, what the pick reaches. Picking it again shares it with
 // every line worded like this one, which retries the recipes an earlier save couldn't update. A
-// renamed line can't keep it, but may pick it again.
+// renamed line can't keep it, but may pick it again, and a `required` one has none to keep.
 function CanonicalPicker({
-  recipe,
-  lineId,
+  line,
   collection,
   pick,
   reach,
   renamed,
+  required,
   onPick,
 }: {
-  recipe: Recipe;
-  lineId: string;
+  line: LineOf;
   collection: Kitchen;
   pick: CanonicalPick;
   reach: string | null;
   renamed: boolean;
+  required: boolean;
   onPick: (pick: CanonicalPick) => void;
 }) {
   const group = useId();
   const categories = useId();
   const [query, setQuery] = useState("");
   const all = collection.canonical_ingredients;
-  const currentId = recipe.facts.ingredients[lineId]?.match?.canonical_id;
+  const currentId = line.facts?.match?.canonical_id;
   const current = all.find((c) => c.id === currentId);
   const q = query.trim();
   const found = q
@@ -421,18 +457,20 @@ function CanonicalPicker({
     <fieldset className="sheet-section">
       <legend>Canonical Ingredient</legend>
       <Field
-        label="Find or create one"
+        label={CANONICAL_SEARCH}
         hint="Search the Canonical Ingredients by name."
         value={query}
         onChange={setQuery}
       />
-      {renamed && (
+      {(renamed || required) && (
         <p className="field-hint item-edit-found">
-          The name’s wording changed, so choose its Canonical Ingredient.
+          {renamed
+            ? "The name’s wording changed, so choose its Canonical Ingredient."
+            : "Choose the line’s Canonical Ingredient."}
         </p>
       )}
       <div className="choices">
-        {!renamed && (
+        {!renamed && !required && (
           <Choice
             group={group}
             checked={pick.kind === "keep"}
@@ -796,6 +834,39 @@ function StepForm({ stepId, recipe, ...props }: FormProps & { stepId: string }) 
           </fieldset>
         );
       })}
+    </EditForm>
+  );
+}
+
+// A step's text, as Our Version edits or adds it: the step waits for enrich to segment it.
+export function StepTextForm({
+  text: start,
+  onSave,
+  ...props
+}: Pick<FormProps, "disabled" | "note" | "onCancel"> & {
+  text: string;
+  submit?: string;
+  onSave: (text: string) => Promise<string | null>;
+}) {
+  const [text, setText] = useState(start);
+  const id = useId();
+  return (
+    <EditForm
+      build={() => (text.trim() ? { edit: text.trim() } : { problem: "Write the step." })}
+      onSave={onSave}
+      {...props}
+    >
+      <div className="edit-field">
+        <label htmlFor={id}>Step</label>
+        <textarea
+          id={id}
+          className="text-input"
+          rows={4}
+          maxLength={2000}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+      </div>
     </EditForm>
   );
 }
