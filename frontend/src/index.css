@@ -2502,6 +2502,12 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 .timer-step,
 .timer-countdown {
   display: block;
+}
+
+/* The countdown is what a Timer is for: it wraps when the controls leave it little room, where the
+   title and step are cut short. */
+.timer-title,
+.timer-step {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2532,6 +2538,12 @@ body:has(.tab-panel:not([hidden]) .review-bar) .toast-region {
 
 .timer-add {
   font-weight: 700;
+}
+
+/* −1 with a minute or less to go: greyed out, as an unavailable button is. */
+.timer-add[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 @media (min-width: 768px) {

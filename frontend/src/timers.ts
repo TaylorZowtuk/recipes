@@ -29,6 +29,7 @@ export type TimerView = TimerStart & {
   paused: boolean;
   countdown: string;
   named: string;
+  canTakeMinute: boolean;
 };
 
 // The thresholds are wall-clock times, so a throttled page catches up on its next tick. A single
@@ -78,6 +79,7 @@ function viewAt(timer: Timer, now: number): TimerView {
     paused: pausedAt !== null,
     countdown: countdownAt(timer, now),
     named: describeTimer(timer),
+    canTakeMinute: canTakeMinuteFrom(timer, now),
   };
 }
 
@@ -92,6 +94,24 @@ function addMinuteTo(timer: Timer, now: number): Timer {
     ...timer,
     alarmAt: alarmAt + MINUTE_MS,
     chimeAt: chimeAhead ? chimeAt + MINUTE_MS : chimeAt,
+  };
+}
+
+// A minute can come off only while the alarm is more than a minute away, paused or not.
+function canTakeMinuteFrom(timer: Timer, now: number): boolean {
+  return timer.alarmAt - (timer.pausedAt ?? now) > MINUTE_MS;
+}
+
+// A minute less on each threshold still ahead. A chime that goes into the past sounds at once, as
+// it would after a gap in ticks.
+function takeMinuteFrom(timer: Timer, now: number): Timer {
+  if (!canTakeMinuteFrom(timer, now)) return timer;
+  const { chimeAt, alarmAt } = timer;
+  const chimeAhead = phaseAt(timer, now) === "counting" && chimeAt !== null;
+  return {
+    ...timer,
+    alarmAt: alarmAt - MINUTE_MS,
+    chimeAt: chimeAhead ? chimeAt - MINUTE_MS : chimeAt,
   };
 }
 
@@ -209,6 +229,7 @@ export function createTimerStore(
       ),
     resume: (id: string) => change(id, resumed),
     addMinute: (id: string) => change(id, addMinuteTo),
+    takeMinute: (id: string) => change(id, takeMinuteFrom),
     cancel(id: string) {
       sound.unlock();
       timers = timers.filter((timer) => timer.id !== id);

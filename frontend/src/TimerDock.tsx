@@ -86,21 +86,40 @@ function reveal(row: HTMLElement | null) {
 }
 
 function TimerRow({ timer }: { timer: TimerView }) {
-  const { id, recipeId, recipeTitle, stepId, stepNumber, written, named, phase, paused } = timer;
+  const {
+    id,
+    recipeId,
+    recipeTitle,
+    stepId,
+    stepNumber,
+    written,
+    named,
+    phase,
+    paused,
+    canTakeMinute,
+  } = timer;
   const alarming = phase === "alarming";
   const row = useRef<HTMLLIElement>(null);
   const addMinute = useRef<HTMLButtonElement>(null);
-  const pauseFocused = useRef(false);
+  const goneFocused = useRef(false);
+  const holdFocus = {
+    onFocus: () => {
+      goneFocused.current = true;
+    },
+    onBlur: () => {
+      goneFocused.current = false;
+    },
+  };
 
   useLayoutEffect(() => reveal(row.current), []);
 
-  // Pause goes when the alarm starts. React sees no blur from a removed control, so the flag still
-  // holds, and focus goes on to +1 minute in place of dropping to the page.
+  // Pause and −1 go when the alarm starts. React sees no blur from a removed control, so the flag
+  // still holds, and focus goes on to +1 minute in place of dropping to the page.
   useLayoutEffect(() => {
     if (!alarming) return;
     reveal(row.current);
-    if (pauseFocused.current) addMinute.current?.focus();
-    pauseFocused.current = false;
+    if (goneFocused.current) addMinute.current?.focus();
+    goneFocused.current = false;
   }, [alarming]);
 
   return (
@@ -127,14 +146,25 @@ function TimerRow({ timer }: { timer: TimerView }) {
           className="icon-button"
           aria-label={`${paused ? "Resume" : "Pause"} ${named}`}
           onClick={() => (paused ? timers.resume(id) : timers.pause(id))}
-          onFocus={() => {
-            pauseFocused.current = true;
-          }}
-          onBlur={() => {
-            pauseFocused.current = false;
-          }}
+          {...holdFocus}
         >
           {paused ? <PlayIcon /> : <PauseIcon />}
+        </button>
+      )}
+      {/* With a minute or less to go −1 does nothing, but stays focusable, so focus isn't lost as
+          the countdown crosses the minute. */}
+      {!alarming && (
+        <button
+          type="button"
+          className="icon-button timer-add"
+          aria-label={`−1 minute on ${named}`}
+          aria-disabled={!canTakeMinute || undefined}
+          onClick={() => {
+            if (canTakeMinute) timers.takeMinute(id);
+          }}
+          {...holdFocus}
+        >
+          −1
         </button>
       )}
       <button

@@ -153,6 +153,57 @@ test("two durations in one step run as separate timers, each with its own contro
   await expect(row(page)).toContainText(/Done in (8:\d\d|9:00)/);
 });
 
+test("−1 takes a minute off a running timer, until a minute or less is left", async ({ page }) => {
+  await startRange(page);
+  // Four controls still fit beside the timer's text at a phone's width.
+  await expect(dock(page).getByRole("button", { name: /^Cancel/ })).toBeInViewport({ ratio: 1 });
+  await page.clock.fastForward("00:30");
+  await expect(row(page)).toContainText(/Check in 7:[23]\d/);
+  const takeMinute = dock(page).getByRole("button", { name: /^−1 minute on/ });
+  await takeMinute.click();
+  await expect(row(page)).toContainText(/Check in 6:[23]\d/);
+
+  // The alarm is now 9 minutes from the start: crossing its last minute greys −1 out on its own.
+  await page.clock.fastForward("08:00");
+  await expect(row(page)).toContainText(/Done in 0:[23]\d/);
+  await expect(takeMinute).toHaveAttribute("aria-disabled", "true");
+  const left = await row(page).textContent();
+  await takeMinute.dispatchEvent("click");
+  await expect(takeMinute).toHaveAttribute("aria-disabled", "true");
+  expect(await row(page).textContent()).toBe(left);
+});
+
+test("the countdown shows whole beside four controls on a 320px screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await startRange(page);
+  await page.clock.fastForward("09:00");
+  const countdown = row(page).locator(".timer-countdown");
+  const whole = () => countdown.evaluate((element) => element.scrollWidth <= element.clientWidth);
+  await expect(countdown).toHaveText("Done in 1:00");
+  expect(await whole()).toBe(true);
+  await dock(page)
+    .getByRole("button", { name: /^Pause/ })
+    .click();
+  await expect(countdown).toHaveText("Paused · Done in 1:00");
+  expect(await whole()).toBe(true);
+  await expect(dock(page).getByRole("button", { name: /^Cancel/ })).toBeInViewport({ ratio: 1 });
+});
+
+test("focus moves from −1 to +1 minute when the alarm takes −1 away", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/recipes/01K7SEED000000000000000007/garlic-butter-green-beans");
+  await page.getByRole("tab", { name: "Steps" }).click();
+  await page.getByRole("button", { name: "Start a timer for 1 minute" }).click();
+  await dock(page)
+    .getByRole("button", { name: /^−1 minute on/ })
+    .focus();
+
+  await page.clock.fastForward("01:00");
+  await expect(row(page)).toHaveClass(/timer-alarming/);
+  await expect(dock(page).getByRole("button", { name: /^−1 minute on/ })).toHaveCount(0);
+  await expect(dock(page).getByRole("button", { name: /^\+1 minute on/ })).toBeFocused();
+});
+
 test("focus moves from Pause to +1 minute when the alarm takes Pause away", async ({ page }) => {
   await page.clock.install();
   await page.goto("/recipes/01K7SEED000000000000000007/garlic-butter-green-beans");
