@@ -25,7 +25,8 @@ An installable, offline-capable PWA for one household's recipe collection: brows
 | `make browser-stop` | Remove the watched browser's container and network. `make clean` runs it too |
 | `make shell` | A shell in the toolchain container, with dependencies installed |
 | `make enrich ARGS='…'`, `make fallback ARGS='…'`, `make backup ARGS='…'` | Run the enrich, fallback or backup CLI with `ARGS` as its arguments, without a TTY, so stdin and stdout are only the CLI's: `make enrich ARGS='substitutes http://api:8787' > backend/ask.json`, or `make backup ARGS='pull <stack URL> --to backups'` for the monthly `backup pull` into the gitignored `backend/backups/`. File arguments are relative to `backend/`, a host redirect relative to the repo root. `PLATEFUL_SERVICE_TOKEN` passes to these three targets only, when exported. `http://api:8787` is `make dev`'s API when it runs in the same worktree |
-| `make clean` | Remove this worktree's containers, volumes and image. Run it before deleting a worktree |
+| `make clean` | Remove this worktree's containers, volumes, networks and images. Run it before deleting a worktree |
+| `make prune` | Remove the containers, volumes, networks and images of every worktree that no longer exists (one deleted without `make clean`). A worktree's project with a running container is left alone, and so is the shared tool cache |
 
 Prerequisites: Docker with Compose v2, git, GNU make 4 or later (on macOS, `brew install make` and run `gmake`) and uv. Nothing else goes on the host: every command runs in the toolchain container ([`docker/Dockerfile`](docker/Dockerfile), [`compose.yaml`](compose.yaml)), and CI runs the same `make` commands. The pre-commit hook runs gitleaks from the same image, so commits need Docker running, and the first commit in a fresh worktree waits for the image to build.
 

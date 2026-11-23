@@ -7,7 +7,7 @@ SHELL := bash
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
 	kill-switch-reset backup-snapshot dev browser browser-run browser-stop shell enrich fallback backup \
-	clean gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
+	clean prune gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
@@ -22,10 +22,10 @@ ifndef IN_CONTAINER
 # The commands share the dependency volumes, so they run one at a time.
 .NOTPARALLEL:
 
-# One Compose project per worktree, so worktrees never share containers, volumes or ports.
-# The worktree's name comes first so `docker volume ls` shows whose volumes are whose.
+# One Compose project per worktree (scripts/project-name.sh), so worktrees never share containers,
+# volumes or ports.
 top := $(shell git rev-parse --show-toplevel)
-export COMPOSE_PROJECT_NAME := recipes-$(shell basename "$(top)" | tr A-Z a-z | tr -c 'a-z0-9\n' - | cut -c1-30)-$(shell printf %s "$(top)" | git hash-object --stdin | cut -c1-7)
+export COMPOSE_PROJECT_NAME := $(shell scripts/project-name.sh "$(top)")
 export NODE_VERSION := $(patsubst v%,%,$(file < .nvmrc))
 # The image's Playwright and browsers follow the version the lockfile resolves.
 export PLAYWRIGHT_VERSION := $(shell sed -n "s|^  '@playwright/test@\([^']*\)':$$|\1|p" frontend/pnpm-lock.yaml | sort -u)
@@ -133,9 +133,14 @@ enrich fallback backup:
 		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$@ "$$@"' \
 		bash $$args
 
-clean: ## Remove this worktree's containers, volumes and image (run before deleting a worktree)
+clean: ## Remove this worktree's containers, volumes, networks and images (run before deleting a worktree)
 	scripts/browser.sh stop
 	$(COMPOSE) down --volumes --remove-orphans --rmi all
+	@# The watched browser's image is behind a Compose profile, which `down` doesn't see.
+	docker image rm --force "$$COMPOSE_PROJECT_NAME-browser-image" >/dev/null 2>&1 || true
+
+prune: ## Remove the containers, volumes, networks and images of worktrees that no longer exist
+	scripts/prune.sh
 
 gitleaks: RUN_FLAGS := -T
 gitleaks: # The pre-commit hook: scan the diff on stdin for secrets
