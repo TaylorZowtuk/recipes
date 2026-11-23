@@ -63,12 +63,35 @@
       "flagged": 2
     },
     {
-      "name": "an open issue on an Our Version line is left out, until Our Version has Review Items",
+      "name": "an open issue on an Our Version line is an Our Version Review Item",
       "facts": { "i1.match": false },
       "editor_difficulty": false,
       "open_issues": ["i1.match", "our_version.i1.match", "our_version.i5.parse"],
-      "items": { "i1": ["i1.match"] },
-      "unconfirmed": 1,
+      "items": {
+        "i1": ["i1.match"],
+        "our_version.i1": ["our_version.i1.match"],
+        "our_version.i5": ["our_version.i5.parse"]
+      },
+      "unconfirmed": 3,
+      "flagged": 3
+    },
+    {
+      "name": "Our Version's steps are its own Review Items, beside the Original's",
+      "facts": {
+        "s2.segments": true,
+        "our_version.s2.segments": false,
+        "our_version.s2.uses": false,
+        "our_version.s4.segments": true
+      },
+      "editor_difficulty": false,
+      "open_issues": ["our_version.s3.uses"],
+      "items": {
+        "s2": ["s2.segments"],
+        "our_version.s2": ["our_version.s2.segments", "our_version.s2.uses"],
+        "our_version.s4": ["our_version.s4.segments"],
+        "our_version.s3": ["our_version.s3.uses"]
+      },
+      "unconfirmed": 2,
       "flagged": 1
     }
   ]

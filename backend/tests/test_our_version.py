@@ -290,6 +290,10 @@ def with_ours(  # noqa: PLR0913 - each is a way the tests vary the stew
     facts = beef_line().ingredients["i1"].model_copy(deep=True)
     assert facts.parse is not None
     facts.parse.preparation, facts.parse.unit = preparation, unit
+    # An Our Version line's facts are the editor's, Confirmed.
+    for fact in (facts.parse, facts.match, facts.conversion):
+        assert fact is not None
+        fact.confirmed, fact.confirmed_by = True, "editor"
     ours = OurVersion(
         ingredients=OurLines(add=[AddedLine(id="i10", after="i1", text="1 stewing beef")]),
         facts=RecipeFacts(ingredients={"i10": facts}),
@@ -390,7 +394,12 @@ def test_an_our_version_line_prepared_another_way_is_asked_for_its_food(
     [issue] = changed.issues
     assert (issue.fact_id, issue.status) == ("our_version.i10.match", "open")
     assert (changed.status, changed.our_version_status) == ("ready", after)
-    assert card(api_store, sharing.id)["needs_review"] == needs
+    # The ask is an Our Version Review Item, beside the Original's.
+    assert card(api_store, sharing.id)["needs_review"] == {
+        "open_issues": needs["open_issues"] + 1,
+        "unconfirmed": needs["unconfirmed"] + 1,
+        "flagged": needs["flagged"] + 1,
+    }
 
 
 def test_a_review_pick_on_an_original_line_reaches_the_our_version_line_with_its_id(

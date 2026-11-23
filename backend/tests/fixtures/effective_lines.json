@@ -1,0 +1,1183 @@
+{
+  "cases": [
+    {
+      "name": "without Our Version, the Original's lines and steps with their facts",
+      "recipe": {
+        "original": {
+          "ingredients": [
+            {
+              "id": "i1",
+              "component": null,
+              "text": "2 cloves garlic"
+            },
+            {
+              "id": "i2",
+              "component": null,
+              "text": "1 onion"
+            },
+            {
+              "id": "i3",
+              "component": null,
+              "text": "1 tbsp oil"
+            }
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "component": null,
+              "text": "Chop the onion and garlic."
+            },
+            {
+              "id": "s2",
+              "component": null,
+              "text": "Fry the onion in the oil."
+            },
+            {
+              "id": "s3",
+              "component": null,
+              "text": "Serve."
+            }
+          ]
+        },
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 2,
+                  "high": 2
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i3": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tbsp",
+                "unit_kind": "volume",
+                "name": "oil",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s2": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Fry the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i2",
+                    "written": "onion",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": " in the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i3",
+                    "written": "oil",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i3",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "our_version": null
+      },
+      "expected": {
+        "ingredients": [
+          {
+            "id": "i1",
+            "component": null,
+            "text": "2 cloves garlic"
+          },
+          {
+            "id": "i2",
+            "component": null,
+            "text": "1 onion"
+          },
+          {
+            "id": "i3",
+            "component": null,
+            "text": "1 tbsp oil"
+          }
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "component": null,
+            "text": "Chop the onion and garlic."
+          },
+          {
+            "id": "s2",
+            "component": null,
+            "text": "Fry the onion in the oil."
+          },
+          {
+            "id": "s3",
+            "component": null,
+            "text": "Serve."
+          }
+        ],
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 2,
+                  "high": 2
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i3": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tbsp",
+                "unit_kind": "volume",
+                "name": "oil",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s2": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Fry the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i2",
+                    "written": "onion",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": " in the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i3",
+                    "written": "oil",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i3",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "an edited, a removed and an added line, an edited and two added steps, one Segmented",
+      "recipe": {
+        "original": {
+          "ingredients": [
+            {
+              "id": "i1",
+              "component": null,
+              "text": "2 cloves garlic"
+            },
+            {
+              "id": "i2",
+              "component": null,
+              "text": "1 onion"
+            },
+            {
+              "id": "i3",
+              "component": null,
+              "text": "1 tbsp oil"
+            }
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "component": null,
+              "text": "Chop the onion and garlic."
+            },
+            {
+              "id": "s2",
+              "component": null,
+              "text": "Fry the onion in the oil."
+            },
+            {
+              "id": "s3",
+              "component": null,
+              "text": "Serve."
+            }
+          ]
+        },
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 2,
+                  "high": 2
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i3": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tbsp",
+                "unit_kind": "volume",
+                "name": "oil",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s2": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Fry the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i2",
+                    "written": "onion",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": " in the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i3",
+                    "written": "oil",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i3",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "our_version": {
+          "ingredients": {
+            "edit": {
+              "i1": {
+                "text": "3 cloves garlic",
+                "component": null
+              }
+            },
+            "remove": [
+              "i3"
+            ],
+            "add": [
+              {
+                "id": "i4",
+                "after": "i2",
+                "component": null,
+                "text": "1 tsp ground cumin"
+              }
+            ]
+          },
+          "steps": {
+            "edit": {
+              "s2": {
+                "text": "Fry the onion and cumin.",
+                "component": null
+              }
+            },
+            "remove": [
+              "s3"
+            ],
+            "add": [
+              {
+                "id": "s4",
+                "after": "s2",
+                "component": null,
+                "text": "Stir in the garlic."
+              },
+              {
+                "id": "s5",
+                "after": null,
+                "component": null,
+                "text": "Warm a pan."
+              }
+            ]
+          },
+          "facts": {
+            "ingredients": {
+              "i1": {
+                "parse": {
+                  "provenance": "editor",
+                  "confidence": 1,
+                  "estimated": false,
+                  "quantity": {
+                    "low": 3,
+                    "high": 3
+                  },
+                  "unit": "clove",
+                  "unit_kind": "count",
+                  "name": "garlic",
+                  "preparation": null
+                }
+              },
+              "i4": {
+                "parse": {
+                  "provenance": "editor",
+                  "confidence": 1,
+                  "estimated": false,
+                  "quantity": {
+                    "low": 1,
+                    "high": 1
+                  },
+                  "unit": "tsp",
+                  "unit_kind": "volume",
+                  "name": "ground cumin",
+                  "preparation": null
+                }
+              }
+            },
+            "steps": {
+              "s2": {
+                "segments": {
+                  "provenance": "llm",
+                  "confidence": 0.8,
+                  "estimated": false,
+                  "segments": [
+                    {
+                      "t": "text",
+                      "v": "Fry the "
+                    },
+                    {
+                      "t": "ingredient",
+                      "ref": "i2",
+                      "written": "onion",
+                      "portion": 1
+                    },
+                    {
+                      "t": "text",
+                      "v": " and "
+                    },
+                    {
+                      "t": "ingredient",
+                      "ref": "i4",
+                      "written": "cumin",
+                      "portion": 1
+                    },
+                    {
+                      "t": "text",
+                      "v": "."
+                    }
+                  ]
+                },
+                "uses": {
+                  "provenance": "llm",
+                  "confidence": 0.8,
+                  "estimated": false,
+                  "uses": [
+                    {
+                      "ref": "i2",
+                      "portion": 1
+                    },
+                    {
+                      "ref": "i4",
+                      "portion": 1
+                    }
+                  ]
+                }
+              },
+              "s4": {
+                "segments": {
+                  "provenance": "llm",
+                  "confidence": 0.8,
+                  "estimated": false,
+                  "segments": [
+                    {
+                      "t": "text",
+                      "v": "Stir in the "
+                    },
+                    {
+                      "t": "ingredient",
+                      "ref": "i1",
+                      "written": "garlic",
+                      "portion": 1
+                    },
+                    {
+                      "t": "text",
+                      "v": "."
+                    }
+                  ]
+                },
+                "uses": {
+                  "provenance": "llm",
+                  "confidence": 0.8,
+                  "estimated": false,
+                  "uses": [
+                    {
+                      "ref": "i1",
+                      "portion": 1
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "note": null,
+          "edited_at": "2026-11-01T00:00:00Z"
+        }
+      },
+      "expected": {
+        "ingredients": [
+          {
+            "id": "i1",
+            "component": null,
+            "text": "3 cloves garlic",
+            "change": "edited"
+          },
+          {
+            "id": "i2",
+            "component": null,
+            "text": "1 onion"
+          },
+          {
+            "id": "i4",
+            "component": null,
+            "text": "1 tsp ground cumin",
+            "change": "added"
+          }
+        ],
+        "steps": [
+          {
+            "id": "s5",
+            "component": null,
+            "text": "Warm a pan.",
+            "change": "added"
+          },
+          {
+            "id": "s1",
+            "component": null,
+            "text": "Chop the onion and garlic."
+          },
+          {
+            "id": "s2",
+            "component": null,
+            "text": "Fry the onion and cumin.",
+            "change": "edited"
+          },
+          {
+            "id": "s4",
+            "component": null,
+            "text": "Stir in the garlic.",
+            "change": "added"
+          }
+        ],
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "editor",
+                "confidence": 1,
+                "estimated": false,
+                "quantity": {
+                  "low": 3,
+                  "high": 3
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i4": {
+              "parse": {
+                "provenance": "editor",
+                "confidence": 1,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tsp",
+                "unit_kind": "volume",
+                "name": "ground cumin",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s2": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Fry the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i2",
+                    "written": "onion",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": " and "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i4",
+                    "written": "cumin",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i4",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s4": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Stir in the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i1",
+                    "written": "garlic",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "an edited step waiting for enrich has no facts, not the Original's",
+      "recipe": {
+        "original": {
+          "ingredients": [
+            {
+              "id": "i1",
+              "component": null,
+              "text": "2 cloves garlic"
+            },
+            {
+              "id": "i2",
+              "component": null,
+              "text": "1 onion"
+            },
+            {
+              "id": "i3",
+              "component": null,
+              "text": "1 tbsp oil"
+            }
+          ],
+          "steps": [
+            {
+              "id": "s1",
+              "component": null,
+              "text": "Chop the onion and garlic."
+            },
+            {
+              "id": "s2",
+              "component": null,
+              "text": "Fry the onion in the oil."
+            },
+            {
+              "id": "s3",
+              "component": null,
+              "text": "Serve."
+            }
+          ]
+        },
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 2,
+                  "high": 2
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i3": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tbsp",
+                "unit_kind": "volume",
+                "name": "oil",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            },
+            "s2": {
+              "segments": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "segments": [
+                  {
+                    "t": "text",
+                    "v": "Fry the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i2",
+                    "written": "onion",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": " in the "
+                  },
+                  {
+                    "t": "ingredient",
+                    "ref": "i3",
+                    "written": "oil",
+                    "portion": 1
+                  },
+                  {
+                    "t": "text",
+                    "v": "."
+                  }
+                ]
+              },
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i3",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "our_version": {
+          "ingredients": {
+            "edit": {
+              "i1": {
+                "text": "3 cloves garlic",
+                "component": null
+              }
+            },
+            "remove": [],
+            "add": [
+              {
+                "id": "i4",
+                "after": "i2",
+                "component": null,
+                "text": "1 tsp ground cumin"
+              }
+            ]
+          },
+          "steps": {
+            "edit": {
+              "s2": {
+                "text": "Fry the onion and cumin.",
+                "component": null
+              }
+            },
+            "remove": [],
+            "add": []
+          },
+          "facts": {
+            "ingredients": {
+              "i1": {
+                "parse": {
+                  "provenance": "editor",
+                  "confidence": 1,
+                  "estimated": false,
+                  "quantity": {
+                    "low": 3,
+                    "high": 3
+                  },
+                  "unit": "clove",
+                  "unit_kind": "count",
+                  "name": "garlic",
+                  "preparation": null
+                }
+              },
+              "i4": {
+                "parse": {
+                  "provenance": "editor",
+                  "confidence": 1,
+                  "estimated": false,
+                  "quantity": {
+                    "low": 1,
+                    "high": 1
+                  },
+                  "unit": "tsp",
+                  "unit_kind": "volume",
+                  "name": "ground cumin",
+                  "preparation": null
+                }
+              }
+            },
+            "steps": {}
+          },
+          "note": null,
+          "edited_at": "2026-11-01T00:00:00Z"
+        }
+      },
+      "expected": {
+        "ingredients": [
+          {
+            "id": "i1",
+            "component": null,
+            "text": "3 cloves garlic",
+            "change": "edited"
+          },
+          {
+            "id": "i2",
+            "component": null,
+            "text": "1 onion"
+          },
+          {
+            "id": "i4",
+            "component": null,
+            "text": "1 tsp ground cumin",
+            "change": "added"
+          },
+          {
+            "id": "i3",
+            "component": null,
+            "text": "1 tbsp oil"
+          }
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "component": null,
+            "text": "Chop the onion and garlic."
+          },
+          {
+            "id": "s2",
+            "component": null,
+            "text": "Fry the onion and cumin.",
+            "change": "edited"
+          },
+          {
+            "id": "s3",
+            "component": null,
+            "text": "Serve."
+          }
+        ],
+        "facts": {
+          "ingredients": {
+            "i1": {
+              "parse": {
+                "provenance": "editor",
+                "confidence": 1,
+                "estimated": false,
+                "quantity": {
+                  "low": 3,
+                  "high": 3
+                },
+                "unit": "clove",
+                "unit_kind": "count",
+                "name": "garlic",
+                "preparation": null
+              }
+            },
+            "i2": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": null,
+                "unit_kind": "count",
+                "name": "onion",
+                "preparation": null
+              }
+            },
+            "i4": {
+              "parse": {
+                "provenance": "editor",
+                "confidence": 1,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tsp",
+                "unit_kind": "volume",
+                "name": "ground cumin",
+                "preparation": null
+              }
+            },
+            "i3": {
+              "parse": {
+                "provenance": "parser",
+                "confidence": 0.9,
+                "estimated": false,
+                "quantity": {
+                  "low": 1,
+                  "high": 1
+                },
+                "unit": "tbsp",
+                "unit_kind": "volume",
+                "name": "oil",
+                "preparation": null
+              }
+            }
+          },
+          "steps": {
+            "s1": {
+              "uses": {
+                "provenance": "llm",
+                "confidence": 0.8,
+                "estimated": false,
+                "uses": [
+                  {
+                    "ref": "i1",
+                    "portion": 1
+                  },
+                  {
+                    "ref": "i2",
+                    "portion": 1
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

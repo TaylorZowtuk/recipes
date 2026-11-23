@@ -208,18 +208,27 @@ def save(
             for i, after, s in added_steps
         ],
     )
+    before_steps, after_steps = _texts(stored_steps), _texts(steps)
+    # A step keeps the facts enrich gave it while its text stays as it was.
+    stored_step_facts = before.facts.steps if before else {}
+    kept_steps = {
+        step_id: facts
+        for step_id, facts in stored_step_facts.items()
+        if step_id in after_steps and before_steps.get(step_id) == after_steps[step_id]
+    }
     ours = OurVersion(
         ingredients=OurLines(edit=edit, remove=lines_draft.remove, add=add),
         steps=steps,
-        facts=RecipeFacts(ingredients=kept),
+        facts=RecipeFacts(ingredients=kept, steps=kept_steps),
         note=draft.note,
         edited_at=now,
     )
-    status = _status(recipe, stored_steps, steps)
+    status, ready_batch = _status(recipe, stored_steps, steps), recipe.our_version_ready_batch
     changed = recipe.model_copy(
         update={
             "our_version": ours,
             "our_version_status": status,
+            "our_version_ready_batch": ready_batch if status == "ready" else None,
             "our_version_last_line": last_line,
             "our_version_last_step": last_step,
         }
@@ -232,7 +241,6 @@ def save(
     ours = cast("OurVersion", changed.our_version)
     spread = ours.facts.ingredients
     facts = {line_id: fresh[line_id] if line_id in fresh else spread[line_id] for line_id in built}
-    before_steps, after_steps = _texts(stored_steps), _texts(steps)
     touched = {
         *fresh,
         *(set(stored_facts) - set(built)),

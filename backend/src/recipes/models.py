@@ -603,6 +603,8 @@ class Recipe(Model):
     our_version: OurVersion | None = None
     # Where Our Version is in enrichment, apart from `status`; none without Our Version.
     our_version_status: EnrichmentStatus | None = None
+    # The Confirm Batch that made Our Version Ready, so undoing it moves Our Version back.
+    our_version_ready_batch: Label | None = None
     # The highest numbers any Our Version gave an added line's or step's id. They outlive Remove
     # Our Version, so no id is given twice and a Step tick never lands on a new step.
     our_version_last_line: int = 0
@@ -614,6 +616,101 @@ class Recipe(Model):
             msg = "A recipe has Our Version and its status together, or neither"
             raise ValueError(msg)
         return self
+
+
+class EffectiveLine(IngredientLine):
+    """A line of the effective recipe, and whether Our Version edited or added it."""
+
+    change: Literal["edited", "added"] | None = None
+
+
+class EffectiveStep(Step):
+    """A step of the effective recipe, and whether Our Version edited or added it."""
+
+    change: Literal["edited", "added"] | None = None
+
+
+class Effective(Model):
+    """The recipe as Our Version shows it: its lines and steps in order, and their facts by id."""
+
+    ingredients: list[EffectiveLine]
+    steps: list[EffectiveStep]
+    facts: RecipeFacts
+
+
+def effective(recipe: Recipe) -> Effective:
+    """The recipe as Our Version shows it, or the Original without one, as the PWA's `effective`.
+    An edited or added line or step has Our Version's facts (none for a step until enrich
+    segments it); one left alone keeps the Original's; a removed one is left out.
+    """
+    original, facts, ours = recipe.original, recipe.facts, recipe.our_version
+    if ours is None:
+        return Effective(
+            ingredients=[EffectiveLine(**line.model_dump()) for line in original.ingredients],
+            steps=[EffectiveStep(**step.model_dump()) for step in original.steps],
+            facts=facts,
+        )
+    line_facts: dict[str, IngredientFacts] = {}
+    step_facts: dict[str, StepFacts] = {}
+
+    def line_of(item: IngredientLine | AddedLine) -> EffectiveLine:
+        edit = ours.ingredients.edit.get(item.id)
+        added = isinstance(item, AddedLine)
+        held = ours.facts.ingredients if added or edit else facts.ingredients
+        if (found := held.get(item.id)) is not None:
+            line_facts[item.id] = found
+        if not added and edit is None:
+            return EffectiveLine(**item.model_dump())
+        written = edit or item
+        change = "added" if added else "edited"
+        return EffectiveLine(
+            id=item.id, component=written.component, text=written.text, change=change
+        )
+
+    def step_of(item: Step | AddedStep) -> EffectiveStep:
+        edit = ours.steps.edit.get(item.id)
+        added = isinstance(item, AddedStep)
+        held = ours.facts.steps if added or edit else facts.steps
+        if (found := held.get(item.id)) is not None:
+            step_facts[item.id] = found
+        if not added and edit is None:
+            return EffectiveStep(**item.model_dump())
+        written = edit or item
+        change = "added" if added else "edited"
+        return EffectiveStep(
+            id=item.id, component=written.component, text=written.text, change=change
+        )
+
+    lines = overlay(original.ingredients, ours.ingredients.remove, ours.ingredients.add)
+    steps = overlay(original.steps, ours.steps.remove, ours.steps.add)
+    return Effective(
+        ingredients=[line_of(item) for item in lines],
+        steps=[step_of(item) for item in steps],
+        facts=facts.model_copy(update={"ingredients": line_facts, "steps": step_facts}),
+    )
+
+
+def overlay[T: (IngredientLine, Step), A: (AddedLine, AddedStep)](
+    items: list[T], remove: list[str], add: list[A]
+) -> list[T | A]:
+    """The Original's items less the removed ones, each added item after the one its `after`
+    names (first for none), several after the same one in the order Our Version lists them.
+    """
+    out: list[T | A] = []
+
+    def place(after: str | None) -> None:
+        for item in add:
+            if item.after == after:
+                out.append(item)
+                place(item.id)
+
+    place(None)
+    for item in items:
+        if item.id in remove:
+            continue
+        out.append(item)
+        place(item.id)
+    return out
 
 
 # The prefix of a fact's path in Our Version: `our_version.i4.match`.
@@ -640,39 +737,49 @@ def review_items(recipe: Recipe) -> dict[str, list[str]]:
     """Each Review Item's fact paths, by the item's id, for the facts the recipe has: a line's
     parse, match and conversion (`i3`), a line's substitutions (`i3.substitutions`), a step's
     segments and uses (`s2`), and the suggested Difficulty (`difficulty`) unless the editor set
-    the recipe's own. An open Enrichment Issue's fact joins its item, which it makes if the
-    recipe lacks the item's facts, so the editor can accept its correction. An issue on an Our
-    Version fact is not yet in any item.
+    the recipe's own. Our Version's facts make its own items, prefixed (`our_version.s2`), apart
+    from the Original's, which still count. An open Enrichment Issue's fact joins its item, which
+    it makes if the recipe lacks the item's facts, so the editor can accept its correction.
     """
     facts = recipe.facts
-    items: dict[str, list[str]] = {}
-    for line_id, line in facts.ingredients.items():
-        items[line_id] = [f"{line_id}.{kind}" for kind in LINE_ITEM if getattr(line, kind)]
-        if line.substitutions:
-            items[f"{line_id}.substitutions"] = [f"{line_id}.substitutions"]
-    for step_id, step in facts.steps.items():
-        items[step_id] = [f"{step_id}.{kind}" for kind in STEP_ITEM if getattr(step, kind)]
+    items = _items(facts, "")
     if facts.difficulty and recipe.difficulty is None:
         items["difficulty"] = ["difficulty"]
+    if recipe.our_version:
+        items |= _items(recipe.our_version.facts, OUR_VERSION)
     items = {item: paths for item, paths in items.items() if paths}
-    for fact_id in _open_on_original(recipe):
+    for fact_id in _open(recipe):
         paths = items.setdefault(item_of(fact_id), [])
         if fact_id not in paths:
             paths.append(fact_id)
     return items
 
 
-def _open_on_original(recipe: Recipe) -> list[str]:
-    """The facts of the recipe's open Enrichment Issues, apart from those on Our Version."""
-    return [
-        issue.fact_id
-        for issue in recipe.issues
-        if issue.status == "open" and not issue.fact_id.startswith(OUR_VERSION)
-    ]
+def _items(facts: RecipeFacts, prefix: str) -> dict[str, list[str]]:
+    """The Review Items of the lines and steps in `facts`, their ids and paths under `prefix`."""
+    items: dict[str, list[str]] = {}
+    for line_id, line in facts.ingredients.items():
+        owner = f"{prefix}{line_id}"
+        items[owner] = [f"{owner}.{kind}" for kind in LINE_ITEM if getattr(line, kind)]
+        if line.substitutions:
+            items[f"{owner}.substitutions"] = [f"{owner}.substitutions"]
+    for step_id, step in facts.steps.items():
+        owner = f"{prefix}{step_id}"
+        items[owner] = [f"{owner}.{kind}" for kind in STEP_ITEM if getattr(step, kind)]
+    return items
+
+
+def _open(recipe: Recipe) -> list[str]:
+    """The facts of the recipe's open Enrichment Issues."""
+    return [issue.fact_id for issue in recipe.issues if issue.status == "open"]
 
 
 def item_of(fact_id: str) -> str:
-    """The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself."""
+    """The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself, and
+    `our_version.s2.uses` to `our_version.s2`.
+    """
+    if fact_id.startswith(OUR_VERSION):
+        return OUR_VERSION + item_of(fact_id.removeprefix(OUR_VERSION))
     if fact_id == "difficulty" or fact_id.endswith(".substitutions"):
         return fact_id
     return fact_id.partition(".")[0]
@@ -704,6 +811,23 @@ def fact_at(facts: RecipeFacts, path: str) -> StoredFact | None:
     return cast("StoredFact | None", getattr(holder, kind))
 
 
+def fact_of(recipe: Recipe, path: str) -> StoredFact | None:
+    """The fact at `path` in the Original's facts, or in Our Version's for `our_version.s2.uses`,
+    if the recipe has it.
+    """
+    if not path.startswith(OUR_VERSION):
+        return fact_at(recipe.facts, path)
+    ours = recipe.our_version
+    return fact_at(ours.facts, path.removeprefix(OUR_VERSION)) if ours else None
+
+
+def recipe_fact_paths(recipe: Recipe) -> list[str]:
+    """The path of every fact the recipe has, the Original's and then Our Version's."""
+    ours = recipe.our_version
+    theirs = [OUR_VERSION + path for path in fact_paths(ours.facts)] if ours else []
+    return [*fact_paths(recipe.facts), *theirs]
+
+
 class NeedsReview(Model):
     open_issues: int
     unconfirmed: int  # Review Items left to check: a fact not yet Confirmed, or an open issue
@@ -713,19 +837,31 @@ class NeedsReview(Model):
 
 
 def needs_review(recipe: Recipe) -> NeedsReview:
-    """What the recipe still has for an editor to check, apart from its Our Version."""
-    open_facts = _open_on_original(recipe)
-    items = review_items(recipe).values()
-    flagged = [any(path in open_facts for path in paths) for paths in items]
+    """What the recipe still has for an editor to check, the Original's and Our Version's."""
+    return _left(recipe, review_items(recipe))
+
+
+def _left(recipe: Recipe, items: dict[str, list[str]]) -> NeedsReview:
+    """What is left to check of `items`, some of the recipe's Review Items."""
+    open_facts = _open(recipe)
+    paths = [path for item in items.values() for path in item]
+    flagged = [any(path in open_facts for path in item) for item in items.values()]
     unconfirmed = [
-        any(not fact.confirmed for path in paths if (fact := fact_at(recipe.facts, path)))
-        for paths in items
+        any(not fact.confirmed for path in item if (fact := fact_of(recipe, path)))
+        for item in items.values()
     ]
     return NeedsReview(
-        open_issues=len(open_facts),
+        open_issues=sum(fact_id in paths for fact_id in open_facts),
         unconfirmed=sum(f or u for f, u in zip(flagged, unconfirmed, strict=True)),
         flagged=sum(flagged),
     )
+
+
+def _left_in(recipe: Recipe, *, ours: bool) -> int:
+    """How many of Our Version's Review Items, or else the Original's, are left to check."""
+    items = review_items(recipe)
+    mine = {item: paths for item, paths in items.items() if item.startswith(OUR_VERSION) == ours}
+    return _left(recipe, mine).unconfirmed
 
 
 def resolve(
@@ -743,21 +879,24 @@ def resolve(
 
 
 def settled(recipe: Recipe, ready_batch: str | None = None) -> Recipe:
-    """The reviewed recipe, Ready in `ready_batch` if it was Awaiting Review and nothing is left
-    to check. An editor's edit or own Difficulty makes it Ready in no batch.
+    """The reviewed recipe, Ready in `ready_batch` if it was Awaiting Review and nothing of the
+    Original's is left to check, whatever Our Version has left. An editor's edit or own
+    Difficulty makes it Ready in no batch.
     """
-    if recipe.status == "awaiting_review" and needs_review(recipe).unconfirmed == 0:
+    if recipe.status == "awaiting_review" and _left_in(recipe, ours=False) == 0:
         return recipe.model_copy(update={"status": "ready", "ready_batch": ready_batch})
     return recipe
 
 
-def our_version_settled(recipe: Recipe) -> Recipe:
-    """The recipe with its Our Version Ready if it was Awaiting Review and no open issue is left
-    on it.
+def our_version_settled(recipe: Recipe, ready_batch: str | None = None) -> Recipe:
+    """The recipe with its Our Version Ready in `ready_batch` if it was Awaiting Review and none
+    of its Review Items is left to check: no unconfirmed fact and no open issue. An editor's edit
+    makes it Ready in no batch.
     """
-    left = any(i.status == "open" and i.fact_id.startswith(OUR_VERSION) for i in recipe.issues)
-    if recipe.our_version_status == "awaiting_review" and not left:
-        return recipe.model_copy(update={"our_version_status": "ready"})
+    if recipe.our_version_status == "awaiting_review" and _left_in(recipe, ours=True) == 0:
+        return recipe.model_copy(
+            update={"our_version_status": "ready", "our_version_ready_batch": ready_batch}
+        )
     return recipe
 
 

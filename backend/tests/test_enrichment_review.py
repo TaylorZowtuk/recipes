@@ -3,6 +3,7 @@ and undoing a batch, which may move the recipe between Awaiting Review and Ready
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,6 +12,7 @@ from conftest import EDITOR, SERVICE_TOKEN
 
 from recipes.auth import Editor, current_editor
 from recipes.models import (
+    OUR_VERSION,
     SCHEMA_VERSION,
     CanonicalIngredient,
     ConversionFact,
@@ -19,6 +21,7 @@ from recipes.models import (
     EnrichmentIssue,
     IngredientFacts,
     MatchFact,
+    OurVersion,
     ParseFact,
     Quantity,
     Recipe,
@@ -262,18 +265,25 @@ ONE_OF_EACH = {
 
 
 def shared_recipe(case: dict[str, Any]) -> Recipe:
+    """The case's recipe: a fact at an `our_version.` path is in its Our Version's facts map."""
     facts: dict[str, Any] = {"ingredients": {}, "steps": {}}
+    ours: dict[str, Any] = {"ingredients": {}, "steps": {}}
     for path, confirmed in case["facts"].items():
-        owner, _, kind = path.rpartition(".")
+        held = ours if path.startswith(OUR_VERSION) else facts
+        owner, _, kind = path.removeprefix(OUR_VERSION).rpartition(".")
         made = ONE_OF_EACH[kind].model_dump() | (CONFIRMED if confirmed else {})
         if not owner:
-            facts[kind] = made
+            held[kind] = made
         else:
-            facts["ingredients" if owner[0] == "i" else "steps"].setdefault(owner, {})[kind] = made
+            held["ingredients" if owner[0] == "i" else "steps"].setdefault(owner, {})[kind] = made
     editors = Difficulty(prep=1, cook=1, cleanup=1) if case["editor_difficulty"] else None
+    overlay = OurVersion(facts=RecipeFacts.model_validate(ours), edited_at=datetime.now(UTC))
+    with_ours = ours != {"ingredients": {}, "steps": {}}
     return STEW.model_copy(
         update={
             "facts": RecipeFacts.model_validate(facts),
+            "our_version": overlay if with_ours else None,
+            "our_version_status": "awaiting_review" if with_ours else None,
             "issues": [issue(n, fact_id) for n, fact_id in enumerate(case["open_issues"])],
             "difficulty": editors,
         }

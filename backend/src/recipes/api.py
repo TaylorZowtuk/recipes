@@ -58,6 +58,7 @@ from recipes.models import (
     OUR_VERSION,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
+    STEP_ITEM,
     CanonicalIngredient,
     Card,
     ConversionFact,
@@ -65,6 +66,7 @@ from recipes.models import (
     Difficulty,
     DurationSegment,
     Enrichment,
+    EnrichmentIssue,
     EnrichmentLineFacts,
     EnrichmentStatus,
     EnrichmentSubstitution,
@@ -99,12 +101,13 @@ from recipes.models import (
     WeekPlan,
     WeekPlanEntry,
     Wording,
-    fact_at,
-    fact_paths,
+    fact_of,
     item_of,
     kept_items,
     new_ulid,
     normalize_wording,
+    our_version_settled,
+    recipe_fact_paths,
     resolve,
     settled,
     site_host,
@@ -1102,6 +1105,7 @@ def patch_recipe(
                 changes |= {
                     "our_version": saved.recipe.our_version,
                     "our_version_status": saved.recipe.our_version_status,
+                    "our_version_ready_batch": saved.recipe.our_version_ready_batch,
                     "our_version_last_line": saved.recipe.our_version_last_line,
                     "our_version_last_step": saved.recipe.our_version_last_step,
                     "facts": saved.recipe.facts,
@@ -1110,7 +1114,12 @@ def patch_recipe(
             case RemoveOurVersion():
                 # Its open issues go with it, settled.
                 issues = resolve(recipe, lambda fact_id: fact_id.startswith(OUR_VERSION))
-                changes |= {"our_version": None, "our_version_status": None, "issues": issues}
+                changes |= {
+                    "our_version": None,
+                    "our_version_status": None,
+                    "our_version_ready_batch": None,
+                    "issues": issues,
+                }
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
     edited = settled(recipe.model_copy(update=changes))
@@ -1257,45 +1266,60 @@ def confirm_facts(
     recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
     """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-    resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
-    none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
-    can't be Ready while it is. A fact already Confirmed keeps its own batch.
+    resolve the open Enrichment Issues on them that propose a correction. An issue on a line that
+    proposes none, an ask to pick a line's portion or food, stays open: only an edit settles it,
+    so the recipe can't be Ready while it is. One on a step that proposes none, a step an Our
+    Version edit affects, is settled by confirming the step as it is. A fact already Confirmed
+    keeps its own batch. Our Version's facts are confirmed at their `our_version.` paths.
 
     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
-    wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+    wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
+    review is Ready, and an Our Version Awaiting Review with nothing of its own left is Ready.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
-    facts = recipe.facts.model_copy(deep=True)
+    work = recipe.model_copy(deep=True)
     listed = set(body.fact_ids)
     open_on = {issue.fact_id for issue in recipe.issues if issue.status == "open"}
-    if unknown := sorted(p for p in listed - open_on if fact_at(facts, p) is None):
+    if unknown := sorted(p for p in listed - open_on if fact_of(work, p) is None):
         raise HTTPException(422, f"The recipe has no fact {', '.join(unknown)}")
     batch, now = new_ulid(), datetime.now(UTC)
-    confirming = sorted(p for p in listed if (f := fact_at(facts, p)) and not f.confirmed)
+    confirming = sorted(p for p in listed if (f := fact_of(work, p)) and not f.confirmed)
     accepted = [
         i
         for i in recipe.issues
-        if i.status == "open" and i.fact_id in listed and i.after is not None
+        if i.status == "open" and i.fact_id in listed and (i.after is not None or _on_a_step(i))
     ]
     if not confirming and not accepted:
         raise HTTPException(422, "Every listed fact is already Confirmed")
     for path in confirming:
-        fact = cast("Fact", fact_at(facts, path))
+        fact = cast("Fact", fact_of(work, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
     issues = [
         i.model_copy(update={"status": "resolved", "confirm_batch": batch}) if i in accepted else i
         for i in recipe.issues
     ]
-    canonicals, wordings = confirm_matches(store, facts, confirming, batch)
+    canonicals, wordings = confirm_matches(store, work.facts, confirming, batch)
+    if ours := work.our_version:
+        theirs = [p.removeprefix(OUR_VERSION) for p in confirming if p.startswith(OUR_VERSION)]
+        more = confirm_matches(store, ours.facts, theirs, batch)
+        canonicals = list({c.id: c for c in [*canonicals, *more[0]]}.values())
+        wordings = list({w.wording: w for w in [*wordings, *more[1]]}.values())
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
-    reviewed = settled(recipe.model_copy(update={"facts": facts, "issues": issues}), batch)
+    reviewed = settled(
+        our_version_settled(work.model_copy(update={"issues": issues}), batch), batch
+    )
     ready = recipe.status == "awaiting_review" and reviewed.status == "ready"
     saved = store.review_recipe(reviewed, canonicals, wordings)
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
+
+
+def _on_a_step(issue: EnrichmentIssue) -> bool:
+    """Whether the issue is on a step's segments or uses, the Original's or Our Version's."""
+    return issue.fact_id.rpartition(".")[2] in STEP_ITEM
 
 
 class FdcPortion(fdc.Portion):
@@ -1492,18 +1516,19 @@ def undo_confirm_batch(
     recipe_id: Annotated[Ulid, Path()], batch: Annotated[Ulid, Path()], store: StoreDep
 ) -> Recipe:
     """Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
-    Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
-    unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+    Enrichment Issues, move the recipe, or its Ready Our Version, back to Awaiting Review if the
+    batch made it Ready, and unconfirm each Canonical Ingredient it confirmed that still carries
+    it. Wordings stay.
     """
     recipe = _recipe(store, recipe_id)
-    facts = recipe.facts.model_copy(deep=True)
-    paths = fact_paths(facts)
-    undone = [p for p in paths if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
+    work = recipe.model_copy(deep=True)
+    paths = recipe_fact_paths(work)
+    undone = [p for p in paths if cast("Fact", fact_of(work, p)).confirm_batch == batch]
     if not undone and all(issue.confirm_batch != batch for issue in recipe.issues):
         raise HTTPException(404, "Nothing on the recipe is in that Confirm Batch")
     canonicals: dict[str, CanonicalIngredient] = {}
     for path in undone:
-        fact = cast("Fact", fact_at(facts, path))
+        fact = cast("Fact", fact_of(work, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at, fact.confirm_batch = (
             False,
             None,
@@ -1517,7 +1542,6 @@ def undo_confirm_batch(
                     update={"confirmed": False, "confirm_batch": None}
                 )
     changes: dict[str, object] = {
-        "facts": facts,
         "issues": [
             issue.model_copy(update={"status": "open", "confirm_batch": None})
             if issue.confirm_batch == batch
@@ -1527,7 +1551,10 @@ def undo_confirm_batch(
     }
     if recipe.ready_batch == batch:
         changes |= {"status": "awaiting_review", "ready_batch": None}
-    return store.review_recipe(recipe.model_copy(update=changes), canonicals.values(), [])
+    # Only a Ready Our Version moves back: a step edited since has made it Pending.
+    if recipe.our_version_status == "ready" and recipe.our_version_ready_batch == batch:
+        changes |= {"our_version_status": "awaiting_review", "our_version_ready_batch": None}
+    return store.review_recipe(work.model_copy(update=changes), canonicals.values(), [])
 
 
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
