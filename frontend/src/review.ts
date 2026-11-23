@@ -33,6 +33,13 @@ const itemOf = (factId: string) =>
     ? factId
     : (factId.split(".")[0] ?? factId);
 
+// The recipe's open Enrichment Issues, apart from those on Our Version (`our_version.i4.match`),
+// which aren't Review Items yet, as the API's `_open_on_original`.
+const openOnOriginal = (recipe: Recipe) =>
+  recipe.issues.filter(
+    (issue) => issue.status === "open" && !issue.fact_id.startsWith("our_version."),
+  );
+
 // Each Review Item's fact paths, by the item's id, for the facts the recipe has: as the API's
 // `review_items`, a line's parse, match and conversion, its substitutions, a step's segments and
 // uses, and the suggested Difficulty unless the editor set the recipe's own. An open Enrichment
@@ -49,7 +56,7 @@ export function reviewItems(recipe: Recipe): Record<string, string[]> {
   }
   if (facts.difficulty && !recipe.difficulty) items.difficulty = ["difficulty"];
   const withFacts = Object.fromEntries(Object.entries(items).filter(([, p]) => p.length > 0));
-  for (const issue of recipe.issues.filter((issue) => issue.status === "open")) {
+  for (const issue of openOnOriginal(recipe)) {
     const id = itemOf(issue.fact_id);
     const paths = withFacts[id] ?? [];
     if (!paths.includes(issue.fact_id)) withFacts[id] = [...paths, issue.fact_id];
@@ -69,7 +76,7 @@ export function factAt(facts: RecipeFacts, path: string): Fact | null {
 // Enrichment Issue is on any of its facts, else unchecked while any fact is unconfirmed.
 export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   const stepIds = new Set(recipe.original.steps.map((step) => step.id));
-  const open = recipe.issues.filter((issue) => issue.status === "open");
+  const open = openOnOriginal(recipe);
   const items = new Map<string, ReviewItem>();
   for (const [id, paths] of Object.entries(reviewItems(recipe))) {
     const issues = open.filter((issue) => itemOf(issue.fact_id) === id);

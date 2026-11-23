@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from "react";
 import type { AdjustChoices, Units } from "./adjust";
 import type { Factor } from "./api/client";
+import type { Version } from "./ourVersion";
 import { Sheet } from "./Sheet";
 import { SCALES, scaleLabel } from "./weekPlan";
 
@@ -10,28 +11,37 @@ const UNITS: [Units, string][] = [
   ["us", "US"],
 ];
 
-// The Adjust choices shown on the button, and in Cooking mode, when they differ from as written at
-// 1×, as "2× · Metric".
-export function adjustSummary({ scale, units }: AdjustChoices): string {
+const VERSIONS: [Version, string][] = [
+  ["ours", "Our Version"],
+  ["original", "Original"],
+];
+
+// The Adjust choices shown on the button, and in Cooking mode, when they differ from Our Version
+// as written at 1×, as "2× · Metric · Original".
+export function adjustSummary({ scale, units, version }: AdjustChoices): string {
   return [
     scale !== 1 && scaleLabel(scale),
     units !== "written" && UNITS.find(([u]) => u === units)?.[1],
+    version === "original" && "Original",
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
 // The recipe page's Adjust button and its sheet: a scale and a unit system for this recipe, on
-// this device only. A new unit system clears the ingredients' own tapped units. A Pending recipe
-// has no Facts to scale or convert, so there the button is disabled with a note saying why.
+// this device only, and for a recipe with Our Version, which version shows. A new unit system or
+// version clears the ingredients' own tapped units. A Pending recipe has no Facts to scale or
+// convert, so there the button is disabled with a note saying why.
 export function AdjustButton({
   choices,
   onChange,
   pending,
+  ourVersion = false,
 }: {
   choices: AdjustChoices;
   onChange: (choices: AdjustChoices) => void;
   pending: boolean;
+  ourVersion?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
@@ -82,8 +92,22 @@ export function AdjustButton({
           label="Units"
           options={UNITS}
           current={choices.units}
-          onChoose={(units) => units !== choices.units && onChange({ scale: choices.scale, units })}
+          onChoose={(units) =>
+            units !== choices.units &&
+            onChange({ scale: choices.scale, units, version: choices.version })
+          }
         />
+        {ourVersion && (
+          <ChoiceGroup
+            label="Version"
+            options={VERSIONS}
+            current={choices.version ?? "ours"}
+            onChoose={(version) =>
+              version !== (choices.version ?? "ours") &&
+              onChange({ scale: choices.scale, units: choices.units, version })
+            }
+          />
+        )}
         <div className="sheet-actions">
           <button type="button" className="button" onClick={() => setOpen(false)}>
             Done

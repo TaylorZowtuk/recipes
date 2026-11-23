@@ -1213,6 +1213,34 @@ def test_reenrichment_keeps_the_issues_on_kept_items_and_adds_those_on_replaced_
     assert fetch(editor_client, before["id"])["issues"] == [resolved, kept, added]
 
 
+def test_reenrichment_keeps_our_versions_issues_and_status(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    ours = {**issue(1), "fact_id": "our_version.i5.match"}
+    recipe_id = reviewed(editor_client, api_store)["id"]
+    stored = fetch(editor_client, recipe_id) | {
+        "our_version": {
+            "ingredients": {"add": [{"id": "i5", "after": None, "text": "1 lemon"}]},
+            "edited_at": "2026-11-02T00:00:00Z",
+        },
+        "our_version_status": "awaiting_review",
+        "our_version_last_line": 5,
+        "issues": [ours],
+    }
+    api_store.enrich_recipe(Recipe.model_validate(stored), [], [])
+    before = fetch(editor_client, recipe_id)
+
+    response = reenrich(editor_client, recipe_id, version=before["version"])
+
+    assert response.status_code == 200
+    after = fetch(editor_client, recipe_id)
+    assert after["issues"] == [ours]
+    assert (after["our_version"], after["our_version_status"]) == (
+        before["our_version"],
+        "awaiting_review",
+    )
+
+
 def test_reenriching_a_recipe_awaiting_review_leaves_it_awaiting_review(
     editor_client: TestClient, api_store: Store
 ) -> None:

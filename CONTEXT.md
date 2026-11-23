@@ -108,7 +108,7 @@ The version of enrichment a recipe was enriched with, recorded on the recipe so 
 _Avoid_: Enrichment run, parser version
 
 **Re-enrichment**:
-An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status.
+An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status. It enriches only the Original: Our Version, its Our Version Status and its issues stay as they are.
 _Avoid_: Refresh, backfill
 
 **Ingest Channel**:
@@ -156,12 +156,16 @@ The recipe exactly as captured from its source. It never changes after ingest, e
 _Avoid_: Source version, scraped version
 
 **Our Version**:
-The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed; its edited and added steps wait for enrichment.
+The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed, until a wording fixed on another line prepared another way leaves one's food unconfirmed with an issue; its edited and added steps wait for enrichment.
 _Avoid_: Personal adjustment, variant, fork
 
 **Our Version Status**:
-Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
+Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched, or given an issue by a wording fixed elsewhere, and waiting for an editor to check it) or *Ready*. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
 _Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
+
+**Effective lines**:
+A recipe's ingredient lines and steps as the household cooks them: the Original with Our Version applied. Removed lines and steps are left out, added ones sit where Our Version put them, and an unchanged line keeps the Original's facts. A recipe shows its effective lines by default, and the Original on request.
+_Avoid_: Merged recipe, current version
 
 ### Ratings and organization
 
@@ -224,7 +228,7 @@ A cook's mark that one step of a recipe is done, set and cleared with the tick u
 _Avoid_: Checkbox, progress, done mark
 
 **Cooking mode**:
-A recipe shown full-screen, one step at a time, for cooking from. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
+A recipe shown full-screen, one step at a time, for cooking from: its effective steps, or the Original's when Adjust shows the Original. It opens at the first step without a Step tick. The Adjust choices are fixed while it's open, and a newer version of the recipe waits until it closes. Finish clears the recipe's Step ticks.
 _Avoid_: Cook view, step-by-step mode
 
 **Confidence Threshold**:

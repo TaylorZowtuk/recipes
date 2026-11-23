@@ -10,6 +10,7 @@ import { DifficultyMeters } from "./DifficultyMeters";
 import { DELETED_ELSEWHERE, editing } from "./editRecipe";
 import { CheckIcon, ClockIcon } from "./icons";
 import { LoadFailed } from "./LoadFailed";
+import { type EffectiveOriginal, effective, lineNote, stepNote } from "./ourVersion";
 import { Plate } from "./Plate";
 import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
 import { PAUSED, useEditBlock, useMounted } from "./RecipeFields";
@@ -161,9 +162,15 @@ function RecipePage() {
                       <TagList tags={card.tags} />
                       {ready && (
                         <div className="hero-actions">
-                          <AdjustButton choices={choices} onChange={setChoices} pending={pending} />
+                          <AdjustButton
+                            choices={choices}
+                            onChange={setChoices}
+                            pending={pending}
+                            ourVersion={!!ready.our_version}
+                          />
                           <CookButton
                             recipe={ready}
+                            version={choices.version ?? "ours"}
                             opener={cookOpener}
                             onCook={() =>
                               setCooking({ recipe: ready, choices: pending ? AS_WRITTEN : choices })
@@ -214,12 +221,14 @@ function RecipePage() {
           {missing ? DELETED_ELSEWHERE : edit.notice}
         </p>
       )}
-      {card && ready && draft && (
+      {card && ready && draft && collection.state === "ready" && (
         <RecipeEditor
           recipe={ready}
           title={card.title}
+          collection={collection.value}
           draft={draft}
           problem={edit.problem}
+          refusedAt={edit.at}
           dispatch={dispatch}
         />
       )}
@@ -275,6 +284,8 @@ function RecipeTabs({
   const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
   const ticks = useStepTicks(recipe.id);
   const items = isEditor ? reviewOf(recipe) : undefined;
+  const version = choices.version ?? "ours";
+  const shown = effective(recipe, version);
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {
     items,
@@ -368,8 +379,8 @@ function RecipeTabs({
             panel: (
               <>
                 <Ingredients
-                  original={recipe.original}
-                  facts={recipe.facts}
+                  original={shown.original}
+                  facts={shown.facts}
                   review={review}
                   choices={choices}
                   onTap={onTap}
@@ -385,8 +396,8 @@ function RecipeTabs({
               <>
                 <Steps
                   recipeId={recipe.id}
-                  original={recipe.original}
-                  facts={recipe.facts}
+                  original={shown.original}
+                  facts={shown.facts}
                   review={review}
                   choices={choices}
                   ticks={ticks}
@@ -400,7 +411,11 @@ function RecipeTabs({
             count: counts?.about,
             panel: (
               <>
-                <About recipe={recipe} review={review} />
+                <About
+                  recipe={recipe}
+                  review={review}
+                  note={version === "ours" ? recipe.our_version?.note : null}
+                />
                 {bar("about")}
               </>
             ),
@@ -437,7 +452,8 @@ function RecipeTabs({
 // shows its raw text. With `onTap`, an amount with another unit to show is a button that moves it
 // on, and one that stays in its unit for want of a weight says why when tapped. To an editor, a
 // line with facts is a marked Review Item, its amount plain text, and the substitutions follow the
-// lines.
+// lines. In Our Version, an edited or added line says so quietly under it, and isn't a Review Item:
+// review stays on the Original's lines.
 export function Ingredients({
   original,
   facts,
@@ -445,7 +461,7 @@ export function Ingredients({
   choices = AS_WRITTEN,
   onTap,
 }: {
-  original: Original;
+  original: EffectiveOriginal;
   facts?: RecipeFacts;
   review?: ReviewTarget;
   choices?: AdjustChoices;
@@ -458,7 +474,8 @@ export function Ingredients({
         {part.lines.map((line) => {
           const lineFacts = facts?.ingredients[line.id];
           const { parse, match } = lineFacts ?? {};
-          const item = review?.items.get(line.id);
+          const item = line.change ? undefined : review?.items.get(line.id);
+          const note = lineNote(line, lineFacts, choices);
           const isNew = !!(item && match && review?.newCanonicals.has(match.canonical_id));
           const tapped = choices.taps?.[line.id];
           const amount =
@@ -490,6 +507,7 @@ export function Ingredients({
               ) : (
                 shown
               )}
+              {note && <span className="our-version-note">{note}</span>}
             </li>
           );
         })}
@@ -511,11 +529,13 @@ function Substitutions({
   facts,
   review,
 }: {
-  original: Original;
+  original: EffectiveOriginal;
   facts: RecipeFacts;
   review: ReviewTarget;
 }) {
-  const lines = original.ingredients.filter((line) => review.items.has(`${line.id}.substitutions`));
+  const lines = original.ingredients.filter(
+    (line) => !line.change && review.items.has(`${line.id}.substitutions`),
+  );
   if (lines.length === 0) return null;
   return (
     <section className="component review-substitutions">
@@ -623,7 +643,8 @@ function ParsedLine({
 // ingredient line, it shows the amount that step uses, marked so it can be told apart. A duration
 // is a button that starts its Timer. In a Review Item, itself a button, it stays text and the
 // buttons follow in a row. Under each step's number, its Step tick: a ticked step dims. A captured
-// recipe has no `recipeId` yet, so no Timers and no ticks.
+// recipe has no `recipeId` yet, so no Timers and no ticks. In Our Version, an edited or added step
+// says so under it, and isn't a Review Item.
 export function Steps({
   recipeId,
   original,
@@ -633,7 +654,7 @@ export function Steps({
   ticks = new Set(),
 }: {
   recipeId?: string;
-  original: Original;
+  original: EffectiveOriginal;
   facts?: RecipeFacts;
   review?: ReviewTarget;
   choices?: AdjustChoices;
@@ -644,7 +665,8 @@ export function Steps({
       {part.component && <h2>{part.component}</h2>}
       <ol className="steps" start={part.start}>
         {part.lines.map((step, index) => {
-          const item = review?.items.get(step.id);
+          const item = step.change ? undefined : review?.items.get(step.id);
+          const note = stepNote(step);
           const timer = (piece: DurationPiece, n: number) =>
             recipeId && (
               <TimerButton
@@ -665,7 +687,7 @@ export function Steps({
           const timerRow = pieces.flatMap((piece, n) =>
             typeof piece !== "string" && "t" in piece ? (timer(piece, n) ?? []) : [],
           );
-          const body =
+          const main =
             item && review ? (
               <>
                 <ReviewButton item={item} review={review}>
@@ -681,6 +703,12 @@ export function Steps({
             ) : (
               shown
             );
+          const body = (
+            <>
+              {main}
+              {note && <span className="our-version-note">{note}</span>}
+            </>
+          );
           if (!recipeId)
             return (
               <li key={step.id} id={`step-${step.id}`} tabIndex={-1}>
@@ -742,15 +770,29 @@ export function Facts({ original }: { original: Original }) {
   );
 }
 
-// The Stated Times and yield, and a link back to the Source. To an editor, enrichment's Suggested
-// Difficulty too, as a Review Item.
-function About({ recipe, review }: { recipe: Recipe; review?: ReviewTarget }) {
+// The Stated Times and yield, and a link back to the Source. In Our Version, its note first. To an
+// editor, enrichment's Suggested Difficulty too, as a Review Item.
+function About({
+  recipe,
+  review,
+  note,
+}: {
+  recipe: Recipe;
+  review?: ReviewTarget;
+  note?: string | null;
+}) {
   const { source } = recipe;
   const sourceName = source.kind === "website" ? source.site_name : source.entry_name;
   const suggestion = review?.items.get("difficulty");
 
   return (
     <>
+      {note && (
+        <section className="component">
+          <h2>Our Version</h2>
+          <p className="our-version-about">{note}</p>
+        </section>
+      )}
       {suggestion && review && (
         <section className="component">
           <h2>Suggested Difficulty</h2>

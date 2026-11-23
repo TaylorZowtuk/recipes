@@ -1,5 +1,7 @@
 # Our Version's lines are the editor's, and its steps wait for enrich under an Our Version Status
 
+Superseded in part by [Our Version's facts are one map](2026-11-21-our-version-facts-are-one-map.md): a wording fixed elsewhere reaches Our Version lines, so a line prepared another way takes the Canonical Ingredient with its food unconfirmed, not every fact Confirmed with provenance `editor`, and that line's Enrichment Issue makes Our Version `awaiting_review` before it is enriched. Everything else here stands.
+
 Supersedes in part the [recipe data model ADR](2026-09-29-recipe-data-model.md), where an Our Version edit "gets its own facts, re-parsed on save", and the [enrichment pipeline ADR](2026-09-26-enrichment-pipeline.md), where saving Our Version "runs the deterministic path on new or changed lines at once" and leaves the lines it can't resolve pending. Nothing is parsed on save, and no Our Version line is pending.
 
 The parser isn't in the Lambda. `ingredient-parser-nlp`, nltk and numpy are in the `enrich` group, and the Lambda zip is built without it. Step Segments come from a model's answer to a Work Packet, which the API never asks for. So the API has nothing to parse an Our Version line or segment an Our Version step with when it's saved (TaylorZowtuk/recipes#116).
