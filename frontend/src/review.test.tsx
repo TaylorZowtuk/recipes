@@ -215,6 +215,7 @@ const sharedRecipe = (c: SharedCase) => {
       confirm_batch: null,
       model: "test",
       settles_on_confirm: c.settles_on_confirm.includes(fact_id),
+      line_id: null,
     })),
   });
 };
@@ -287,6 +288,7 @@ describe("an open Enrichment Issue on a fact the line lacks", () => {
     confirm_batch: null,
     model: "test",
     settles_on_confirm: false,
+    line_id: null,
   });
   const items = reviewOf(recipe({ issues: [issue(11, "i3.match"), issue(12, "i4.match")] }));
 
@@ -352,6 +354,7 @@ const withOurs = (): Recipe => {
         confirm_batch: null,
         model: "test",
         settles_on_confirm: true,
+        line_id: null,
       },
     ],
   });
@@ -397,6 +400,7 @@ describe("Our Version's Review Items", () => {
       fact_id: "our_version.s2.uses",
       reason: "Step 3 uses the lemon too: together more than all of it.",
       settles_on_confirm: false,
+      line_id: "i5",
     };
     return { ...r, issues: [...r.issues, flag] };
   };

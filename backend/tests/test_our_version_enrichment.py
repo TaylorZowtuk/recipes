@@ -522,9 +522,7 @@ def test_an_original_edit_back_within_all_of_a_line_settles_the_flag(
 
 def both(portion: float) -> StepFacts:
     """A step's use of the beef (i1) and the parsley (i9), each `portion` of its line."""
-    return StepFacts(uses=uses(uses=[{"ref": "i1", "portion": portion}] + [
-        {"ref": "i9", "portion": portion}
-    ]))
+    return StepFacts(uses=uses(uses=[{"ref": ref, "portion": portion} for ref in ("i1", "i9")]))
 
 
 def test_two_lines_past_all_of_them_on_one_step_flag_it_twice(
@@ -534,9 +532,7 @@ def test_two_lines_past_all_of_them_on_one_step_flag_it_twice(
         api_store, status="ready", step_facts={"s2": both(0.5)}, facts=original(s1=both(0.25))
     )
 
-    response = edit(
-        editor_client, recipe, kind="step", step_id="s1", portions=[1, 1], durations=[]
-    )
+    response = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1, 1], durations=[])
 
     assert response.status_code == 200, response.text
     flags = [(i.fact_id, i.line_id) for i in stored(api_store, recipe.id).issues]
@@ -578,10 +574,9 @@ def test_renaming_a_flagged_line_doesnt_flag_its_step_again(
     )
     over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
     assert over.status_code == 200, over.text
+    renamed = line_edit(name="beef chuck", canonical=BRAISING)
 
-    response = edit(
-        editor_client, stored(api_store, recipe.id), **line_edit(name="beef chuck", canonical=BRAISING)
-    )
+    response = edit(editor_client, stored(api_store, recipe.id), **renamed)
 
     assert response.status_code == 200, response.text
     assert [i.status for i in stored(api_store, recipe.id).issues] == ["open"]
