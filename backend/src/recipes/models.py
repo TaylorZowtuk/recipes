@@ -641,8 +641,9 @@ class Effective(Model):
 def effective(recipe: Recipe) -> Effective:
     """The recipe as Our Version shows it, or the Original without one, as the PWA's `effective`.
     An edited or added line or step has Our Version's facts (none for a step until enrich
-    segments it); one left alone keeps the Original's; a removed one is left out, and a step's
-    Segment for it shows as its text, with no amount, and its uses drop it.
+    segments it); one left alone keeps the Original's; a removed one is left out. A step's Segment
+    for a line not among the effective lines shows as its text, with no amount, and its uses drop
+    it.
     """
     original, facts, ours = recipe.original, recipe.facts, recipe.our_version
     if ours is None:
@@ -653,6 +654,7 @@ def effective(recipe: Recipe) -> Effective:
         )
     line_facts: dict[str, IngredientFacts] = {}
     step_facts: dict[str, StepFacts] = {}
+    lines = overlay(original.ingredients, ours.ingredients.remove, ours.ingredients.add)
 
     def line_of(item: IngredientLine | AddedLine) -> EffectiveLine:
         edit = ours.ingredients.edit.get(item.id)
@@ -673,7 +675,7 @@ def effective(recipe: Recipe) -> Effective:
         added = isinstance(item, AddedStep)
         held = ours.facts.steps if added or edit else facts.steps
         if (found := held.get(item.id)) is not None:
-            step_facts[item.id] = _without(found, set(ours.ingredients.remove))
+            step_facts[item.id] = _without(found, {line.id for line in lines})
         if not added and edit is None:
             return EffectiveStep(**item.model_dump())
         written = edit or item
@@ -682,7 +684,6 @@ def effective(recipe: Recipe) -> Effective:
             id=item.id, component=written.component, text=written.text, change=change
         )
 
-    lines = overlay(original.ingredients, ours.ingredients.remove, ours.ingredients.add)
     steps = overlay(original.steps, ours.steps.remove, ours.steps.add)
     return Effective(
         ingredients=[line_of(item) for item in lines],
@@ -691,21 +692,19 @@ def effective(recipe: Recipe) -> Effective:
     )
 
 
-def _without(facts: StepFacts, removed: set[str]) -> StepFacts:
-    """The step's facts with each Segment for a removed line shown as its text, with no amount,
-    and its uses less the removed lines.
+def _without(facts: StepFacts, kept: set[str]) -> StepFacts:
+    """The step's facts with each Segment for a line not in `kept` shown as its text, with no
+    amount, and its uses only of the kept lines.
     """
-    if not removed:
-        return facts
     segments, uses = facts.segments, facts.uses
     if segments is not None:
         shown = [
-            TextSegment(v=s.written) if isinstance(s, IngredientSegment) and s.ref in removed else s
+            TextSegment(v=s.written) if isinstance(s, IngredientSegment) and s.ref not in kept else s
             for s in segments.segments
         ]
         segments = segments.model_copy(update={"segments": shown})
     if uses is not None:
-        uses = uses.model_copy(update={"uses": [u for u in uses.uses if u.ref not in removed]})
+        uses = uses.model_copy(update={"uses": [u for u in uses.uses if u.ref in kept]})
     return StepFacts(segments=segments, uses=uses)
 
 
