@@ -443,7 +443,8 @@ class EnrichmentIssue(Model):
     Those propose no correction (no `before` or `after`) and are settled by editing the line.
     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
-    only an edit does, as for steps that together use more than all of a line.
+    only an edit does, as for steps that together use more than all of a line, which names that
+    line in `line_id`.
     """
 
     id: Ulid
@@ -455,6 +456,7 @@ class EnrichmentIssue(Model):
     status: Literal["open", "resolved"] = "open"
     confirm_batch: Label | None = None
     settles_on_confirm: bool = False
+    line_id: Label | None = None
 
 
 def confirm_settles(issue: EnrichmentIssue) -> bool:

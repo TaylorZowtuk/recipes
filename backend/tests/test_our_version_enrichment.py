@@ -9,12 +9,24 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR, SNAPSHOT
-from test_enrichment_review import BEEF, FACTS, LLM, card, confirm, issue, stored, uses
+from test_enrichment_review import (
+    BEEF,
+    CONFIRMED,
+    FACTS,
+    LLM,
+    card,
+    confirm,
+    issue,
+    parse,
+    stored,
+    uses,
+)
 from test_our_version import BRAISING, line, lines, save
-from test_our_version_review import BROWN, REST, enriched, segmented, steps_draft
-from test_review_edits import edit
+from test_our_version_review import BROWN, REST, enriched, segmented, segments, steps_draft
+from test_review_edits import edit, line_edit
 
 from recipes.models import (
+    IngredientFacts,
     IngredientSegment,
     RecipeFacts,
     StepFacts,
@@ -475,6 +487,104 @@ def test_an_open_issue_on_another_line_doesnt_hide_a_step_using_too_much(
         "Mentions parsley, which Our Version removed",
         "Step 1 uses stewing beef too: together more than all of it",
     ]
+
+
+def test_an_original_edit_back_within_all_of_a_line_settles_the_flag(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # The Original edit was the mistake: setting it back settles the flag like an edit.
+    rest = StepFacts(segments=segments(REST, **CONFIRMED), uses=uses(**CONFIRMED))
+    recipe = enriched(
+        api_store,
+        status="ready",
+        step_facts={"s2": segmented(BROWN, **CONFIRMED), "s5": rest},
+        facts=original(s1=uses_of("i1", 0.25)),
+    )
+    over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
+    assert over.status_code == 200, over.text
+    assert stored(api_store, recipe.id).our_version_status == "awaiting_review"
+
+    response = edit(
+        editor_client,
+        stored(api_store, recipe.id),
+        kind="step",
+        step_id="s1",
+        portions=[0.25],
+        durations=[],
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert open_issues(changed) == {}
+    assert [(i.status, i.confirm_batch) for i in changed.issues] == [("resolved", None)]
+    assert (changed.our_version_status, changed.our_version_ready_batch) == ("ready", None)
+
+
+def both(portion: float) -> StepFacts:
+    """A step's use of the beef (i1) and the parsley (i9), each `portion` of its line."""
+    return StepFacts(uses=uses(uses=[{"ref": "i1", "portion": portion}] + [
+        {"ref": "i9", "portion": portion}
+    ]))
+
+
+def test_two_lines_past_all_of_them_on_one_step_flag_it_twice(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = enriched(
+        api_store, status="ready", step_facts={"s2": both(0.5)}, facts=original(s1=both(0.25))
+    )
+
+    response = edit(
+        editor_client, recipe, kind="step", step_id="s1", portions=[1, 1], durations=[]
+    )
+
+    assert response.status_code == 200, response.text
+    flags = [(i.fact_id, i.line_id) for i in stored(api_store, recipe.id).issues]
+    assert flags == [("our_version.s2.uses", "i1"), ("our_version.s2.uses", "i9")]
+
+
+def test_two_lines_with_one_name_are_flagged_apart(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # Butter in the crust and butter in the filling: the same name, two lines.
+    ingredients = {**FACTS.ingredients, "i9": IngredientFacts(parse=parse("stewing beef"))}
+    facts = original(s1=both(0.25)).model_copy(update={"ingredients": ingredients})
+    recipe = enriched(api_store, status="ready", step_facts={"s2": both(0.5)}, facts=facts)
+    first = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1, 0.25], durations=[])
+    assert first.status_code == 200, first.text
+
+    response = edit(
+        editor_client,
+        stored(api_store, recipe.id),
+        kind="step",
+        step_id="s1",
+        portions=[1, 1],
+        durations=[],
+    )
+
+    assert response.status_code == 200, response.text
+    open_lines = [i.line_id for i in stored(api_store, recipe.id).issues if i.status == "open"]
+    assert open_lines == ["i1", "i9"]
+
+
+def test_renaming_a_flagged_line_doesnt_flag_its_step_again(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = enriched(
+        api_store,
+        status="ready",
+        step_facts={"s2": segmented(BROWN)},
+        facts=original(s1=uses_of("i1", 0.25)),
+    )
+    over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
+    assert over.status_code == 200, over.text
+
+    response = edit(
+        editor_client, stored(api_store, recipe.id), **line_edit(name="beef chuck", canonical=BRAISING)
+    )
+
+    assert response.status_code == 200, response.text
+    assert [i.status for i in stored(api_store, recipe.id).issues] == ["open"]
 
 
 def test_an_original_step_edit_within_all_of_a_line_flags_nothing(

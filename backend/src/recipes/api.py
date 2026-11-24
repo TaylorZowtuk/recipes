@@ -1686,12 +1686,14 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
     # Only an editor's review settles an issue, never enrichment, and only the API marks one
-    # that confirming the fact as it is settles.
+    # that confirming the fact as it is settles, or one on steps using more than all of a line.
     if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
         raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
-    if any(issue.settles_on_confirm for issue in body.issues):
+    if any(issue.settles_on_confirm or issue.line_id for issue in body.issues):
         raise HTTPException(
-            422, "An Enrichment Issue arrives without settles_on_confirm: only the API sets it"
+            422,
+            "An Enrichment Issue arrives without settles_on_confirm or line_id: only the API "
+            "sets them",
         )
     names = {
         normalize_wording(facts.parse.name)

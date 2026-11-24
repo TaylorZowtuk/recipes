@@ -1,6 +1,7 @@
 """Step Portions across the effective steps: a line's add up to at most 1. A change to the
 Original alone that takes a line past that isn't refused, as Our Version's steps are Our
-Version's to fix: each Our Version step that uses the line is flagged, settled only by an edit.
+Version's to fix: each Our Version step that uses the line is flagged, settled only by an edit
+that brings the line back within all of it, or of the Our Version step.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from recipes.models import (
     IngredientSegment,
     effective,
     new_ulid,
+    our_version_settled,
 )
 
 if TYPE_CHECKING:
@@ -33,32 +35,39 @@ def overused(steps: Mapping[str, StepFacts]) -> list[str]:
 
 def flag_overused(recipe: Recipe) -> Recipe:
     """The recipe with an issue on each Our Version step that uses a line the effective steps use
-    more than all of, naming the other steps, unless the step's open issue says so of that line
-    already.
+    more than all of, naming the other steps, unless the step has one open for that line already.
+    Such an issue whose line is back within all of it is resolved, as an edit settles it.
     """
     if recipe.our_version is None:
         return recipe
     shown = effective(recipe)
+    flags: set[tuple[str, str]] = set()
     issues: list[EnrichmentIssue] = []
+    open_flags = {(i.fact_id, i.line_id) for i in recipe.issues if _flag(i)}
     for ref in overused(shown.facts.steps):
         users = {i for i, facts in shown.facts.steps.items() if ref in refs(facts)}
         said = f"{line_name(shown, ref)} too: together more than all of it"
         for step in shown.steps:
-            if not step.change or step.id not in users or _says(recipe, step.id, said):
+            if not step.change or step.id not in users:
                 continue
-            issues.append(step_issue(step.id, f"{steps_use(shown, users - {step.id})} {said}"))
-    return flagged(recipe, issues)
-
-
-def _says(recipe: Recipe, step_id: str, said: str) -> bool:
-    """Whether an open over-use issue on the Our Version step ends with `said`, naming its line."""
-    return any(
-        i.status == "open"
-        and i.fact_id == f"{OUR_VERSION}{step_id}.uses"
-        and not i.settles_on_confirm
-        and i.reason.endswith(said)
+            flags.add(flag := (f"{OUR_VERSION}{step.id}.uses", ref))
+            if flag not in open_flags:
+                reason = f"{steps_use(shown, users - {step.id})} {said}"
+                issues.append(step_issue(step.id, reason, line_id=ref))
+    if not (gone := open_flags - flags):
+        return flagged(recipe, issues)
+    kept = [
+        i.model_copy(update={"status": "resolved", "confirm_batch": None})
+        if _flag(i) and (i.fact_id, i.line_id) in gone
+        else i
         for i in recipe.issues
-    )
+    ]
+    return our_version_settled(flagged(recipe.model_copy(update={"issues": kept}), issues))
+
+
+def _flag(issue: EnrichmentIssue) -> bool:
+    """Whether the issue is an open one that steps use more than all of its line."""
+    return issue.status == "open" and issue.line_id is not None
 
 
 def refs(facts: StepFacts | None) -> set[str]:
@@ -87,13 +96,16 @@ def steps_use(shown: Effective, step_ids: set[str]) -> str:
     return f"Steps {', '.join(numbers[:-1])} and {numbers[-1]} use"
 
 
-def step_issue(step_id: str, reason: str, *, settles_on_confirm: bool = False) -> EnrichmentIssue:
+def step_issue(
+    step_id: str, reason: str, *, settles_on_confirm: bool = False, line_id: str | None = None
+) -> EnrichmentIssue:
     """An issue on an Our Version step's uses that proposes no correction."""
     return EnrichmentIssue(
         id=new_ulid(),
         fact_id=f"{OUR_VERSION}{step_id}.uses",
         reason=reason,
         settles_on_confirm=settles_on_confirm,
+        line_id=line_id,
     )
 
 
