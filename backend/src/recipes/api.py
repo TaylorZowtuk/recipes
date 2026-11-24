@@ -27,6 +27,7 @@ from recipes.backup import BackupBucket, BackupLinks
 from recipes.edits import (
     CONFIRMED_BY,
     Edited,
+    EditLine,
     FactEdit,
     confirm_matches,
     edit_recipe,
@@ -846,12 +847,12 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
             "isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't "
             "have, a step's segments aren't its text, its segments or uses name a line the recipe "
             "doesn't have, a line's portions add up to more than 1 (with any kept steps'), an "
-            "issue isn't open, substitutions or a suggested Difficulty aren't the LLM's "
-            "unconfirmed estimate, a substitute is its line's own match (kept or new), a wording "
-            "isn't a parsed line's name, it learns more than one write holds, a fact names an "
-            "unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or "
-            "wording is confirmed or at another schema version, or the enriched recipe is too big "
-            "to store"
+            "issue isn't open or comes marked to settle on confirm, substitutions or a suggested "
+            "Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own "
+            "match (kept or new), a wording isn't a parsed line's name, it learns more than one "
+            "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new "
+            "Canonical Ingredient or wording is confirmed or at another schema version, or the "
+            "enriched recipe is too big to store"
         },
     },
 )
@@ -886,16 +887,16 @@ def put_enrichment(
     temperature segment is one code finds in its step's text, a step with segments has uses that are
     exactly its segments' Step Portions summed per line, each line's `portion`s across the steps add
     up to at most 1, every Enrichment Issue is on one of their facts and arrives open with no
-    Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated and
-    unconfirmed, no substitute is its line's own match, every wording is the normalized name of one
-    of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
-    names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
-    every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
-    enriched recipe is at most MAX_RECIPE_BYTES as JSON. Re-enrichment's facts must also fit
-    with the kept ones: each line's `portion`s across the steps still add up to at most 1, and
-    no substitute is its line's own match. Together with Our Version's steps, a line may go past
-    all of it: each Our Version step that uses it gets an Enrichment Issue, and a Ready Our
-    Version is Awaiting Review.
+    Confirm Batch and without `settles_on_confirm`, substitutions and a suggested Difficulty
+    arrive from the LLM, estimated and unconfirmed, no substitute is its line's own match, every
+    wording is the normalized name of one of the parsed lines, it learns at most MAX_LEARNED
+    items, every match, substitute and wording names a Canonical Ingredient that exists or is new
+    here, every new one's Store Category exists, every new Canonical Ingredient and wording is
+    unconfirmed and at SCHEMA_VERSION, and the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+    Re-enrichment's facts must also fit with the kept ones: each line's `portion`s across the
+    steps still add up to at most 1, and no substitute is its line's own match. Together with Our
+    Version's steps, a line may go past all of it: each Our Version step that uses it gets an
+    Enrichment Issue, and a Ready Our Version is Awaiting Review.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
@@ -1539,8 +1540,9 @@ def search_fdc_foods(
             "changed, or the recipe is Pending and has no facts to edit yet"
         },
         422: {
-            "description": "The recipe has no such line, step or substitute, the step's portions "
-            "and timers don't fit it or use more than all of a line, the line's wording changes "
+            "description": "The recipe has no such line, step or substitute, Our Version "
+            "doesn't write the line, the step is Our Version's, the step's portions and timers "
+            "don't fit it or use more than all of a line, the line's wording changes "
             "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
             "doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but "
             "no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC "
@@ -1576,13 +1578,23 @@ def edit_fact(
     A step's portions that take a line past all of it together with Our Version's steps aren't
     refused: each Our Version step that uses it gets an Enrichment Issue, and a Ready Our Version
     is Awaiting Review.
+
+    A line edit whose `line_id` is an Our Version line's Review Item (`our_version.i3`) edits
+    that line as an Our Version save that changes only it would: its facts are Our Version's
+    own, its text is built from them, its open Enrichment Issues are resolved, the steps that
+    mention it by another name or Canonical Ingredient are flagged, and an Our Version Awaiting
+    Review with nothing left to review is Ready. Our Version's steps are edited in Our Version.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":
         raise HTTPException(409, "A Pending recipe has no facts to edit yet")
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
-    edited = edit_recipe(store, recipe, body.edit, snapshot)
+    edit = body.edit
+    if isinstance(edit, EditLine) and edit.line_id.startswith(OUR_VERSION):
+        edited = our_version.edit_line(store, recipe, edit, snapshot, datetime.now(UTC))
+    else:
+        edited = edit_recipe(store, recipe, edit, snapshot)
     if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     saved = store.review_recipe(
@@ -1673,9 +1685,14 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     )
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
-    # Only an editor's review settles an issue, never enrichment.
+    # Only an editor's review settles an issue, never enrichment, and only the API marks one
+    # that confirming the fact as it is settles.
     if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
         raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
+    if any(issue.settles_on_confirm for issue in body.issues):
+        raise HTTPException(
+            422, "An Enrichment Issue arrives without settles_on_confirm: only the API sets it"
+        )
     names = {
         normalize_wording(facts.parse.name)
         for facts in body.facts.ingredients.values()

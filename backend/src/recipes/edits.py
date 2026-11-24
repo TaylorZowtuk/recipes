@@ -631,6 +631,8 @@ def matched_food(recipes: list[Recipe], canonical_id: str, snapshot: fdc.Snapsho
 
 
 def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
+    if edit.step_id.startswith(OUR_VERSION):
+        raise HTTPException(422, "Our Version's steps are edited in Our Version")
     if edit.step_id not in {step.id for step in recipe.original.steps}:
         raise HTTPException(422, f"The recipe has no step {edit.step_id}")
     facts = recipe.facts.model_copy(deep=True)

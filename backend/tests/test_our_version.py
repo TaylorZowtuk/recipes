@@ -23,6 +23,7 @@ from test_enrichment_review import (
     issue,
     parse,
     stored,
+    uses,
 )
 from test_review_edits import PORK, beef_line, edit, line_edit, numbers, other
 
@@ -38,6 +39,7 @@ from recipes.models import (
     Quantity,
     Recipe,
     RecipeFacts,
+    StepFacts,
     SubstitutionsFact,
 )
 from recipes.our_version import Refused, kitchen_number, line_text
@@ -566,6 +568,106 @@ def test_an_our_version_whose_last_issue_a_wording_fix_settles_is_ready(
     [asked] = changed.issues
     assert (asked.fact_id, asked.status) == ("our_version.i10.match", "resolved")
     assert changed.our_version_status == "ready"
+
+
+# A Review edit of an Our Version line
+
+
+def test_a_review_edit_of_an_our_version_line_settles_its_ask_and_makes_it_ready(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = awaiting(api_store, issues=[], status="ready")
+    sharing = with_ours(api_store, 2, unit="can", original=beef_line("carrots"))
+    braised(editor_client, recipe, "our_version")
+    asked = stored(api_store, sharing.id)
+    assert [i.fact_id for i in asked.issues] == ["our_version.i10.conversion"]
+    assert asked.our_version_status == "awaiting_review"
+
+    # The editor picks a portion for it, by counting the beef in eggs' "each".
+    response = edit(
+        editor_client,
+        asked,
+        **line_edit(
+            "our_version.i10",
+            quantity={"low": 2, "high": 2},
+            unit="each",
+            fdc_id=1002,
+            portion_id=503,
+        ),
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, sharing.id)
+    assert [i.status for i in changed.issues if i.id == asked.issues[0].id] == ["resolved"]
+    assert [i for i in changed.issues if i.status == "open"] == []
+    assert changed.our_version_status == "ready"
+    assert response.json()["recipe"]["our_version_status"] == "ready"
+    picked = our_line(api_store, sharing.id)
+    assert picked.parse is not None
+    assert picked.match is not None
+    assert (picked.parse.unit, picked.match.fdc_id, picked.match.portion_id) == ("each", 1002, 503)
+    assert editors(picked.match.model_dump())
+    ours = changed.our_version
+    assert ours is not None
+    assert ours.ingredients.add[0].text == "2 each stewing beef"
+    # The Original's facts are its own: the edit writes only Our Version's.
+    assert changed.facts == asked.facts
+
+
+def test_a_review_edit_renaming_an_our_version_line_flags_the_steps_that_mention_it(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    browning = StepFacts(uses=uses(uses=[{"ref": "i1", "portion": 1}]))
+    recipe = ready(api_store, FACTS.model_copy(update={"steps": {"s1": browning}}))
+    saved = save(editor_client, recipe, {"ingredients": lines(edit={"i1": line()})})
+    assert saved.status_code == 200, saved.text
+    before = stored(api_store, recipe.id)
+
+    response = edit(
+        editor_client,
+        before,
+        **line_edit("our_version.i1", name="chuck roast", canonical=BRAISING),
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    [flagged] = changed.issues
+    assert (flagged.fact_id, flagged.status, flagged.settles_on_confirm) == (
+        "our_version.s1.uses",
+        "open",
+        True,
+    )
+    assert flagged.reason == "Mentions stewing beef, which Our Version changed"
+    assert changed.our_version_status == "awaiting_review"
+    ours = changed.our_version
+    assert ours is not None
+    renamed = ours.facts.ingredients["i1"].parse
+    assert renamed is not None
+    assert renamed.name == "chuck roast"
+    assert changed.facts == before.facts
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        line_edit("our_version.i9"),
+        line_edit("our_version.i2"),
+        {"kind": "step", "step_id": "our_version.s1", "portions": [1], "durations": []},
+    ],
+    ids=["a line Our Version removed", "a line Our Version leaves", "an Our Version step"],
+)
+def test_a_review_edit_of_no_our_version_line_is_refused(
+    editor_client: TestClient, api_store: Store, body: dict[str, Any]
+) -> None:
+    recipe = ready(api_store)
+    draft = {"ingredients": lines(edit={"i1": line()}, remove=["i9"])}
+    assert save(editor_client, recipe, draft).status_code == 200
+    before = stored(api_store, recipe.id)
+
+    response = edit(editor_client, before, **body)
+
+    assert response.status_code == 422, response.text
+    assert stored(api_store, recipe.id) == before
 
 
 def test_a_save_reads_the_collection_once(

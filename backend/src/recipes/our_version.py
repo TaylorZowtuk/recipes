@@ -247,20 +247,83 @@ def save(
             "our_version_last_step": last_step,
         }
     )
-    for edited in saved.edits:
-        if edited.shared:
-            changed = edited.shared.apply(changed) or changed
-    # The lines this save changed are the editor's own picks, so the spread passes them by. The
-    # open issues of the lines and steps it changed or dropped are settled; the rest stay.
-    ours = cast("OurVersion", changed.our_version)
-    spread = ours.facts.ingredients
-    facts = {line_id: fresh[line_id] if line_id in fresh else spread[line_id] for line_id in built}
     touched = {
         *fresh,
         *(set(stored_facts) - set(built)),
         *(i for i, text in before_steps.items() if after_steps.get(i) != text),
         *(i for i, text in after_steps.items() if before_steps.get(i) != text),
     }
+    saved.recipe = _finished(recipe, changed, saved.edits, fresh, touched)
+    return saved
+
+
+def edit_line(
+    store: Store,
+    recipe: Recipe,
+    edit: EditLine,
+    snapshot: Callable[[], fdc.Snapshot],
+    now: datetime,
+) -> Edited:
+    """The recipe with a Review edit of one Our Version line, `edit.line_id` being its Review
+    Item (`our_version.i3`): its facts built and settled as an Our Version save that changes only
+    that line builds and settles them, and its text built from its parse. The Original's facts
+    change only where the line's pick fixes a wording. A 422 for a line Our Version doesn't write.
+    """
+    line_id = edit.line_id.removeprefix(OUR_VERSION)
+    ours = recipe.our_version
+    stored = ours.facts.ingredients.get(line_id) if ours else None
+    if ours is None or stored is None:
+        raise HTTPException(422, f"Our Version has no line {line_id}")
+    result = Edited(recipe)
+    facts = _built(
+        line_id,
+        edit,
+        stored,
+        store=store,
+        result=result,
+        snapshot=snapshot,
+        recipes=store.recipes,
+        now=now,
+    )
+    text = line_text(cast("ParseFact", facts.parse))
+    lines = ours.ingredients
+    if line_id in lines.edit:
+        edited = {**lines.edit, line_id: lines.edit[line_id].model_copy(update={"text": text})}
+        lines = lines.model_copy(update={"edit": edited})
+    else:
+        added = [a.model_copy(update={"text": text}) if a.id == line_id else a for a in lines.add]
+        lines = lines.model_copy(update={"add": added})
+    ours = ours.model_copy(
+        update={
+            "ingredients": lines,
+            "facts": ours.facts.model_copy(
+                update={"ingredients": {**ours.facts.ingredients, line_id: facts}}
+            ),
+            "edited_at": now,
+        }
+    )
+    changed = recipe.model_copy(update={"our_version": ours})
+    result.recipe = _finished(recipe, changed, [result], {line_id: facts}, {line_id})
+    return result
+
+
+def _finished(
+    before: Recipe,
+    changed: Recipe,
+    edits: Sequence[Edited],
+    fresh: Mapping[str, IngredientFacts],
+    touched: set[str],
+) -> Recipe:
+    """The recipe an Our Version change leaves, with the lines it rebuilt (`fresh`): each line's
+    pick spread over the recipe, apart from those lines, which are the editor's own picks; the
+    open issues of the lines and steps it `touched` settled, the rest kept; each step it affected
+    flagged; and its Our Version settled.
+    """
+    for edited in edits:
+        if edited.shared:
+            changed = edited.shared.apply(changed) or changed
+    ours = cast("OurVersion", changed.our_version)
+    facts = {**ours.facts.ingredients, **fresh}
     issues = resolve(
         changed,
         lambda fact_id: (
@@ -270,8 +333,7 @@ def save(
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
     done = changed.model_copy(update={"our_version": ours, "issues": issues})
-    saved.recipe = our_version_settled(flagged(done, _affected(recipe, done, set(fresh))))
-    return saved
+    return our_version_settled(flagged(done, _affected(before, done, set(fresh))))
 
 
 def _affected(before: Recipe, after: Recipe, fresh: set[str]) -> list[EnrichmentIssue]:
@@ -555,28 +617,56 @@ def _line(
         refuse("ingredients", line_id, f"Line {line_id} needs a Canonical Ingredient choice")
     # A Review line edit's refusal names the line by the draft's id, for the PWA to show it there.
     try:
-        fields = {name: getattr(draft, name) for name in LineFields.model_fields}
-        edit = EditLine(kind="line", line_id=line_id, **fields)
         edited = Edited(saved.recipe)
-        facts = edited_line(
-            store,
-            saved.recipe.id,
-            edit,
+        facts = _built(
+            line_id,
+            draft,
             old,
+            store=store,
+            result=edited,
             snapshot=snapshot,
             recipes=recipes,
             now=now,
-            result=edited,
-        )
-        saved.edits.append(edited)
-        return facts.model_copy(
-            update={
-                "match": _as_editors(facts.match, now),
-                "conversion": _as_editors(facts.conversion, now),
-            }
         )
     except HTTPException as refusal:
         refuse("ingredients", line_id, refusal.detail)
+    saved.edits.append(edited)
+    return facts
+
+
+def _built(
+    line_id: str,
+    line: LineFields,
+    old: IngredientFacts | None,
+    *,
+    store: Store,
+    result: Edited,
+    snapshot: Callable[[], fdc.Snapshot],
+    recipes: Callable[[], list[Recipe]],
+    now: datetime,
+) -> IngredientFacts:
+    """An Our Version line's facts as the editor gives them, built from `old` as a Review line
+    edit builds them, with what else the edit writes in `result`. Its match and conversion are
+    the editor's, even one kept from enrichment's.
+    """
+    fields = {name: getattr(line, name) for name in LineFields.model_fields}
+    edit = EditLine(kind="line", line_id=line_id, **fields)
+    facts = edited_line(
+        store,
+        result.recipe.id,
+        edit,
+        old,
+        snapshot=snapshot,
+        recipes=recipes,
+        now=now,
+        result=result,
+    )
+    return facts.model_copy(
+        update={
+            "match": _as_editors(facts.match, now),
+            "conversion": _as_editors(facts.conversion, now),
+        }
+    )
 
 
 def _as_editors[F: (MatchFact, ConversionFact)](fact: F | None, now: datetime) -> F | None:
