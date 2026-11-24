@@ -457,6 +457,10 @@ describe("Our Version's Review Items", () => {
     expect(shown("our_version.s1")).toContain("Mentions butter, which Our Version changed.");
     expect(canEdit(item("our_version.s2"), r)).toBe(false);
     expect(canEdit(item("s1"), r)).toBe(true);
+    // Not even a step or substitutions the Original's own item could edit.
+    expect(canEdit(item("our_version.s1"), r)).toBe(false);
+    const swaps = { ...item("i3.substitutions"), id: "our_version.i3.substitutions" };
+    expect(canEdit(swaps, r)).toBe(false);
   });
 
   it("edits an Our Version line from its sheet, by its item id, prefilled from its own facts", () => {
