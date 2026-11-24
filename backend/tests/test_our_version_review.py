@@ -399,7 +399,7 @@ def test_undoing_a_stale_batch_leaves_a_pending_our_version_pending(
     ],
     ids=["a segmented step left", "no step left"],
 )
-def test_a_save_dropping_the_only_step_waiting_for_enrich_leaves_pending(
+def test_a_save_dropping_the_only_step_waiting_for_enrich_settles_its_status(
     editor_client: TestClient, api_store: Store, draft: dict[str, Any], status: EnrichmentStatus
 ) -> None:
     # s2 is segmented, s5 waits for enrich; the save drops s5.

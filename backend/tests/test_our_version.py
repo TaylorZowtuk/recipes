@@ -644,6 +644,7 @@ def test_a_review_edit_renaming_an_our_version_line_flags_the_steps_that_mention
     renamed = ours.facts.ingredients["i1"].parse
     assert renamed is not None
     assert renamed.name == "chuck roast"
+    assert ours.ingredients.edit["i1"].text == "900 g chuck roast"
     assert changed.facts == before.facts
 
 
