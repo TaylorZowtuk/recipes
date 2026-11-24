@@ -1320,7 +1320,8 @@ export interface components {
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
          *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
          *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
-         *     only an edit does, as for steps that together use more than all of a line.
+         *     only an edit does, as for steps that together use more than all of a line, which names that
+         *     line in `line_id`.
          */
         "EnrichmentIssue-Input": {
             /** After */
@@ -1333,6 +1334,8 @@ export interface components {
             fact_id: string;
             /** Id */
             id: string;
+            /** Line Id */
+            line_id?: string | null;
             /** Model */
             model?: string | null;
             /** Reason */
@@ -1357,7 +1360,8 @@ export interface components {
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
          *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
          *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
-         *     only an edit does, as for steps that together use more than all of a line.
+         *     only an edit does, as for steps that together use more than all of a line, which names that
+         *     line in `line_id`.
          */
         "EnrichmentIssue-Output": {
             /** After */
@@ -1370,6 +1374,8 @@ export interface components {
             fact_id: string;
             /** Id */
             id: string;
+            /** Line Id */
+            line_id: string | null;
             /** Model */
             model: string | null;
             /** Reason */
