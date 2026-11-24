@@ -11,19 +11,19 @@ An editor can change the Original's steps after Our Version exists: a Review ste
 - A Review step edit or a re-enrichment that takes a line past 1 across the Original's own steps is refused, as before. The Original alone stays strict.
 - One that takes a line past 1 only across the effective steps is not refused. Each Our Version step that uses the line gets an Enrichment Issue naming the other steps ("Step 1 uses stewing beef too: together more than all of it"). A Ready Our Version becomes Awaiting Review.
 - While the issue is open, the effective total may sit past 1, and the step shows more of the line than the line has.
-- A step gets one such issue per line it overuses. An open issue on the step about another line doesn't stop it.
+- A step gets one such issue per line it overuses. The issue records the line, so an open issue on the step about another line doesn't stop it, two lines with the same name get one each, and renaming the line doesn't add another.
 
 ### Re-enrichment checks Our Version's steps too
 
 - Re-enriching the Original runs the same checks an Our Version save runs on unchanged steps. A step whose new facts mention a line Our Version removed or renamed gets the affected-step issue, and a line past 1 gets the over-use issue above.
 - The open issues of a step whose facts it replaced are settled, as they are about facts that are gone.
-- So re-enrichment can now give Our Version issues and move it from Ready to Awaiting Review. Our Version's own facts stay as they are.
+- So re-enrichment can now give Our Version issues and move it from Ready to Awaiting Review. It can also move it back to Ready: settling a replaced step's issues, or an over-use whose line is back within 1, can leave none of Our Version's Review Items to check. Our Version's own facts stay as they are.
 
 ### Each issue records whether confirming the step as it is settles it
 
 - An issue that proposes no correction records, on the issue, whether confirming its step as it is settles it. The API's confirm and the PWA both read that, not where the issue sits or what its reason says.
 - The affected-step issue and the cap's issue (an enrich answer past 1, stored at what's left) settle by confirming the step as it is, or by editing it. The capped Segment is already within 1, and a step that mentions a removed line may still read right.
-- The over-use issue settles only by an edit. Confirming the step leaves it open, so Our Version can't become Ready while a line is used past 1.
+- The over-use issue settles only by an edit: one of either step that brings the line back within 1 (a Review step edit of the Original's step, or a re-enrichment, settles it like an edit), or an edit or removal of the Our Version step. Confirming the step leaves it open, so Our Version can't become Ready while a line is used past 1.
 
 ## Why
 
@@ -35,9 +35,9 @@ An editor can change the Original's steps after Our Version exists: a Review ste
 ## Consequences
 
 - An effective total of Step Portions can sit past 1, always with an open Enrichment Issue on an Our Version step.
-- Re-enrichment and Review step edits can move Our Version from Ready to Awaiting Review.
-- An Enrichment Issue has one more field, and the generated API client changes with it.
-- An editor who sees an over-use flag must edit a step to settle it.
+- Re-enrichment and Review step edits can move Our Version from Ready to Awaiting Review, and back.
+- An Enrichment Issue has two more fields, whether a confirm settles it and the line an over-use is of, and the generated API client changes with them.
+- An editor who sees an over-use flag must edit a step to settle it: either step back within 1, or the Our Version step itself.
 
 ## Considered options
 
