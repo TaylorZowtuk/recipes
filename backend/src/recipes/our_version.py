@@ -24,7 +24,6 @@ from recipes.edits import (
     LineFields,
     _by_editor,  # pyright: ignore[reportPrivateUsage]
     edited_line,
-    overused,
 )
 from recipes.models import (
     MAX_LINES,
@@ -54,11 +53,12 @@ from recipes.models import (
     StepUse,
     TextSegment,
     effective,
-    new_ulid,
+    item_of,
     normalize_wording,
     our_version_settled,
     resolve,
 )
+from recipes.step_portions import flagged, line_name, refs, step_issue, steps_use
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -236,7 +236,8 @@ def save(
         note=draft.note,
         edited_at=now,
     )
-    status, ready_batch = _status(recipe, stored_steps, steps), recipe.our_version_ready_batch
+    status = _status(recipe, stored_steps, steps, kept_steps)
+    ready_batch = recipe.our_version_ready_batch
     changed = recipe.model_copy(
         update={
             "our_version": ours,
@@ -269,14 +270,14 @@ def save(
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
     done = changed.model_copy(update={"our_version": ours, "issues": issues})
-    saved.recipe = our_version_settled(_flagged(done, _affected(recipe, done)))
+    saved.recipe = our_version_settled(flagged(done, _affected(recipe, done, set(fresh))))
     return saved
 
 
-def _affected(before: Recipe, after: Recipe) -> list[EnrichmentIssue]:
-    """An issue proposing no correction for each step of `after` with a Segment or use for a line
-    the save removed, or whose name or Canonical Ingredient it changed. Amounts, units and
-    preparations don't affect a step.
+def _affected(before: Recipe, after: Recipe, fresh: set[str]) -> list[EnrichmentIssue]:
+    """An issue for each step of `after` with a Segment or use for a line the save removed, or
+    rebuilt (`fresh`) with another name or Canonical Ingredient. Amounts, units and preparations
+    don't affect a step, nor does a wording spread to a line the save left alone.
     """
     was, now = effective(before), effective(after)
     ours = cast("OurVersion", after.our_version)
@@ -285,18 +286,63 @@ def _affected(before: Recipe, after: Recipe) -> list[EnrichmentIssue]:
         line_id: "removed" if line_id not in kept else "changed"
         for line_id in (line.id for line in was.ingredients)
         if line_id not in kept
-        or (line_id in ours.ingredients.edit and _identity(was, line_id) != _identity(now, line_id))
+        or (line_id in fresh and _identity(was, line_id) != _identity(now, line_id))
     }
-    issues: list[EnrichmentIssue] = []
-    for step in now.steps:
-        held = ours.facts.steps if step.change else after.facts.steps
-        refs = _refs(held.get(step.id))
-        issues += [
-            _issue(step.id, f"Mentions {_line_name(was, ref)}, which Our Version {how}")
-            for ref, how in changed.items()
-            if ref in refs
-        ]
-    return issues
+    steps = [
+        (step.id, (ours.facts.steps if step.change else after.facts.steps).get(step.id))
+        for step in now.steps
+    ]
+    return _mentioning(steps, changed, was)
+
+
+def reenriched(before: Recipe, after: Recipe) -> Recipe:
+    """The re-enriched recipe `after` with the open issues of the unchanged steps whose facts the
+    re-enrichment replaced settled, and an issue on each of those with a Segment or use for a line
+    Our Version removed, or edited to another name or Canonical Ingredient than the Original's.
+    """
+    ours = after.our_version
+    if ours is None:
+        return after
+    now = effective(after)
+    replaced = [
+        step.id
+        for step in now.steps
+        if not step.change and before.facts.steps.get(step.id) != after.facts.steps.get(step.id)
+    ]
+    issues = resolve(
+        after,
+        lambda fact_id: (
+            fact_id.startswith(OUR_VERSION)
+            and item_of(fact_id).removeprefix(OUR_VERSION) in replaced
+        ),
+    )
+    original = effective(after.model_copy(update={"our_version": None}))
+    changed = dict.fromkeys(ours.ingredients.remove, "removed") | {
+        line_id: "changed"
+        for line_id in ours.ingredients.edit
+        if _identity(original, line_id) != _identity(now, line_id)
+    }
+    steps = [(step_id, after.facts.steps.get(step_id)) for step_id in replaced]
+    settled = after.model_copy(update={"issues": issues})
+    return our_version_settled(flagged(settled, _mentioning(steps, changed, original)))
+
+
+def _mentioning(
+    steps: Sequence[tuple[str, StepFacts | None]], changed: Mapping[str, str], names: Effective
+) -> list[EnrichmentIssue]:
+    """An issue, settled by confirming the step as it is, on each step whose facts have a Segment
+    or use for a line in `changed`, saying how Our Version changed it, named as `names` has it.
+    """
+    return [
+        step_issue(
+            step_id,
+            f"Mentions {line_name(names, ref)}, which Our Version {how}",
+            settles_on_confirm=True,
+        )
+        for step_id, facts in steps
+        for ref, how in changed.items()
+        if ref in refs(facts)
+    ]
 
 
 def _identity(shown: Effective, line_id: str) -> tuple[str | None, str | None]:
@@ -309,53 +355,13 @@ def _identity(shown: Effective, line_id: str) -> tuple[str | None, str | None]:
     )
 
 
-def _refs(facts: StepFacts | None) -> set[str]:
-    """The lines a step's Segments and uses are for."""
-    if facts is None:
-        return set()
-    segments = facts.segments.segments if facts.segments else []
-    uses = facts.uses.uses if facts.uses else []
-    named = {s.ref for s in segments if isinstance(s, IngredientSegment)}
-    return named | {use.ref for use in uses}
-
-
-def _line_name(shown: Effective, line_id: str) -> str:
-    """A line as a message names it: its parsed name, or else its text."""
-    facts = shown.facts.ingredients.get(line_id)
-    if facts and facts.parse:
-        return facts.parse.name
-    return next(line.text for line in shown.ingredients if line.id == line_id)
-
-
-def _steps_use(shown: Effective, step_ids: set[str]) -> str:
-    """ "Step 1 uses" or "Steps 1 and 4 use", by where the steps are in the effective recipe."""
-    numbers = [str(n) for n, step in enumerate(shown.steps, 1) if step.id in step_ids]
-    if len(numbers) == 1:
-        return f"Step {numbers[0]} uses"
-    return f"Steps {', '.join(numbers[:-1])} and {numbers[-1]} use"
-
-
-def _issue(step_id: str, reason: str) -> EnrichmentIssue:
-    """An issue on an Our Version step's uses that proposes no correction."""
-    return EnrichmentIssue(id=new_ulid(), fact_id=f"{OUR_VERSION}{step_id}.uses", reason=reason)
-
-
-def _flagged(recipe: Recipe, issues: list[EnrichmentIssue]) -> Recipe:
-    """The recipe with these issues added, and its Our Version Awaiting Review if it was Ready."""
-    if not issues:
-        return recipe
-    changes: dict[str, object] = {"issues": [*recipe.issues, *issues]}
-    if recipe.our_version_status == "ready":
-        changes |= {"our_version_status": "awaiting_review", "our_version_ready_batch": None}
-    return recipe.model_copy(update=changes)
-
-
 def capped(
     recipe: Recipe, answers: Mapping[str, StepFacts]
 ) -> tuple[dict[str, StepFacts], list[EnrichmentIssue]]:
     """Enrich's answers for Our Version's steps, in the effective order, each Segment at most what
     the other effective steps leave of its line: one past that is stored at what's left, or as its
-    text when none is, with an issue naming the other steps that use the line.
+    text when none is, with an issue naming the other steps that use the line, which confirming
+    the step as it is settles.
     """
     shown = effective(recipe)
     used: dict[str, float] = {}
@@ -369,12 +375,12 @@ def capped(
         stored[step_id], short[step_id] = _capped(answers[step_id], used)
     steps = {**shown.facts.steps, **stored}
     issues: list[EnrichmentIssue] = []
-    for step_id, refs in short.items():
-        for ref in sorted(refs):
-            others = {i for i, facts in steps.items() if i != step_id and ref in _refs(facts)}
-            left = "what's left of it" if ref in _refs(stored[step_id]) else "none of it"
-            reason = f"{_steps_use(shown, others)} {_line_name(shown, ref)} too, so this step has"
-            issues.append(_issue(step_id, f"{reason} {left}"))
+    for step_id, lines in short.items():
+        for ref in sorted(lines):
+            others = {i for i, facts in steps.items() if i != step_id and ref in refs(facts)}
+            left = "what's left of it" if ref in refs(stored[step_id]) else "none of it"
+            reason = f"{steps_use(shown, others)} {line_name(shown, ref)} too, so this step has"
+            issues.append(step_issue(step_id, f"{reason} {left}", settles_on_confirm=True))
     return stored, issues
 
 
@@ -409,30 +415,6 @@ def _capped(facts: StepFacts, used: dict[str, float]) -> tuple[StepFacts, set[st
         segments=facts.segments.model_copy(update={"segments": segments}),
         uses=facts.uses.model_copy(update={"uses": uses}) if facts.uses else None,
     ), short
-
-
-def flag_overused(recipe: Recipe) -> Recipe:
-    """The recipe with an issue on each Our Version step that uses a line the effective steps use
-    more than all of, naming the other steps, unless the step has an open issue there already.
-    A change to the Original alone that does this isn't refused, as Our Version's steps are
-    Our Version's to fix.
-    """
-    if recipe.our_version is None:
-        return recipe
-    shown = effective(recipe)
-    flagged = {i.fact_id for i in recipe.issues if i.status == "open"}
-    issues: list[EnrichmentIssue] = []
-    for ref in overused(shown.facts.steps):
-        users = {i for i, facts in shown.facts.steps.items() if ref in _refs(facts)}
-        for step in shown.steps:
-            if not step.change or step.id not in users:
-                continue
-            if f"{OUR_VERSION}{step.id}.uses" in flagged:
-                continue
-            others = _steps_use(shown, users - {step.id})
-            reason = f"{others} {_line_name(shown, ref)} too: together more than all of it"
-            issues.append(_issue(step.id, reason))
-    return _flagged(recipe, issues)
 
 
 Part = Literal["ingredients", "steps"]
@@ -626,13 +608,18 @@ def _unchanged(draft: OurLineDraft, stored: IngredientFacts) -> bool:
     )
 
 
-def _status(recipe: Recipe, stored: OurSteps, steps: OurSteps) -> EnrichmentStatus:
-    """Pending when a step is new or its text changed, else as it was, or Ready for a new Our
-    Version.
+def _status(
+    recipe: Recipe, stored: OurSteps, steps: OurSteps, facts: Mapping[str, StepFacts]
+) -> EnrichmentStatus:
+    """Pending when a step is new or its text changed; Awaiting Review, for the save to settle,
+    when it was Pending and every edited or added step has its `facts` from enrich; else as it
+    was, or Ready for a new Our Version.
     """
     before, after = _texts(stored), _texts(steps)
     if any(before.get(step_id) != text for step_id, text in after.items()):
         return "pending"
+    if recipe.our_version_status == "pending" and facts.keys() >= after.keys():
+        return "awaiting_review"
     return recipe.our_version_status or "ready"
 
 

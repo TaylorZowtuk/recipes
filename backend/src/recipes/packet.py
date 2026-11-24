@@ -602,8 +602,9 @@ class Work:
                 "recipe": offer.model_dump(mode="json", exclude={"offer_id"}),
             }
             offer.offer_id = _sha256(offered)
-        self.our_versions = {r.id: (r, effective(r)) for r in our_versions or []}
-        ours = [_offer_ours(recipe, shown) for recipe, shown in self.our_versions.values()]
+        # Each recipe whose Our Version waits for enrich, with its effective recipe, by its id.
+        self.pending_ours = {r.id: (r, effective(r)) for r in our_versions or []}
+        ours = [_offer_ours(recipe, shown) for recipe, shown in self.pending_ours.values()]
         for offer in ours:
             offer.offer_id = _sha256({"our_version": offer.model_dump(mode="json")})
         reenriching = any(kept_items(recipe.facts) for recipe, _ in self.recipes.values())
@@ -624,7 +625,7 @@ class Work:
         return self._packet
 
     def title(self, recipe_id: str) -> str:
-        recipe = self.recipes.get(recipe_id) or self.our_versions.get(recipe_id)
+        recipe = self.recipes.get(recipe_id) or self.pending_ours.get(recipe_id)
         return recipe[0].original.title if recipe else recipe_id
 
     def _offer(

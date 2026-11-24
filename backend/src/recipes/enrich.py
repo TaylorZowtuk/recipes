@@ -1,9 +1,8 @@
 """The enrich CLI: hands a model a Work Packet of every Pending recipe, and of every Pending Our
 Version's steps, then checks the model's answer against what the packet offered and writes each
-recipe's facts through the API. A
-Substitutes Packet comes first, whose answer (the substitutes file) the Work Packet offers
-candidates for. With --recipe or --stale, all three re-enrich those recipes instead, and apply
-prints each one's fact changes, writing them only with --write.
+recipe's facts through the API. A Substitutes Packet comes first, whose answer (the substitutes
+file) the Work Packet offers candidates for. With --recipe or --stale, all three re-enrich those
+recipes instead, and apply prints each one's fact changes, writing them only with --write.
 
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich substitutes <API base URL> > ask.json
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich packet <API base URL> \
@@ -127,10 +126,11 @@ def fetch_work(
     substitutes: Substitutes | None = None,
     chosen: Chosen | None = None,
 ) -> Work | None:
-    """The Collection's Pending (or chosen) recipes, Canonical Ingredients, wordings and Store
-    Categories, with the substitutes each recipe states, and without chosen recipes the recipes
-    whose Our Version is Pending, or None when the API couldn't give them or the substitutes file
-    quotes what its recipes don't say, which is printed to stderr.
+    """The work for a Work Packet: the Collection's Pending recipes (or the chosen ones), its
+    Canonical Ingredients, wordings and Store Categories, the substitutes each recipe states,
+    and, unless recipes are chosen, the recipes whose Our Version is Pending. None, with the
+    reason printed to stderr, when the API couldn't give them or the substitutes file quotes what
+    its recipes don't say.
     """
     fetched = fetch_recipes(base_url, send, chosen)
     if fetched is None:
@@ -253,7 +253,7 @@ def apply(
             print(f"{work.title(answered.recipe_id)} → rejected, nothing written:")
             print("\n".join(f"  {error}" for error in rejected.errors))
             continue
-        if not sent_ours(base_url, send, work.our_versions[answered.recipe_id][0], steps):
+        if not sent_ours(base_url, send, work.pending_ours[answered.recipe_id][0], steps):
             failed += 1
     count = len(answer.recipes) + len(answer.our_versions)
     if chosen is not None and not write:
@@ -314,7 +314,6 @@ def sent_ours(base_url: str, send: Send, stored: Recipe, steps: dict[str, StepFa
     body: dict[str, object] = {
         "version": stored.version,
         "steps": {step_id: facts.model_dump(mode="json") for step_id, facts in steps.items()},
-        "issues": [],
     }
     url = f"{base_url}/api/recipes/{stored.id}/our-version/enrichment"
     status, written = send("PUT", url, json.dumps(body).encode())
