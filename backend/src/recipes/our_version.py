@@ -58,7 +58,14 @@ from recipes.models import (
     our_version_settled,
     resolve,
 )
-from recipes.step_portions import flagged, line_name, refs, step_issue, steps_use
+from recipes.step_portions import (
+    flag_overused,
+    flagged,
+    line_name,
+    refs,
+    step_issue,
+    steps_use,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -317,7 +324,8 @@ def _finished(
     """The recipe an Our Version change leaves, with the lines it rebuilt (`fresh`): each line's
     pick spread over the recipe, apart from those lines, which are the editor's own picks; the
     open issues of the lines and steps it `touched` settled, the rest kept; each step it affected
-    flagged; and its Our Version settled.
+    flagged, as is each that now uses a line past all of it, while a flag whose line is back
+    within all of it is settled; and its Our Version settled.
     """
     for edited in edits:
         if edited.shared:
@@ -333,7 +341,7 @@ def _finished(
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
     done = changed.model_copy(update={"our_version": ours, "issues": issues})
-    return our_version_settled(flagged(done, _affected(before, done, set(fresh))))
+    return our_version_settled(flag_overused(flagged(done, _affected(before, done, set(fresh)))))
 
 
 def _affected(before: Recipe, after: Recipe, fresh: set[str]) -> list[EnrichmentIssue]:

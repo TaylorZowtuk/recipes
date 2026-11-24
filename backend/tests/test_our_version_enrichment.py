@@ -563,6 +563,29 @@ def test_two_lines_with_one_name_are_flagged_apart(
     assert open_lines == ["i1", "i9"]
 
 
+def test_an_our_version_save_dropping_the_other_use_settles_the_flag(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # s2 and s5 each use half the beef; s1 taking a quarter flags both. Rewording s2 drops its
+    # use until enrich, so s5, which the save leaves alone, is back within all of it.
+    recipe = enriched(api_store, status="ready", facts=original(s1=uses_of("i1", 0.1)))
+    over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[0.25], durations=[])
+    assert over.status_code == 200, over.text
+    assert set(open_issues(stored(api_store, recipe.id))) == {
+        "our_version.s2.uses",
+        "our_version.s5.uses",
+    }
+
+    response = save(
+        editor_client, stored(api_store, recipe.id), steps_draft(s2="Brown the beef in batches.")
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert open_issues(changed) == {}
+    assert changed.our_version_status == "pending"
+
+
 def test_renaming_a_flagged_line_doesnt_flag_its_step_again(
     editor_client: TestClient, api_store: Store
 ) -> None:
