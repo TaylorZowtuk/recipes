@@ -108,7 +108,7 @@ The version of enrichment a recipe was enriched with, recorded on the recipe so 
 _Avoid_: Enrichment run, parser version
 
 **Re-enrichment**:
-An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status. It enriches only the Original: Our Version, its Our Version Status and its issues stay as they are.
+An explicit run of enrichment over the recipes it is told to enrich, or over those whose Enrichment Version or FDC Snapshot release is out of date. It shows each recipe's fact changes first and writes only when asked. Every Review Item with a Confirmed fact keeps its facts whole, and the recipe keeps its Enrichment Status. It enriches only the Original, and Our Version's own facts stay as they are. It does check Our Version's steps against the new facts: an unchanged step that now mentions a line Our Version removed or renamed, or a line whose Step Portions now add up past 1 across the effective steps, gets an Enrichment Issue, and a Ready Our Version becomes Awaiting Review. The open issues of a step whose facts it replaced are settled.
 _Avoid_: Refresh, backfill
 
 **Ingest Channel**:
@@ -120,7 +120,7 @@ Where a recipe is in enrichment: *Pending* (saved but not yet enriched), *Awaiti
 _Avoid_: Processing state
 
 **Enrichment Issue**:
-Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An editor's FDC food pick on another line with its wording can also leave an issue that proposes no correction (it has no before or after) and is settled by editing the line: on a line that took the food but no FDC portion fits its unit, asking for one, or on a line prepared another way, asking for its FDC food. An Our Version edit leaves one that proposes no correction on an unchanged step that mentions a line Our Version removed or renamed, settled by editing the step or confirming it as it is.
+Something enrichment corrected or was unsure about, and which an editor should check. It names the fact it is about, what it was before and after, and the reason. An editor's FDC food pick on another line with its wording can also leave an issue that proposes no correction (it has no before or after) and is settled by editing the line: on a line that took the food but no FDC portion fits its unit, asking for one, or on a line prepared another way, asking for its FDC food. An Our Version edit leaves one that proposes no correction on an unchanged step that mentions a line Our Version removed or renamed. Each issue that proposes no correction records whether confirming its step as it is settles it: that one does, as does the one for a Step Portion stored at what's left, while the one for a line used past 1 across the effective steps settles only by an edit.
 _Avoid_: Warning, error
 
 **Work Packet**:
@@ -128,7 +128,7 @@ The JSON that a CLI hands a model to answer, checked against the packet before a
 _Avoid_: Prompt, batch
 
 **Step Portion**:
-The share of an ingredient line that one mention of it in a step uses, e.g. 0.5 for "half the garlic". The step shows the line's amount times it. Across all of a recipe's effective steps, a line's step portions add up to at most 1; enrichment of Our Version's steps stores a share past that at what's left, with an Enrichment Issue naming the other steps. It has nothing to do with an FDC food's portion, a household measure with its gram weight.
+The share of an ingredient line that one mention of it in a step uses, e.g. 0.5 for "half the garlic". The step shows the line's amount times it. Across all of a recipe's effective steps, a line's step portions add up to at most 1; enrichment of Our Version's steps stores a share past that at what's left, with an Enrichment Issue naming the other steps. The Original's own steps are held to 1 strictly. A change to the Original (a Review step edit or re-enrichment) that takes a line past 1 only across the effective steps isn't refused: each Our Version step that uses the line gets an Enrichment Issue naming the other steps, settled only by an edit, and the total may sit past 1 while it's open. It has nothing to do with an FDC food's portion, a household measure with its gram weight.
 _Avoid_: Portion (alone), share, fraction
 
 **FDC Snapshot**:
@@ -160,7 +160,7 @@ The household's own changes to a recipe's ingredients and steps, stored as a lay
 _Avoid_: Personal adjustment, variant, fork
 
 **Our Version Status**:
-Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (enriched, or given an issue by a wording fixed elsewhere, and waiting for an editor to check it) or *Ready*. Saving an edited or added step makes it Pending, enrichment then makes it Awaiting Review, and confirming its last Review Item makes it Ready. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
+Where a recipe's Our Version is in enrichment: *Pending* (it has something enrichment still has to do), *Awaiting Review* (waiting for an editor to check it: enriched, or given an Enrichment Issue by a wording fixed elsewhere, by a removed or renamed line an unchanged step mentions, or by a line whose Step Portions add up past 1 across the effective steps) or *Ready*. Saving an edited or added step makes it Pending, enrichment then makes it Awaiting Review, and confirming its last Review Item makes it Ready. A recipe without Our Version has none. It is separate from the recipe's Enrichment Status, which stays Ready, so the recipe stays on the grocery list and in fridge matching while its Our Version waits.
 _Avoid_: Pending (alone, for Our Version), Our Version enrichment flag
 
 **Effective lines**:
