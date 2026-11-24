@@ -30,6 +30,7 @@ import {
   reviewOf,
   runEdit,
   runReview,
+  shownIn,
   shownItem,
   tabCounts,
   undoBatch,
@@ -290,8 +291,9 @@ function RecipeTabs({
   const location = useLocation();
   const jump = location.hash.startsWith("#step-") ? location.hash.slice(1) : undefined;
   const ticks = useStepTicks(recipe.id);
-  const items = isEditor ? reviewOf(recipe) : undefined;
   const version = choices.version ?? "ours";
+  // The Original shows none of Our Version's items, so they aren't counted or confirmed there.
+  const items = isEditor ? shownIn(reviewOf(recipe), version) : undefined;
   const shown = effective(recipe, version);
   const counts = items && tabCounts(items);
   const review: ReviewTarget | undefined = items && {

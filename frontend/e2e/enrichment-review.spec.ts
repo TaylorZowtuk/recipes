@@ -363,6 +363,69 @@ test("an editor reviews Our Version's enriched step to Ready on a Ready recipe",
   await expect(toast(page, "Undone.")).toBeVisible();
   await expect(steps.getByRole("button", { name: /^Unchecked: Add the/ })).toBeVisible();
   expect(await ourStatus()).toBe("awaiting_review");
+
+  // The Original doesn't show Our Version's step, so it neither counts it nor confirms it.
+  await page.getByRole("button", { name: /^Adjust/ }).click();
+  const adjust = page.getByRole("dialog", { name: "Adjust" });
+  await adjust.getByRole("button", { name: "Original", exact: true }).click();
+  await adjust.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByRole("tab", { name: "Steps", exact: true })).toBeVisible();
+  await expect(steps.getByRole("button", { name: /^Confirm \d+ on this tab$/ })).toHaveCount(0);
+});
+
+test("an editor edits Our Version's line from its sheet, and it's Confirmed", async ({
+  page,
+}, testInfo) => {
+  const path = `salt-pilaf-${attempt(testInfo)}`;
+  const id = await addRecipe(page, path);
+  const enriched = await page.request.put(`/api/recipes/${id}/enrichment`, {
+    headers: SERVICE_TOKEN,
+    data: enrichment(`salt rice ${attempt(testInfo)}`),
+  });
+  expect(enriched.status(), await enriched.text()).toBe(200);
+  const recipe = await (await page.request.get(`/api/recipes/${id}`)).json();
+  const saved = await page.request.patch(`/api/recipes/${id}`, {
+    data: {
+      version: recipe.version,
+      operations: [
+        {
+          op: "set_our_version",
+          our_version: {
+            ingredients: {
+              edit: {
+                i3: {
+                  quantity: { low: 0.5, high: 0.5 },
+                  unit: "tsp",
+                  name: "kosher salt",
+                  preparation: null,
+                  fdc_id: null,
+                  portion_id: null,
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+  });
+  expect(saved.status(), await saved.text()).toBe(200);
+  await page.goto(`/recipes/${id}`);
+
+  // Our Version's line, the editor's own and so Confirmed, opens its own sheet, whose Edit starts
+  // from Our Version's parse.
+  const ingredients = page.getByRole("tabpanel", { name: /^Ingredients/ });
+  await ingredients.getByRole("button", { name: /^Confirmed: kosher salt/ }).click();
+  const sheet = page.getByRole("dialog", { name: /kosher salt/ });
+  await sheet.getByRole("button", { name: "Edit" }).click();
+  const amount = sheet.getByRole("textbox", { name: "Amount" });
+  await expect(amount).toHaveValue("½");
+  await amount.fill("1/4");
+  await sheet.getByRole("button", { name: "Save" }).click();
+  await expect(sheet).toBeHidden();
+  await expect(toast(page, "Saved as Confirmed.")).toBeVisible();
+  await expect(ingredients.getByRole("button", { name: /^Confirmed: kosher salt/ })).toContainText(
+    "¼ tsp",
+  );
 });
 
 test("a review write that lost a race shows the newer recipe, says so, and stays on the tab", async ({

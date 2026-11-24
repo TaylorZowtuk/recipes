@@ -11,6 +11,7 @@ import {
   confirmableOn,
   confirmedBy,
   confirmLabel,
+  editInOurVersion,
   itemRecipe,
   reviewLeft,
   uncheckedOn,
@@ -144,6 +145,10 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
     </dl>
   );
 }
+
+// Where to settle a flagged Our Version step no confirm settles, which the sheet can't edit.
+export const EDIT_IN_OUR_VERSION =
+  "Only an edit settles this: change the step in Edit, under Our Version.";
 
 // Everything enrichment says about a Review Item, for an editor to check before confirming it.
 export function ItemDetail({
@@ -293,6 +298,7 @@ export function ItemDetail({
           <p>{issue.reason}</p>
         </Section>
       ))}
+      {editInOurVersion(item) && <p className="review-note">{EDIT_IN_OUR_VERSION}</p>}
     </>
   );
 }

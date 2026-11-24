@@ -2,7 +2,7 @@ import { api, type Card, type Collection, type Recipe, type RecipeFacts } from "
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
 import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED, UNREACHABLE } from "./editRecipe";
-import { effective } from "./ourVersion";
+import { effective, type Version } from "./ourVersion";
 import type { ToastMessage } from "./Toast";
 import { type Answer, refusalMessage, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
@@ -152,31 +152,41 @@ export function shownItem(
   return mine ?? (changed ? undefined : review.items.get(id));
 }
 
-// Whether confirming the item settles its open issues as they are: on a step, an issue proposing
-// no correction (one an Our Version edit left) is settled by confirming the step as it is.
-const settlesAsItIs = (item: ReviewItem, issue: EnrichmentIssue) =>
-  issue.after !== null || item.kind === "step";
+// Whether confirming the issue's fact settles it, as the API's `confirm_settles`: it proposes a
+// correction, which the confirm accepts, or it is marked as one that confirming the fact as it is
+// settles (a step mentioning a line Our Version removed or changed).
+export const confirmSettles = (issue: EnrichmentIssue) =>
+  issue.after !== null || issue.settles_on_confirm;
 
 // Whether the item's sheet offers Confirm, or Accept correction while flagged: not once it's
-// Confirmed, nor while every open issue on a line proposes no correction (one asking an editor to
-// pick an FDC portion or FDC food), which the editor settles by editing the item instead.
+// Confirmed, nor while no open issue settles on confirm (one asking an editor to pick an FDC
+// portion or FDC food, or a step using too much of a line), which an edit settles instead.
 export const acceptable = (item: ReviewItem) =>
-  item.mark !== "confirmed" &&
-  (item.mark !== "flagged" || item.issues.some((issue) => settlesAsItIs(item, issue)));
+  item.mark !== "confirmed" && (item.mark !== "flagged" || item.issues.some(confirmSettles));
+
+// Whether only an edit in Our Version settles the item: a flagged Our Version step that no open
+// issue of settles on confirm, which the review sheet can't edit.
+export const editInOurVersion = (item: ReviewItem) =>
+  item.kind === "step" && ownerOf(item.id).ours && item.mark === "flagged" && !acceptable(item);
 
 // What the sheet's confirm button says: Accept correction while an open issue proposes one.
 export const confirmLabel = (item: ReviewItem) =>
   item.issues.some((issue) => issue.after !== null) ? "Accept correction" : "Confirm";
 
-// The fact ids confirming the item sends: not one that only an open issue on a line proposing no
-// correction is on, so accepting another issue's correction leaves that ask open, and the item
+// The fact ids confirming the item sends: not one that only open issues that don't settle on
+// confirm are on, so accepting another issue's correction leaves that ask open, and the item
 // flagged, until an edit settles it.
 export const confirmedBy = (item: ReviewItem) =>
   item.factIds.filter(
     (id) =>
       !item.issues.some((issue) => issue.fact_id === id) ||
-      item.issues.some((issue) => issue.fact_id === id && settlesAsItIs(item, issue)),
+      item.issues.some((issue) => issue.fact_id === id && confirmSettles(issue)),
   );
+
+// The items a version shows: the Original shows none of Our Version's, so its tab counts and
+// Confirm N on this tab leave them out.
+export const shownIn = (items: Map<string, ReviewItem>, version: Version) =>
+  version === "ours" ? items : new Map([...items].filter(([id]) => !id.startsWith(OUR_VERSION)));
 
 const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
   [...items.values()].filter((item) => item.tab === tab);
