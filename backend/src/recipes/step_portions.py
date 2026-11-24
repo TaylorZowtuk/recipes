@@ -35,34 +35,43 @@ def overused(steps: Mapping[str, StepFacts]) -> list[str]:
 
 def flag_overused(recipe: Recipe) -> Recipe:
     """The recipe with an issue on each Our Version step that uses a line the effective steps use
-    more than all of, naming the other steps, unless the step has one open for that line already.
-    Such an issue whose line is back within all of it is resolved, as an edit settles it.
+    more than all of, naming the other steps, unless the step has one open for that line already,
+    whose wording is brought up to date. Such an issue whose line is back within all of it is
+    resolved, as an edit settles it.
     """
     if recipe.our_version is None:
         return recipe
     shown = effective(recipe)
-    flags: set[tuple[str, str]] = set()
-    issues: list[EnrichmentIssue] = []
-    open_flags = {(i.fact_id, i.line_id) for i in recipe.issues if _flag(i)}
+    reasons: dict[tuple[str, str], str] = {}
+    steps: dict[tuple[str, str], str] = {}
     for ref in overused(shown.facts.steps):
         users = {i for i, facts in shown.facts.steps.items() if ref in refs(facts)}
         said = f"{line_name(shown, ref)} too: together more than all of it"
         for step in shown.steps:
-            if not step.change or step.id not in users:
-                continue
-            flags.add(flag := (f"{OUR_VERSION}{step.id}.uses", ref))
-            if flag not in open_flags:
-                reason = f"{steps_use(shown, users - {step.id})} {said}"
-                issues.append(step_issue(step.id, reason, line_id=ref))
-    if not (gone := open_flags - flags):
-        return flagged(recipe, issues)
-    kept = [
-        i.model_copy(update={"status": "resolved", "confirm_batch": None})
-        if _flag(i) and (i.fact_id, i.line_id) in gone
-        else i
-        for i in recipe.issues
+            if step.change and step.id in users:
+                flag = (f"{OUR_VERSION}{step.id}.uses", ref)
+                reasons[flag] = f"{steps_use(shown, users - {step.id})} {said}"
+                steps[flag] = step.id
+    open_flags = {(i.fact_id, str(i.line_id)) for i in recipe.issues if _flag(i)}
+    issues = [
+        step_issue(steps[flag], reason, line_id=flag[1])
+        for flag, reason in reasons.items()
+        if flag not in open_flags
     ]
-    return our_version_settled(flagged(recipe.model_copy(update={"issues": kept}), issues))
+    gone = open_flags - reasons.keys()
+    kept = [_refreshed(i, reasons, gone) if _flag(i) else i for i in recipe.issues]
+    updated = flagged(recipe.model_copy(update={"issues": kept}), issues)
+    return our_version_settled(updated) if gone else updated
+
+
+def _refreshed(
+    issue: EnrichmentIssue, reasons: dict[tuple[str, str], str], gone: set[tuple[str, str]]
+) -> EnrichmentIssue:
+    """The open flag resolved if its line is back within all of it, else with its wording now."""
+    key = (issue.fact_id, str(issue.line_id))
+    if key in gone:
+        return issue.model_copy(update={"status": "resolved", "confirm_batch": None})
+    return issue.model_copy(update={"reason": reasons[key]})
 
 
 def _flag(issue: EnrichmentIssue) -> bool:

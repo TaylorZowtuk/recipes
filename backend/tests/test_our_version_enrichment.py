@@ -435,6 +435,33 @@ def test_confirming_a_step_that_uses_too_much_leaves_it_flagged(
     assert changed.our_version_status == "awaiting_review"
 
 
+def test_reenriching_the_original_back_within_all_of_a_line_settles_the_flag(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = enriched(api_store, status="ready", step_facts={"s2": segmented(BROWN)})
+    over = {"s1": {"uses": {**LLM, "uses": [{"ref": "i1", "portion": 0.75}]}}}
+    assert reenrich(editor_client, recipe, over).status_code == 200
+    confirmed = confirm(
+        editor_client,
+        stored(api_store, recipe.id),
+        "our_version.s2.segments",
+        "our_version.s2.uses",
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    flagged = stored(api_store, recipe.id)
+    assert list(open_issues(flagged)) == ["our_version.s2.uses"]
+    assert flagged.our_version_status == "awaiting_review"
+    back = {"s1": {"uses": {**LLM, "uses": [{"ref": "i1", "portion": 0.25}]}}}
+
+    response = reenrich(editor_client, flagged, back)
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert open_issues(changed) == {}
+    assert [(i.status, i.confirm_batch) for i in changed.issues] == [("resolved", None)]
+    assert changed.our_version_status == "ready"
+
+
 def test_a_second_original_edit_past_all_of_a_line_flags_the_step_once(
     editor_client: TestClient, api_store: Store
 ) -> None:
@@ -602,7 +629,9 @@ def test_renaming_a_flagged_line_doesnt_flag_its_step_again(
     response = edit(editor_client, stored(api_store, recipe.id), **renamed)
 
     assert response.status_code == 200, response.text
-    assert [i.status for i in stored(api_store, recipe.id).issues] == ["open"]
+    kept = stored(api_store, recipe.id).issues
+    assert [i.status for i in kept] == ["open"]
+    assert kept[0].reason == "Step 1 uses beef chuck too: together more than all of it"
 
 
 def test_an_original_step_edit_within_all_of_a_line_flags_nothing(
