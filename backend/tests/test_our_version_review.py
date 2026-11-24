@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from test_enrichment_review import (
+    CONFIRMED,
     FACTS,
     LLM,
     STEW,
@@ -310,7 +311,7 @@ def test_confirming_an_affected_step_as_it_is_settles_its_issue(
     editor_client: TestClient, api_store: Store
 ) -> None:
     # s3 is the Original's, unchanged, and uses the parsley Our Version removed.
-    affected = issue(1, "our_version.s3.uses", before=None, after=None)
+    affected = issue(1, "our_version.s3.uses", before=None, after=None, settles_on_confirm=True)
     recipe = enriched(api_store, issues=(affected,), step_facts={})
 
     response = confirm(editor_client, recipe, "our_version.s3.uses")
@@ -361,10 +362,53 @@ def test_undoing_after_a_step_edit_leaves_our_version_pending(
     batch = confirm(editor_client, recipe, *paths).json()["confirm_batch"]
     edited = save(editor_client, stored(api_store, recipe.id), steps_draft(s5="Rest briefly."))
     assert edited.json()["our_version_status"] == "pending"
+    assert stored(api_store, recipe.id).our_version_ready_batch is None
 
     assert undo(editor_client, recipe.id, batch).status_code == 200
 
     assert stored(api_store, recipe.id).our_version_status == "pending"
+
+
+def test_undoing_a_stale_batch_leaves_a_pending_our_version_pending(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # A Pending Our Version still naming the batch that once made it Ready.
+    batch = "01K7Q0000000000000000000B9"
+    confirmed = {**CONFIRMED, "confirm_batch": batch}
+    recipe = enriched(
+        api_store,
+        status="pending",
+        step_facts={"s2": segmented(BROWN, **confirmed)},
+        our_version_ready_batch=batch,
+    )
+
+    response = undo(editor_client, recipe.id, batch)
+
+    assert response.status_code == 200, response.text
+    back = stored(api_store, recipe.id)
+    assert back.our_version_status == "pending"
+    assert back.our_version is not None
+    assert back.our_version.facts.steps["s2"] == segmented(BROWN)
+
+
+@pytest.mark.parametrize(
+    ("draft", "status"),
+    [
+        ({"steps": lines(edit={"s2": {"text": BROWN}})}, "awaiting_review"),
+        ({}, "ready"),
+    ],
+    ids=["a segmented step left", "no step left"],
+)
+def test_a_save_dropping_the_only_step_waiting_for_enrich_leaves_pending(
+    editor_client: TestClient, api_store: Store, draft: dict[str, Any], status: EnrichmentStatus
+) -> None:
+    # s2 is segmented, s5 waits for enrich; the save drops s5.
+    recipe = enriched(api_store, status="pending", step_facts={"s2": segmented(BROWN)})
+
+    response = save(editor_client, recipe, draft)
+
+    assert response.status_code == 200, response.text
+    assert stored(api_store, recipe.id).our_version_status == status
 
 
 def test_the_original_is_ready_while_our_version_has_items_left(

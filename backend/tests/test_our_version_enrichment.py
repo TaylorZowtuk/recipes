@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from conftest import EDITOR, SNAPSHOT
-from test_enrichment_review import FACTS, LLM, card, confirm, issue, stored, uses
+from test_enrichment_review import BEEF, FACTS, LLM, card, confirm, issue, stored, uses
 from test_our_version import BRAISING, line, lines, save
 from test_our_version_review import BROWN, REST, enriched, segmented, steps_draft
 from test_review_edits import edit
@@ -137,18 +137,6 @@ def test_confirming_the_enriched_steps_makes_our_version_ready(
     assert stored(api_store, recipe.id).our_version_status == "ready"
 
 
-def test_its_issues_are_stored_on_our_versions_steps(
-    editor_client: TestClient, api_store: Store
-) -> None:
-    recipe = pending(api_store)
-    unsure = issue(1, "our_version.s2.segments", before=None, after=None, reason="Unsure")
-
-    response = enrich_ours(editor_client, recipe, issues=[unsure.model_dump(mode="json")])
-
-    assert response.status_code == 200, response.text
-    assert open_issues(stored(api_store, recipe.id)) == {"our_version.s2.segments": "Unsure"}
-
-
 def test_a_dry_run_returns_the_enriched_recipe_and_writes_nothing(
     editor_client: TestClient, api_store: Store
 ) -> None:
@@ -233,16 +221,6 @@ REFUSALS: dict[str, tuple[dict[str, Any], dict[str, Any], str]] = {
         {},
         "Enrichment can't confirm a fact",
     ),
-    "an issue on the Original": (
-        {"s2": brown(), "s5": REST_ANSWER},
-        {"issues": [issue(1, "s2.segments").model_dump(mode="json")]},
-        "An Enrichment Issue is on no fact: s2.segments",
-    ),
-    "a resolved issue": (
-        {"s2": brown(), "s5": REST_ANSWER},
-        {"issues": [issue(1, "our_version.s2.uses", status="resolved").model_dump(mode="json")]},
-        "An Enrichment Issue arrives open, in no Confirm Batch",
-    ),
 }
 
 
@@ -303,7 +281,35 @@ def test_an_answer_past_all_of_a_line_is_stored_at_whats_left_and_flagged(
     assert open_issues(changed) == {
         "our_version.s2.uses": "Step 1 uses stewing beef too, so this step has what's left of it"
     }
+    assert [i.settles_on_confirm for i in changed.issues] == [True]
     assert changed.our_version_status == "awaiting_review"
+
+
+def test_answering_two_steps_that_share_a_line_stores_the_later_at_whats_left(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    rest = answer(text("Rest the "), beef(0.75), text(" for ten minutes."))
+    recipe = pending(api_store)
+    ours = recipe.our_version
+    assert ours is not None
+    s5 = ours.steps.add[0].model_copy(update={"text": "Rest the beef for ten minutes."})
+    texts = ours.steps.model_copy(update={"add": [s5]})
+    api_store.update_recipe(
+        recipe.model_copy(update={"our_version": ours.model_copy(update={"steps": texts})})
+    )
+    recipe = stored(api_store, recipe.id)
+
+    response = enrich_ours(editor_client, recipe, {"s2": brown(0.75), "s5": rest})
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert changed.our_version is not None
+    s5 = changed.our_version.facts.steps["s5"]
+    assert s5.uses is not None
+    assert [(u.ref, u.portion) for u in s5.uses.uses] == [("i1", 0.25)]
+    assert open_issues(changed) == {
+        "our_version.s5.uses": "Step 2 uses stewing beef too, so this step has what's left of it"
+    }
 
 
 def test_an_answer_with_none_of_a_line_left_names_it_as_plain_text(
@@ -394,6 +400,83 @@ def test_an_original_step_edit_past_all_of_a_line_with_our_versions_steps_flags_
     assert changed.our_version_status == "awaiting_review"
 
 
+def test_confirming_a_step_that_uses_too_much_leaves_it_flagged(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # Only an edit of either step settles using more than all of a line.
+    recipe = enriched(
+        api_store,
+        status="ready",
+        step_facts={"s2": segmented(BROWN)},
+        facts=original(s1=uses_of("i1", 0.25)),
+    )
+    over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
+    assert over.status_code == 200, over.text
+    flagged = stored(api_store, recipe.id)
+    assert [i.settles_on_confirm for i in flagged.issues] == [False]
+
+    response = confirm(editor_client, flagged, "our_version.s2.segments", "our_version.s2.uses")
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert list(open_issues(changed)) == ["our_version.s2.uses"]
+    assert changed.our_version_status == "awaiting_review"
+
+
+def test_a_second_original_edit_past_all_of_a_line_flags_the_step_once(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = enriched(
+        api_store,
+        status="ready",
+        step_facts={"s2": segmented(BROWN)},
+        facts=original(s1=uses_of("i1", 0.25)),
+    )
+    over = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
+    assert over.status_code == 200, over.text
+
+    response = edit(
+        editor_client,
+        stored(api_store, recipe.id),
+        kind="step",
+        step_id="s1",
+        portions=[0.75],
+        durations=[],
+    )
+
+    assert response.status_code == 200, response.text
+    assert [i.status for i in stored(api_store, recipe.id).issues] == ["open"]
+
+
+def test_an_open_issue_on_another_line_doesnt_hide_a_step_using_too_much(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    mentions = issue(
+        1,
+        "our_version.s2.uses",
+        before=None,
+        after=None,
+        reason="Mentions parsley, which Our Version removed",
+        settles_on_confirm=True,
+    )
+    recipe = enriched(
+        api_store,
+        status="awaiting_review",
+        step_facts={"s2": segmented(BROWN)},
+        facts=original(s1=uses_of("i1", 0.25)),
+        issues=(mentions,),
+    )
+
+    response = edit(editor_client, recipe, kind="step", step_id="s1", portions=[1], durations=[])
+
+    assert response.status_code == 200, response.text
+    reasons = [i.reason for i in stored(api_store, recipe.id).issues if i.status == "open"]
+    assert reasons == [
+        "Mentions parsley, which Our Version removed",
+        "Step 1 uses stewing beef too: together more than all of it",
+    ]
+
+
 def test_an_original_step_edit_within_all_of_a_line_flags_nothing(
     editor_client: TestClient, api_store: Store
 ) -> None:
@@ -412,8 +495,69 @@ def test_an_original_step_edit_within_all_of_a_line_flags_nothing(
     assert changed.our_version_status == "ready"
 
 
-def reenrich(client: TestClient, recipe: Recipe, steps: dict[str, Any]) -> Response:
-    body = {"enrichment_version": 3, "fdc_release": SNAPSHOT.release, "facts": {"steps": steps}}
+def test_reenriching_an_unchanged_steps_facts_settles_its_issues(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = flaggable(api_store, PARSLEY)
+    draft = {**steps_draft(), "ingredients": lines(remove=["i9"])}
+    assert save(editor_client, recipe, draft).status_code == 200
+    flagged = stored(api_store, recipe.id)
+    assert list(open_issues(flagged)) == ["our_version.s4.uses"]
+    s4 = {"uses": {**LLM, "uses": [{"ref": "i1", "portion": 0.25}]}}
+
+    response = reenrich(editor_client, flagged, {"s1": PARSLEY.steps["s1"].model_dump(), "s4": s4})
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert open_issues(changed) == {}
+    assert changed.our_version_status == "ready"
+
+
+@pytest.mark.parametrize(
+    ("ingredients", "reason"),
+    [
+        (lines(remove=["i9"]), "Mentions parsley, which Our Version removed"),
+        (
+            lines(edit={"i9": line(name="chives", fdc_id=None)}),
+            "Mentions parsley, which Our Version changed",
+        ),
+    ],
+    ids=["removed", "renamed"],
+)
+def test_reenriching_an_unchanged_step_with_a_line_our_version_changed_flags_it(
+    editor_client: TestClient, api_store: Store, ingredients: dict[str, Any], reason: str
+) -> None:
+    recipe = flaggable(api_store, original(s1=uses_of("i1", 0.5)))
+    draft = {**steps_draft(), "ingredients": ingredients}
+    assert save(editor_client, recipe, draft).status_code == 200
+    saved = stored(api_store, recipe.id)
+    assert saved.our_version_status == "ready"
+    s3 = {"uses": {**LLM, "uses": [{"ref": "i9", "portion": 1}]}}
+
+    parses = {i: {"parse": FACTS.ingredients[i].model_dump()["parse"]} for i in ("i1", "i9")}
+
+    response = reenrich(
+        editor_client, saved, {"s1": uses_of("i1", 0.5).model_dump(), "s3": s3}, parses
+    )
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert {k: v for k, v in open_issues(changed).items() if k.startswith("our_version.")} == {
+        "our_version.s3.uses": reason
+    }
+    [flagged] = [i for i in changed.issues if i.fact_id == "our_version.s3.uses"]
+    assert flagged.settles_on_confirm
+    assert changed.our_version_status == "awaiting_review"
+
+
+def reenrich(
+    client: TestClient,
+    recipe: Recipe,
+    steps: dict[str, Any],
+    ingredients: dict[str, Any] | None = None,
+) -> Response:
+    facts = {"steps": steps, "ingredients": ingredients or {}}
+    body = {"enrichment_version": 3, "fdc_release": SNAPSHOT.release, "facts": facts}
     return client.put(
         f"/api/recipes/{recipe.id}/enrichment",
         json=body,
@@ -445,7 +589,7 @@ def test_removing_a_line_flags_the_unchanged_steps_that_use_it(
         "our_version.s4.uses": "Mentions parsley, which Our Version removed"
     }
     [flagged] = [i for i in changed.issues if i.status == "open"]
-    assert (flagged.before, flagged.after) == (None, None)
+    assert (flagged.before, flagged.after, flagged.settles_on_confirm) == (None, None, True)
     assert changed.our_version_status == "awaiting_review"
 
 
@@ -453,7 +597,7 @@ def test_removing_a_line_flags_the_unchanged_steps_that_use_it(
     ("beef", "reason"),
     [
         (
-            line(name="braising beef", canonical=BRAISING),
+            line(name="beef chuck", canonical={"kind": "existing", "id": BEEF.id}),
             "Mentions stewing beef, which Our Version changed",
         ),
         (
@@ -478,6 +622,25 @@ def test_changing_a_lines_name_or_canonical_ingredient_flags_the_unchanged_steps
     ours = {k: v for k, v in open_issues(changed).items() if k.startswith("our_version.")}
     assert ours == {"our_version.s1.uses": reason}
     assert changed.our_version_status == "awaiting_review"
+
+
+def test_a_wording_spread_to_a_line_the_save_left_alone_affects_no_step(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    # Our Version's i1 keeps its identity; only the added line's Canonical Ingredient changes,
+    # which the wording spreads to i1 too, but s1's line isn't one the save rebuilt.
+    recipe = flaggable(api_store, PARSLEY)
+    added = line(after="i1", canonical={"kind": "existing", "id": BEEF.id})
+    first = {**steps_draft(), "ingredients": lines(edit={"i1": line()}, add=[added])}
+    assert save(editor_client, recipe, first).status_code == 200
+    saved = stored(api_store, recipe.id)
+    again = lines(edit={"i1": line()}, add=[added | {"id": "i10", "canonical": BRAISING}])
+
+    response = save(editor_client, saved, {**first, "ingredients": again})
+
+    assert response.status_code == 200, response.text
+    changed = stored(api_store, recipe.id)
+    assert {k: v for k, v in open_issues(changed).items() if k.startswith("our_version.s")} == {}
 
 
 def test_changing_a_lines_amount_affects_no_step(

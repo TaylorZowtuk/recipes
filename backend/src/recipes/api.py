@@ -51,7 +51,6 @@ from recipes.ingest import (
 )
 from recipes.models import (
     MAX_FAVORITE_SITES,
-    MAX_ISSUES,
     MAX_LABEL,
     MAX_LINES,
     MAX_RECIPE_BYTES,
@@ -59,7 +58,6 @@ from recipes.models import (
     OUR_VERSION,
     PORTION_TOLERANCE,
     SCHEMA_VERSION,
-    STEP_ITEM,
     CanonicalIngredient,
     Card,
     ConversionFact,
@@ -68,7 +66,6 @@ from recipes.models import (
     DurationSegment,
     Effective,
     Enrichment,
-    EnrichmentIssue,
     EnrichmentLineFacts,
     EnrichmentStatus,
     EnrichmentSubstitution,
@@ -103,6 +100,7 @@ from recipes.models import (
     WeekPlan,
     WeekPlanEntry,
     Wording,
+    confirm_settles,
     effective,
     fact_of,
     item_of,
@@ -121,6 +119,7 @@ from recipes.models import (
 )
 from recipes.offers import find_offers
 from recipes.our_version import OurVersionDraft, Refused
+from recipes.step_portions import flag_overused
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -365,13 +364,11 @@ class ConfirmFacts(BaseModel):
 
 class OurVersionEnrichment(BaseModel):
     """What the enrich CLI found in Our Version's steps waiting for enrich, on the recipe at
-    `version`: each step's Segments and uses by its id, and Enrichment Issues on them at their
-    `our_version.` paths (`our_version.s5.segments`).
+    `version`: each step's Segments and uses by its id.
     """
 
     version: RecipeVersion
     steps: Annotated[dict[str, StepFacts], Field(max_length=MAX_LINES)]
-    issues: Annotated[list[EnrichmentIssue], Field(max_length=MAX_ISSUES)] = []
 
 
 class ConfirmedBatch(BaseModel):
@@ -930,8 +927,7 @@ def put_enrichment(
             422, f"An enrichment learns at most {MAX_LEARNED} Canonical Ingredients and wordings"
         )
     _check_canonical_ingredients(body, store)
-    # The Original's own steps stay within each line; past it with Our Version's flags those.
-    enriched = our_version.flag_overused(_enriched(recipe, body, foods))
+    enriched = _enriched(recipe, body, foods)
     if len(enriched.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An enriched recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     if dry_run:
@@ -946,8 +942,10 @@ def put_enrichment(
 
 def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
     """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
-    (a Pending recipe has none), refused if the facts don't fit together. Our Version's issues
-    are its own, and stay.
+    (a Pending recipe has none), refused if the facts don't fit together. The Original's own
+    steps stay within each line; past it with Our Version's flags those. Our Version's issues are
+    its own, and stay, but for those of the unchanged steps whose facts this replaces, which are
+    checked again against Our Version's lines.
     """
     new, stored = _filled(body, snapshot), recipe.facts
     kept = kept_items(stored)
@@ -967,7 +965,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
         *(i for i in body.issues if item_of(i.fact_id) not in kept),
     ]
     _check_together(facts)
-    return recipe.model_copy(
+    enriched = recipe.model_copy(
         update={
             "facts": facts,
             "enrichment_version": body.enrichment_version,
@@ -976,6 +974,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
             "status": _enriched_status(recipe) if recipe.status == "pending" else recipe.status,
         }
     )
+    return our_version.reenriched(recipe, flag_overused(enriched))
 
 
 def _merged[H: IngredientFacts | StepFacts](
@@ -1075,9 +1074,9 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
         },
         422: {
             "description": "A step isn't an Our Version step waiting for enrich, one waiting has "
-            "no segments, a fact arrives Confirmed, an Enrichment Issue isn't open or on one of "
-            "the steps' facts, the step facts are ones the Original's enrichment refuses against "
-            "the effective lines, or the enriched recipe is too big to store"
+            "no segments, a fact arrives Confirmed, the step facts are ones the Original's "
+            "enrichment refuses against the effective lines, or the enriched recipe is too big "
+            "to store"
         },
     },
 )
@@ -1089,15 +1088,15 @@ def put_our_version_enrichment(
     dry_run: Annotated[bool, Query()] = False,
 ) -> Recipe:
     """Store the Segments and uses of the Our Version steps waiting for enrich, its edited and
-    added steps without Segments, in Our Version's facts, with their Enrichment Issues. The
-    Original's facts stay as they are. Our Version is then Awaiting Review.
+    added steps without Segments, in Our Version's facts. The Original's facts stay as they are.
+    Our Version is then Awaiting Review.
 
     Refused unless Our Version is Pending and the recipe is at `version`, the request segments
-    every step waiting and no other, each step's facts pass the Original's enrichment's step
-    checks against the effective lines, arrive unconfirmed, and every issue arrives open on one
-    of their facts. A Segment that takes a line past all of it with the other effective steps is
-    stored at what's left, or as its text when none is, with an Enrichment Issue naming the other
-    steps. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
+    every step waiting and no other, and each step's facts pass the Original's enrichment's step
+    checks against the effective lines and arrive unconfirmed. A Segment that takes a line past
+    all of it with the other effective steps is stored at what's left, or as its text when none
+    is, with an Enrichment Issue naming the other steps, which confirming the step as it is
+    settles. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.version != body.version:
@@ -1113,7 +1112,7 @@ def put_our_version_enrichment(
             update={
                 "our_version": ours.model_copy(update={"facts": facts}),
                 "our_version_status": "awaiting_review",
-                "issues": [*recipe.issues, *body.issues, *capped],
+                "issues": [*recipe.issues, *capped],
             }
         )
     )
@@ -1126,8 +1125,8 @@ def put_our_version_enrichment(
 
 def _check_our_steps(body: OurVersionEnrichment, shown: Effective) -> None:
     """Refuse an answer for a step that isn't Our Version's without Segments, one that leaves
-    such a step out or unsegmented, a Confirmed fact, an issue on no fact of theirs or not open,
-    and the step facts `_check_step` refuses against the effective lines.
+    such a step out or unsegmented, a Confirmed fact, and the step facts `_check_step` refuses
+    against the effective lines.
     """
     waiting = {s.id: s.text for s in shown.steps if s.change and s.id not in shown.facts.steps}
     if unknown := sorted(body.steps.keys() - waiting.keys()):
@@ -1139,11 +1138,6 @@ def _check_our_steps(body: OurVersionEnrichment, shown: Effective) -> None:
             raise HTTPException(422, f"Step {step_id} needs its segments")
     if any(f and f.confirmed for s in body.steps.values() for f in (s.segments, s.uses)):
         raise HTTPException(422, "Enrichment can't confirm a fact")
-    paths = {f"{OUR_VERSION}{step_id}.{kind}" for step_id in waiting for kind in STEP_ITEM}
-    if unknown := sorted({issue.fact_id for issue in body.issues} - paths):
-        raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
-    if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
-        raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
     lines = {line.id for line in shown.ingredients}
     for step_id, facts in body.steps.items():
         _check_step(step_id, waiting[step_id], facts, lines)
@@ -1373,11 +1367,12 @@ def confirm_facts(
     recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
     """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-    resolve the open Enrichment Issues on them that propose a correction. An issue on a line that
-    proposes none, an ask to pick a line's portion or food, stays open: only an edit settles it,
-    so the recipe can't be Ready while it is. One on a step that proposes none, a step an Our
-    Version edit affects, is settled by confirming the step as it is. A fact already Confirmed
-    keeps its own batch. Our Version's facts are confirmed at their `our_version.` paths.
+    resolve the open Enrichment Issues on them that propose a correction, or that confirming as
+    it is settles (`settles_on_confirm`, as for a step an Our Version edit affects). Any other
+    issue proposing none, an ask to pick a line's portion or food or steps that together use more
+    than all of a line, stays open: only an edit settles it, so the recipe, or Our Version, can't
+    be Ready while it is. A fact already Confirmed keeps its own batch. Our Version's facts are
+    confirmed at their `our_version.` paths.
 
     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
     wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
@@ -1396,7 +1391,7 @@ def confirm_facts(
     accepted = [
         i
         for i in recipe.issues
-        if i.status == "open" and i.fact_id in listed and (i.after is not None or _on_a_step(i))
+        if i.status == "open" and i.fact_id in listed and confirm_settles(i)
     ]
     if not confirming and not accepted:
         raise HTTPException(422, "Every listed fact is already Confirmed")
@@ -1410,10 +1405,10 @@ def confirm_facts(
     ]
     canonicals, wordings = confirm_matches(store, work.facts, confirming, batch)
     if ours := work.our_version:
-        theirs = [p.removeprefix(OUR_VERSION) for p in confirming if p.startswith(OUR_VERSION)]
-        more = confirm_matches(store, ours.facts, theirs, batch)
-        canonicals = list({c.id: c for c in [*canonicals, *more[0]]}.values())
-        wordings = list({w.wording: w for w in [*wordings, *more[1]]}.values())
+        in_ours = [p.removeprefix(OUR_VERSION) for p in confirming if p.startswith(OUR_VERSION)]
+        our_canonicals, our_wordings = confirm_matches(store, ours.facts, in_ours, batch)
+        canonicals = list({c.id: c for c in [*canonicals, *our_canonicals]}.values())
+        wordings = list({w.wording: w for w in [*wordings, *our_wordings]}.values())
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
     reviewed = settled(
@@ -1422,11 +1417,6 @@ def confirm_facts(
     ready = recipe.status == "awaiting_review" and reviewed.status == "ready"
     saved = store.review_recipe(reviewed, canonicals, wordings)
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
-
-
-def _on_a_step(issue: EnrichmentIssue) -> bool:
-    """Whether the issue is on a step's segments or uses, the Original's or Our Version's."""
-    return issue.fact_id.rpartition(".")[2] in STEP_ITEM
 
 
 class FdcPortion(fdc.Portion):
@@ -1593,7 +1583,6 @@ def edit_fact(
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
     edited = edit_recipe(store, recipe, body.edit, snapshot)
-    edited.recipe = our_version.flag_overused(edited.recipe)
     if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     saved = store.review_recipe(

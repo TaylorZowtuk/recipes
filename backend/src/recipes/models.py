@@ -441,6 +441,9 @@ class EnrichmentIssue(Model):
     editor's FDC food pick on another line left to check: a line no portion of the food fits
     (on its conversion), or a line prepared another way that may need another food (on its match).
     Those propose no correction (no `before` or `after`) and are settled by editing the line.
+    One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
+    step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
+    only an edit does, as for steps that together use more than all of a line.
     """
 
     id: Ulid
@@ -451,6 +454,14 @@ class EnrichmentIssue(Model):
     model: Label | None = None
     status: Literal["open", "resolved"] = "open"
     confirm_batch: Label | None = None
+    settles_on_confirm: bool = False
+
+
+def confirm_settles(issue: EnrichmentIssue) -> bool:
+    """Whether confirming the issue's fact resolves it: it proposes a correction, which the
+    confirm accepts, or it is one that confirming the fact as it is settles.
+    """
+    return issue.after is not None or issue.settles_on_confirm
 
 
 def normalize_wording(name: str) -> str:
@@ -699,7 +710,11 @@ def _without(facts: StepFacts, kept: set[str]) -> StepFacts:
     segments, uses = facts.segments, facts.uses
     if segments is not None:
         shown = [
-            TextSegment(v=s.written) if isinstance(s, IngredientSegment) and s.ref not in kept else s
+            (
+                TextSegment(v=s.written)
+                if isinstance(s, IngredientSegment) and s.ref not in kept
+                else s
+            )
             for s in segments.segments
         ]
         segments = segments.model_copy(update={"segments": shown})

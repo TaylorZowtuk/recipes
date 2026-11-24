@@ -33,6 +33,7 @@ from recipes.models import (
     UsesFact,
     Wording,
     card_for,
+    confirm_settles,
     needs_review,
     review_items,
 )
@@ -284,7 +285,16 @@ def shared_recipe(case: dict[str, Any]) -> Recipe:
             "facts": RecipeFacts.model_validate(facts),
             "our_version": overlay if with_ours else None,
             "our_version_status": "awaiting_review" if with_ours else None,
-            "issues": [issue(n, fact_id) for n, fact_id in enumerate(case["open_issues"])],
+            "issues": [
+                issue(
+                    n,
+                    fact_id,
+                    before=None,
+                    after=None,
+                    settles_on_confirm=fact_id in case["settles_on_confirm"],
+                )
+                for n, fact_id in enumerate(case["open_issues"])
+            ],
             "difficulty": editors,
         }
     )
@@ -297,6 +307,8 @@ def test_review_items_are_the_shared_cases(case: dict[str, Any]) -> None:
     assert review_items(recipe) == case["items"]
     left = needs_review(recipe)
     assert (left.unconfirmed, left.flagged) == (case["unconfirmed"], case["flagged"])
+    settles = [i.fact_id for i in recipe.issues if confirm_settles(i)]
+    assert settles == case["confirm_settles"]
 
 
 def test_an_open_issue_on_a_fact_the_recipe_lacks_is_a_review_item_of_its_line() -> None:

@@ -268,6 +268,7 @@ def issue(n: int, status: str = "open") -> dict[str, Any]:
         "model": "a-model",
         "status": status,
         "confirm_batch": None,
+        "settles_on_confirm": False,
     }
 
 
