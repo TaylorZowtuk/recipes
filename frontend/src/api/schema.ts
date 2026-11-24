@@ -381,11 +381,12 @@ export interface paths {
         /**
          * Confirm Facts
          * @description Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-         *     resolve the open Enrichment Issues on them that propose a correction. An issue on a line that
-         *     proposes none, an ask to pick a line's portion or food, stays open: only an edit settles it,
-         *     so the recipe can't be Ready while it is. One on a step that proposes none, a step an Our
-         *     Version edit affects, is settled by confirming the step as it is. A fact already Confirmed
-         *     keeps its own batch. Our Version's facts are confirmed at their `our_version.` paths.
+         *     resolve the open Enrichment Issues on them that propose a correction, or that confirming as
+         *     it is settles (`settles_on_confirm`, as for a step an Our Version edit affects). Any other
+         *     issue proposing none, an ask to pick a line's portion or food or steps that together use more
+         *     than all of a line, stays open: only an edit settles it, so the recipe, or Our Version, can't
+         *     be Ready while it is. A fact already Confirmed keeps its own batch. Our Version's facts are
+         *     confirmed at their `our_version.` paths.
          *
          *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
          *     wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
@@ -526,15 +527,15 @@ export interface paths {
         /**
          * Put Our Version Enrichment
          * @description Store the Segments and uses of the Our Version steps waiting for enrich, its edited and
-         *     added steps without Segments, in Our Version's facts, with their Enrichment Issues. The
-         *     Original's facts stay as they are. Our Version is then Awaiting Review.
+         *     added steps without Segments, in Our Version's facts. The Original's facts stay as they are.
+         *     Our Version is then Awaiting Review.
          *
          *     Refused unless Our Version is Pending and the recipe is at `version`, the request segments
-         *     every step waiting and no other, each step's facts pass the Original's enrichment's step
-         *     checks against the effective lines, arrive unconfirmed, and every issue arrives open on one
-         *     of their facts. A Segment that takes a line past all of it with the other effective steps is
-         *     stored at what's left, or as its text when none is, with an Enrichment Issue naming the other
-         *     steps. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
+         *     every step waiting and no other, and each step's facts pass the Original's enrichment's step
+         *     checks against the effective lines and arrive unconfirmed. A Segment that takes a line past
+         *     all of it with the other effective steps is stored at what's left, or as its text when none
+         *     is, with an Enrichment Issue naming the other steps, which confirming the step as it is
+         *     settles. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
          */
         put: operations["put_our_version_enrichment_api_recipes__recipe_id__our_version_enrichment_put"];
         post?: never;
@@ -1311,6 +1312,9 @@ export interface components {
          *     editor's FDC food pick on another line left to check: a line no portion of the food fits
          *     (on its conversion), or a line prepared another way that may need another food (on its match).
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
+         *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
+         *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
+         *     only an edit does, as for steps that together use more than all of a line.
          */
         "EnrichmentIssue-Input": {
             /** After */
@@ -1328,6 +1332,11 @@ export interface components {
             /** Reason */
             reason: string;
             /**
+             * Settles On Confirm
+             * @default false
+             */
+            settles_on_confirm: boolean;
+            /**
              * Status
              * @default open
              * @enum {string}
@@ -1340,6 +1349,9 @@ export interface components {
          *     editor's FDC food pick on another line left to check: a line no portion of the food fits
          *     (on its conversion), or a line prepared another way that may need another food (on its match).
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
+         *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
+         *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
+         *     only an edit does, as for steps that together use more than all of a line.
          */
         "EnrichmentIssue-Output": {
             /** After */
@@ -1356,6 +1368,11 @@ export interface components {
             model: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Settles On Confirm
+             * @default false
+             */
+            settles_on_confirm: boolean;
             /**
              * Status
              * @default open
@@ -1994,15 +2011,9 @@ export interface components {
         /**
          * OurVersionEnrichment
          * @description What the enrich CLI found in Our Version's steps waiting for enrich, on the recipe at
-         *     `version`: each step's Segments and uses by its id, and Enrichment Issues on them at their
-         *     `our_version.` paths (`our_version.s5.segments`).
+         *     `version`: each step's Segments and uses by its id.
          */
         OurVersionEnrichment: {
-            /**
-             * Issues
-             * @default []
-             */
-            issues: components["schemas"]["EnrichmentIssue-Input"][];
             /** Steps */
             steps: {
                 [key: string]: components["schemas"]["StepFacts-Input"];
@@ -4124,7 +4135,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A step isn't an Our Version step waiting for enrich, one waiting has no segments, a fact arrives Confirmed, an Enrichment Issue isn't open or on one of the steps' facts, the step facts are ones the Original's enrichment refuses against the effective lines, or the enriched recipe is too big to store */
+            /** @description A step isn't an Our Version step waiting for enrich, one waiting has no segments, a fact arrives Confirmed, the step facts are ones the Original's enrichment refuses against the effective lines, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
