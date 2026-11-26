@@ -1,7 +1,8 @@
 """The fallback CLI: takes each waiting Queued Ingest through a browser, then recipe-scrapers on
 the page it loaded, then a model. What the first two capture is saved. Pages they can't read go
 to a model as a Work Packet of their visible text, and its answer is checked against that text
-before it's saved. `capture` is the chain itself, which the bulk import can call.
+before it's saved. The bulk import shares how a captured recipe's photos are stored and what
+saving it sends.
 
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.fallback run <API base URL> > packet.json
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.fallback apply <API base URL> packet.json \
@@ -250,7 +251,7 @@ def _record_failed_attempt(
     _post(send, url, {"reason": reason}, HTTPStatus.OK)
 
 
-def _stored_photos(base_url: str, send: Send, urls: list[str]) -> tuple[Image, ...]:
+def stored_photos(base_url: str, send: Send, urls: list[str]) -> tuple[Image, ...]:
     """The candidates that stored, in order, each photo once. Any that fails is dropped."""
     images: dict[str, Image] = {}
     for url in urls:
@@ -265,14 +266,14 @@ def _stored_photos(base_url: str, send: Send, urls: list[str]) -> tuple[Image, .
     return tuple(images.values())
 
 
-def _new_recipe(
+def new_recipe(
     source: WebsiteSource,
     original: Original,
     site_name: str | None = None,
     images: tuple[Image, ...] = (),
 ) -> dict[str, Any]:
-    """What saving a Queued Ingest sends. The first photo is its preview, centred, as Add a
-    recipe's default is.
+    """What saving a captured recipe sends, here and in the bulk import. The first photo is its
+    preview, centred, as Add a recipe's default is.
     """
     source = source.model_copy(
         update={"site_name": site_name or source.site_name, "captured_at": datetime.now(UTC)}
@@ -312,8 +313,8 @@ def run(base_url: str, send: Send, fetch: PageFetcher) -> int:
         try:
             match capture(source.url, fetch):
                 case Extracted(captured):
-                    images = _stored_photos(base_url, send, captured.candidate_photos)
-                    recipe = _new_recipe(source, captured.original, captured.site_name, images)
+                    images = stored_photos(base_url, send, captured.candidate_photos)
+                    recipe = new_recipe(source, captured.original, captured.site_name, images)
                     _save(base_url, send, queued.id, recipe)
                     saved += 1
                     _say(f"{source.url} → saved")
@@ -386,7 +387,7 @@ def apply(base_url: str, send: Send, packet_text: str, answer_text: str) -> int:
                 continue
             checked = _checked(answered.original, item.text)
             if isinstance(checked, Original):
-                _save(base_url, send, ingest_id, _new_recipe(source, checked))
+                _save(base_url, send, ingest_id, new_recipe(source, checked))
                 saved += 1
                 _say(f"{item.url} → saved")
             else:

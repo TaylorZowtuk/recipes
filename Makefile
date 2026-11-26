@@ -7,7 +7,7 @@ SHELL := bash
 
 .PHONY: help setup check fix e2e screenshots api-client lambda build deploy smoke kill-switch-test \
 	kill-switch-reset backup-snapshot dev browser browser-run browser-stop shell enrich fallback backup \
-	clean prune gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
+	bulk-import clean prune gitleaks aws deps nltk-data dev-api dev-web py-lint py-types py-test ts-lint ts-types ts-test tf \
 	tf-test links api-drift sh-lint sh-test workflows
 
 ifeq ($(filter 4.% 5.%,$(MAKE_VERSION)),)
@@ -118,6 +118,7 @@ shell: ## A shell in the toolchain container, with dependencies installed
 enrich: ## Run the enrich CLI with ARGS (argv, file paths relative to backend/), without a TTY
 fallback: ## Run the fallback CLI with ARGS (argv, file paths relative to backend/), without a TTY
 backup: ## Run the backup CLI with ARGS (argv, file paths relative to backend/), without a TTY
+bulk-import: ## Run the bulk import CLI with ARGS, e.g. ARGS='<base URL> -' < sources.csv, without a TTY
 # stdin and stdout are only the CLI's, and only these runs see PLATEFUL_SERVICE_TOKEN. ARGS stays
 # unexpanded: make neither exports it nor expands it, refuses it with a newline, and the host shell
 # splits it at spaces into words, unglobbed, each reaching the CLI as one argument, never as shell.
@@ -126,11 +127,11 @@ define newline
 
 endef
 unexport ARGS
-enrich fallback backup: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
-enrich fallback backup:
+enrich fallback backup bulk-import: RUN_FLAGS := -T -e PLATEFUL_SERVICE_TOKEN
+enrich fallback backup bulk-import:
 	$(if $(findstring $(newline),$(value ARGS)),$(error ARGS must be one line))
 	@set -f && args='$(subst ','\'',$(value ARGS))' && $(RUN) bash -c 'make --no-print-directory \
-		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$@ "$$@"' \
+		deps nltk-data >&2 && cd backend && exec uv run --locked --quiet python -m recipes.$(subst -,_,$@) "$$@"' \
 		bash $$args
 
 clean: ## Remove this worktree's containers, volumes, networks and images (run before deleting a worktree)
