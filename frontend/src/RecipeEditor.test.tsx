@@ -183,7 +183,7 @@ describe("the recipe editor", () => {
       {
         op: "set_our_version",
         our_version: {
-          ingredients: { edit: {}, remove: ["i3"], add: [] },
+          ingredients: { edit: {}, remove: ["i3"], add: [], substitutions: {} },
           steps: { edit: {}, remove: [], add: [] },
           note: null,
         },

@@ -123,6 +123,7 @@ export function ourDraftOf(recipe: Recipe): OurDraft {
         after: line.after,
         ...storedFields(ours?.facts.ingredients[line.id], line.component),
       })),
+      substitutions: storedSubstitutions(ours),
     },
     steps: {
       edit: mapValues(ours?.steps.edit ?? {}, ({ text, component }) => ({ text, component })),
@@ -158,9 +159,45 @@ function anchored<P extends Lines | Steps>(items: { id: string }[], part: P): P 
   return { ...part, remove: part.remove.toSorted(), add };
 }
 
+// Our Version's household substitutions as stored, by line id, so a save keeps them as they are.
+function storedSubstitutions(ours: Ours | null | undefined): Lines["substitutions"] {
+  return Object.fromEntries(
+    Object.entries(ours?.facts.ingredients ?? {}).flatMap(([id, facts]) =>
+      facts.substitutions
+        ? [
+            [
+              id,
+              facts.substitutions.items.map(({ canonical_id, wording, ratio, note, ...food }) => ({
+                canonical: { kind: "existing" as const, id: canonical_id },
+                wording,
+                ratio,
+                note,
+                fdc_id: food.fdc_id,
+                portion_id: food.portion_id,
+              })),
+            ],
+          ]
+        : [],
+    ),
+  );
+}
+
+// The household substitutions of the lines the draft still has: none for a line it removes.
+function heldSubstitutions(recipe: Recipe, lines: Lines): Lines["substitutions"] {
+  const removed = new Set(lines.remove);
+  const shown = new Set([
+    ...recipe.original.ingredients.map((line) => line.id).filter((id) => !removed.has(id)),
+    ...lines.add.flatMap((line) => (line.id ? [line.id] : [])),
+  ]);
+  return Object.fromEntries(Object.entries(lines.substitutions).filter(([id]) => shown.has(id)));
+}
+
 function asSaved(recipe: Recipe, draft: OurDraft): OurVersionDraft {
   return {
-    ingredients: anchored(recipe.original.ingredients, draft.ingredients),
+    ingredients: {
+      ...anchored(recipe.original.ingredients, draft.ingredients),
+      substitutions: heldSubstitutions(recipe, draft.ingredients),
+    },
     steps: anchored(recipe.original.steps, draft.steps),
     note: draft.note.trim() || null,
   };
