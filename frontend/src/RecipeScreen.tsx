@@ -16,6 +16,7 @@ import {
   effective,
   lineNote,
   stepNote,
+  substituteText,
 } from "./ourVersion";
 import { Plate } from "./Plate";
 import { EditButton, focusEditHeading, RecipeEditor } from "./RecipeEditor";
@@ -25,6 +26,7 @@ import { byComponent } from "./recipeComponents";
 import {
   confirmItems,
   type FactEdit,
+  OUR_VERSION,
   type ReviewOutcome,
   type ReviewTab,
   reviewOf,
@@ -463,7 +465,7 @@ function RecipeTabs({
 // on, and one that stays in its unit for want of a weight says why when tapped. To an editor, a
 // line with facts is a marked Review Item, its amount plain text, and the substitutions follow the
 // lines. In Our Version, an edited or added line says so quietly under it, and is Our Version's
-// own Review Item.
+// own Review Item. A line's Confirmed substitutions show under it to everyone.
 export function Ingredients({
   original,
   facts,
@@ -487,6 +489,10 @@ export function Ingredients({
           const item = review && shownItem(review, line.id, !!line.change);
           const note = lineNote(line, lineFacts, choices);
           const isNew = !!(item && match && review?.newCanonicals.has(match.canonical_id));
+          // Every viewer sees a line's substitutions once they're Confirmed, Our Version's in
+          // place of the recipe's.
+          const subs = lineFacts?.substitutions;
+          const substitutes = subs?.confirmed ? subs.items : [];
           const tapped = choices.taps?.[line.id];
           const amount =
             lineFacts &&
@@ -518,6 +524,12 @@ export function Ingredients({
                 shown
               )}
               {note && <span className="our-version-note">{note}</span>}
+              {substitutes.map((sub, n) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a line's substitutes keep their order.
+                <span key={n} className="ingredient-substitute">
+                  {substituteText(sub)}
+                </span>
+              ))}
             </li>
           );
         })}
@@ -533,7 +545,8 @@ export function Ingredients({
   );
 }
 
-// Only an editor sees substitutions, for review: nobody else does until they're confirmed.
+// An editor sees each line's substitutions here, for review: nobody else does until they're
+// confirmed.
 function Substitutions({
   original,
   facts,
@@ -543,8 +556,11 @@ function Substitutions({
   facts: RecipeFacts;
   review: ReviewTarget;
 }) {
+  // A line Our Version holds substitutions for has none to review here: they're edited in Edit.
   const itemOf = (line: EffectiveLine) =>
-    shownItem(review, `${line.id}.substitutions`, !!line.change);
+    review.ours && review.items.has(`${OUR_VERSION}${line.id}.substitutions`)
+      ? undefined
+      : shownItem(review, `${line.id}.substitutions`, !!line.change);
   const lines = original.ingredients.filter((line) => itemOf(line));
   if (lines.length === 0) return null;
   return (

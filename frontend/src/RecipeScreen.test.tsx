@@ -780,4 +780,78 @@ describe("RecipeScreen review", () => {
     expect(markup).toContain(">Suggested</span>");
     expect(markup).toContain('aria-label="Suggested difficulty: Prep 2 of 3');
   });
+
+  // The recipe's own margarine Confirmed, or Our Version holding `items` for its one line.
+  const confirmedOriginal = (r: Recipe): Recipe => {
+    const i1 = r.facts.ingredients.i1 as NonNullable<Recipe["facts"]["ingredients"]["i1"]>;
+    const subs = i1.substitutions as NonNullable<typeof i1.substitutions>;
+    const confirmed = { ...subs, confirmed: true, confirmed_by: "editor" };
+    return {
+      ...r,
+      facts: { ...r.facts, ingredients: { i1: { ...i1, substitutions: confirmed } } },
+    };
+  };
+  const household =
+    (items: object[]) =>
+    (r: Recipe): Recipe =>
+      ({
+        ...confirmedOriginal(r),
+        our_version: {
+          ingredients: { edit: {}, remove: [], add: [] },
+          steps: { edit: {}, remove: [], add: [] },
+          facts: {
+            ingredients: {
+              i1: {
+                parse: null,
+                match: null,
+                conversion: null,
+                substitutions: {
+                  provenance: "editor",
+                  confidence: 1,
+                  estimated: false,
+                  confirmed: true,
+                  confirmed_by: "editor",
+                  confirmed_at: "2026-11-02T00:00:00Z",
+                  confirm_batch: null,
+                  items,
+                },
+              },
+            },
+            steps: {},
+            difficulty: null,
+          },
+          note: null,
+          edited_at: "2026-11-02T00:00:00Z",
+        },
+      }) as unknown as Recipe;
+  const coconut = {
+    wording: "coconut oil",
+    canonical_id: "01K7TEST0000000000000000C2",
+    ratio: 0.75,
+    note: "",
+    fdc_id: 2,
+    portion_id: null,
+    fdc,
+  };
+  const substitutes = (markup: string) =>
+    [...markup.matchAll(/<span class="ingredient-substitute">(.*?)<\/span>/g)].map(([, t]) => t);
+
+  it("shows every viewer a line's Confirmed substitutions under it, with any note", () => {
+    const markup = render(false, "ready", confirmedOriginal);
+    expect(substitutes(markup)).toEqual(["or margarine (×1) · use the same amount"]);
+    expect(markup).toMatch(/2 tbsp.*or margarine.*<\/li>/);
+  });
+
+  it("shows Our Version's substitutions for a line in place of the Original's", () => {
+    const markup = render(false, "ready", household([coconut]));
+    expect(substitutes(markup)).toEqual(["or coconut oil (×¾)"]);
+    expect(markup).not.toContain("margarine");
+  });
+
+  it("shows none on a line Our Version holds none for, even where the Original has some", () => {
+    expect(substitutes(render(false, "ready", household([])))).toEqual([]);
+    // Nor does an editor's review list it, as Our Version's are edited in Edit.
+    const markup = render(true, "awaiting_review", household([]));
+    expect(markup).not.toMatch(/margarine|No substitutions suggested|hidden until confirmed/);
+  });
 });

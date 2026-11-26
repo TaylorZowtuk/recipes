@@ -195,7 +195,15 @@ describe("the recipe editor", () => {
     const r = recipe();
     function Fields() {
       const [draft, setDraft] = useState(ourDraftOf(r));
-      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+      return (
+        <OurVersionFields
+          recipe={r}
+          draft={draft}
+          collection={collection}
+          onChange={setDraft}
+          onOpen={() => {}}
+        />
+      );
     }
     act(() => root.render(<Fields />));
     const press = (name: string) => {
@@ -207,6 +215,48 @@ describe("the recipe editor", () => {
     expect(document.activeElement?.textContent).toBe("Restore 2 cups flour or rice flour");
     press("Restore 2 cups flour or rice flour");
     expect(document.activeElement?.textContent).toBe("Remove 2 cups flour or rice flour");
+  });
+
+  it("shows each line's substitutes under it, and opens them to change", () => {
+    const r = recipe();
+    const onOpen = vi.fn();
+    const start = ourDraftOf(r);
+    const coconut = {
+      canonical: { kind: "existing" as const, id: "01K7TESTCANON0000000000003" },
+      wording: "coconut oil",
+      ratio: 1,
+      note: "",
+      fdc_id: 171412,
+      portion_id: null,
+    };
+    const draft = {
+      ...start,
+      ingredients: { ...start.ingredients, substitutions: { i1: [coconut], i3: [] } },
+    };
+    act(() =>
+      root.render(
+        <OurVersionFields
+          recipe={r}
+          draft={draft}
+          collection={collection}
+          onChange={() => {}}
+          onOpen={onOpen}
+        />,
+      ),
+    );
+    const substitutes = (id: string) =>
+      host.querySelector(`[data-row="ingredients ${id}"] .our-version-substitutes`)?.textContent;
+    expect(substitutes("i1")).toBe("or coconut oil (×1)");
+    // Our Version holds none for i3, in place of the recipe's rice flour.
+    expect(substitutes("i3")).toBeUndefined();
+    // A line's substitutes change none of its text, and so don't mark it changed.
+    expect(host.querySelector('[data-row="ingredients i1"]')?.textContent).not.toContain("Changed");
+    act(() => button("Substitutes for 2 tbsp butter")?.click());
+    expect(onOpen).toHaveBeenCalledWith({
+      part: "ingredients",
+      substitutesOf: "i1",
+      title: "Substitutes for 2 tbsp butter",
+    });
   });
 
   it("says how a changed step shows only once a step is changed", () => {
@@ -244,7 +294,15 @@ describe("the recipe editor", () => {
         ...start,
         ingredients: { ...start.ingredients, add: [lemon] },
       });
-      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+      return (
+        <OurVersionFields
+          recipe={r}
+          draft={draft}
+          collection={collection}
+          onChange={setDraft}
+          onOpen={() => {}}
+        />
+      );
     }
     act(() => root.render(<Fields />));
     const remove = button("Remove 1 lemon");
@@ -282,7 +340,15 @@ describe("the recipe editor", () => {
         ...start,
         ingredients: { ...start.ingredients, add: [lemon] },
       });
-      return <OurVersionFields recipe={r} draft={draft} onChange={setDraft} onOpen={() => {}} />;
+      return (
+        <OurVersionFields
+          recipe={r}
+          draft={draft}
+          collection={collection}
+          onChange={setDraft}
+          onOpen={() => {}}
+        />
+      );
     }
     act(() => root.render(<Fields />));
     const remove = button("Remove 1 lemon");

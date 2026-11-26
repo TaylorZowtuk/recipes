@@ -1,7 +1,9 @@
 import { Fragment, type ReactNode, useEffect, useRef } from "react";
 import type { Collection, Recipe } from "./api/client";
 import type { RefusedAt } from "./editRecipe";
-import { LineForm, StepTextForm } from "./ItemEditForm";
+import { substituteName } from "./factEdits";
+import { LineForm, OurSubstitutesForm, StepTextForm } from "./ItemEditForm";
+import { substituteText } from "./ourVersion";
 import {
   addLine,
   addStep,
@@ -15,14 +17,18 @@ import {
   type Row,
   removeItem,
   restoreItem,
+  setSubstitutions,
+  substituteLine,
+  substitutesFor,
 } from "./ourVersionDraft";
 import { byComponent } from "./recipeComponents";
 import { Sheet } from "./Sheet";
 
-// What the Our Version sheet edits: a line or step, or a new one at its place.
+// What the Our Version sheet edits: a line or step, a new one at its place, or a line's substitutes.
 export type OurTarget =
   | { part: Part; id: string; title: string }
-  | { part: Part; place: Place; title: string };
+  | { part: Part; place: Place; title: string }
+  | { part: "ingredients"; substitutesOf: string; title: string };
 
 const MARKS = { edited: "Changed", added: "Added", removed: "Removed" } as const;
 const NOUN = { ingredients: "line", steps: "step" } as const;
@@ -33,6 +39,7 @@ const NOUN = { ingredients: "line", steps: "step" } as const;
 export function OurVersionFields({
   recipe,
   draft,
+  collection,
   problem,
   refusedAt,
   onChange,
@@ -40,6 +47,7 @@ export function OurVersionFields({
 }: {
   recipe: Recipe;
   draft: OurDraft;
+  collection: Pick<Collection, "canonical_ingredients">;
   // The API's refusal of a line or step, shown by it.
   problem?: string | undefined;
   refusedAt?: RefusedAt | undefined;
@@ -87,7 +95,21 @@ export function OurVersionFields({
               key={row.id}
               row={row}
               part={part}
+              substitutes={
+                part === "ingredients" && row.change !== "removed"
+                  ? substitutesFor(recipe, draft, row.id).map((sub) =>
+                      substituteText({ ...sub, wording: substituteName(sub, collection) }),
+                    )
+                  : []
+              }
               onEdit={() => onOpen({ part, id: row.id, title: `Edit ${row.text}` })}
+              onSubstitutes={() =>
+                onOpen({
+                  part: "ingredients",
+                  substitutesOf: row.id,
+                  title: `Substitutes for ${row.text}`,
+                })
+              }
               onAddAfter={() =>
                 onOpen({
                   part,
@@ -199,10 +221,14 @@ function EmptyAdd({ part, onOpen }: { part: Part; onOpen: (target: OurTarget) =>
   );
 }
 
+// A line's substitutes show under it, as the recipe view shows them; changing them doesn't mark
+// the line changed.
 function OurRow({
   row,
   part,
+  substitutes,
   onEdit,
+  onSubstitutes,
   onAddAfter,
   onRemove,
   onRestore,
@@ -210,7 +236,9 @@ function OurRow({
 }: {
   row: Row;
   part: Part;
+  substitutes: string[];
   onEdit: () => void;
+  onSubstitutes: () => void;
   onAddAfter: () => void;
   onRemove: () => void;
   onRestore: () => void;
@@ -227,10 +255,25 @@ function OurRow({
         {removed ? <s>{row.text}</s> : row.text}
         {row.change && <span className="our-version-mark"> · {MARKS[row.change]}</span>}
       </span>
+      {substitutes.length > 0 && (
+        <span className="our-version-substitutes">
+          {substitutes.map((text, n) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a line's substitutes keep their order.
+            <span key={n} className="our-version-substitute">
+              {text}
+            </span>
+          ))}
+        </span>
+      )}
       <span className="our-version-actions">
         {!removed && (
           <button type="button" className="text-button" onClick={onEdit}>
             Edit{named}
+          </button>
+        )}
+        {!removed && part === "ingredients" && (
+          <button type="button" className="text-button" onClick={onSubstitutes}>
+            Substitutes<span className="visually-hidden"> for {row.text}</span>
           </button>
         )}
         {(removed || row.change === "edited") && (
@@ -284,6 +327,18 @@ export function OurVersionSheet({
   const form = () => {
     if (!target) return null;
     const common = { disabled, note, submit: "Done", onCancel: onClose };
+    if ("substitutesOf" in target) {
+      const id = target.substitutesOf;
+      return (
+        <OurSubstitutesForm
+          start={substitutesFor(recipe, draft, id)}
+          line={substituteLine(recipe, draft, id)}
+          collection={collection}
+          {...common}
+          onSave={(substitutes) => done(setSubstitutions(recipe, draft, id, substitutes))}
+        />
+      );
+    }
     const id = "id" in target ? target.id : undefined;
     if (target.part === "steps") {
       const text = id ? (ourRows(recipe, draft).steps.find((s) => s.id === id)?.text ?? "") : "";

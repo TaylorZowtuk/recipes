@@ -1,4 +1,5 @@
 import { type AdjustChoices, lineView } from "./adjust";
+import { kitchenNumber } from "./amount";
 import type { IngredientFacts, Original, Recipe, RecipeFacts, Step, StepFacts } from "./api/client";
 
 // Which of a recipe's versions shows: Our Version, when the recipe has one, or the Original.
@@ -18,13 +19,21 @@ export type EffectiveOriginal = Omit<Original, "ingredients" | "steps"> & {
   steps: EffectiveStep[];
 };
 
+const NO_FACTS: IngredientFacts = {
+  parse: null,
+  match: null,
+  conversion: null,
+  substitutions: null,
+};
+
 export const ADDED = "added in Our Version";
 export const CHANGED = "changed in Our Version";
 
 // The recipe as `version` shows it: its lines and steps in order and their facts by id. Our
 // Version leaves out what it removes, replaces what it edits with its own line (and facts) or step
 // (raw text, with no facts, until enrich segments it) and puts each added one after the one it
-// names. An unchanged line or step keeps the Original's facts; a step's segment for a line not
+// names. An unchanged line or step keeps the Original's facts, apart from the substitutions Our
+// Version holds for the line, even none, which replace the Original's; a step's segment for a line not
 // among the effective lines shows as its words, with no amount, and its uses drop that line, as
 // the API's `effective`.
 export function effective(
@@ -46,7 +55,10 @@ export function effective(
       const edit = ours.ingredients.edit[line.id];
       const original = recipe.facts.ingredients[line.id];
       if (!edit) {
-        if (original) lineFacts[line.id] = original;
+        // Our Version's household substitutions, even none, replace the Original's on the line.
+        const household = ours.facts.ingredients[line.id]?.substitutions;
+        if (household) lineFacts[line.id] = { ...(original ?? NO_FACTS), substitutions: household };
+        else if (original) lineFacts[line.id] = original;
         return line;
       }
       ourFacts(line.id);
@@ -172,4 +184,17 @@ export function stepNote(step: EffectiveStep): string | undefined {
   if (step.change === "edited") return CHANGED;
   if (step.change === "added") return ADDED;
   return undefined;
+}
+
+// A substitute as it shows under its line: "or coconut oil (×¾) · melt it first".
+export function substituteText({
+  wording,
+  ratio,
+  note,
+}: {
+  wording: string;
+  ratio: number;
+  note: string;
+}) {
+  return `or ${wording} (×${kitchenNumber(ratio)})${note ? ` · ${note}` : ""}`;
 }
