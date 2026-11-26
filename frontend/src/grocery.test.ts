@@ -299,6 +299,11 @@ describe("Other", () => {
     expect(items(result).map((i) => i.key)).toEqual(["o:e1:i4", "o:e1:i3"]);
   });
 
+  it("carries its entry's factor when that isn't 1×, as its text isn't scaled", () => {
+    const result = list(plan([[["a", 2]], [["a"]]]), [recipe("a", [unmatched])]);
+    expect(items(result).map((i) => i.factor)).toEqual([2, undefined]);
+  });
+
   it("is one item per entry when a recipe is planned twice", () => {
     const result = list(plan([[["a"]], [["a"]]]), [recipe("a", [unmatched])]);
     expect(items(result).map((i) => i.key)).toEqual(["o:e1:i2", "o:e2:i2"]);

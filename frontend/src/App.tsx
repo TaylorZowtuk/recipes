@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AddRecipeScreen } from "./AddRecipeScreen";
 import { CollectionScreen } from "./CollectionScreen";
 import { FavoriteSitesScreen } from "./FavoriteSitesScreen";
+import { GroceryListScreen } from "./GroceryListScreen";
 import { KitchenSettingsScreen } from "./KitchenSettingsScreen";
 import { RecipeScreen } from "./RecipeScreen";
 import { Shell } from "./Shell";
@@ -17,6 +18,7 @@ export function App() {
           <Route path="recipes" element={<CollectionScreen />} />
           <Route path="recipes/:id/:slug?" element={<RecipeScreen />} />
           <Route path="week" element={<WeekPlanScreen />} />
+          <Route path="week/:monday/grocery" element={<GroceryListScreen />} />
           <Route path="fridge" element={<FridgeScreen />} />
           <Route path="sites" element={<FavoriteSitesScreen />} />
           <Route path="sign-in" element={<SignInScreen />} />

@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import type { Factor, WeekPlanEntry } from "./api/client";
 import { useCollection } from "./collection";
 import { OFFLINE, WeekNav } from "./DaySheet";
@@ -47,10 +47,12 @@ export function WeekPlanScreen() {
 
 // One week, Monday to Sunday, with ‹ and › to the others. Past days stay editable, since the
 // household corrects its record of what it cooked. Writes are never queued, so edits are off while
-// offline or paused, except in a Demo, which lives on this device.
+// offline or paused, except in a Demo, which lives on this device. Opening a week's Grocery List
+// keeps that week in the history entry, so Back returns to it.
 function WeekPlanner({ demo }: { demo: boolean }) {
   const today = useToday();
-  const [offset, setOffset] = useState(0);
+  const navigate = useNavigate();
+  const [offset, setOffset] = useState<number>(useLocation().state?.weekOffset ?? 0);
   const monday = addDays(mondayOf(today), offset * 7);
   const collection = useCollection();
   const household = { ...useWeek(demo ? null : monday), ...useWeekEdit(monday) };
@@ -80,6 +82,15 @@ function WeekPlanner({ demo }: { demo: boolean }) {
       </p>
       {!plan && failed && <LoadFailed what="The Week Plan" retry={retry} status={status} />}
       {blocked && <p className="screen-note">{blocked === "offline" ? OFFLINE : PAUSED}</p>}
+      {plan && !demo && (
+        <Link
+          to={`/week/${monday}/grocery`}
+          className="button button-secondary week-grocery"
+          onClick={() => navigate(".", { replace: true, state: { weekOffset: offset } })}
+        >
+          Grocery List
+        </Link>
+      )}
       {plan &&
         DAY_NAMES.map((name, day) => (
           <Day

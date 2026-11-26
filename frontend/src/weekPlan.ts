@@ -1,4 +1,4 @@
-import type { createApi, Factor, WeekOperation, WeekPlan } from "./api/client";
+import type { createApi, Factor, GroceryTick, WeekOperation, WeekPlan } from "./api/client";
 import type { ToastMessage } from "./Toast";
 import { DAY_NAMES } from "./weekDates";
 import { type Answer, apiError, type WriteRefusal, writeRefusal } from "./writeOutcome";
@@ -186,10 +186,40 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
     return outcome;
   }
 
+  // Adds or removes one Grocery Item's tick. It's atomic and at no version, so it neither waits for
+  // nor holds up a plan write. A 404 means the week has no plan there, so like a conflict it's
+  // read again.
+  async function tick(monday: string, change: GroceryTick): Promise<WeekWrite> {
+    const began = session;
+    let answer: Answer<WeekPlan> | undefined;
+    try {
+      answer = await api.POST("/api/weeks/{monday}/ticks", {
+        params: { path: { monday } },
+        body: change,
+      });
+    } catch {
+      // Offline: reported below as a failed write.
+    }
+    if (began !== session) return { kind: "skipped" };
+    if (answer?.response.status === 200 && answer.data) {
+      update(monday, { plan: newer(week(monday).plan, answer.data) });
+      return { kind: "saved" };
+    }
+    const refusal: WriteRefusal = !answer
+      ? { kind: "failed" }
+      : answer.response.status === 404 && apiError(answer.error)
+        ? { kind: "conflict" }
+        : writeRefusal(answer);
+    if (refusal.kind !== "conflict") return { kind: refusal.kind };
+    const refreshed = await read(monday);
+    return began === session ? { kind: "conflict", refreshed } : { kind: "skipped" };
+  }
+
   return {
     week,
     load,
     write,
+    tick,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);

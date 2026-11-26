@@ -13,6 +13,7 @@ import {
 import { formatAmount, formatQuantity } from "./amount";
 import type {
   CanonicalIngredient,
+  Factor,
   IngredientFacts,
   KitchenSettings,
   ParseFact,
@@ -35,12 +36,14 @@ export type BreakdownRow = {
 
 // One row of the Grocery List. `amount` is the summed amount for display ("2 cups + 300 g",
 // "≈ 450 g", "to taste"), null for an Other line, which shows only its text (`name`) and its
-// recipe. `tick` is what `grocery_ticks` holds when it's ticked at this amount; `tickedEarlier`
+// recipe and, when its entry isn't at 1×, that entry's `factor`, since its text isn't scaled.
+// `tick` is what `grocery_ticks` holds when it's ticked at this amount; `tickedEarlier`
 // is the amount an older tick of the same item was made at, when only that one matches.
 export type GroceryItem = {
   key: string;
   name: string;
   recipe?: string;
+  factor?: Factor;
   amount: string | null;
   fingerprint: string;
   tick: string;
@@ -277,6 +280,7 @@ export function groceryList(
             key,
             name: line.text,
             recipe: entry.recipe_title,
+            ...(entry.amount.factor !== 1 && { factor: entry.amount.factor }),
             amount: null,
             fingerprint: "",
             ...ticks(key, "", [], tickSet),

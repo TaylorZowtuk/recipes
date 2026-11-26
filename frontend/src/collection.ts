@@ -155,6 +155,14 @@ export function useCollection(): Loaded<Collection> {
   return held ? { state: "ready", value: held } : loaded;
 }
 
+// Every recipe of `cards` at its card's version, loaded together, as a Grocery List needs them.
+export function useRecipes(cards: Card[]): Loaded<Recipe[]> {
+  const key = cards.map((card) => recipeKey(card.id, card.recipe_version)).join(",");
+  const known = cards.map((card) => recipes.get(recipeKey(card.id, card.recipe_version)));
+  const cached = known.every((recipe) => recipe) ? (known as Recipe[]) : undefined;
+  return useLoaded(`recipes:${key}`, () => Promise.all(cards.map(loadRecipe)), cached);
+}
+
 // Keeps a recipe the API just returned, so its page shows it without loading it again.
 export function rememberRecipe(recipe: Recipe) {
   recipes.set(recipeKey(recipe.id, recipe.version), recipe);
