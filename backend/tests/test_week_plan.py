@@ -6,7 +6,7 @@ import pytest
 from conftest import EDITOR
 
 from recipes.seed import RECIPES
-from recipes.store import VersionConflict, week_key
+from recipes.store import Store, VersionConflict, week_key
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from httpx2 import Response
 
     from recipes.models import Recipe, WeekPlan
-    from recipes.store import Store
 
 MONDAY = "2026-11-02"
 MISSING_ID = "01K7ZZZZZZZZZZZZZZZZZZZZZZ"
@@ -569,35 +568,62 @@ def test_ticking_twice_or_unticking_what_isnt_ticked_changes_nothing(
     assert ticked(editor_client, OTHER_TICK, "untick")["grocery_ticks"] == [TICK]
 
 
-def test_two_phones_ticking_from_the_same_read_both_keep_their_tick(
-    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+def race(store: Store, monkeypatch: pytest.MonkeyPatch, other: Callable[[], object]) -> None:
+    """Runs `other` against the table just before the store's first write lands, whatever the
+    write is and however it read first, so only a write that doesn't depend on a read survives.
+    """
+    client, pending = store.client, [other]
+
+    def before(name: str) -> Callable[..., Any]:
+        write = getattr(client, name)
+
+        def wrapped(**kwargs: Any) -> Any:
+            while pending:
+                pending.pop()()
+            return write(**kwargs)
+
+        return wrapped
+
+    for name in ("update_item", "put_item", "transact_write_items"):
+        monkeypatch.setattr(client, name, before(name))
+
+
+def test_two_phones_ticking_at_once_both_keep_their_tick(
+    editor_client: TestClient, api_store: Store, table: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     roast = api_store.add_recipe(ROAST)
     planned(editor_client, place(roast))
-    before = api_store.week_plan(MONDAY)
-    ticked(editor_client, TICK)
-    monkeypatch.setattr(api_store, "week_plan", read_as(before))
+    other_phone = Store(table)
+    race(
+        api_store,
+        monkeypatch,
+        lambda: other_phone.set_grocery_tick(MONDAY, OTHER_TICK, ticked=True),
+    )
 
-    ticked(editor_client, OTHER_TICK)
+    ticked(editor_client, TICK)
 
     monkeypatch.undo()
     assert sorted(read_week(editor_client)["grocery_ticks"]) == sorted([TICK, OTHER_TICK])
 
 
-def test_a_tick_keeps_a_placement_made_since_the_phone_last_read(
-    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+def test_a_tick_keeps_a_placement_that_lands_as_it_is_written(
+    editor_client: TestClient, api_store: Store, table: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    roast, noodles = api_store.add_recipe(ROAST), api_store.add_recipe(NOODLES)
+    roast = api_store.add_recipe(ROAST)
     planned(editor_client, place(roast))
-    before = api_store.week_plan(MONDAY)
-    placed = patch(editor_client, place(noodles), version=1).json()
-    monkeypatch.setattr(api_store, "week_plan", read_as(before))
+    other_phone = Store(table)
+    placed = other_phone.week_plan(MONDAY).model_copy(deep=True)
+    placed.days[1] = [placed.days[0][0].model_copy(update={"entry_id": MISSING_ID})]
+    race(api_store, monkeypatch, lambda: other_phone.save_week_plan(placed))
 
     response = tick(editor_client)
 
     monkeypatch.undo()
-    assert response.json() == {**placed, "grocery_ticks": [TICK]}
-    assert read_week(editor_client) == response.json()
+    stored = read_week(editor_client)
+    assert response.status_code == 200
+    assert stored["grocery_ticks"] == [TICK]
+    assert stored["version"] == 2
+    assert [entry["entry_id"] for entry in stored["days"][1]] == [MISSING_ID]
 
 
 def test_a_placement_from_a_read_before_a_tick_keeps_the_tick(
