@@ -27,6 +27,7 @@ from recipes.backup import BackupBucket, BackupLinks
 from recipes.edits import (
     CONFIRMED_BY,
     Edited,
+    EditLine,
     FactEdit,
     confirm_matches,
     edit_recipe,
@@ -64,6 +65,7 @@ from recipes.models import (
     Dataset,
     Difficulty,
     DurationSegment,
+    Effective,
     Enrichment,
     EnrichmentLineFacts,
     EnrichmentStatus,
@@ -99,12 +101,15 @@ from recipes.models import (
     WeekPlan,
     WeekPlanEntry,
     Wording,
-    fact_at,
-    fact_paths,
+    confirm_settles,
+    effective,
+    fact_of,
     item_of,
     kept_items,
     new_ulid,
     normalize_wording,
+    our_version_settled,
+    recipe_fact_paths,
     resolve,
     settled,
     site_host,
@@ -115,6 +120,7 @@ from recipes.models import (
 )
 from recipes.offers import find_offers
 from recipes.our_version import OurVersionDraft, Refused
+from recipes.step_portions import flag_overused
 from recipes.store import (
     MAX_LEARNED,
     CanonicalExists,
@@ -355,6 +361,15 @@ class ConfirmFacts(BaseModel):
 
     version: RecipeVersion
     fact_ids: Annotated[list[Label], Field(min_length=1, max_length=MAX_FACT_IDS)]
+
+
+class OurVersionEnrichment(BaseModel):
+    """What the enrich CLI found in Our Version's steps waiting for enrich, on the recipe at
+    `version`: each step's Segments and uses by its id.
+    """
+
+    version: RecipeVersion
+    steps: Annotated[dict[str, StepFacts], Field(max_length=MAX_LINES)]
 
 
 class ConfirmedBatch(BaseModel):
@@ -832,12 +847,12 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
             "isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't "
             "have, a step's segments aren't its text, its segments or uses name a line the recipe "
             "doesn't have, a line's portions add up to more than 1 (with any kept steps'), an "
-            "issue isn't open, substitutions or a suggested Difficulty aren't the LLM's "
-            "unconfirmed estimate, a substitute is its line's own match (kept or new), a wording "
-            "isn't a parsed line's name, it learns more than one write holds, a fact names an "
-            "unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or "
-            "wording is confirmed or at another schema version, or the enriched recipe is too big "
-            "to store"
+            "issue isn't open or comes marked to settle on confirm, substitutions or a suggested "
+            "Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own "
+            "match (kept or new), a wording isn't a parsed line's name, it learns more than one "
+            "write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new "
+            "Canonical Ingredient or wording is confirmed or at another schema version, or the "
+            "enriched recipe is too big to store"
         },
     },
 )
@@ -872,14 +887,16 @@ def put_enrichment(
     temperature segment is one code finds in its step's text, a step with segments has uses that are
     exactly its segments' Step Portions summed per line, each line's `portion`s across the steps add
     up to at most 1, every Enrichment Issue is on one of their facts and arrives open with no
-    Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated and
-    unconfirmed, no substitute is its line's own match, every wording is the normalized name of one
-    of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
-    names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
-    every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
-    enriched recipe is at most MAX_RECIPE_BYTES as JSON. Re-enrichment's facts must also fit
-    with the kept ones: each line's `portion`s across the steps still add up to at most 1, and
-    no substitute is its line's own match.
+    Confirm Batch and without `settles_on_confirm`, substitutions and a suggested Difficulty
+    arrive from the LLM, estimated and unconfirmed, no substitute is its line's own match, every
+    wording is the normalized name of one of the parsed lines, it learns at most MAX_LEARNED
+    items, every match, substitute and wording names a Canonical Ingredient that exists or is new
+    here, every new one's Store Category exists, every new Canonical Ingredient and wording is
+    unconfirmed and at SCHEMA_VERSION, and the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+    Re-enrichment's facts must also fit with the kept ones: each line's `portion`s across the
+    steps still add up to at most 1, and no substitute is its line's own match. Together with Our
+    Version's steps, a line may go past all of it: each Our Version step that uses it gets an
+    Enrichment Issue, and a Ready Our Version is Awaiting Review.
     """
     recipe = store.get_recipe(recipe_id)
     if recipe is None:
@@ -926,8 +943,10 @@ def put_enrichment(
 
 def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recipe:
     """The recipe with the enrichment's facts and Enrichment Issues, merged with the stored ones
-    (a Pending recipe has none), refused if the facts don't fit together. Our Version's issues
-    are its own, and stay.
+    (a Pending recipe has none), refused if the facts don't fit together. The Original's own
+    steps stay within each line; past it with Our Version's flags those. Our Version's issues are
+    its own, and stay, but for those of the unchanged steps whose facts this replaces, which are
+    checked again against Our Version's lines.
     """
     new, stored = _filled(body, snapshot), recipe.facts
     kept = kept_items(stored)
@@ -947,7 +966,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
         *(i for i in body.issues if item_of(i.fact_id) not in kept),
     ]
     _check_together(facts)
-    return recipe.model_copy(
+    enriched = recipe.model_copy(
         update={
             "facts": facts,
             "enrichment_version": body.enrichment_version,
@@ -956,6 +975,7 @@ def _enriched(recipe: Recipe, body: Enrichment, snapshot: fdc.Snapshot) -> Recip
             "status": _enriched_status(recipe) if recipe.status == "pending" else recipe.status,
         }
     )
+    return our_version.reenriched(recipe, flag_overused(enriched))
 
 
 def _merged[H: IngredientFacts | StepFacts](
@@ -1042,6 +1062,88 @@ def _enriched_status(recipe: Recipe) -> EnrichmentStatus:
     return "ready" if skips_review else "awaiting_review"
 
 
+@router.put(
+    "/recipes/{recipe_id}/our-version/enrichment",
+    response_model=Recipe,
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        **NO_SUCH_RECIPE,
+        409: {
+            "description": "The recipe isn't at the `version` given or changed meanwhile, or its "
+            "Our Version isn't Pending"
+        },
+        422: {
+            "description": "A step isn't an Our Version step waiting for enrich, one waiting has "
+            "no segments, a fact arrives Confirmed, the step facts are ones the Original's "
+            "enrichment refuses against the effective lines, or the enriched recipe is too big "
+            "to store"
+        },
+    },
+)
+def put_our_version_enrichment(
+    *,
+    recipe_id: Annotated[Ulid, Path()],
+    body: OurVersionEnrichment,
+    store: StoreDep,
+    dry_run: Annotated[bool, Query()] = False,
+) -> Recipe:
+    """Store the Segments and uses of the Our Version steps waiting for enrich, its edited and
+    added steps without Segments, in Our Version's facts. The Original's facts stay as they are.
+    Our Version is then Awaiting Review.
+
+    Refused unless Our Version is Pending and the recipe is at `version`, the request segments
+    every step waiting and no other, and each step's facts pass the Original's enrichment's step
+    checks against the effective lines and arrive unconfirmed. A Segment that takes a line past
+    all of it with the other effective steps is stored at what's left, or as its text when none
+    is, with an Enrichment Issue naming the other steps, which confirming the step as it is
+    settles. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
+    """
+    recipe = _recipe(store, recipe_id)
+    if recipe.version != body.version:
+        raise VersionConflict(recipe.id)
+    ours = recipe.our_version
+    if ours is None or recipe.our_version_status != "pending":
+        raise HTTPException(409, "Only a Pending Our Version is enriched")
+    _check_our_steps(body, effective(recipe))
+    steps, capped = our_version.capped(recipe, body.steps)
+    facts = ours.facts.model_copy(update={"steps": {**ours.facts.steps, **steps}})
+    enriched = our_version_settled(
+        recipe.model_copy(
+            update={
+                "our_version": ours.model_copy(update={"facts": facts}),
+                "our_version_status": "awaiting_review",
+                "issues": [*recipe.issues, *capped],
+            }
+        )
+    )
+    if len(enriched.model_dump_json().encode()) > MAX_RECIPE_BYTES:
+        raise HTTPException(422, f"An enriched recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
+    if dry_run:
+        return enriched.model_copy(update={"version": enriched.version + 1})
+    return store.update_recipe(enriched)
+
+
+def _check_our_steps(body: OurVersionEnrichment, shown: Effective) -> None:
+    """Refuse an answer for a step that isn't Our Version's without Segments, one that leaves
+    such a step out or unsegmented, a Confirmed fact, and the step facts `_check_step` refuses
+    against the effective lines.
+    """
+    waiting = {s.id: s.text for s in shown.steps if s.change and s.id not in shown.facts.steps}
+    if unknown := sorted(body.steps.keys() - waiting.keys()):
+        raise HTTPException(
+            422, f"{', '.join(unknown)} isn't an Our Version step waiting for enrich"
+        )
+    for step_id in waiting:
+        if (facts := body.steps.get(step_id)) is None or facts.segments is None:
+            raise HTTPException(422, f"Step {step_id} needs its segments")
+    if any(f and f.confirmed for s in body.steps.values() for f in (s.segments, s.uses)):
+        raise HTTPException(422, "Enrichment can't confirm a fact")
+    lines = {line.id for line in shown.ingredients}
+    for step_id, facts in body.steps.items():
+        _check_step(step_id, waiting[step_id], facts, lines)
+
+
 @router.patch(
     "/recipes/{recipe_id}",
     response_model=Recipe,
@@ -1077,7 +1179,10 @@ def patch_recipe(
     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
     Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
-    Our Version Status Pending; a new Our Version without one is Ready. Removing Our Version
+    Our Version Status Pending; a new Our Version without one is Ready. Removing a line, or
+    changing an edited line's name or Canonical Ingredient, gives each step with a Segment or use
+    for it an Enrichment Issue that proposes no correction, and a Ready Our Version is Awaiting
+    Review. Removing Our Version
     settles its open issues. The Enrichment Status stays.
     """
     recipe = _recipe(store, recipe_id)
@@ -1102,6 +1207,7 @@ def patch_recipe(
                 changes |= {
                     "our_version": saved.recipe.our_version,
                     "our_version_status": saved.recipe.our_version_status,
+                    "our_version_ready_batch": saved.recipe.our_version_ready_batch,
                     "our_version_last_line": saved.recipe.our_version_last_line,
                     "our_version_last_step": saved.recipe.our_version_last_step,
                     "facts": saved.recipe.facts,
@@ -1110,7 +1216,12 @@ def patch_recipe(
             case RemoveOurVersion():
                 # Its open issues go with it, settled.
                 issues = resolve(recipe, lambda fact_id: fact_id.startswith(OUR_VERSION))
-                changes |= {"our_version": None, "our_version_status": None, "issues": issues}
+                changes |= {
+                    "our_version": None,
+                    "our_version_status": None,
+                    "our_version_ready_batch": None,
+                    "issues": issues,
+                }
     # The editor's own Difficulty drops the suggestion from review, which can leave nothing to
     # review: the recipe is then Ready, though no Confirm Batch made it so.
     edited = settled(recipe.model_copy(update=changes))
@@ -1257,42 +1368,53 @@ def confirm_facts(
     recipe_id: Annotated[Ulid, Path()], body: ConfirmFacts, store: StoreDep
 ) -> ConfirmedBatch:
     """Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-    resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
-    none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
-    can't be Ready while it is. A fact already Confirmed keeps its own batch.
+    resolve the open Enrichment Issues on them that propose a correction, or that confirming as
+    it is settles (`settles_on_confirm`, as for a step an Our Version edit affects). Any other
+    issue proposing none, an ask to pick a line's portion or food or steps that together use more
+    than all of a line, stays open: only an edit settles it, so the recipe, or Our Version, can't
+    be Ready while it is. A fact already Confirmed keeps its own batch. Our Version's facts are
+    confirmed at their `our_version.` paths.
 
     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
-    wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+    wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
+    review is Ready, and an Our Version Awaiting Review with nothing of its own left is Ready.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
-    facts = recipe.facts.model_copy(deep=True)
+    work = recipe.model_copy(deep=True)
     listed = set(body.fact_ids)
     open_on = {issue.fact_id for issue in recipe.issues if issue.status == "open"}
-    if unknown := sorted(p for p in listed - open_on if fact_at(facts, p) is None):
+    if unknown := sorted(p for p in listed - open_on if fact_of(work, p) is None):
         raise HTTPException(422, f"The recipe has no fact {', '.join(unknown)}")
     batch, now = new_ulid(), datetime.now(UTC)
-    confirming = sorted(p for p in listed if (f := fact_at(facts, p)) and not f.confirmed)
+    confirming = sorted(p for p in listed if (f := fact_of(work, p)) and not f.confirmed)
     accepted = [
         i
         for i in recipe.issues
-        if i.status == "open" and i.fact_id in listed and i.after is not None
+        if i.status == "open" and i.fact_id in listed and confirm_settles(i)
     ]
     if not confirming and not accepted:
         raise HTTPException(422, "Every listed fact is already Confirmed")
     for path in confirming:
-        fact = cast("Fact", fact_at(facts, path))
+        fact = cast("Fact", fact_of(work, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at = True, CONFIRMED_BY, now
         fact.confirm_batch = batch
     issues = [
         i.model_copy(update={"status": "resolved", "confirm_batch": batch}) if i in accepted else i
         for i in recipe.issues
     ]
-    canonicals, wordings = confirm_matches(store, facts, confirming, batch)
+    canonicals, wordings = confirm_matches(store, work.facts, confirming, batch)
+    if ours := work.our_version:
+        in_ours = [p.removeprefix(OUR_VERSION) for p in confirming if p.startswith(OUR_VERSION)]
+        our_canonicals, our_wordings = confirm_matches(store, ours.facts, in_ours, batch)
+        canonicals = list({c.id: c for c in [*canonicals, *our_canonicals]}.values())
+        wordings = list({w.wording: w for w in [*wordings, *our_wordings]}.values())
     if len(canonicals) + len(wordings) > MAX_LEARNED:
         raise HTTPException(422, "Confirm fewer matches at once")
-    reviewed = settled(recipe.model_copy(update={"facts": facts, "issues": issues}), batch)
+    reviewed = settled(
+        our_version_settled(work.model_copy(update={"issues": issues}), batch), batch
+    )
     ready = recipe.status == "awaiting_review" and reviewed.status == "ready"
     saved = store.review_recipe(reviewed, canonicals, wordings)
     return ConfirmedBatch(recipe=saved, confirm_batch=batch, ready=ready)
@@ -1418,8 +1540,9 @@ def search_fdc_foods(
             "changed, or the recipe is Pending and has no facts to edit yet"
         },
         422: {
-            "description": "The recipe has no such line, step or substitute, the step's portions "
-            "and timers don't fit it or use more than all of a line, the line's wording changes "
+            "description": "The recipe has no such line, step or substitute, Our Version "
+            "doesn't write the line, the step is Our Version's, the step's portions and timers "
+            "don't fit it or use more than all of a line, the line's wording changes "
             "without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category "
             "doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but "
             "no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC "
@@ -1451,13 +1574,27 @@ def edit_fact(
 
     A substitute's new FDC food or FDC portion takes its numbers from the FDC Snapshot, never
     from the request, and reaches no other line or recipe; unchanged, its numbers stay as stored.
+
+    A step's portions that take a line past all of it together with Our Version's steps aren't
+    refused: each Our Version step that uses it gets an Enrichment Issue, and a Ready Our Version
+    is Awaiting Review.
+
+    A line edit whose `line_id` is an Our Version line's Review Item (`our_version.i3`) edits
+    that line as an Our Version save that changes only it would: its facts are Our Version's
+    own, its text is built from them, its open Enrichment Issues are resolved, the steps that
+    mention it by another name or Canonical Ingredient are flagged, and an Our Version Awaiting
+    Review with nothing left to review is Ready. Our Version's steps are edited in Our Version.
     """
     recipe = _recipe(store, recipe_id)
     if recipe.status == "pending":
         raise HTTPException(409, "A Pending recipe has no facts to edit yet")
     if recipe.version != body.version:
         raise VersionConflict(recipe.id)
-    edited = edit_recipe(store, recipe, body.edit, snapshot)
+    edit = body.edit
+    if isinstance(edit, EditLine) and edit.line_id.startswith(OUR_VERSION):
+        edited = our_version.edit_line(store, recipe, edit, snapshot, datetime.now(UTC))
+    else:
+        edited = edit_recipe(store, recipe, edit, snapshot)
     if len(edited.recipe.model_dump_json().encode()) > MAX_RECIPE_BYTES:
         raise HTTPException(422, f"An edited recipe is at most {MAX_RECIPE_BYTES} bytes as JSON")
     saved = store.review_recipe(
@@ -1492,18 +1629,19 @@ def undo_confirm_batch(
     recipe_id: Annotated[Ulid, Path()], batch: Annotated[Ulid, Path()], store: StoreDep
 ) -> Recipe:
     """Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
-    Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
-    unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+    Enrichment Issues, move the recipe, or its Ready Our Version, back to Awaiting Review if the
+    batch made it Ready, and unconfirm each Canonical Ingredient it confirmed that still carries
+    it. Wordings stay.
     """
     recipe = _recipe(store, recipe_id)
-    facts = recipe.facts.model_copy(deep=True)
-    paths = fact_paths(facts)
-    undone = [p for p in paths if cast("Fact", fact_at(facts, p)).confirm_batch == batch]
+    work = recipe.model_copy(deep=True)
+    paths = recipe_fact_paths(work)
+    undone = [p for p in paths if cast("Fact", fact_of(work, p)).confirm_batch == batch]
     if not undone and all(issue.confirm_batch != batch for issue in recipe.issues):
         raise HTTPException(404, "Nothing on the recipe is in that Confirm Batch")
     canonicals: dict[str, CanonicalIngredient] = {}
     for path in undone:
-        fact = cast("Fact", fact_at(facts, path))
+        fact = cast("Fact", fact_of(work, path))
         fact.confirmed, fact.confirmed_by, fact.confirmed_at, fact.confirm_batch = (
             False,
             None,
@@ -1517,7 +1655,6 @@ def undo_confirm_batch(
                     update={"confirmed": False, "confirm_batch": None}
                 )
     changes: dict[str, object] = {
-        "facts": facts,
         "issues": [
             issue.model_copy(update={"status": "open", "confirm_batch": None})
             if issue.confirm_batch == batch
@@ -1527,7 +1664,10 @@ def undo_confirm_batch(
     }
     if recipe.ready_batch == batch:
         changes |= {"status": "awaiting_review", "ready_batch": None}
-    return store.review_recipe(recipe.model_copy(update=changes), canonicals.values(), [])
+    # Only a Ready Our Version moves back: a step edited since has made it Pending.
+    if recipe.our_version_status == "ready" and recipe.our_version_ready_batch == batch:
+        changes |= {"our_version_status": "awaiting_review", "our_version_ready_batch": None}
+    return store.review_recipe(work.model_copy(update=changes), canonicals.values(), [])
 
 
 def _check_lines(body: Enrichment, recipe: Recipe) -> None:
@@ -1545,9 +1685,16 @@ def _check_lines(body: Enrichment, recipe: Recipe) -> None:
     )
     if unknown := sorted({issue.fact_id for issue in body.issues} - facts):
         raise HTTPException(422, f"An Enrichment Issue is on no fact: {', '.join(unknown)}")
-    # Only an editor's review settles an issue, never enrichment.
+    # Only an editor's review settles an issue, never enrichment, and only the API marks one
+    # that confirming the fact as it is settles, or one on steps using more than all of a line.
     if any(issue.status != "open" or issue.confirm_batch for issue in body.issues):
         raise HTTPException(422, "An Enrichment Issue arrives open, in no Confirm Batch")
+    if any(issue.settles_on_confirm or issue.line_id for issue in body.issues):
+        raise HTTPException(
+            422,
+            "An Enrichment Issue arrives without settles_on_confirm or line_id: only the API "
+            "sets them",
+        )
     names = {
         normalize_wording(facts.parse.name)
         for facts in body.facts.ingredients.values()

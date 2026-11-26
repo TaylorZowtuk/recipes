@@ -155,6 +155,8 @@ export const recipe = (fields: Partial<Recipe> = {}): Recipe =>
         status: "open",
         confirm_batch: null,
         model: "test",
+        settles_on_confirm: false,
+        line_id: null,
       },
       {
         id: "01K7TESTISSUE000000000002",
@@ -165,6 +167,8 @@ export const recipe = (fields: Partial<Recipe> = {}): Recipe =>
         status: "resolved",
         confirm_batch: "01K7TESTBATCH0000000000000",
         model: "test",
+        settles_on_confirm: false,
+        line_id: null,
       },
     ],
     ...fields,

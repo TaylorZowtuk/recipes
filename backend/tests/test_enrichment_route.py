@@ -268,6 +268,8 @@ def issue(n: int, status: str = "open") -> dict[str, Any]:
         "model": "a-model",
         "status": status,
         "confirm_batch": None,
+        "settles_on_confirm": False,
+        "line_id": None,
     }
 
 
@@ -525,8 +527,17 @@ def test_an_enrichment_too_big_for_one_item_is_refused(
         {"wordings": [{"wording": "cubed", "canonical_id": BEEF_ID, "schema_version": 1}]},
         {"issues": [issue(1, "resolved")]},
         {"issues": [{**issue(1), "confirm_batch": "batch-1"}]},
+        {"issues": [{**issue(1), "settles_on_confirm": True}]},
+        {"issues": [{**issue(1), "fact_id": "s1.uses", "line_id": "i1"}]},
     ],
-    ids=["wording of no line", "wording of no line's name", "resolved issue", "confirmed issue"],
+    ids=[
+        "wording of no line",
+        "wording of no line's name",
+        "resolved issue",
+        "confirmed issue",
+        "issue settled by confirming",
+        "issue on steps using more than all of a line",
+    ],
 )
 def test_a_wording_of_another_line_or_an_issue_already_settled_is_refused(
     editor_client: TestClient, api_store: Store, fields: dict[str, Any]

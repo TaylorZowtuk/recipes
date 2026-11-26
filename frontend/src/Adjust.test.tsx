@@ -438,11 +438,12 @@ describe("Our Version", () => {
     expect(() => button("Original")).toThrow();
   });
 
-  it("never opens an Original line's Review Item from an Our Version line", () => {
+  it("opens Our Version's own Review Item from an Our Version line, never the Original's", () => {
     shown.editor = true;
     open("", "awaiting_review", undefined, OUR_VERSION);
-    const butter = lineOf("butter");
-    expect(butter?.querySelector("button")).toBeNull();
+    const butter = lineOf("butter")?.querySelector<HTMLElement>(".review-item");
+    act(() => butter?.click());
+    expect(host.querySelector("dialog[open] h2")?.textContent).toBe("1 tbsp butter");
     expect(lineOf("flour")?.querySelector(".review-item")).not.toBeNull();
   });
 });

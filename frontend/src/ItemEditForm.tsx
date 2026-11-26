@@ -41,7 +41,7 @@ import {
   withWording,
 } from "./factEdits";
 import { DifficultyField } from "./RecipeFields";
-import type { FactEdit, ReviewItem } from "./review";
+import { type FactEdit, itemRecipe, ownerOf, type ReviewItem } from "./review";
 import { alphabetical, titleMatches } from "./titleSearch";
 
 type Kitchen = Pick<Collection, "canonical_ingredients" | "kitchen_settings" | "wordings">;
@@ -60,10 +60,13 @@ type FormProps = {
   onCancel: () => void;
 };
 
-// Whether the item has facts an editor can edit: a line always, a step with portions or timers,
-// substitutions while there are any, and the Difficulty.
+// Whether the item has facts an editor can edit: a line always, the Original's or Our Version's,
+// one of the Original's steps with portions or timers, substitutions while there are any, and the
+// Difficulty.
 export function canEdit(item: ReviewItem, recipe: Recipe): boolean {
-  const [owner = ""] = item.id.split(".");
+  const { owner, ours } = ownerOf(item.id);
+  // Our Version's steps and substitutions are edited in Our Version itself.
+  if (ours) return item.kind === "line";
   switch (item.kind) {
     case "difficulty":
     case "line":
@@ -77,16 +80,23 @@ export function canEdit(item: ReviewItem, recipe: Recipe): boolean {
   }
 }
 
+// The line a line item's form edits, with its text and facts as the item's version shows them. An
+// Our Version line's id is its item's (`our_version.i1`), which the edit names it by.
+export function itemLine(item: ReviewItem, recipe: Recipe): LineOf {
+  const { owner, seen } = itemRecipe(item, recipe);
+  return { ...lineOf(seen, owner), id: ownerOf(item.id).ours ? item.id : owner };
+}
+
 // The edit form for the item's kind, in place of its detail in the same sheet.
 export function ItemEditForm(props: FormProps) {
-  const [owner = ""] = props.item.id.split(".");
+  const { owner } = ownerOf(props.item.id);
   switch (props.item.kind) {
     case "difficulty":
       return <DifficultyForm {...props} />;
     case "substitutions":
       return <SubstitutionsForm lineId={owner} {...props} />;
     case "line":
-      return <LineForm line={lineOf(props.recipe, owner)} {...props} />;
+      return <LineForm line={itemLine(props.item, props.recipe)} {...props} />;
     case "step":
       return <StepForm stepId={owner} {...props} />;
   }

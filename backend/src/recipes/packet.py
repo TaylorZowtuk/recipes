@@ -65,6 +65,7 @@ from recipes.models import (
     TextSegment,
     UsesFact,
     Wording,
+    effective,
     kept_items,
     new_ulid,
     normalize_wording,
@@ -75,7 +76,15 @@ from recipes.parse import parse_line
 from recipes.store import MAX_LEARNED
 
 if TYPE_CHECKING:
-    from recipes.models import IngredientLine, Step
+    from collections.abc import Sequence
+
+    from recipes.models import (
+        Effective,
+        EffectiveStep,
+        IngredientFacts,
+        IngredientLine,
+        Step,
+    )
 
 # Recorded on each recipe enriched, so recipes enriched by an older version can be found.
 ENRICHMENT_VERSION = 4
@@ -119,6 +128,15 @@ INSTRUCTIONS = (
     "a line's portions add up to at most 1 across all the steps. Leave out a step you can't read. "
     "Give the recipe a difficulty from its steps and stated_times: prep, cook and cleanup, each "
     "1 (easy) to 3 (hard); its Total Difficulty is their sum."
+)
+# Added to the instructions when the packet has Our Version steps to segment.
+OUR_VERSION_INSTRUCTIONS = (
+    " Each of our_versions is the household's own steps for a recipe, offered against its lines "
+    "as they are, each with the parse it has. Answer every one of its steps as you would a "
+    "recipe's, under our_versions with its recipe_id and offer_id, and no lines or difficulty. "
+    "Its context_steps are the recipe's other steps in order, with how much of each line they "
+    'use: read them to understand phrases such as "the rest of the garlic", but never answer '
+    "them. Its default_uses already leave out what the context_steps use."
 )
 # Added to the instructions when a recipe has Review Items an editor confirmed.
 KEPT_INSTRUCTIONS = (
@@ -216,17 +234,43 @@ def default_uses(recipe: Recipe, facts: EnrichmentFacts) -> dict[str, list[StepU
     """
     kept, used = kept_items(recipe.facts), kept_portions(recipe.facts)
     steps = [step for step in recipe.original.steps if step.id not in kept]
-    uses: dict[str, list[StepUse]] = {step.id: [] for step in recipe.original.steps}
-    for line in recipe.original.ingredients:
-        fact = facts.ingredients.get(line.id)
-        parse = fact.parse if fact else None
-        left = 1 - used.get(line.id, 0)
+    lines = recipe.original.ingredients
+    parses = [(line.id, _parse_of(facts.ingredients.get(line.id))) for line in lines]
+    return {step.id: [] for step in recipe.original.steps} | _first_mentions(parses, steps, used)
+
+
+def our_default_uses(shown: Effective, waiting: list[EffectiveStep]) -> dict[str, list[StepUse]]:
+    """Each Our Version step's default uses: what the effective steps with Segments leave of each
+    line, in the first waiting step that mentions it, as `default_uses`.
+    """
+    used: dict[str, float] = {}
+    for step in shown.facts.steps.values():
+        for use in step.uses.uses if step.uses else []:
+            used[use.ref] = used.get(use.ref, 0) + use.portion
+    held = shown.facts.ingredients
+    parses = [(line.id, _parse_of(held.get(line.id))) for line in shown.ingredients]
+    return _first_mentions(parses, waiting, used)
+
+
+def _parse_of(facts: IngredientFacts | EnrichmentLineFacts | None) -> ParseFact | None:
+    return facts.parse if facts else None
+
+
+def _first_mentions(
+    parses: list[tuple[str, ParseFact | None]], steps: Sequence[Step], used: dict[str, float]
+) -> dict[str, list[StepUse]]:
+    """Each parsed line, less what `used` takes of it, in the first of `steps` whose text
+    mentions its short name or name, ignoring case.
+    """
+    uses: dict[str, list[StepUse]] = {step.id: [] for step in steps}
+    for line_id, parse in parses:
+        left = 1 - used.get(line_id, 0)
         if parse is None or left <= PORTION_TOLERANCE:
             continue
         names = [name for name in (parse.short_name, parse.name) if name]
         step = next((s for s in steps if any(mentions(s.text, n) for n in names)), None)
         if step:
-            uses[step.id].append(StepUse(ref=line.id, portion=left))
+            uses[step.id].append(StepUse(ref=line_id, portion=left))
     return uses
 
 
@@ -368,11 +412,42 @@ class PacketRecipe(Strict):
     confirmed_difficulty: Difficulty | None = KEPT
 
 
+class OurVersionLine(Strict):
+    line_id: str
+    text: str
+    parse: OfferedParse | None
+
+
+class ContextStep(Strict):
+    """An effective step Our Version doesn't ask about, shown so the waiting ones read right."""
+
+    step_id: str
+    text: str
+    uses: list[OfferedUse]
+
+
+class PacketOurVersion(Strict):
+    """A Ready recipe's Our Version steps waiting for enrich, offered against its effective lines
+    with the parses they have: no line is parsed again.
+    """
+
+    recipe_id: str
+    offer_id: str = ""
+    # Part of its offer_id, so any change to the recipe since its packet refuses the answer.
+    version: int
+    title: str
+    lines: list[OurVersionLine]
+    # The other effective steps, in order, with their uses: context, never answered.
+    context_steps: list[ContextStep]
+    steps: list[PacketStep]
+
+
 class Packet(Strict):
     fdc_release: str
     store_categories: list[StoreCategory]
     families: list[str]
     recipes: list[PacketRecipe]
+    our_versions: list[PacketOurVersion] = []
     instructions: str
 
 
@@ -466,9 +541,16 @@ class AnsweredRecipe(Strict):
     difficulty: AnsweredDifficulty | None = None
 
 
+class AnsweredOurVersion(Strict):
+    recipe_id: str
+    offer_id: str  # the offer_id of the Our Version it answers
+    steps: list[AnsweredStep] = []
+
+
 class Answer(Strict):
     model: Label
     recipes: list[AnsweredRecipe]
+    our_versions: list[AnsweredOurVersion] = []
 
 
 class Rejected(Exception):
@@ -496,6 +578,7 @@ class Work:
         store_categories: list[StoreCategory],
         snapshot: fdc.Snapshot,
         substitutes: Quoted | None = None,
+        our_versions: list[Recipe] | None = None,
     ) -> None:
         self.snapshot = snapshot
         self.categories = {category.id: category for category in store_categories}
@@ -518,23 +601,31 @@ class Work:
                 "store_categories": [category.model_dump() for category in store_categories],
                 "recipe": offer.model_dump(mode="json", exclude={"offer_id"}),
             }
-            canonical_json = json.dumps(offered, sort_keys=True, separators=(",", ":"))
-            offer.offer_id = hashlib.sha256(canonical_json.encode()).hexdigest()
+            offer.offer_id = _sha256(offered)
+        # Each recipe whose Our Version waits for enrich, with its effective recipe, by its id.
+        self.pending_ours = {r.id: (r, effective(r)) for r in our_versions or []}
+        ours = [_offer_ours(recipe, shown) for recipe, shown in self.pending_ours.values()]
+        for offer in ours:
+            offer.offer_id = _sha256({"our_version": offer.model_dump(mode="json")})
         reenriching = any(kept_items(recipe.facts) for recipe, _ in self.recipes.values())
         self._packet = Packet(
             fdc_release=snapshot.release,
             store_categories=store_categories,
             families=sorted({canonical.family for canonical in canonical_ingredients}),
             recipes=offers,
-            instructions=INSTRUCTIONS + (KEPT_INSTRUCTIONS if reenriching else ""),
+            our_versions=ours,
+            instructions=INSTRUCTIONS
+            + (KEPT_INSTRUCTIONS if reenriching else "")
+            + (OUR_VERSION_INSTRUCTIONS if ours else ""),
         )
         self._offered = {offer.recipe_id: offer for offer in offers}
+        self._offered_ours = {offer.recipe_id: offer for offer in ours}
 
     def packet(self) -> Packet:
         return self._packet
 
     def title(self, recipe_id: str) -> str:
-        recipe = self.recipes.get(recipe_id)
+        recipe = self.recipes.get(recipe_id) or self.pending_ours.get(recipe_id)
         return recipe[0].original.title if recipe else recipe_id
 
     def _offer(
@@ -738,6 +829,38 @@ class Work:
             wordings=list(recipe.learned.values()),
         )
 
+    def enrich_our_version(self, answered: AnsweredOurVersion, model: str) -> dict[str, StepFacts]:
+        """The Segments and uses a model's answer gives an Our Version's waiting steps, by step id.
+        Raises Rejected, with every error, when its offer changed since the answer's packet, a step
+        chose something it wasn't offered or is left out. A line's portions past 1 across the
+        effective steps are left to the API, which stores what's left and flags the step.
+        """
+        try:
+            return self._enrich_our_version(answered, model)
+        except ValidationError as error:
+            raise Rejected([str(error)]) from None
+
+    def _enrich_our_version(self, answered: AnsweredOurVersion, model: str) -> dict[str, StepFacts]:
+        offered = self._offered_ours.get(answered.recipe_id)
+        if offered is None:
+            raise Rejected([f"{answered.recipe_id}'s Our Version isn't in the packet"])
+        if answered.offer_id != offered.offer_id:
+            raise Rejected(
+                ["its offer changed since the packet: make a new packet and answer that"]
+            )
+        line_ids = {line.line_id for line in offered.lines}
+        recipe = _Answering(self, EnrichmentFacts(), model, line_ids, RecipeFacts())
+        recipe.answer_steps(offered.steps, answered.steps, capped=True)
+        given = {step.step_id for step in answered.steps}
+        recipe.errors += [
+            f"{step.step_id}: answer every step"
+            for step in offered.steps
+            if step.step_id not in given
+        ]
+        if recipe.errors:
+            raise Rejected(recipe.errors)
+        return recipe.steps
+
     def learn(self, enrichment: Enrichment) -> None:
         """Remember what a written enrichment created and learned, for the recipes after it."""
         for canonical in enrichment.canonical_ingredients:
@@ -896,9 +1019,11 @@ class _Answering:
             )
         return errors
 
-    def answer_steps(self, offered: list[PacketStep], answered: list[AnsweredStep]) -> None:
+    def answer_steps(
+        self, offered: list[PacketStep], answered: list[AnsweredStep], *, capped: bool = False
+    ) -> None:
         """Each answered step's segments and uses, refusing a line whose portions across the
-        steps add up to more than all of it.
+        steps add up to more than all of it, unless the API caps them (`capped`).
         """
         steps = {step.step_id: step for step in offered}
         for answered_step in answered:
@@ -912,7 +1037,7 @@ class _Answering:
             else:
                 self._answer_step(step, answered_step)
         for ref, total in self.portions.items():
-            if total <= 1 + PORTION_TOLERANCE:
+            if capped or total <= 1 + PORTION_TOLERANCE:
                 continue
             kept = self.kept_portions.get(ref)
             with_kept = f" with the confirmed steps' {kept:g}" if kept else ""
@@ -1185,6 +1310,48 @@ def _corrected_optional(
     if not answered.corrections_reason:
         return None, ["say why optional changed in corrections_reason"]
     return answered.optional, []
+
+
+def _sha256(offered: object) -> str:
+    """An offer's id: the SHA-256 of its canonical JSON."""
+    canonical_json = json.dumps(offered, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode()).hexdigest()
+
+
+def _offer_ours(recipe: Recipe, shown: Effective) -> PacketOurVersion:
+    """The Our Version steps without Segments, each edited or added, against the effective
+    lines as they are.
+    """
+    waiting = [s for s in shown.steps if s.change and s.id not in shown.facts.steps]
+    uses = our_default_uses(shown, waiting)
+    context: list[ContextStep] = []
+    for step in shown.steps:
+        if step.id in uses:
+            continue
+        facts = shown.facts.steps.get(step.id)
+        used = facts.uses.uses if facts and facts.uses else []
+        context.append(
+            ContextStep(
+                step_id=step.id,
+                text=step.text,
+                uses=[OfferedUse(ref=u.ref, portion=u.portion) for u in used],
+            )
+        )
+    return PacketOurVersion(
+        recipe_id=recipe.id,
+        version=recipe.version,
+        title=recipe.original.title,
+        lines=[
+            OurVersionLine(
+                line_id=line.id,
+                text=line.text,
+                parse=_offered_parse(_parse_of(shown.facts.ingredients.get(line.id))),
+            )
+            for line in shown.ingredients
+        ],
+        context_steps=context,
+        steps=[_offer_step(step, uses[step.id]) for step in waiting],
+    )
 
 
 def _offer_step(step: Step, uses: list[StepUse]) -> PacketStep:

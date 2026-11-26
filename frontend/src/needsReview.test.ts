@@ -57,6 +57,16 @@ describe("reviewQueue", () => {
       "Synthetic Apple Bake",
     ]);
   });
+
+  it("holds a Ready recipe whose Our Version is Awaiting Review, by the items the card counts", () => {
+    const ours = card("Synthetic Our Beans", {
+      our_version_status: "awaiting_review",
+      needs_review: { open_issues: 1, unconfirmed: 2, flagged: 1 },
+    });
+    const settled = card("Synthetic Our Soup", { our_version_status: "ready" });
+    expect(reviewQueue([settled, ours])).toEqual([ours]);
+    expect(reviewCounts(ours.needs_review)).toBe("2 to check, incl. 1 flagged");
+  });
 });
 
 describe("reviewCounts", () => {

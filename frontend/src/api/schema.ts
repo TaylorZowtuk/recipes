@@ -360,7 +360,10 @@ export interface paths {
          *     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
          *     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
          *     Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
-         *     Our Version Status Pending; a new Our Version without one is Ready. Removing Our Version
+         *     Our Version Status Pending; a new Our Version without one is Ready. Removing a line, or
+         *     changing an edited line's name or Canonical Ingredient, gives each step with a Segment or use
+         *     for it an Enrichment Issue that proposes no correction, and a Ready Our Version is Awaiting
+         *     Review. Removing Our Version
          *     settles its open issues. The Enrichment Status stays.
          */
         patch: operations["patch_recipe_api_recipes__recipe_id__patch"];
@@ -378,12 +381,16 @@ export interface paths {
         /**
          * Confirm Facts
          * @description Confirm the listed facts of the recipe at `body.version` as one new Confirm Batch, and
-         *     resolve the open Enrichment Issues on them that propose a correction. An issue that proposes
-         *     none, an ask to pick a line's portion, stays open: only an edit settles it, so the recipe
-         *     can't be Ready while it is. A fact already Confirmed keeps its own batch.
+         *     resolve the open Enrichment Issues on them that propose a correction, or that confirming as
+         *     it is settles (`settles_on_confirm`, as for a step an Our Version edit affects). Any other
+         *     issue proposing none, an ask to pick a line's portion or food or steps that together use more
+         *     than all of a line, stays open: only an edit settles it, so the recipe, or Our Version, can't
+         *     be Ready while it is. A fact already Confirmed keeps its own batch. Our Version's facts are
+         *     confirmed at their `our_version.` paths.
          *
          *     Confirming a match also confirms its Canonical Ingredient, stamped with the batch, and the
-         *     wording of its line's name. A recipe Awaiting Review with nothing left to review is Ready.
+         *     wording of its line's name. A recipe Awaiting Review with nothing of the Original's left to
+         *     review is Ready, and an Our Version Awaiting Review with nothing of its own left is Ready.
          */
         post: operations["confirm_facts_api_recipes__recipe_id__confirm_post"];
         delete?: never;
@@ -404,8 +411,9 @@ export interface paths {
         /**
          * Undo Confirm Batch
          * @description Reverse one Confirm Batch on the recipe as it is now: unconfirm its facts, reopen its
-         *     Enrichment Issues, move the recipe back to Awaiting Review if the batch made it Ready, and
-         *     unconfirm each Canonical Ingredient it confirmed that still carries it. Wordings stay.
+         *     Enrichment Issues, move the recipe, or its Ready Our Version, back to Awaiting Review if the
+         *     batch made it Ready, and unconfirm each Canonical Ingredient it confirmed that still carries
+         *     it. Wordings stay.
          */
         post: operations["undo_confirm_batch_api_recipes__recipe_id__confirm_batches__batch__undo_post"];
         delete?: never;
@@ -445,6 +453,16 @@ export interface paths {
          *
          *     A substitute's new FDC food or FDC portion takes its numbers from the FDC Snapshot, never
          *     from the request, and reaches no other line or recipe; unchanged, its numbers stay as stored.
+         *
+         *     A step's portions that take a line past all of it together with Our Version's steps aren't
+         *     refused: each Our Version step that uses it gets an Enrichment Issue, and a Ready Our Version
+         *     is Awaiting Review.
+         *
+         *     A line edit whose `line_id` is an Our Version line's Review Item (`our_version.i3`) edits
+         *     that line as an Our Version save that changes only it would: its facts are Our Version's
+         *     own, its text is built from them, its open Enrichment Issues are resolved, the steps that
+         *     mention it by another name or Canonical Ingredient are flagged, and an Our Version Awaiting
+         *     Review with nothing left to review is Ready. Our Version's steps are edited in Our Version.
          */
         post: operations["edit_fact_api_recipes__recipe_id__edit_post"];
         delete?: never;
@@ -485,16 +503,47 @@ export interface paths {
          *     temperature segment is one code finds in its step's text, a step with segments has uses that are
          *     exactly its segments' Step Portions summed per line, each line's `portion`s across the steps add
          *     up to at most 1, every Enrichment Issue is on one of their facts and arrives open with no
-         *     Confirm Batch, substitutions and a suggested Difficulty arrive from the LLM, estimated and
-         *     unconfirmed, no substitute is its line's own match, every wording is the normalized name of one
-         *     of the parsed lines, it learns at most MAX_LEARNED items, every match, substitute and wording
-         *     names a Canonical Ingredient that exists or is new here, every new one's Store Category exists,
-         *     every new Canonical Ingredient and wording is unconfirmed and at SCHEMA_VERSION, and the
-         *     enriched recipe is at most MAX_RECIPE_BYTES as JSON. Re-enrichment's facts must also fit
-         *     with the kept ones: each line's `portion`s across the steps still add up to at most 1, and
-         *     no substitute is its line's own match.
+         *     Confirm Batch and without `settles_on_confirm`, substitutions and a suggested Difficulty
+         *     arrive from the LLM, estimated and unconfirmed, no substitute is its line's own match, every
+         *     wording is the normalized name of one of the parsed lines, it learns at most MAX_LEARNED
+         *     items, every match, substitute and wording names a Canonical Ingredient that exists or is new
+         *     here, every new one's Store Category exists, every new Canonical Ingredient and wording is
+         *     unconfirmed and at SCHEMA_VERSION, and the enriched recipe is at most MAX_RECIPE_BYTES as JSON.
+         *     Re-enrichment's facts must also fit with the kept ones: each line's `portion`s across the
+         *     steps still add up to at most 1, and no substitute is its line's own match. Together with Our
+         *     Version's steps, a line may go past all of it: each Our Version step that uses it gets an
+         *     Enrichment Issue, and a Ready Our Version is Awaiting Review.
          */
         put: operations["put_enrichment_api_recipes__recipe_id__enrichment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recipes/{recipe_id}/our-version/enrichment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Our Version Enrichment
+         * @description Store the Segments and uses of the Our Version steps waiting for enrich, its edited and
+         *     added steps without Segments, in Our Version's facts. The Original's facts stay as they are.
+         *     Our Version is then Awaiting Review.
+         *
+         *     Refused unless Our Version is Pending and the recipe is at `version`, the request segments
+         *     every step waiting and no other, and each step's facts pass the Original's enrichment's step
+         *     checks against the effective lines and arrive unconfirmed. A Segment that takes a line past
+         *     all of it with the other effective steps is stored at what's left, or as its text when none
+         *     is, with an Enrichment Issue naming the other steps, which confirming the step as it is
+         *     settles. With `dry_run`, it checks and returns the recipe it would store, writing nothing.
+         */
+        put: operations["put_our_version_enrichment_api_recipes__recipe_id__our_version_enrichment_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1269,6 +1318,10 @@ export interface components {
          *     editor's FDC food pick on another line left to check: a line no portion of the food fits
          *     (on its conversion), or a line prepared another way that may need another food (on its match).
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
+         *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
+         *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
+         *     only an edit does, as for steps that together use more than all of a line, which names that
+         *     line in `line_id`.
          */
         "EnrichmentIssue-Input": {
             /** After */
@@ -1281,10 +1334,17 @@ export interface components {
             fact_id: string;
             /** Id */
             id: string;
+            /** Line Id */
+            line_id?: string | null;
             /** Model */
             model?: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Settles On Confirm
+             * @default false
+             */
+            settles_on_confirm: boolean;
             /**
              * Status
              * @default open
@@ -1298,6 +1358,10 @@ export interface components {
          *     editor's FDC food pick on another line left to check: a line no portion of the food fits
          *     (on its conversion), or a line prepared another way that may need another food (on its match).
          *     Those propose no correction (no `before` or `after`) and are settled by editing the line.
+         *     One the API raises on a step proposes none either: `settles_on_confirm` when confirming the
+         *     step as it is settles it, as for a line Our Version removed or a Step Portion it capped; else
+         *     only an edit does, as for steps that together use more than all of a line, which names that
+         *     line in `line_id`.
          */
         "EnrichmentIssue-Output": {
             /** After */
@@ -1310,10 +1374,17 @@ export interface components {
             fact_id: string;
             /** Id */
             id: string;
+            /** Line Id */
+            line_id: string | null;
             /** Model */
             model: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Settles On Confirm
+             * @default false
+             */
+            settles_on_confirm: boolean;
             /**
              * Status
              * @default open
@@ -1950,6 +2021,19 @@ export interface components {
             steps: components["schemas"]["StepsDraft"];
         };
         /**
+         * OurVersionEnrichment
+         * @description What the enrich CLI found in Our Version's steps waiting for enrich, on the recipe at
+         *     `version`: each step's Segments and uses by its id.
+         */
+        OurVersionEnrichment: {
+            /** Steps */
+            steps: {
+                [key: string]: components["schemas"]["StepFacts-Input"];
+            };
+            /** Version */
+            version: number;
+        };
+        /**
          * ParseFact
          * @description An ingredient line read into its parts. No quantity means no amount, as in "to taste".
          */
@@ -2174,6 +2258,8 @@ export interface components {
              * @default 0
              */
             our_version_last_step: number;
+            /** Our Version Ready Batch */
+            our_version_ready_batch: string | null;
             /** Our Version Status */
             our_version_status: ("pending" | "awaiting_review" | "ready") | null;
             preview: components["schemas"]["Preview"] | null;
@@ -3948,7 +4034,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The recipe has no such line, step or substitute, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC Snapshot or its FDC portion isn't the food's, the line has no weight to keep or convert or no portion to convert it by, or the edited recipe is too big to store */
+            /** @description The recipe has no such line, step or substitute, Our Version doesn't write the line, the step is Our Version's, the step's portions and timers don't fit it or use more than all of a line, the line's wording changes without a Canonical Ingredient choice, the Canonical Ingredient or its Store Category doesn't exist, the line has a Canonical Ingredient but no FDC food or an FDC food but no Canonical Ingredient, the line's or substitute's FDC food isn't in the FDC Snapshot or its FDC portion isn't the food's, the line has no weight to keep or convert or no portion to convert it by, or the edited recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -4005,7 +4091,63 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description The request names another FDC Snapshot release than the API's, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1 (with any kept steps'), an issue isn't open, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match (kept or new), a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            /** @description The request names another FDC Snapshot release than the API's, a line or substitute names an FDC food the FDC Snapshot doesn't have or an FDC portion that isn't the food's, a fact or Enrichment Issue is for a line or step the recipe doesn't have, a step's segments aren't its text, its segments or uses name a line the recipe doesn't have, a line's portions add up to more than 1 (with any kept steps'), an issue isn't open or comes marked to settle on confirm, substitutions or a suggested Difficulty aren't the LLM's unconfirmed estimate, a substitute is its line's own match (kept or new), a wording isn't a parsed line's name, it learns more than one write holds, a fact names an unknown Canonical Ingredient or Store Category, or a new Canonical Ingredient or wording is confirmed or at another schema version, or the enriched recipe is too big to store */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    put_our_version_enrichment_api_recipes__recipe_id__our_version_enrichment_put: {
+        parameters: {
+            query?: {
+                dry_run?: boolean;
+            };
+            header?: never;
+            path: {
+                recipe_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OurVersionEnrichment"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recipe"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such recipe */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The recipe isn't at the `version` given or changed meanwhile, or its Our Version isn't Pending */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A step isn't an Our Version step waiting for enrich, one waiting has no segments, a fact arrives Confirmed, the step facts are ones the Original's enrichment refuses against the effective lines, or the enriched recipe is too big to store */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -1,5 +1,5 @@
 {
-  "about": "Review Items, shared by the API's review_items and needs_review (test_enrichment_review.py) and the PWA's reviewItems and reviewOf (review.test.tsx). facts maps each fact the recipe has to whether it is Confirmed; editor_difficulty is whether the editor set the recipe's own Difficulty; open_issues are the fact ids of its open Enrichment Issues; items are the expected Review Items' fact ids by item id; unconfirmed is how many items are left to check: with a fact not yet Confirmed or an open issue; flagged is how many of those carry an open issue.",
+  "about": "Review Items, shared by the API's review_items and needs_review (test_enrichment_review.py) and the PWA's reviewItems and reviewOf (review.test.tsx). facts maps each fact the recipe has to whether it is Confirmed; editor_difficulty is whether the editor set the recipe's own Difficulty; open_issues are the fact ids of its open Enrichment Issues; items are the expected Review Items' fact ids by item id; unconfirmed is how many items are left to check: with a fact not yet Confirmed or an open issue; flagged is how many of those carry an open issue. settles_on_confirm lists the open issues marked to settle when their fact is confirmed as it is; confirm_settles is which open issues confirming their facts resolves (none of these propose a correction).",
   "cases": [
     {
       "name": "lines, substitutions, steps and the suggested Difficulty",
@@ -25,7 +25,9 @@
         "difficulty": ["difficulty"]
       },
       "unconfirmed": 4,
-      "flagged": 0
+      "flagged": 0,
+      "settles_on_confirm": [],
+      "confirm_settles": []
     },
     {
       "name": "the editor's own Difficulty leaves the suggestion out",
@@ -34,7 +36,9 @@
       "open_issues": [],
       "items": { "i1": ["i1.parse"] },
       "unconfirmed": 0,
-      "flagged": 0
+      "flagged": 0,
+      "settles_on_confirm": [],
+      "confirm_settles": []
     },
     {
       "name": "an open issue joins its line's item, made for a line with no facts",
@@ -47,7 +51,9 @@
         "i5": ["i5.match"]
       },
       "unconfirmed": 3,
-      "flagged": 3
+      "flagged": 3,
+      "settles_on_confirm": [],
+      "confirm_settles": []
     },
     {
       "name": "an open issue on missing substitutions, and on a Difficulty the editor overrode",
@@ -60,16 +66,66 @@
         "difficulty": ["difficulty"]
       },
       "unconfirmed": 2,
-      "flagged": 2
+      "flagged": 2,
+      "settles_on_confirm": [],
+      "confirm_settles": []
     },
     {
-      "name": "an open issue on an Our Version line is left out, until Our Version has Review Items",
+      "name": "an open issue on an Our Version line is an Our Version Review Item",
       "facts": { "i1.match": false },
       "editor_difficulty": false,
       "open_issues": ["i1.match", "our_version.i1.match", "our_version.i5.parse"],
-      "items": { "i1": ["i1.match"] },
-      "unconfirmed": 1,
-      "flagged": 1
+      "items": {
+        "i1": ["i1.match"],
+        "our_version.i1": ["our_version.i1.match"],
+        "our_version.i5": ["our_version.i5.parse"]
+      },
+      "unconfirmed": 3,
+      "flagged": 3,
+      "settles_on_confirm": [],
+      "confirm_settles": []
+    },
+    {
+      "name": "Our Version's steps are its own Review Items, beside the Original's",
+      "facts": {
+        "s2.segments": true,
+        "our_version.s2.segments": false,
+        "our_version.s2.uses": false,
+        "our_version.s4.segments": true
+      },
+      "editor_difficulty": false,
+      "open_issues": ["our_version.s3.uses"],
+      "items": {
+        "s2": ["s2.segments"],
+        "our_version.s2": ["our_version.s2.segments", "our_version.s2.uses"],
+        "our_version.s4": ["our_version.s4.segments"],
+        "our_version.s3": ["our_version.s3.uses"]
+      },
+      "unconfirmed": 2,
+      "flagged": 1,
+      "settles_on_confirm": [],
+      "confirm_settles": []
+    },
+    {
+      "name": "confirming settles only the issues marked to, not the one on steps using too much",
+      "facts": { "s1.uses": false, "our_version.s2.segments": false, "our_version.s2.uses": false },
+      "editor_difficulty": false,
+      "open_issues": [
+        "s1.uses",
+        "our_version.s2.uses",
+        "our_version.s3.uses",
+        "our_version.s4.uses"
+      ],
+      "items": {
+        "s1": ["s1.uses"],
+        "our_version.s2": ["our_version.s2.segments", "our_version.s2.uses"],
+        "our_version.s3": ["our_version.s3.uses"],
+        "our_version.s4": ["our_version.s4.uses"]
+      },
+      "unconfirmed": 4,
+      "flagged": 4,
+      "settles_on_confirm": ["our_version.s2.uses", "our_version.s3.uses"],
+      "confirm_settles": ["our_version.s2.uses", "our_version.s3.uses"]
     }
   ]
 }

@@ -1,8 +1,8 @@
-"""The enrich CLI: hands a model a Work Packet of every Pending recipe, then checks the model's
-answer against what the packet offered and writes each recipe's facts through the API. A
-Substitutes Packet comes first, whose answer (the substitutes file) the Work Packet offers
-candidates for. With --recipe or --stale, all three re-enrich those recipes instead, and apply
-prints each one's fact changes, writing them only with --write.
+"""The enrich CLI: hands a model a Work Packet of every Pending recipe, and of every Pending Our
+Version's steps, then checks the model's answer against what the packet offered and writes each
+recipe's facts through the API. A Substitutes Packet comes first, whose answer (the substitutes
+file) the Work Packet offers candidates for. With --recipe or --stale, all three re-enrich those
+recipes instead, and apply prints each one's fact changes, writing them only with --write.
 
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich substitutes <API base URL> > ask.json
 PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich packet <API base URL> \
@@ -13,6 +13,7 @@ PLATEFUL_SERVICE_TOKEN=… uv run python -m recipes.enrich stale <API base URL>
 """
 
 import argparse
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from recipes.models import (
     ParseFact,
     Recipe,
     SegmentsFact,
+    StepFacts,
     StoredFact,
     SubstitutionsFact,
     UsesFact,
@@ -95,6 +97,18 @@ def fetch_recipes(
         if refusals:
             print("\n".join(refusals), file=sys.stderr)
             return None
+    recipes = read_recipes(base_url, send, cards, ids)
+    if recipes is None:
+        return None
+    if chosen and chosen.stale:
+        recipes = [recipe for recipe in recipes if is_stale(recipe, chosen.stale)]
+    return collection, recipes
+
+
+def read_recipes(
+    base_url: str, send: Send, cards: dict[str, Any], ids: list[str]
+) -> list[Recipe] | None:
+    """The recipes `ids` names, or None when the API couldn't give one, printed to stderr."""
     recipes: list[Recipe] = []
     for id_ in ids:
         status, body = send("GET", f"{base_url}/api/recipes/{id_}", None)
@@ -102,9 +116,7 @@ def fetch_recipes(
             print(f"Couldn't read {cards[id_]['title']}: {status} {body}", file=sys.stderr)
             return None
         recipes.append(Recipe.model_validate(body))
-    if chosen and chosen.stale:
-        recipes = [recipe for recipe in recipes if is_stale(recipe, chosen.stale)]
-    return collection, recipes
+    return recipes
 
 
 def fetch_work(
@@ -114,14 +126,21 @@ def fetch_work(
     substitutes: Substitutes | None = None,
     chosen: Chosen | None = None,
 ) -> Work | None:
-    """The Collection's Pending (or chosen) recipes, Canonical Ingredients, wordings and Store
-    Categories, with the substitutes each recipe states, or None when the API couldn't give them
-    or the substitutes file quotes what its recipes don't say, which is printed to stderr.
+    """The work for a Work Packet: the Collection's Pending recipes (or the chosen ones), its
+    Canonical Ingredients, wordings and Store Categories, the substitutes each recipe states,
+    and, unless recipes are chosen, the recipes whose Our Version is Pending. None, with the
+    reason printed to stderr, when the API couldn't give them or the substitutes file quotes what
+    its recipes don't say.
     """
     fetched = fetch_recipes(base_url, send, chosen)
     if fetched is None:
         return None
     collection, recipes = fetched
+    cards = {card["id"]: card for card in collection["cards"]}
+    ours = [id_ for id_, card in cards.items() if card.get("our_version_status") == "pending"]
+    our_versions = read_recipes(base_url, send, cards, [] if chosen else ours)
+    if our_versions is None:
+        return None
     try:
         stated = checked(substitutes, recipes) if substitutes else {}
     except Rejected as rejected:
@@ -139,6 +158,7 @@ def fetch_work(
         ).store_categories,
         snapshot=snapshot,
         substitutes=stated,
+        our_versions=our_versions,
     )
 
 
@@ -225,7 +245,17 @@ def apply(
         reenriching = chosen is not None
         if not sent(base_url, send, work, enrichment, stored, reenriching=reenriching, write=write):
             failed += 1
-    count = len(answer.recipes)
+    for answered in answer.our_versions:
+        try:
+            steps = work.enrich_our_version(answered, answer.model)
+        except Rejected as rejected:
+            failed += 1
+            print(f"{work.title(answered.recipe_id)} → rejected, nothing written:")
+            print("\n".join(f"  {error}" for error in rejected.errors))
+            continue
+        if not sent_ours(base_url, send, work.pending_ours[answered.recipe_id][0], steps):
+            failed += 1
+    count = len(answer.recipes) + len(answer.our_versions)
     if chosen is not None and not write:
         print(f"Checked {count - failed} of {count} answered recipes, {failed} failed")
         print("Nothing written: rerun apply with --write to write these changes")
@@ -273,6 +303,28 @@ def sent(
     # A re-enrichment's issue changes are in the diff above it.
     if not reenriching:
         for issue in body["issues"]:
+            print(f"  {issue_line(issue)}")
+    return True
+
+
+def sent_ours(base_url: str, send: Send, stored: Recipe, steps: dict[str, StepFacts]) -> bool:
+    """Write an Our Version's step facts, at the version its packet read, and print its Our
+    Version Status and the Enrichment Issues the write added. False when the API refused it.
+    """
+    body: dict[str, object] = {
+        "version": stored.version,
+        "steps": {step_id: facts.model_dump(mode="json") for step_id, facts in steps.items()},
+    }
+    url = f"{base_url}/api/recipes/{stored.id}/our-version/enrichment"
+    status, written = send("PUT", url, json.dumps(body).encode())
+    title = stored.original.title
+    if status != HTTPStatus.OK:
+        print(f"{title} → failed: {status} {written}")
+        return False
+    print(f"{title} → Our Version {written['our_version_status']}")
+    had = {issue.id for issue in stored.issues}
+    for issue in written["issues"]:
+        if issue["id"] not in had:
             print(f"  {issue_line(issue)}")
     return True
 

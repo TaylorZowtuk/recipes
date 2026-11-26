@@ -6,15 +6,26 @@ import { lineName } from "./factEdits";
 import { canEdit, ItemEditForm, type SaveEdit } from "./ItemEditForm";
 import { reviewCounts } from "./needsReview";
 import type { Mark, ReviewItem, ReviewTab } from "./review";
-import { acceptable, confirmableOn, confirmedBy, reviewLeft, uncheckedOn } from "./review";
+import {
+  acceptable,
+  confirmableOn,
+  confirmedBy,
+  confirmLabel,
+  editInOurVersion,
+  itemRecipe,
+  reviewLeft,
+  uncheckedOn,
+} from "./review";
 import { Sheet } from "./Sheet";
 
-// What the recipe view needs to show an editor Review Items: each item by id, opening one, and
-// the ids of the unconfirmed Canonical Ingredients, whose lines it marks new.
+// What the recipe view needs to show an editor Review Items: each item by id, opening one, the
+// ids of the unconfirmed Canonical Ingredients, whose lines it marks new, and whether it shows Our
+// Version, whose own items then show on its lines and steps.
 export type ReviewTarget = {
   items: Map<string, ReviewItem>;
   open: (id: string) => void;
   newCanonicals: Set<string>;
+  ours?: boolean;
 };
 
 const MARK_TEXT: Record<Mark, string> = {
@@ -135,6 +146,10 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
   );
 }
 
+// Where to settle a flagged Our Version step no confirm settles, which the sheet can't edit.
+export const EDIT_IN_OUR_VERSION =
+  "Only an edit settles this: change the step in Edit, under Our Version.";
+
 // Everything enrichment says about a Review Item, for an editor to check before confirming it.
 export function ItemDetail({
   item,
@@ -145,9 +160,9 @@ export function ItemDetail({
   recipe: Recipe;
   collection: Pick<Collection, "canonical_ingredients" | "kitchen_settings">;
 }) {
-  const [owner = ""] = item.id.split(".");
-  const line = recipe.facts.ingredients[owner];
-  const step = recipe.facts.steps[owner];
+  const { owner, seen } = itemRecipe(item, recipe);
+  const line = seen.facts.ingredients[owner];
+  const step = seen.facts.steps[owner];
   const sections: ReactNode[] = [];
 
   // An item an open Enrichment Issue alone makes has no facts of its own to show.
@@ -243,7 +258,7 @@ export function ItemDetail({
                 {segment.t === "text"
                   ? `“${segment.v}”`
                   : segment.t === "ingredient"
-                    ? `“${segment.written}” → ${lineName(recipe, segment.ref)} × ${segment.portion}`
+                    ? `“${segment.written}” → ${lineName(seen, segment.ref)} × ${segment.portion}`
                     : segment.t === "duration"
                       ? `“${segment.written}” → ${segment.low_s}–${segment.high_s} s`
                       : `“${segment.written}” → ${segment.c} °C`}
@@ -260,7 +275,7 @@ export function ItemDetail({
           <ul className="review-list">
             {step.uses.uses.map((use) => (
               <li key={use.ref}>
-                {lineName(recipe, use.ref)} × {use.portion}
+                {lineName(seen, use.ref)} × {use.portion}
               </li>
             ))}
           </ul>
@@ -283,6 +298,7 @@ export function ItemDetail({
           <p>{issue.reason}</p>
         </Section>
       ))}
+      {editInOurVersion(item) && <p className="review-note">{EDIT_IN_OUR_VERSION}</p>}
     </>
   );
 }
@@ -298,8 +314,8 @@ export function NewCanonicalNote({
   recipe: Recipe;
   collection: Pick<Collection, "canonical_ingredients">;
 }) {
-  const [owner = ""] = item.id.split(".");
-  const match = item.kind === "line" ? recipe.facts.ingredients[owner]?.match : undefined;
+  const { owner, seen } = itemRecipe(item, recipe);
+  const match = item.kind === "line" ? seen.facts.ingredients[owner]?.match : undefined;
   const canonical = collection.canonical_ingredients.find((c) => c.id === match?.canonical_id);
   if (!canonical || canonical.confirmed) return null;
   return (
@@ -312,8 +328,8 @@ export function NewCanonicalNote({
 
 // What a Review Item is called in its sheet's title.
 function itemTitle(item: ReviewItem, recipe: Recipe) {
-  const [owner = ""] = item.id.split(".");
-  const line = recipe.original.ingredients.find((l) => l.id === owner)?.text ?? item.id;
+  const { owner, seen } = itemRecipe(item, recipe);
+  const line = seen.original.ingredients.find((l) => l.id === owner)?.text ?? item.id;
   switch (item.kind) {
     case "difficulty":
       return "Suggested Difficulty";
@@ -322,7 +338,7 @@ function itemTitle(item: ReviewItem, recipe: Recipe) {
     case "line":
       return line;
     case "step":
-      return recipe.original.steps.find((s) => s.id === owner)?.text ?? item.id;
+      return seen.original.steps.find((s) => s.id === owner)?.text ?? item.id;
   }
 }
 
@@ -411,7 +427,7 @@ export function ItemSheet({
                       onConfirm(confirmedBy(item));
                     }}
                   >
-                    {item.mark === "flagged" ? "Accept correction" : "Confirm"}
+                    {confirmLabel(item)}
                   </button>
                 )}
               </div>

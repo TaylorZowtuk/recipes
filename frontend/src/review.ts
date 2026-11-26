@@ -2,6 +2,7 @@ import { api, type Card, type Collection, type Recipe, type RecipeFacts } from "
 import type { components } from "./api/schema";
 import { reloadCollection, rememberRecipe } from "./collection";
 import { CHANGED_ELSEWHERE, CHANGED_NOT_REFRESHED, UNREACHABLE } from "./editRecipe";
+import { effective, type Version } from "./ourVersion";
 import type { ToastMessage } from "./Toast";
 import { type Answer, refusalMessage, versionedRefusal, type WriteRefusal } from "./writeOutcome";
 
@@ -27,41 +28,59 @@ type Fact = { confirmed: boolean };
 const LINE_ITEM = ["parse", "match", "conversion"] as const;
 const STEP_ITEM = ["segments", "uses"] as const;
 
-// The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself.
-const itemOf = (factId: string) =>
-  factId === "difficulty" || factId.endsWith(".substitutions")
+// The prefix of a fact's path, and of a Review Item's id, in Our Version: `our_version.i4.match`.
+export const OUR_VERSION = "our_version.";
+
+// The Review Item a fact belongs to: `i3.match` to `i3`, `i3.substitutions` to itself, and
+// `our_version.s2.uses` to `our_version.s2`.
+const itemOf = (factId: string): string => {
+  if (factId.startsWith(OUR_VERSION)) return OUR_VERSION + itemOf(factId.slice(OUR_VERSION.length));
+  return factId === "difficulty" || factId.endsWith(".substitutions")
     ? factId
     : (factId.split(".")[0] ?? factId);
+};
 
-// The recipe's open Enrichment Issues, apart from those on Our Version (`our_version.i4.match`),
-// which aren't Review Items yet, as the API's `_open_on_original`.
-const openOnOriginal = (recipe: Recipe) =>
-  recipe.issues.filter(
-    (issue) => issue.status === "open" && !issue.fact_id.startsWith("our_version."),
-  );
+const openIssues = (recipe: Recipe) => recipe.issues.filter((issue) => issue.status === "open");
+
+// The Review Items of the lines and steps in `facts`, their ids and paths under `prefix`.
+function itemsIn(facts: RecipeFacts, prefix: string): Record<string, string[]> {
+  const items: Record<string, string[]> = {};
+  for (const [lineId, line] of Object.entries(facts.ingredients)) {
+    const owner = `${prefix}${lineId}`;
+    items[owner] = LINE_ITEM.filter((kind) => line[kind]).map((kind) => `${owner}.${kind}`);
+    if (line.substitutions) items[`${owner}.substitutions`] = [`${owner}.substitutions`];
+  }
+  for (const [stepId, step] of Object.entries(facts.steps)) {
+    const owner = `${prefix}${stepId}`;
+    items[owner] = STEP_ITEM.filter((kind) => step[kind]).map((kind) => `${owner}.${kind}`);
+  }
+  return items;
+}
 
 // Each Review Item's fact paths, by the item's id, for the facts the recipe has: as the API's
 // `review_items`, a line's parse, match and conversion, its substitutions, a step's segments and
-// uses, and the suggested Difficulty unless the editor set the recipe's own. An open Enrichment
+// uses, and the suggested Difficulty unless the editor set the recipe's own. Our Version's facts
+// make its own items, prefixed (`our_version.s2`), beside the Original's. An open Enrichment
 // Issue's fact joins its item, which it makes if the recipe lacks the item's facts.
 export function reviewItems(recipe: Recipe): Record<string, string[]> {
   const { facts } = recipe;
-  const items: Record<string, string[]> = {};
-  for (const [lineId, line] of Object.entries(facts.ingredients)) {
-    items[lineId] = LINE_ITEM.filter((kind) => line[kind]).map((kind) => `${lineId}.${kind}`);
-    if (line.substitutions) items[`${lineId}.substitutions`] = [`${lineId}.substitutions`];
-  }
-  for (const [stepId, step] of Object.entries(facts.steps)) {
-    items[stepId] = STEP_ITEM.filter((kind) => step[kind]).map((kind) => `${stepId}.${kind}`);
-  }
+  const items = itemsIn(facts, "");
   if (facts.difficulty && !recipe.difficulty) items.difficulty = ["difficulty"];
+  if (recipe.our_version) Object.assign(items, itemsIn(recipe.our_version.facts, OUR_VERSION));
   const withFacts = Object.fromEntries(Object.entries(items).filter(([, p]) => p.length > 0));
-  for (const issue of openOnOriginal(recipe)) {
+  for (const issue of openIssues(recipe)) {
     const id = itemOf(issue.fact_id);
     const paths = withFacts[id] ?? [];
     if (!paths.includes(issue.fact_id)) withFacts[id] = [...paths, issue.fact_id];
   }
   return withFacts;
+}
+
+// The fact at `path` in the Original's facts, or in Our Version's for `our_version.s2.uses`.
+export function factOf(recipe: Recipe, path: string): Fact | null {
+  if (!path.startsWith(OUR_VERSION)) return factAt(recipe.facts, path);
+  const ours = recipe.our_version;
+  return ours ? factAt(ours.facts, path.slice(OUR_VERSION.length)) : null;
 }
 
 export function factAt(facts: RecipeFacts, path: string): Fact | null {
@@ -74,19 +93,21 @@ export function factAt(facts: RecipeFacts, path: string): Fact | null {
 
 // The recipe's Review Items in order, each with its tab and mark: flagged while an open
 // Enrichment Issue is on any of its facts, else unchecked while any fact is unconfirmed.
+// An Our Version item is a step's when it is one of the Original's steps or one Our Version adds.
 export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
-  const stepIds = new Set(recipe.original.steps.map((step) => step.id));
-  const open = openOnOriginal(recipe);
+  const added = recipe.our_version?.steps.add ?? [];
+  const stepIds = new Set([...recipe.original.steps, ...added].map((step) => step.id));
+  const open = openIssues(recipe);
   const items = new Map<string, ReviewItem>();
   for (const [id, paths] of Object.entries(reviewItems(recipe))) {
     const issues = open.filter((issue) => itemOf(issue.fact_id) === id);
-    const unconfirmed = paths.some((path) => !factAt(recipe.facts, path)?.confirmed);
+    const unconfirmed = paths.some((path) => !factOf(recipe, path)?.confirmed);
     const kind: ReviewItemKind =
       id === "difficulty"
         ? "difficulty"
         : id.endsWith(".substitutions")
           ? "substitutions"
-          : stepIds.has(id)
+          : stepIds.has(ownerOf(id).owner)
             ? "step"
             : "line";
     items.set(id, {
@@ -101,22 +122,71 @@ export function reviewOf(recipe: Recipe): Map<string, ReviewItem> {
   return items;
 }
 
-// Whether the item's sheet offers Confirm, or Accept correction while flagged: not once it's
-// Confirmed, nor while every open issue on it proposes no correction (one asking an editor to pick
-// an FDC portion or FDC food), which the editor settles by editing the item instead.
-export const acceptable = (item: ReviewItem) =>
-  item.mark !== "confirmed" &&
-  (item.mark !== "flagged" || item.issues.some((issue) => issue.after !== null));
+// The line, step or Difficulty a Review Item is of, and whether it is Our Version's:
+// `our_version.s2` is Our Version's step s2, `i3.substitutions` the Original's line i3.
+export function ownerOf(id: string): { owner: string; ours: boolean } {
+  const ours = id.startsWith(OUR_VERSION);
+  const [owner = ""] = (ours ? id.slice(OUR_VERSION.length) : id).split(".");
+  return { owner, ours };
+}
 
-// The fact ids confirming the item sends: not one that only an open issue proposing no correction
-// is on, so accepting another issue's correction leaves that ask open, and the item flagged, until
-// an edit settles it.
+// The recipe a Review Item's facts and text are in, and its line's or step's id there: the
+// effective recipe for an Our Version item, whose lines and facts are Our Version's, else the
+// Original.
+export function itemRecipe(
+  item: ReviewItem,
+  recipe: Recipe,
+): { owner: string; seen: Pick<Recipe, "original" | "facts"> } {
+  const { owner, ours } = ownerOf(item.id);
+  return { owner, seen: ours ? effective(recipe, "ours") : recipe };
+}
+
+// The Review Item a line or step shows as: in Our Version its own item when it has one, else the
+// Original's, which an edited or added one doesn't show.
+export function shownItem(
+  review: { items: Map<string, ReviewItem>; ours?: boolean },
+  id: string,
+  changed: boolean,
+): ReviewItem | undefined {
+  const mine = review.ours ? review.items.get(OUR_VERSION + id) : undefined;
+  return mine ?? (changed ? undefined : review.items.get(id));
+}
+
+// Whether confirming the issue's fact settles it, as the API's `confirm_settles`: it proposes a
+// correction, which the confirm accepts, or it is marked as one that confirming the fact as it is
+// settles (a step mentioning a line Our Version removed or changed).
+export const confirmSettles = (issue: EnrichmentIssue) =>
+  issue.after !== null || issue.settles_on_confirm;
+
+// Whether the item's sheet offers Confirm, or Accept correction while flagged: not once it's
+// Confirmed, nor while no open issue settles on confirm (one asking an editor to pick an FDC
+// portion or FDC food, or a step using too much of a line), which an edit settles instead.
+export const acceptable = (item: ReviewItem) =>
+  item.mark !== "confirmed" && (item.mark !== "flagged" || item.issues.some(confirmSettles));
+
+// Whether only an edit in Our Version settles the item: a flagged Our Version step that no open
+// issue of settles on confirm, which the review sheet can't edit.
+export const editInOurVersion = (item: ReviewItem) =>
+  item.kind === "step" && ownerOf(item.id).ours && item.mark === "flagged" && !acceptable(item);
+
+// What the sheet's confirm button says: Accept correction while an open issue proposes one.
+export const confirmLabel = (item: ReviewItem) =>
+  item.issues.some((issue) => issue.after !== null) ? "Accept correction" : "Confirm";
+
+// The fact ids confirming the item sends: not one that only open issues that don't settle on
+// confirm are on, so accepting another issue's correction leaves that ask open, and the item
+// flagged, until an edit settles it.
 export const confirmedBy = (item: ReviewItem) =>
   item.factIds.filter(
     (id) =>
       !item.issues.some((issue) => issue.fact_id === id) ||
-      item.issues.some((issue) => issue.fact_id === id && issue.after !== null),
+      item.issues.some((issue) => issue.fact_id === id && confirmSettles(issue)),
   );
+
+// The items a version shows: the Original shows none of Our Version's, so its tab counts and
+// Confirm N on this tab leave them out.
+export const shownIn = (items: Map<string, ReviewItem>, version: Version) =>
+  version === "ours" ? items : new Map([...items].filter(([id]) => !id.startsWith(OUR_VERSION)));
 
 const onTab = (items: Map<string, ReviewItem>, tab: ReviewTab) =>
   [...items.values()].filter((item) => item.tab === tab);

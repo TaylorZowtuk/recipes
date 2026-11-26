@@ -25,7 +25,6 @@ from recipes.models import (
     MAX_RECIPE_BYTES,
     MAX_SUBSTITUTES,
     OUR_VERSION,
-    PORTION_TOLERANCE,
     SCHEMA_VERSION,
     CanonicalIngredient,
     ConversionFact,
@@ -59,10 +58,11 @@ from recipes.models import (
     settled,
     unit_kind,
 )
+from recipes.step_portions import flag_overused, overused
 from recipes.store import ATTEMPTS, VersionConflict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
 
     from recipes.store import Store
 
@@ -418,19 +418,22 @@ def edit_recipe(
     store: Store, recipe: Recipe, edit: FactEdit, snapshot: Callable[[], fdc.Snapshot]
 ) -> Edited:
     """The recipe with the edit applied, loading the FDC Snapshot only to pick a line's or a
-    substitute's food.
+    substitute's food. Our Version's steps that the edit leaves using more than all of a line
+    together with the Original's are flagged.
     Raises a 422 for an edit it can't take.
     """
     now = datetime.now(UTC)
     match edit:
         case EditLine():
-            return _edit_line(store, recipe, edit, snapshot, now)
+            edited = _edit_line(store, recipe, edit, snapshot, now)
         case EditStep():
-            return Edited(_edit_step(recipe, edit, now))
+            edited = Edited(_edit_step(recipe, edit, now))
         case EditSubstitution() | RemoveSubstitution():
-            return Edited(_edit_substitution(recipe, edit, snapshot, now))
+            edited = Edited(_edit_substitution(recipe, edit, snapshot, now))
         case EditDifficulty():
-            return Edited(_edit_difficulty(recipe, edit, now))
+            edited = Edited(_edit_difficulty(recipe, edit, now))
+    edited.recipe = flag_overused(edited.recipe)
+    return edited
 
 
 def _edit_line(
@@ -628,6 +631,8 @@ def matched_food(recipes: list[Recipe], canonical_id: str, snapshot: fdc.Snapsho
 
 
 def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
+    if edit.step_id.startswith(OUR_VERSION):
+        raise HTTPException(422, "Our Version's steps are edited in Our Version")
     if edit.step_id not in {step.id for step in recipe.original.steps}:
         raise HTTPException(422, f"The recipe has no step {edit.step_id}")
     facts = recipe.facts.model_copy(deep=True)
@@ -679,15 +684,6 @@ def _counted(segments: list[Segment], edit: EditStep) -> list[Segment]:
             f"Step {edit.step_id} has {ingredients} ingredient segments and {durations} timers",
         )
     return segments
-
-
-def overused(steps: Mapping[str, StepFacts]) -> list[str]:
-    """The lines the steps use more than all of, across every step."""
-    portions: dict[str, float] = {}
-    for facts in steps.values():
-        for use in facts.uses.uses if facts.uses else []:
-            portions[use.ref] = portions.get(use.ref, 0) + use.portion
-    return sorted(ref for ref, total in portions.items() if total > 1 + PORTION_TOLERANCE)
 
 
 def _edit_substitution(

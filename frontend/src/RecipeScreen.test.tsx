@@ -724,6 +724,8 @@ describe("RecipeScreen review", () => {
       status: "open" as const,
       confirm_batch: null,
       model: "test",
+      settles_on_confirm: false,
+      line_id: null,
     });
     const markup = render(true, "awaiting_review", (r) => ({
       ...r,

@@ -21,7 +21,9 @@ import {
   stepEdit,
   substitutionEdit,
 } from "./factEdits";
+import { canEdit, itemLine } from "./ItemEditForm";
 import { reviewCounts } from "./needsReview";
+import { effective } from "./ourVersion";
 import { Ingredients, Steps } from "./RecipeScreen";
 import { ItemDetail, NewCanonicalNote, ReviewBar } from "./ReviewSheet";
 import {
@@ -29,6 +31,8 @@ import {
   confirmableOn,
   confirmedBy,
   confirmItems,
+  confirmLabel,
+  confirmSettles,
   type EnrichmentIssue,
   READY_TOAST,
   type ReviewItem,
@@ -37,6 +41,7 @@ import {
   reviewOf,
   runEdit,
   runReview,
+  shownIn,
   tabCounts,
   undoBatch,
 } from "./review";
@@ -152,6 +157,8 @@ type SharedCase = {
   items: Record<string, string[]>;
   unconfirmed: number;
   flagged: number;
+  settles_on_confirm: string[];
+  confirm_settles: string[];
 };
 const shared: { cases: SharedCase[] } = JSON.parse(
   readFileSync(new URL("../../backend/tests/fixtures/review_items.json", import.meta.url), "utf8"),
@@ -168,20 +175,35 @@ const oneOfEach = (kind: string, confirmed: boolean): object =>
     difficulty: { ...stamp(confirmed), prep: 2, cook: 1, cleanup: 1 },
   })[kind] ?? {};
 
+// The case's recipe: a fact at an `our_version.` path is in its Our Version's facts map.
 const sharedRecipe = (c: SharedCase) => {
-  const holders: Record<"i" | "s", Record<string, Record<string, object>>> = { i: {}, s: {} };
+  type Holders = Record<"i" | "s", Record<string, Record<string, object>>>;
+  const theirs: Holders = { i: {}, s: {} };
+  const ours: Holders = { i: {}, s: {} };
   let difficulty: object | null = null;
   for (const [path, confirmed] of Object.entries(c.facts)) {
-    const [owner = "", kind = ""] = path.split(".");
+    const mine = path.startsWith("our_version.");
+    const [owner = "", kind = ""] = path.replace("our_version.", "").split(".");
     if (path === "difficulty") {
       difficulty = oneOfEach(path, confirmed);
     } else {
-      const holder = holders[owner.startsWith("i") ? "i" : "s"];
+      const holder = (mine ? ours : theirs)[owner.startsWith("i") ? "i" : "s"];
       holder[owner] = { ...holder[owner], [kind]: oneOfEach(kind, confirmed) };
     }
   }
+  const withOurs = Object.keys({ ...ours.i, ...ours.s }).length > 0;
   return recipe({
-    facts: { ingredients: holders.i, steps: holders.s, difficulty } as unknown as Recipe["facts"],
+    facts: { ingredients: theirs.i, steps: theirs.s, difficulty } as unknown as Recipe["facts"],
+    our_version: withOurs
+      ? {
+          ingredients: { edit: {}, remove: [], add: [] },
+          steps: { edit: {}, remove: [], add: [] },
+          facts: { ingredients: ours.i, steps: ours.s } as unknown as Recipe["facts"],
+          note: null,
+          edited_at: "2026-11-01T00:00:00Z",
+        }
+      : null,
+    our_version_status: withOurs ? "awaiting_review" : null,
     difficulty: c.editor_difficulty ? { prep: 1, cook: 1, cleanup: 1 } : null,
     issues: c.open_issues.map((fact_id, n) => ({
       id: `01K7TESTISSUE0000000000${n}`,
@@ -192,6 +214,8 @@ const sharedRecipe = (c: SharedCase) => {
       status: "open" as const,
       confirm_batch: null,
       model: "test",
+      settles_on_confirm: c.settles_on_confirm.includes(fact_id),
+      line_id: null,
     })),
   });
 };
@@ -207,7 +231,7 @@ describe.each(shared.cases)("the shared Review Items case: $name", (c) => {
 
   it("leaves as much to review as the card counts", () => {
     expect(reviewLeft(reviewOf(shown))).toEqual({
-      open_issues: c.open_issues.filter((id) => !id.startsWith("our_version.")).length,
+      open_issues: c.open_issues.length,
       unconfirmed: c.unconfirmed,
       flagged: c.flagged,
     });
@@ -218,6 +242,16 @@ describe.each(shared.cases)("the shared Review Items case: $name", (c) => {
     const tabs = ["ingredients", "steps", "about"] as const;
     const bars = Object.fromEntries(tabs.map((tab) => [tab, reviewLeft(items, tab).unconfirmed]));
     expect(tabCounts(items)).toEqual(bars);
+  });
+
+  it("settles on confirm the issues the API's confirm settles, offering Confirm only for those", () => {
+    const settles = shown.issues.filter(confirmSettles).map((issue) => issue.fact_id);
+    expect(settles).toEqual(c.confirm_settles);
+    for (const item of reviewOf(shown).values())
+      if (item.mark === "flagged")
+        expect(acceptable(item)).toBe(
+          item.issues.some((issue) => c.confirm_settles.includes(issue.fact_id)),
+        );
   });
 });
 
@@ -253,6 +287,8 @@ describe("an open Enrichment Issue on a fact the line lacks", () => {
     status: "open" as const,
     confirm_batch: null,
     model: "test",
+    settles_on_confirm: false,
+    line_id: null,
   });
   const items = reviewOf(recipe({ issues: [issue(11, "i3.match"), issue(12, "i4.match")] }));
 
@@ -270,6 +306,176 @@ describe("an open Enrichment Issue on a fact the line lacks", () => {
       tab: "ingredients",
       mark: "flagged",
       factIds: ["i4.match"],
+    });
+  });
+});
+
+// The synthetic beans with an Our Version Awaiting Review: i1 edited, i5 added, s2 edited and
+// segmented, s3 added and Confirmed, and s1 left alone but flagged, as it uses the butter line
+// Our Version changed. Its ask proposes no correction.
+const withOurs = (): Recipe => {
+  const r = recipe();
+  const segmented = (confirmed: boolean, text: string) => ({
+    segments: { ...stamp(confirmed), segments: [{ t: "text" as const, v: text }] },
+    uses: { ...stamp(confirmed), uses: [{ ref: "i5", portion: 1 }] },
+  });
+  const line = { parse: parse("butter", false, "tbsp"), match: null, conversion: null };
+  return recipe({
+    status: "ready",
+    our_version_status: "awaiting_review",
+    our_version: {
+      ingredients: {
+        edit: { i1: { text: "1 tbsp butter", component: null } },
+        remove: [],
+        add: [{ id: "i5", after: "i4", text: "1 lemon", component: null }],
+      },
+      steps: {
+        edit: { s2: { text: "Serve hot.", component: null } },
+        remove: [],
+        add: [{ id: "s3", after: "s2", text: "Add the lemon.", component: null }],
+      },
+      facts: {
+        ingredients: { i1: { ...line, substitutions: null } },
+        steps: { s2: segmented(false, "Serve hot."), s3: segmented(true, "Add the lemon.") },
+        difficulty: null,
+      },
+      note: null,
+      edited_at: "2026-11-02T00:00:00Z",
+    },
+    issues: [
+      ...r.issues,
+      {
+        id: "01K7TESTISSUE000000000021",
+        fact_id: "our_version.s1.uses",
+        before: null,
+        after: null,
+        reason: "Mentions butter, which Our Version changed.",
+        status: "open",
+        confirm_batch: null,
+        model: "test",
+        settles_on_confirm: true,
+        line_id: null,
+      },
+    ],
+  });
+};
+
+describe("Our Version's Review Items", () => {
+  const items = reviewOf(withOurs());
+  const item = (id: string) => items.get(id) as ReviewItem;
+
+  it("are its own, prefixed, beside the Original's, which still count", () => {
+    expect(reviewItems(withOurs())).toMatchObject({
+      s1: ["s1.segments", "s1.uses"],
+      "our_version.i1": ["our_version.i1.parse"],
+      "our_version.s2": ["our_version.s2.segments", "our_version.s2.uses"],
+      "our_version.s3": ["our_version.s3.segments", "our_version.s3.uses"],
+      "our_version.s1": ["our_version.s1.uses"],
+    });
+  });
+
+  it("gives an edited or added step the step kind, on Steps, marked by Our Version's facts", () => {
+    expect(item("our_version.s2")).toMatchObject({ kind: "step", tab: "steps", mark: "unchecked" });
+    expect(item("our_version.s3")).toMatchObject({ kind: "step", mark: "confirmed" });
+    expect(item("our_version.i1")).toMatchObject({ kind: "line", tab: "ingredients" });
+    expect(item("our_version.s1")).toMatchObject({ kind: "step", mark: "flagged" });
+    expect(tabCounts(items)).toEqual({ ingredients: 4, steps: 3, about: 1 });
+  });
+
+  it("lets a flagged step be confirmed as it is, with the fact its ask is on", () => {
+    const flagged = item("our_version.s1");
+    expect(acceptable(flagged)).toBe(true);
+    expect(confirmedBy(flagged)).toEqual(["our_version.s1.uses"]);
+    expect(confirmLabel(flagged)).toBe("Confirm");
+    expect(confirmLabel(item("i1"))).toBe("Accept correction");
+    expect(confirmLabel(item("s1"))).toBe("Confirm");
+  });
+
+  // s2 uses the lemon line as s3 does, together more than all of it: only an edit settles that.
+  const overUsed = (): Recipe => {
+    const r = withOurs();
+    const flag = {
+      ...(r.issues.at(-1) as EnrichmentIssue),
+      id: "01K7TESTISSUE000000000022",
+      fact_id: "our_version.s2.uses",
+      reason: "Step 3 uses the lemon too: together more than all of it.",
+      settles_on_confirm: false,
+      line_id: "i5",
+    };
+    return { ...r, issues: [...r.issues, flag] };
+  };
+
+  it("offers no Confirm for a step using too much, and says to edit it in Our Version", () => {
+    const r = overUsed();
+    const flagged = reviewOf(r).get("our_version.s2") as ReviewItem;
+    expect(flagged.mark).toBe("flagged");
+    expect(acceptable(flagged)).toBe(false);
+    expect(confirmedBy(flagged)).toEqual(["our_version.s2.segments"]);
+    const shown = text(
+      renderToStaticMarkup(<ItemDetail item={flagged} recipe={r} collection={collection} />),
+    );
+    expect(shown).toContain("together more than all of it.");
+    expect(shown).toContain(
+      "Only an edit settles this: change the step in Edit, under Our Version.",
+    );
+    const settled = reviewOf(withOurs()).get("our_version.s1") as ReviewItem;
+    expect(
+      text(renderToStaticMarkup(<ItemDetail item={settled} recipe={r} collection={collection} />)),
+    ).not.toContain("Only an edit");
+  });
+
+  it("in the Original, leaves out Our Version's items, which it doesn't show", () => {
+    const original = shownIn(items, "original");
+    expect([...original.keys()].filter((id) => id.startsWith("our_version."))).toEqual([]);
+    expect(tabCounts(original)).toEqual({ ingredients: 3, steps: 1, about: 1 });
+    expect(shownIn(items, "ours")).toBe(items);
+  });
+
+  it("show on the effective recipe in Our Version, and only the Original's in the Original", () => {
+    const r = withOurs();
+    const steps = (version: "ours" | "original") => {
+      const shown = effective(r, version);
+      return text(
+        renderToStaticMarkup(
+          <Steps
+            original={shown.original}
+            facts={shown.facts}
+            review={{ items, open: () => {}, newCanonicals: new Set(), ours: version === "ours" }}
+          />,
+        ),
+      );
+    };
+    // s1's own Our Version item is flagged; the edited s2 and added s3 are Our Version's items.
+    expect(steps("ours")).toMatch(
+      /Flagged.*Melt.*Unchecked.*Serve hot\..*Confirmed.*Add the lemon/,
+    );
+    expect(steps("original")).toMatch(/Unchecked.*Melt/);
+    expect(steps("original")).not.toContain("Flagged");
+  });
+
+  it("shows an Our Version step's own facts and its ask in the sheet, with no Edit", () => {
+    const r = withOurs();
+    const shown = (id: string) =>
+      text(renderToStaticMarkup(<ItemDetail item={item(id)} recipe={r} collection={collection} />));
+    expect(shown("our_version.s3")).toMatch(/Add the lemon\..*lemon × 1/);
+    expect(shown("our_version.s1")).toContain("Mentions butter, which Our Version changed.");
+    expect(canEdit(item("our_version.s2"), r)).toBe(false);
+    expect(canEdit(item("s1"), r)).toBe(true);
+    // Not even a step or substitutions the Original's own item could edit.
+    expect(canEdit(item("our_version.s1"), r)).toBe(false);
+    const swaps = { ...item("i3.substitutions"), id: "our_version.i3.substitutions" };
+    expect(canEdit(swaps, r)).toBe(false);
+  });
+
+  it("edits an Our Version line from its sheet, by its item id, prefilled from its own facts", () => {
+    const r = withOurs();
+    expect(canEdit(item("our_version.i1"), r)).toBe(true);
+    const line = itemLine(item("our_version.i1"), r);
+    expect(line).toMatchObject({ id: "our_version.i1", text: "1 tbsp butter" });
+    expect(lineDraft(line)).toMatchObject({ unit: "tbsp", name: "butter" });
+    const built = lineEdit(line, lineDraft(line));
+    expect(built).toMatchObject({
+      edit: { kind: "line", line_id: "our_version.i1", name: "butter" },
     });
   });
 });
