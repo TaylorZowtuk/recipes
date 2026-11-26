@@ -659,6 +659,27 @@ export interface paths {
         patch: operations["patch_week_plan_api_weeks__monday__patch"];
         trace?: never;
     };
+    "/api/weeks/{monday}/ticks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tick Grocery Item
+         * @description Add or remove one tick in place, at no version, so two phones ticking at once both keep
+         *     theirs. Ticking twice, or unticking what isn't ticked, changes nothing.
+         */
+        post: operations["tick_grocery_item_api_weeks__monday__ticks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1558,6 +1579,20 @@ export interface components {
             modifier: string | null;
             /** Unit */
             unit: string;
+        };
+        /**
+         * GroceryTick
+         * @description Tick a Grocery Item off the week's Grocery List, or untick it. The tick is opaque here: an
+         *     item key (`c:`, `o:` or `x:`), then `|` and the amount it was ticked at.
+         */
+        GroceryTick: {
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: "tick" | "untick";
+            /** Tick */
+            tick: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -4444,6 +4479,53 @@ export interface operations {
                 content?: never;
             };
             /** @description Not a real Monday, or not a valid edit */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tick_grocery_item_api_weeks__monday__ticks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                monday: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroceryTick"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeekPlan"];
+                };
+            };
+            /** @description Only an editor can do that */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Nothing has been placed in the week, so it has no Grocery List */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a real Monday, or not a valid tick */
             422: {
                 headers: {
                     [name: string]: unknown;
