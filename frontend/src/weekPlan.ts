@@ -80,15 +80,18 @@ export function writeToast(outcome: WeekWrite): ToastMessage | null {
   return text ? { text, brief: outcome.kind === "busy" } : null;
 }
 
-// Runs a write, showing what became of it. The last notice goes as the tap lands, not when the write
-// answers, so a write that succeeds leaves alone the notice of a tap refused meanwhile.
+// Runs a write, showing what became of it, and returns that. The last notice goes as the tap lands,
+// not when the write answers, so a write that succeeds leaves alone the notice of a tap refused
+// meanwhile.
 export async function noticedWrite(
   write: () => Promise<WeekWrite>,
   show: (toast: ToastMessage | null) => void,
-) {
+): Promise<WeekWrite> {
   show(null);
-  const toast = writeToast(await write());
+  const outcome = await write();
+  const toast = writeToast(outcome);
   if (toast) show(toast);
+  return outcome;
 }
 
 // A stale version is a 409, so a 404 from the API means the write named something that doesn't

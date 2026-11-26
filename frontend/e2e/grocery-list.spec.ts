@@ -61,6 +61,7 @@ const row = (page: Page, name: string) =>
 
 test("a week's Grocery List: combined, ticked off, kept through a reload, expanded", async ({
   page,
+  context,
 }, testInfo) => {
   const monday = await plan(page, testInfo, 0);
   await placeElsewhere(page, monday, [CHICKEN.id, SOUP.id, OATS.id, BEANS.id]);
@@ -93,12 +94,18 @@ test("a week's Grocery List: combined, ticked off, kept through a reload, expand
     new RegExp(BEANS.id),
   );
 
-  // Ticked, the berries sink from the start of Produce to its end, and stay ticked after a reload.
+  // Ticked from the keyboard, the berries sink from the start of Produce to its end, keeping
+  // focus and saying so, and stay ticked after a reload.
   const produce = category(page, "Produce").locator(".grocery-item");
   await expect(produce.first()).toContainText("berries");
-  await tick(page, "berries").click();
+  await tick(page, "berries").focus();
+  await page.keyboard.press("Enter");
   await expect(tick(page, "berries")).toHaveAttribute("aria-pressed", "true");
   await expect(produce.last()).toContainText("berries");
+  await expect(tick(page, "berries")).toBeFocused();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Bought berries, moved to the end of Produce" }),
+  ).toBeAttached();
   await page.reload();
   await expect(tick(page, "berries")).toHaveAttribute("aria-pressed", "true");
   await expect(produce.last()).toContainText("berries");
@@ -119,6 +126,14 @@ test("a week's Grocery List: combined, ticked off, kept through a reload, expand
   await tick(page, "berries").click();
   await expect(tick(page, "berries")).toHaveAttribute("aria-pressed", "false");
   await expect(produce.first()).toContainText("berries");
+  await expect(
+    page.getByRole("status").filter({ hasText: "berries back on the list" }),
+  ).toBeAttached();
+
+  // Ticks are never queued, so offline they're off.
+  await context.setOffline(true);
+  await expect(tick(page, "berries")).toBeDisabled();
+  await context.setOffline(false);
 });
 
 test("Back from next week's Grocery List returns to next week", async ({ page }, testInfo) => {
@@ -140,6 +155,12 @@ test("an empty week says nothing is planned", async ({ page }, testInfo) => {
   const monday = await plan(page, testInfo, 1);
   await page.goto(`/week/${monday}/grocery`);
   await expect(page.getByText("Nothing planned this week.")).toBeVisible();
+});
+
+test("a visitor opening a Grocery List is asked to sign in", async ({ page }) => {
+  await page.goto("/week/2040-01-02/grocery");
+  await expect(page.getByText("Sign in to see the household’s Grocery List.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
 test("a visitor's Demo has no Grocery List link", async ({ page }) => {
