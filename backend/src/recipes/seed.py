@@ -11,6 +11,12 @@ Sites are on reserved domains, and the first is on example.com, so it counts the
 As enrichment does, every line of a recipe past Pending has a parse fact; Overnight Oats has a
 line in cups and one in ounces, for the Adjust sheet's units. Lemon Herb Roast Chicken has an Our
 Version: less salt, garlic for the thyme, an edited step waiting for enrich, and a note.
+For a Week Plan's Grocery List, the Ready recipes' lines match GROCERY's Canonical Ingredients
+across several Store Categories: onion counts in the chicken and the soup sum, plain yogurt (a
+mass in the oats, a volume in the soup, both checked) becomes one mass, green onion (a range of
+counts in the noodles, a volume in the soup, unchecked) stays subtotals, the soup's crushed
+tomatoes are a sized can, and its salt is to taste. Their olive oil and carrots are unmatched,
+under Other. The Taco Seasoning's parts wait for Ratio Recipes, so its lines are unmatched too.
 """
 
 import io
@@ -139,6 +145,76 @@ PANTRY = [
 ]
 
 
+def _canonical(suffix: str, name: str, family: str, category: str) -> CanonicalIngredient:
+    return CanonicalIngredient(
+        id=f"01K7SEED0000000000000000{suffix}",
+        name=name,
+        family=family,
+        store_category_id=category,
+        confirmed=True,
+        version=1,
+        schema_version=SCHEMA_VERSION,
+    )
+
+
+# The Canonical Ingredients the Ready recipes' lines match, for a Week Plan's Grocery List. None
+# shares a name with PANTRY's, which stay free, so their olive oil and carrot lines are unmatched.
+ONION = _canonical("C8", "onion", "onion", "produce")
+LEMON = _canonical("C9", "lemon", "lemon", "produce")
+WHOLE_CHICKEN = _canonical("CA", "whole chicken", "chicken", "meat")
+SALT = _canonical("CB", "salt", "salt", "spices")
+TAHINI = _canonical("CC", "tahini", "sesame", "aisles")
+SOY_SAUCE = _canonical("CD", "soy sauce", "soy", "aisles")
+RICE_VINEGAR = _canonical("CE", "rice vinegar", "vinegar", "aisles")
+CHILI_OIL = _canonical("CF", "chili oil", "oil", "aisles")
+FIRM_TOFU = _canonical("CG", "firm tofu", "tofu", "produce")
+CORNSTARCH = _canonical("CH", "cornstarch", "starch", "aisles")
+VEGETABLE_OIL = _canonical("CJ", "vegetable oil", "oil", "aisles")
+WHEAT_NOODLES = _canonical("CK", "wheat noodles", "noodle", "aisles")
+GREEN_ONION = _canonical("CM", "green onion", "onion", "produce")
+ROLLED_OATS = _canonical("CN", "rolled oats", "oat", "aisles")
+MILK = _canonical("CP", "milk", "milk", "dairy")
+YOGURT = _canonical("CQ", "plain yogurt", "yogurt", "dairy")
+MAPLE_SYRUP = _canonical("CR", "maple syrup", "syrup", "aisles")
+BERRIES = _canonical("CS", "berries", "berry", "produce")
+RED_LENTILS = _canonical("CT", "red lentils", "lentil", "aisles")
+CRUSHED_TOMATOES = _canonical("CV", "crushed tomatoes", "tomato", "aisles")
+VEGETABLE_BROTH = _canonical("CW", "vegetable broth", "broth", "aisles")
+CUMIN = _canonical("CX", "ground cumin", "cumin", "spices")
+# FDC foods and portions in the committed FDC Snapshot that more than one line uses. Lines name
+# their own food and portion inline where no other line shares them.
+CHICKEN_FDC_ID = 171447  # Chicken, broilers or fryers, meat and skin, raw
+LEMON_FDC_ID = 167746  # Lemons, raw, without peel
+ONION_FDC_ID, ONION_MEDIUM = 170000, 85860  # Onions, raw, by the medium onion
+SALT_FDC_ID, SALT_TSP = 173468, 92594  # Salt, table, by the teaspoon
+GREEN_ONION_FDC_ID, GREEN_ONION_TBSP = 170006, 85883  # Onions, young green, tops only
+YOGURT_FDC_ID, YOGURT_CUP = 171284, 88365  # Yogurt, plain, whole milk, by the cup
+GROCERY = [
+    ONION,
+    LEMON,
+    WHOLE_CHICKEN,
+    SALT,
+    TAHINI,
+    SOY_SAUCE,
+    RICE_VINEGAR,
+    CHILI_OIL,
+    FIRM_TOFU,
+    CORNSTARCH,
+    VEGETABLE_OIL,
+    WHEAT_NOODLES,
+    GREEN_ONION,
+    ROLLED_OATS,
+    MILK,
+    YOGURT,
+    MAPLE_SYRUP,
+    BERRIES,
+    RED_LENTILS,
+    CRUSHED_TOMATOES,
+    VEGETABLE_BROTH,
+    CUMIN,
+]
+
+
 def _ingredients(*lines: str, component: str | None = None, start: int = 1) -> list[IngredientLine]:
     return [
         IngredientLine(id=f"i{start + n}", component=component, text=t) for n, t in enumerate(lines)
@@ -209,6 +285,43 @@ def _editors(facts: IngredientFacts) -> IngredientFacts:
     return IngredientFacts(parse=parse, match=match, conversion=conversion)
 
 
+def _matched(
+    facts: IngredientFacts,
+    canonical: CanonicalIngredient,
+    fdc_id: int,
+    portion_id: int | None = None,
+    *,
+    checked: bool = True,
+) -> IngredientFacts:
+    """The line's facts with a match to `canonical`, and with a portion its conversion: checked
+    (Confirmed, above the Confidence Threshold) or else unconfirmed and below it.
+    """
+    checks = {
+        "confidence": 0.9 if checked else 0.6,
+        "confirmed": checked,
+        "confirmed_by": "editor@example.com" if checked else None,
+        "confirmed_at": CAPTURED_AT if checked else None,
+    }
+    match = MatchFact(
+        provenance="llm",
+        confidence=1,
+        estimated=False,
+        canonical_id=canonical.id,
+        fdc_id=fdc_id,
+        portion_id=portion_id,
+    ).model_copy(update=checks)
+    conversion = facts.conversion
+    if portion_id is not None:
+        conversion = ConversionFact(
+            provenance="fdc",
+            confidence=1,
+            estimated=False,
+            fdc_id=fdc_id,
+            **fdc.numbers(fdc.snapshot(), fdc_id, portion_id).model_dump(),
+        ).model_copy(update=checks)
+    return facts.model_copy(update={"match": match, "conversion": conversion})
+
+
 def _ingredient(ref: str, written: str, portion: float = 1.0) -> IngredientSegment:
     return IngredientSegment(ref=ref, written=written, portion=portion)
 
@@ -277,14 +390,33 @@ RECIPES = [
         status="ready",
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(
-                    1, None, "count", "whole chicken", comment="about 1.8 kg", confirmed=True
+                "i1": _matched(
+                    _parse(
+                        1, None, "count", "whole chicken", comment="about 1.8 kg", confirmed=True
+                    ),
+                    WHOLE_CHICKEN,
+                    CHICKEN_FDC_ID,
                 ),
-                "i2": _parse(2, None, "count", "lemons", "halved", confirmed=True),
+                "i2": _matched(
+                    _parse(2, None, "count", "lemons", "halved", confirmed=True),
+                    LEMON,
+                    LEMON_FDC_ID,
+                ),
                 "i3": _parse(6, "sprigs", "count", "fresh thyme", confirmed=True),
+                # The olive oil is unmatched, so it is under Other.
                 "i4": _parse(2, "tbsp", "volume", "olive oil", confirmed=True),
-                "i5": _parse(2, None, "count", "onions", "thickly sliced", confirmed=True),
-                "i6": _parse(1, "tsp", "volume", "kosher salt", confirmed=True),
+                "i5": _matched(
+                    _parse(2, None, "count", "onions", "thickly sliced", confirmed=True),
+                    ONION,
+                    ONION_FDC_ID,
+                    ONION_MEDIUM,
+                ),
+                "i6": _matched(
+                    _parse(1, "tsp", "volume", "kosher salt", confirmed=True),
+                    SALT,
+                    SALT_FDC_ID,
+                    SALT_TSP,
+                ),
             },
             steps={
                 "s1": _step_facts("Heat the oven to ", _temperature(218, "425°F"), "."),
@@ -315,7 +447,11 @@ RECIPES = [
             ),
             facts=RecipeFacts(
                 ingredients={
-                    "i6": _editors(_parse(0.5, "tsp", "volume", "kosher salt")),
+                    "i6": _editors(
+                        _matched(
+                            _parse(0.5, "tsp", "volume", "kosher salt"), SALT, SALT_FDC_ID, SALT_TSP
+                        )
+                    ),
                     "i7": _editors(
                         _parse(4, None, "count", "garlic cloves", "smashed").model_copy(
                             update={
@@ -419,7 +555,9 @@ RECIPES = [
         facts=RecipeFacts(
             ingredients={
                 # Confirmed, so the Adjust sheet can show it as a weight; soy sauce has none.
-                "i1": _parse(3, "tbsp", "volume", "tahini").model_copy(
+                "i1": _matched(
+                    _parse(3, "tbsp", "volume", "tahini"), TAHINI, TAHINI_FDC_ID
+                ).model_copy(
                     update={
                         "conversion": ConversionFact(
                             provenance="fdc",
@@ -433,14 +571,58 @@ RECIPES = [
                         )
                     }
                 ),
-                "i2": _parse(2, "tbsp", "volume", "soy sauce"),
-                "i3": _parse(1.5, "tbsp", "volume", "rice vinegar"),
-                "i4": _parse(1, "tsp", "volume", "chili oil", comment="or to taste"),
-                "i5": _parse(400, "g", "mass", "firm tofu", "cubed"),
-                "i6": _parse(2, "tbsp", "volume", "cornstarch"),
-                "i7": _parse(3, "tbsp", "volume", "neutral oil"),
-                "i8": _parse(250, "g", "mass", "wheat noodles"),
-                "i9": _parse((1, 2), None, "count", "green onions", "sliced"),
+                "i2": _matched(
+                    _parse(2, "tbsp", "volume", "soy sauce"), SOY_SAUCE, 174278, checked=False
+                ),
+                "i3": _matched(
+                    _parse(1.5, "tbsp", "volume", "rice vinegar"),
+                    RICE_VINEGAR,
+                    172237,
+                    90136,
+                    checked=False,
+                ),
+                "i4": _matched(
+                    _parse(1, "tsp", "volume", "chili oil", comment="or to taste"),
+                    CHILI_OIL,
+                    171016,
+                    87779,
+                    checked=False,
+                ),
+                "i5": _matched(
+                    _parse(400, "g", "mass", "firm tofu", "cubed"),
+                    FIRM_TOFU,
+                    172475,
+                    90683,
+                    checked=False,
+                ),
+                "i6": _matched(
+                    _parse(2, "tbsp", "volume", "cornstarch"),
+                    CORNSTARCH,
+                    169698,
+                    85370,
+                    checked=False,
+                ),
+                "i7": _matched(
+                    _parse(3, "tbsp", "volume", "neutral oil"),
+                    VEGETABLE_OIL,
+                    172370,
+                    90462,
+                    checked=False,
+                ),
+                "i8": _matched(
+                    _parse(250, "g", "mass", "wheat noodles"),
+                    WHEAT_NOODLES,
+                    169731,
+                    85405,
+                    checked=False,
+                ),
+                # A range, and with no portion its count has no weight.
+                "i9": _matched(
+                    _parse((1, 2), None, "count", "green onions", "sliced"),
+                    GREEN_ONION,
+                    GREEN_ONION_FDC_ID,
+                    checked=False,
+                ),
             },
             steps={
                 # "the sauce ingredients" names no one line, so the step has no segments.
@@ -507,12 +689,38 @@ RECIPES = [
         # A line in cups and one in ounces, for the Adjust sheet to show in metric.
         facts=RecipeFacts(
             ingredients={
-                "i1": _parse(0.5, "cup", "volume", "rolled oats", confirmed=True),
-                "i2": _parse(0.5, "cup", "volume", "milk", confirmed=True),
-                "i3": _parse(2, "oz", "mass", "plain yogurt", confirmed=True),
-                "i4": _parse(1, "tbsp", "volume", "maple syrup", confirmed=True),
-                "i5": _parse(
-                    None, None, None, "berries", comment="to serve", optional=True, confirmed=True
+                "i1": _matched(
+                    _parse(0.5, "cup", "volume", "rolled oats", confirmed=True),
+                    ROLLED_OATS,
+                    2346396,
+                ),
+                "i2": _matched(
+                    _parse(0.5, "cup", "volume", "milk", confirmed=True), MILK, 171265, 88314
+                ),
+                "i3": _matched(
+                    _parse(2, "oz", "mass", "plain yogurt", confirmed=True),
+                    YOGURT,
+                    YOGURT_FDC_ID,
+                    YOGURT_CUP,
+                ),
+                "i4": _matched(
+                    _parse(1, "tbsp", "volume", "maple syrup", confirmed=True),
+                    MAPLE_SYRUP,
+                    169661,
+                    85303,
+                ),
+                "i5": _matched(
+                    _parse(
+                        None,
+                        None,
+                        None,
+                        "berries",
+                        comment="to serve",
+                        optional=True,
+                        confirmed=True,
+                    ),
+                    BERRIES,
+                    171711,
                 ),
             }
         ),
@@ -535,11 +743,15 @@ RECIPES = [
                 "1 can (796 ml) crushed tomatoes",
                 "4 cups vegetable broth",
                 "1 tsp ground cumin",
+                "1/2 cup plain yogurt, to serve",
+                "2 tbsp sliced green onions",
+                "Salt, to taste",
             ),
             steps=_steps(
                 "Soften the onion and carrots in the oil for 5 minutes.",
                 "Add the cumin, lentils, tomatoes and broth.",
                 "Simmer 25 minutes, until the lentils fall apart. Blend if you like.",
+                "Season with salt and serve topped with the yogurt and green onions.",
             ),
             recipe_yield=RecipeYield(text="6 servings", servings=6, unit="servings"),
             stated_times=StatedTimes(prep=_time("10 min", 600), cook=_time("30 min", 1800)),
@@ -548,21 +760,70 @@ RECIPES = [
         # No editor Difficulty, so the card and the recipe page show this one as a suggestion.
         facts=RecipeFacts(
             ingredients={
+                # The olive oil and carrots are unmatched, so each is under Other.
                 "i1": _parse(1, "tbsp", "volume", "olive oil", confirmed=True),
-                "i2": _parse(1, None, "count", "onion", "diced", confirmed=True),
-                "i3": _parse(2, None, "count", "carrots", "diced", confirmed=True),
-                "i4": _parse(1, "cup", "volume", "red lentils", "rinsed", confirmed=True),
-                "i5": _parse(
-                    1, "can", "count", "crushed tomatoes", comment="796 ml", confirmed=True
+                "i2": _matched(
+                    _parse(1, None, "count", "onion", "diced", confirmed=True),
+                    ONION,
+                    ONION_FDC_ID,
+                    ONION_MEDIUM,
                 ),
-                "i6": _parse(4, "cup", "volume", "vegetable broth", confirmed=True),
-                "i7": _parse(1, "tsp", "volume", "ground cumin", confirmed=True),
+                "i3": _parse(2, None, "count", "carrots", "diced", confirmed=True),
+                "i4": _matched(
+                    _parse(1, "cup", "volume", "red lentils", "rinsed", confirmed=True),
+                    RED_LENTILS,
+                    174284,
+                    94081,
+                ),
+                # A sized package: a can counts, and its size is the comment.
+                "i5": _matched(
+                    _parse(1, "can", "count", "crushed tomatoes", comment="796 ml", confirmed=True),
+                    CRUSHED_TOMATOES,
+                    170501,
+                ),
+                "i6": _matched(
+                    _parse(4, "cup", "volume", "vegetable broth", confirmed=True),
+                    VEGETABLE_BROTH,
+                    171180,
+                    88126,
+                ),
+                "i7": _matched(
+                    _parse(1, "tsp", "volume", "ground cumin", confirmed=True),
+                    CUMIN,
+                    170923,
+                    87544,
+                ),
+                # A volume of the yogurt Overnight Oats weighs, both conversions checked, so the
+                # two become one mass.
+                "i8": _matched(
+                    _parse(
+                        0.5, "cup", "volume", "plain yogurt", comment="to serve", confirmed=True
+                    ),
+                    YOGURT,
+                    YOGURT_FDC_ID,
+                    YOGURT_CUP,
+                ),
+                # A volume of the green onions the noodles count, its conversion unchecked, so the
+                # two stay subtotals.
+                "i9": _matched(
+                    _parse(2, "tbsp", "volume", "green onions", "sliced", confirmed=True),
+                    GREEN_ONION,
+                    GREEN_ONION_FDC_ID,
+                    GREEN_ONION_TBSP,
+                    checked=False,
+                ),
+                # No amount: the roast chicken's salt has one, and this adds nothing to it.
+                "i10": _matched(
+                    _parse(None, None, None, "salt", comment="to taste", confirmed=True),
+                    SALT,
+                    SALT_FDC_ID,
+                ),
             },
             difficulty=DifficultyFact(
                 provenance="llm", confidence=0.6, estimated=True, prep=2, cook=1, cleanup=1
             ),
         ),
-        status="awaiting_review",
+        status="ready",
     ),
     Recipe(
         id="01K7SEED000000000000000005",
@@ -783,7 +1044,7 @@ def load(store: Store, images: ImageStore) -> None:
     for recipe in RECIPES:
         added = store.add_recipe(_with_photo(recipe, images) if recipe.id in PHOTOS else recipe)
         if added.id == CHICKEN_ID:
-            store.enrich_recipe(added, [GARLIC], [GARLIC_WORDING])
+            store.enrich_recipe(added, [GARLIC, *GROCERY], [GARLIC_WORDING])
         if added.id == REVIEW_RECIPE_ID:
             store.enrich_recipe(added, [BUTTER, UNSALTED_BUTTER, *PANTRY], [BUTTER_WORDING])
     store.save_favorite_sites(store.favorite_sites().model_copy(update={"sites": FAVORITE_SITES}))
