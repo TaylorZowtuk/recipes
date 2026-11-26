@@ -6,7 +6,7 @@ The bulk import is a local CLI, `python -m recipes.bulk_import <API base URL> <s
 
 `POST /api/recipes` takes an optional `ingest_channel`, `add_a_recipe` when it's left out, and saves it on the recipe. Only the service token may send `bulk_import`: a signed-in editor who sends it gets a 403. The PWA never sends the field. A bulk import skips Awaiting Review, so a recipe an editor adds in the app can't claim it.
 
-`POST /api/queued-ingests/{ingest_id}/recipe` stays as the fallback chain ADR has it: its recipe is always Add a recipe's, and a body with `bulk_import` is a 422.
+`POST /api/queued-ingests/{ingest_id}/recipe` keeps the fallback chain ADR's rule that its recipe is always Add a recipe's. This ADR adds the enforcement: a body with `bulk_import` is a 422.
 
 ## What the bulk import does with each Source
 
@@ -21,5 +21,5 @@ The household's sources file holds the private list of sites, so it lives outsid
 
 ## Considered options
 
-- **Running the fallback chain inside the bulk import:** rejected. The fallback already finishes every waiting Queued Ingest, and runs a browser and a model's Work Packet that the household drives in one session. A Source finished that way is Add a recipe's, so it is checked at Awaiting Review, which an unread page should be anyway.
+- **Running the fallback chain inside the bulk import:** rejected. The fallback already finishes every waiting Queued Ingest in the household's own session (the browser, then a model's Work Packet), and a recipe saved from a Queued Ingest is Add a recipe's by that endpoint's rule. The consequence: a Source on the list that a plain fetch can't read waits at Awaiting Review, even when the browser captured it.
 - **Letting any editor send `bulk_import`:** rejected. Only the CLI imports in bulk, and a recipe an editor reviews by hand has no reason to skip review.
