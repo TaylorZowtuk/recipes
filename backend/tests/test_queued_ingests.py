@@ -212,6 +212,18 @@ def test_a_source_that_isnt_the_queued_ingests_is_refused(
     assert [item.id for item in store.queued_ingests()] == [INGEST_ID]
 
 
+def test_a_queued_ingest_is_always_saved_as_add_a_recipe(
+    editor_client: TestClient, store: Store
+) -> None:
+    store.queue_ingest(queued_ingest())
+
+    response = save(editor_client, new_recipe(ingest_channel="bulk_import"))
+
+    assert response.status_code == 422
+    assert store.cards() == []
+    assert [item.id for item in store.queued_ingests()] == [INGEST_ID]
+
+
 def test_a_photo_that_isnt_stored_is_refused(editor_client: TestClient, store: Store) -> None:
     store.queue_ingest(queued_ingest())
     image = {"id": "0" * 64, "width": 1, "height": 1, "origin": "https://plateful.test/p.jpg"}

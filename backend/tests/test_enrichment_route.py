@@ -100,6 +100,23 @@ def test_enriching_moves_a_pending_recipe_on_by_its_ingest_channel(
     assert fetch(editor_client, recipe.id)["status"] == status
 
 
+def test_a_recipe_saved_as_the_bulk_import_goes_straight_to_ready_once_enriched(
+    editor_client: TestClient,
+) -> None:
+    body = {
+        "source": PENDING.source.model_dump(mode="json"),
+        "original": PENDING.original.model_dump(mode="json"),
+        "ingest_channel": "bulk_import",
+    }
+    saved = editor_client.post("/api/recipes", json=body, headers=EDITOR)
+    assert saved.status_code == 201
+
+    response = enrich(editor_client, saved.json()["id"])
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
 @pytest.mark.parametrize(
     ("channel", "extractor", "status"),
     [

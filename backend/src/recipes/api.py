@@ -21,7 +21,7 @@ from pydantic import (
 )
 
 from recipes import fdc, our_version
-from recipes.auth import Auth, CurrentEditor, require_editor
+from recipes.auth import SERVICE_TOKEN_EDITOR, Auth, CurrentEditor, EditorDep, require_editor
 from recipes.auth import router as auth_router
 from recipes.backup import BackupBucket, BackupLinks
 from recipes.edits import (
@@ -75,6 +75,7 @@ from recipes.models import (
     FavoriteSite,
     FavoriteSites,
     Image,
+    IngestChannel,
     IngredientFacts,
     IngredientSegment,
     KitchenSettings,
@@ -244,6 +245,9 @@ class NewRecipe(BaseModel):
     # A factory, not a default, so the schema leaves it optional for clients that send none.
     images: Annotated[list[Image], Field(max_length=MAX_IMAGES, default_factory=list)]
     preview: Preview | None = None
+    # Only the service token may claim the bulk import, which skips Awaiting Review. A factory too,
+    # so the PWA, which never sends it, sees it as optional.
+    ingest_channel: Annotated[IngestChannel, Field(default_factory=lambda: "add_a_recipe")]
 
     @model_validator(mode="after")
     def _previews_one_of_its_images(self) -> NewRecipe:
@@ -797,10 +801,20 @@ def get_backup_links(backups: BackupsDep, after: str | None = None) -> BackupLin
     response_model=Recipe,
     status_code=201,
     dependencies=EDITORS_ONLY,
-    responses={**DUPLICATE, 422: {"description": "Not a valid recipe, or an image isn't stored"}},
+    responses={
+        **DUPLICATE,
+        403: {"description": "Not an editor, or the bulk import without the service token"},
+        422: {"description": "Not a valid recipe, or an image isn't stored"},
+    },
 )
-def post_recipe(body: NewRecipe, store: StoreDep, images: ImagesDep) -> Recipe | Response:
-    """Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard."""
+def post_recipe(
+    body: NewRecipe, editor: EditorDep, store: StoreDep, images: ImagesDep
+) -> Recipe | Response:
+    """Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard.
+    Only the service token, which the bulk import CLI sends, may save it as the bulk import.
+    """
+    if body.ingest_channel == "bulk_import" and editor.name != SERVICE_TOKEN_EDITOR:
+        raise HTTPException(403, "Only the bulk import CLI can save a recipe as the bulk import")
     key = _dedupe_key(body.source.url)
     recipe = _new_recipe(body, key, store, images)
     try:
@@ -825,7 +839,7 @@ def _new_recipe(body: NewRecipe, key: str, store: Store, images: ImageStore) -> 
         images=body.images,
         preview=body.preview,
         status="pending",
-        ingest_channel="add_a_recipe",
+        ingest_channel=body.ingest_channel,
     )
 
 
@@ -1824,7 +1838,10 @@ NO_SUCH_QUEUED_INGEST: dict[int | str, dict[str, Any]] = {
         403: DUPLICATE[403],
         **NO_SUCH_QUEUED_INGEST,
         409: {"description": "Another save of this Queued Ingest got there first"},
-        422: {"description": "Not a valid recipe, not its Source, or an image isn't stored"},
+        422: {
+            "description": "Not a valid recipe, not its Source, an image isn't stored, or it "
+            "isn't Add a recipe's"
+        },
     },
 )
 def post_queued_ingest_recipe(
@@ -1833,6 +1850,9 @@ def post_queued_ingest_recipe(
     """Turn a Queued Ingest into the recipe a fallback captured, Pending enrichment: its Source
     guard moves to the recipe, and the Queued Ingest goes, all at once.
     """
+    # The fallback finishes an Add a recipe, so its recipe is never the bulk import's.
+    if body.ingest_channel != "add_a_recipe":
+        raise HTTPException(422, "A Queued Ingest's recipe is always Add a recipe's")
     queued = _queued_ingest(store, ingest_id)
     key = _dedupe_key(body.source.url)
     if key != queued.dedupe_key:
