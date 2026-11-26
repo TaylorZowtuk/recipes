@@ -83,8 +83,8 @@ def run(base_url: str, send: Send, sources: Iterable[str]) -> int:
     counts: dict[Outcome, int] = {"ingested": 0, "skipped": 0, "queued": 0}
     failures: list[tuple[str, str]] = []
     for row in csv.DictReader(sources):
-        location = row["location"]
-        if row["kind"] != "website":
+        location = row["location"].strip()
+        if row["kind"].strip() != "website":
             counts["skipped"] += 1
             _say(f"{location} → skipped (not a website Source)")
             continue
@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> None:
         text = sys.stdin.read()
     else:
         text = Path(args.sources).read_text(encoding="utf-8")
+    text = text.removeprefix("\ufeff")  # a spreadsheet's "CSV UTF-8" export starts with a BOM
     with SameOriginSession() as session:
         failed = run(base_url, send_with(session, token), io.StringIO(text, newline=""))
     sys.exit(1 if failed else 0)

@@ -174,6 +174,22 @@ def test_a_recipe_the_api_refuses_to_save_fails_that_source(
     assert f"  {RECIPE}: 500 Internal Server Error" in capsys.readouterr().out
 
 
+def test_a_409_on_saving_the_recipe_is_skipped_not_failed(
+    editor_client: TestClient, send: Send, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def already_saved(method: str, url: str, body: bytes | None) -> Any:
+        if url == f"{BASE_URL}/api/recipes":
+            return 409, {"detail": "Already in the Collection"}
+        return send(method, url, body)
+
+    failed = run(BASE_URL, already_saved, io.StringIO(f"kind,location,notes\nwebsite,{RECIPE},\n"))
+
+    captured = capsys.readouterr()
+    assert failed == 0
+    assert f"{RECIPE} → skipped (Already in the Collection)" in captured.err
+    assert "Ingested 0, skipped 1, queued 0, failed 0" in captured.out
+
+
 def through_the_api(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     """Points `main`'s session at the in-process API, signed in with the service token."""
 
@@ -218,3 +234,32 @@ def test_main_needs_the_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(SystemExit, match=SERVICE_TOKEN_ENV):
         main([LOCAL_URL, "-"])
+
+
+def test_main_ignores_a_byte_order_mark_and_padding_in_the_sources_file(
+    editor_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    through_the_api(monkeypatch, editor_client)
+    sources = tmp_path / "sources.csv"
+    sources.write_text(f"\ufeffkind,location,notes\nwebsite ,  {RECIPE} ,\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exited:
+        main([LOCAL_URL, str(sources)])
+
+    assert exited.value.code == 0
+    assert [recipe["source"]["url"] for recipe in recipes(editor_client)] == [RECIPE]
+
+
+def test_main_ignores_a_byte_order_mark_on_stdin(
+    editor_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    through_the_api(monkeypatch, editor_client)
+    monkeypatch.setattr(
+        sys, "stdin", io.StringIO(f"\ufeffkind,location,notes\nwebsite,{RECIPE},\n")
+    )
+
+    with pytest.raises(SystemExit) as exited:
+        main([LOCAL_URL, "-"])
+
+    assert exited.value.code == 0
+    assert len(recipes(editor_client)) == 1
