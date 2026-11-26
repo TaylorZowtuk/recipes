@@ -2,6 +2,8 @@
 
 Superseded in part by [The fallback records why its latest try at a waiting Queued Ingest failed](2026-11-10-fallback-records-failed-attempts.md): a fetch that fails with a reason that may pass no longer writes nothing; it records that reason, and the Queued Ingest stays waiting. Everything else here stands.
 
+Superseded in part by [Only the service token saves a recipe as the bulk import, which queues what it can't read for the fallback](2026-11-25-bulk-import.md): the bulk import doesn't run the chain itself. It leaves what it can't read queued for the fallback, and shares only how the fallback stores a captured recipe's photos and saves it.
+
 This settles what the [website ingest ADR](2026-10-24-website-ingest.md) left to [TaylorZowtuk/recipes#50](https://github.com/TaylorZowtuk/recipes/issues/50): how a Queued Ingest becomes a recipe, what the local fallback tries, and what an editor can paste. Everything else in that ADR stands.
 
 The fallback runs in the local CLI, never in the API, as that ADR says. The API gains four endpoints, and a new module, `recipes.fallback`, runs the chain. The bulk import shares that module.

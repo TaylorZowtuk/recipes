@@ -84,7 +84,7 @@ A website Source that Add a recipe couldn't turn into a recipe with a plain fetc
 _Avoid_: Pending ingest (*Pending* is an Enrichment Status), draft, failed import
 
 **Fallback Chain**:
-What the local CLI tries, in order, on a waiting Queued Ingest: a browser loading the page, recipe-scrapers on the loaded page, then a model reading the page's text through a Work Packet. A page nothing can read is marked as needing its page. A fetch that fails for a reason that may pass (the site is rate limiting, has a server error or can't be reached) leaves the Queued Ingest waiting for the next run, with its reason updated to that one. The bulk import runs the same chain. A recipe a model read has the extractor `llm` and always stops at Awaiting Review.
+What the local CLI tries, in order, on a waiting Queued Ingest: a browser loading the page, recipe-scrapers on the loaded page, then a model reading the page's text through a Work Packet. A page nothing can read is marked as needing its page. A fetch that fails for a reason that may pass (the site is rate limiting, has a server error or can't be reached) leaves the Queued Ingest waiting for the next run, with its reason updated to that one. The bulk import doesn't run it: a Source it can't read is left as a Queued Ingest for the chain, which finishes it as Add a recipe. A recipe a model read has the extractor `llm` and always stops at Awaiting Review.
 _Avoid_: Fallback (alone), scraper
 
 **Source Guard**:
@@ -112,7 +112,7 @@ An explicit run of enrichment over the recipes it is told to enrich, or over tho
 _Avoid_: Refresh, backfill
 
 **Ingest Channel**:
-How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
+How a recipe came into the collection: *Add a recipe*, where an editor adds one from a website, or the *bulk import*, which only the service token can claim. It decides whether enrichment stops at *Awaiting Review* (Add a recipe) or goes straight to *Ready* (bulk import), except that an `llm` Original stops at *Awaiting Review* even from the bulk import.
 _Avoid_: Origin, import type
 
 **Enrichment Status**:
