@@ -304,9 +304,12 @@ MAX_SUBSTITUTES = 5
 
 
 class SubstitutionsFact(Fact):
-    """A line's substitutions, which an editor confirms together in one tap."""
+    """A line's substitutions, which an editor confirms together in one tap. Only Our Version
+    holds an empty list, for a line the household substitutes nothing on: the Original stores
+    none rather than an empty list.
+    """
 
-    items: Annotated[list[Substitution], Field(min_length=1, max_length=MAX_SUBSTITUTES)]
+    items: Annotated[list[Substitution], Field(max_length=MAX_SUBSTITUTES)]
 
 
 class EnrichmentSubstitutionsFact(Fact):
@@ -654,9 +657,10 @@ class Effective(Model):
 def effective(recipe: Recipe) -> Effective:
     """The recipe as Our Version shows it, or the Original without one, as the PWA's `effective`.
     An edited or added line or step has Our Version's facts (none for a step until enrich
-    segments it); one left alone keeps the Original's; a removed one is left out. A step's Segment
-    for a line not among the effective lines shows as its text, with no amount, and its uses drop
-    it.
+    segments it); one left alone keeps the Original's, apart from the substitutions Our Version
+    holds for it, even none, which replace the Original's; a removed one is left out. A step's
+    Segment for a line not among the effective lines shows as its text, with no amount, and its
+    uses drop it.
     """
     original, facts, ours = recipe.original, recipe.facts, recipe.our_version
     if ours is None:
@@ -676,6 +680,11 @@ def effective(recipe: Recipe) -> Effective:
         if (found := held.get(item.id)) is not None:
             line_facts[item.id] = found
         if not added and edit is None:
+            household = ours.facts.ingredients.get(item.id)
+            if household is not None and household.substitutions is not None:
+                theirs = line_facts.get(item.id, IngredientFacts())
+                swaps = {"substitutions": household.substitutions}
+                line_facts[item.id] = theirs.model_copy(update=swaps)
             return EffectiveLine(**item.model_dump())
         written = edit or item
         change = "added" if added else "edited"

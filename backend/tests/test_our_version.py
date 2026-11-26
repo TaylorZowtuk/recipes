@@ -41,6 +41,7 @@ from recipes.models import (
     RecipeFacts,
     StepFacts,
     SubstitutionsFact,
+    effective,
 )
 from recipes.our_version import Refused, kitchen_number, line_text
 from recipes.seed import CHICKEN_ID, GARLIC, load
@@ -116,8 +117,10 @@ def lines(
     edit: dict[str, Any] | None = None,
     remove: list[str] | None = None,
     add: list[dict[str, Any]] | None = None,
+    substitutions: dict[str, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    return {"edit": edit or {}, "remove": remove or [], "add": add or []}
+    drafted = {"edit": edit or {}, "remove": remove or [], "add": add or []}
+    return drafted | ({"substitutions": substitutions} if substitutions is not None else {})
 
 
 def ready(store: Store, facts: RecipeFacts = FACTS) -> Recipe:
@@ -886,6 +889,350 @@ def test_an_edit_saves_our_version_or_removes_it_not_both(
     assert response.status_code == 422
     assert "not both" in response.json()["detail"][0]["msg"]
     assert stored(api_store, recipe.id) == recipe
+
+
+# Household substitutions
+
+# The substitute the recipe itself states for the beef, as enrichment recorded it.
+STATED = {**SWAP, "wording": "pork shoulder", "canonical_id": PORK.id}
+
+
+def pork(**fields: Any) -> dict[str, Any]:
+    """A household substitute for the stew's beef: pork shoulder, by its Canonical Ingredient."""
+    return {
+        "canonical": {"kind": "existing", "id": PORK.id},
+        "wording": None,
+        "ratio": 1,
+        "note": "braise it a little longer",
+        "fdc_id": 1002,
+        "portion_id": 503,
+        **fields,
+    }
+
+
+def stated(store: Store) -> Recipe:
+    """The stew Ready, its beef line with the substitute the recipe states, and nothing in Our
+    Version.
+    """
+    swaps = SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [STATED]})
+    beef = FACTS.ingredients["i1"].model_copy(update={"substitutions": swaps})
+    facts = FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": beef}})
+    return awaiting(store, facts=facts, issues=[], status="ready", canonicals=(BEEF, PORK))
+
+
+def held(store: Store, recipe_id: str) -> dict[str, Any]:
+    """Our Version's facts map for its lines, as JSON."""
+    ours = stored(store, recipe_id).our_version
+    assert ours is not None
+    return ours.facts.model_dump(mode="json")["ingredients"]
+
+
+def saved_ok(client: TestClient, store: Store, recipe_id: str, draft: dict[str, Any]) -> Recipe:
+    response = save(client, stored(store, recipe_id), draft)
+    assert response.status_code == 200, response.text
+    return stored(store, recipe_id)
+
+
+def test_household_substitutions_on_an_unchanged_line_replace_the_originals_there(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    subs = {
+        "i1": [pork(), pork(wording="pork butt", ratio=1.5, note="", fdc_id=1001, portion_id=None)]
+    }
+
+    saved = saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=subs)}
+    )
+
+    entry = held(api_store, recipe.id)["i1"]
+    assert (entry["parse"], entry["match"], entry["conversion"]) == (None, None, None)
+    swaps = entry["substitutions"]
+    assert editors(swaps)
+    assert swaps["estimated"] is False
+    first, second = swaps["items"]
+    assert (first["wording"], first["canonical_id"], first["ratio"]) == (
+        "pork shoulder",
+        PORK.id,
+        1,
+    )
+    assert first["note"] == "braise it a little longer"
+    assert (first["fdc_id"], first["portion_id"]) == (1002, 503)
+    assert first["fdc"] == {k: v for k, v in numbers(1002, 503).items() if k != "fdc_id"}
+    assert (second["wording"], second["ratio"], second["fdc_id"]) == ("pork butt", 1.5, 1001)
+    assert saved.facts == recipe.facts
+    assert saved.our_version is not None
+    assert saved.our_version.ingredients == OurLines()
+    shown = effective(saved)
+    beef = next(ln for ln in shown.ingredients if ln.id == "i1")
+    assert (beef.change, beef.text) == (None, "900 g stewing beef, cubed")
+    facts = shown.facts.ingredients["i1"]
+    original = recipe.facts.ingredients["i1"]
+    assert (facts.parse, facts.match, facts.conversion) == (
+        original.parse,
+        original.match,
+        original.conversion,
+    )
+    assert facts.substitutions == saved.our_version.facts.ingredients["i1"].substitutions
+
+
+def test_removing_every_household_substitute_shows_none_not_the_originals(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+
+    saved = saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": []})}
+    )
+
+    swaps = held(api_store, recipe.id)["i1"]["substitutions"]
+    assert (swaps["items"], editors(swaps)) == ([], True)
+    shown = effective(saved).facts.ingredients["i1"].substitutions
+    assert shown is not None
+    assert shown.items == []
+    assert saved.facts == recipe.facts
+
+
+def test_household_substitutions_change_and_go_with_each_save(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": [pork()]})}
+    )
+    first = held(api_store, recipe.id)["i1"]["substitutions"]
+
+    changed = {"i1": [pork(note="sear it first")]}
+    saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=changed)})
+
+    swaps = held(api_store, recipe.id)["i1"]["substitutions"]
+    assert swaps["items"][0]["note"] == "sear it first"
+    assert editors(swaps)
+    assert swaps["confirmed_at"] != first["confirmed_at"]
+
+    saved = saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines()})
+
+    assert held(api_store, recipe.id) == {}
+    assert effective(saved).facts.ingredients["i1"] == recipe.facts.ingredients["i1"]
+
+
+def test_household_substitutions_leave_the_our_version_status_as_it_was(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    steps = lines(edit={"s2": {"text": "Brown the beef."}})
+    pending = saved_ok(editor_client, api_store, recipe.id, {"steps": steps})
+    assert pending.our_version_status == "pending"
+
+    saved = saved_ok(
+        editor_client,
+        api_store,
+        recipe.id,
+        {"ingredients": lines(substitutions={"i1": [pork()]}), "steps": steps},
+    )
+
+    assert saved.our_version_status == "pending"
+    assert card(api_store, recipe.id)["our_version_status"] == "pending"
+
+
+def test_a_save_keeps_a_lines_unchanged_substitutions_as_stored_and_their_issues_open(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    subs = {"i1": [pork()], "i9": [pork(note="for a meatier finish")]}
+    saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=subs)})
+    before = held(api_store, recipe.id)
+    asked = [
+        issue(n, f"our_version.{line_id}.substitutions", status="open")
+        for n, line_id in enumerate(["i1", "i9"])
+    ]
+    api_store.update_recipe(stored(api_store, recipe.id).model_copy(update={"issues": asked}))
+    parsley = line(name="parsley", quantity=None, unit=None, fdc_id=None)
+
+    draft = {"ingredients": lines(edit={"i9": parsley}, substitutions={**subs, "i9": [pork()]})}
+    saved_ok(editor_client, api_store, recipe.id, draft)
+
+    after = held(api_store, recipe.id)
+    assert after["i1"] == before["i1"]
+    assert after["i9"]["parse"]["name"] == "parsley"
+    assert after["i9"]["substitutions"]["items"][0]["note"] == "braise it a little longer"
+    found = {i.fact_id: i.status for i in stored(api_store, recipe.id).issues}
+    assert found == {
+        "our_version.i1.substitutions": "open",
+        "our_version.i9.substitutions": "resolved",
+    }
+
+
+def test_undoing_a_lines_edit_drops_its_facts_and_settles_its_issues_but_keeps_its_substitutions(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    subs = {"i1": [pork()]}
+    draft = {"ingredients": lines(edit={"i1": line()}, substitutions=subs)}
+    saved_ok(editor_client, api_store, recipe.id, draft)
+    before = held(api_store, recipe.id)["i1"]
+    asked = [issue(1, "our_version.i1.match", status="open")]
+    api_store.update_recipe(stored(api_store, recipe.id).model_copy(update={"issues": asked}))
+
+    saved = saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=subs)}
+    )
+
+    entry = held(api_store, recipe.id)["i1"]
+    assert (entry["parse"], entry["match"], entry["conversion"]) == (None, None, None)
+    assert entry["substitutions"] == before["substitutions"]
+    assert saved.our_version is not None
+    assert saved.our_version.ingredients.edit == {}
+    [settled] = saved.issues
+    assert (settled.fact_id, settled.status) == ("our_version.i1.match", "resolved")
+
+
+def test_editing_a_line_that_holds_only_substitutions_keeps_them(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    subs = {"i1": [pork()]}
+    saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=subs)})
+    before = held(api_store, recipe.id)["i1"]["substitutions"]
+
+    draft = {"ingredients": lines(edit={"i1": line()}, substitutions=subs)}
+    saved = saved_ok(editor_client, api_store, recipe.id, draft)
+
+    entry = held(api_store, recipe.id)["i1"]
+    assert entry["substitutions"] == before
+    assert all(editors(entry[kind]) for kind in ("parse", "match", "conversion"))
+    assert entry["match"]["canonical_id"] == BEEF.id
+    assert saved.our_version is not None
+    assert saved.our_version.ingredients.edit["i1"].text == "450 g stewing beef"
+
+
+def test_household_substitutions_on_edited_and_added_lines(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    subs = {"i1": [pork()], "new-1": [pork(note="instead of tomatoes")]}
+    draft = {
+        "ingredients": lines(edit={"i1": line()}, add=[tomatoes(id="new-1")], substitutions=subs)
+    }
+
+    saved = saved_ok(editor_client, api_store, recipe.id, draft)
+
+    found = held(api_store, recipe.id)
+    assert found["i1"]["substitutions"]["items"][0]["wording"] == "pork shoulder"
+    assert found["i10"]["substitutions"]["items"][0]["note"] == "instead of tomatoes"
+    assert editors(found["i10"]["substitutions"])
+    assert saved.our_version is not None
+    ours = saved.our_version.facts.ingredients
+    assert effective(saved).facts.ingredients["i10"].substitutions == ours["i10"].substitutions
+
+    again = {
+        "ingredients": lines(
+            edit={"i1": line()},
+            add=[
+                tomatoes(
+                    id="i10",
+                    canonical={"kind": "existing", "id": found["i10"]["match"]["canonical_id"]},
+                )
+            ],
+            substitutions={"i10": []},
+        )
+    }
+    saved_ok(editor_client, api_store, recipe.id, again)
+
+    after = held(api_store, recipe.id)
+    assert after["i1"]["substitutions"] is None
+    assert after["i1"]["parse"] == found["i1"]["parse"]
+    assert after["i10"]["substitutions"]["items"] == []
+
+
+def test_removing_a_line_drops_its_substitutions(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": [pork()]})}
+    )
+
+    saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(remove=["i1"])})
+
+    assert held(api_store, recipe.id) == {}
+
+
+def test_a_household_substitute_can_be_a_new_canonical_ingredient(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    substitute = pork(canonical=NEW_TOMATOES | {"name": "Jackfruit", "family": "jackfruit"})
+
+    saved_ok(
+        editor_client,
+        api_store,
+        recipe.id,
+        {"ingredients": lines(substitutions={"i1": [substitute]})},
+    )
+
+    [item] = held(api_store, recipe.id)["i1"]["substitutions"]["items"]
+    created = next(c for c in api_store.canonical_ingredients() if c.id == item["canonical_id"])
+    assert (created.name, created.confirmed) == ("Jackfruit", True)
+    assert item["wording"] == "Jackfruit"
+
+
+@pytest.mark.parametrize(
+    ("substitutions", "detail"),
+    [
+        (
+            {"i1": [pork(fdc_id=9999)]},
+            refused(
+                "ingredients",
+                "i1",
+                "Line i1's substitute pork shoulder: FDC food 9999 isn't in the FDC Snapshot",
+            ),
+        ),
+        (
+            {"i1": [pork(canonical={"kind": "existing", "id": BEEF.id})]},
+            refused("ingredients", "i1", "A substitute isn't its line's own Canonical Ingredient"),
+        ),
+        (
+            {"i99": [pork()]},
+            refused("ingredients", "i99", "The recipe has no line i99"),
+        ),
+        (
+            {"i9": [pork()]},
+            refused("ingredients", "i9", "Line i9 is removed, so it holds no substitutions"),
+        ),
+    ],
+    ids=["food not in the snapshot", "the line's own", "unknown line", "removed line"],
+)
+def test_household_substitutions_it_cant_take_are_refused_naming_the_line(
+    editor_client: TestClient,
+    api_store: Store,
+    substitutions: dict[str, Any],
+    detail: Any,
+) -> None:
+    recipe = stated(api_store)
+
+    response = save(
+        editor_client, recipe, {"ingredients": lines(remove=["i9"], substitutions=substitutions)}
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == detail
+    assert stored(api_store, recipe.id) == recipe
+
+
+def test_a_review_edit_of_a_line_holding_only_substitutions_is_refused(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": [pork()]})}
+    )
+    before = stored(api_store, recipe.id)
+
+    response = edit(editor_client, before, **line_edit("our_version.i1"))
+
+    assert response.status_code == 422, response.text
+    assert stored(api_store, recipe.id) == before
 
 
 # Ids

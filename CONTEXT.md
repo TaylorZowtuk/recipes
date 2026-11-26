@@ -96,7 +96,7 @@ Structured facts added to a recipe once, after it is ingested, and stored with i
 _Avoid_: AI processing, augmentation
 
 **Substitution**:
-A substitute for an ingredient line that the recipe itself states, such as "butter or margarine", with an estimated ratio and the FDC numbers for the substitute. Enrichment records only what the recipe states, as unconfirmed, and a household's own substitutions go in Our Version. Only a Confirmed substitution is used: fridge matching then shows a **swap**. The stored fact is a Substitution; "swap" is only how fridge matching shows one. An editor can change a substitute's FDC food and FDC portion; unlike a line's, that reaches no other line or recipe.
+A substitute for an ingredient line that the recipe itself states, such as "butter or margarine", with an estimated ratio and the FDC numbers for the substitute. Enrichment records only what the recipe states, as unconfirmed. A household's own substitutions for a line go in Our Version, Confirmed with provenance `editor`, and replace the recipe-stated ones on that line without marking it changed; removing them all shows none there. The recipe view shows a line's Confirmed effective substitutions under it to every viewer. Only a Confirmed substitution is used: fridge matching then shows a **swap**. The stored fact is a Substitution; "swap" is only how fridge matching shows one. An editor can change a substitute's FDC food and FDC portion; unlike a line's, that reaches no other line or recipe.
 _Avoid_: Swap (for the stored fact), alternative, replacement
 
 **Fact**:
@@ -156,7 +156,7 @@ The recipe exactly as captured from its source. It never changes after ingest, e
 _Avoid_: Source version, scraped version
 
 **Our Version**:
-The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed, until a wording fixed on another line prepared another way leaves one's food unconfirmed with an issue; its edited and added steps wait for enrichment.
+The household's own changes to a recipe's ingredients and steps, stored as a layer on top of the original. Each recipe has at most one. Its edited and added ingredient lines are the editor's, Confirmed, until a wording fixed on another line prepared another way leaves one's food unconfirmed with an issue; its edited and added steps wait for enrichment. It can also hold a line's household substitutions, on a line it otherwise leaves as the Original has it.
 _Avoid_: Personal adjustment, variant, fork
 
 **Our Version Status**:

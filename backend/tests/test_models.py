@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from recipes.models import (
     MAX_ORIGINAL_BYTES,
     Card,
+    EnrichmentSubstitutionsFact,
     Original,
     Recipe,
     SourceGuard,
@@ -135,9 +136,15 @@ def test_a_substitution_ratio_out_of_bounds_is_refused(ratio: float) -> None:
         substitutions(substitution(ratio=ratio))
 
 
-def test_a_substitutions_fact_has_at_least_one_item() -> None:
+def test_enrichment_sends_at_least_one_substitute_for_a_line() -> None:
     with pytest.raises(ValidationError):
-        substitutions()
+        EnrichmentSubstitutionsFact.model_validate(
+            {"provenance": "llm", "confidence": 0.6, "estimated": True, "items": []}
+        )
+
+
+def test_a_stored_substitutions_fact_may_hold_none_for_our_versions_none_here() -> None:
+    assert substitutions().items == []
 
 
 def test_a_website_recipes_card_holds_its_host() -> None:
