@@ -23,6 +23,7 @@ import type {
 } from "./api/client";
 import { effective } from "./ourVersion";
 import { addDays } from "./weekDates";
+import { scaleLabel } from "./weekPlan";
 
 // One recipe entry's part of a Grocery Item: its day and that entry's own scaled amount.
 export type BreakdownRow = {
@@ -207,32 +208,48 @@ function amountsOf(fingerprint: string, current: Amount[]): Amount[] {
       .slice(at + 1)
       .split("-")
       .map(Number);
-    const pkg = key.match(/^(.*)\((.*)\)$/);
+    const pkg = key.match(/^(.*)\((\d[^)]*)\)$/);
     const kind: Kind = key === "g" ? "mass" : key === "ml" ? "volume" : pkg ? "package" : "count";
     const unit = pkg ? (pkg[1] ?? null) : kind === "count" && key !== "count" ? key : null;
-    const metric = current.find((a) => a.kind === kind)?.metric ?? true;
+    const like = current.find((a) => a.kind === kind);
+    const [metric, estimated] = [like?.metric ?? true, like?.estimated ?? false];
     const size = pkg?.[2];
-    return { key, kind, low, high, unit, metric, largest: high, estimated: false, size };
+    return { key, kind, low, high, unit, metric, largest: high, estimated, size };
   });
 }
 
-const toTasteText = (amounts: Amount[]) =>
+const amountText = (amounts: Amount[]) =>
   amounts.length ? amounts.map(show).join(" + ") : "to taste";
 
+// A Grocery Item's fingerprint read back: its size, to pick the largest, and its text.
+type Reading = (fingerprint: string) => { size: number; text: string };
+
+const readAmounts =
+  (current: Amount[]): Reading =>
+  (fingerprint) => {
+    const amounts = amountsOf(fingerprint, current);
+    return { size: amounts.reduce((n, a) => n + a.high, 0), text: amountText(amounts) };
+  };
+
+// An Other item's fingerprint is its entry's factor, "x2", empty at 1×, as its text isn't scaled.
+const factorPrint = (factor: Factor) => (factor === 1 ? "" : `x${factor}`);
+const readFactor: Reading = (fingerprint) => {
+  const factor = (fingerprint ? Number(fingerprint.slice(1)) : 1) as Factor;
+  return { size: factor, text: scaleLabel(factor) };
+};
+
 // Whether the item is ticked at its amount, else the amount of an older tick of it: of several,
-// the largest, by the sum of their high ends, then by text.
-function ticks(key: string, fingerprint: string, current: Amount[], set: Set<string>) {
+// the largest, then by fingerprint.
+function ticks(key: string, fingerprint: string, read: Reading, set: Set<string>) {
   const tick = `${key}|${fingerprint}`;
   if (set.has(tick)) return { tick, ticked: true };
   const earlier = [...set]
     .filter((t) => t.startsWith(`${key}|`))
-    .map((t) => amountsOf(t.slice(key.length + 1), current))
-    .map((amounts) => ({ amounts, size: amounts.reduce((n, a) => n + a.high, 0) }))
-    .sort(
-      (a, b) => b.size - a.size || fingerprintOf(a.amounts).localeCompare(fingerprintOf(b.amounts)),
-    )[0];
+    .map((t) => t.slice(key.length + 1))
+    .map((print) => ({ print, ...read(print) }))
+    .sort((a, b) => b.size - a.size || a.print.localeCompare(b.print))[0];
   if (!earlier) return { tick, ticked: false };
-  return { tick, ticked: false, tickedEarlier: toTasteText(earlier.amounts) };
+  return { tick, ticked: false, tickedEarlier: earlier.text };
 }
 
 type Contribution = { entry: WeekPlanEntry; day: number; facts: IngredientFacts };
@@ -276,14 +293,15 @@ export function groceryList(
         const canonicalId = lineFacts?.match?.canonical_id;
         if (!lineFacts?.parse || !canonicalId || !canonicalById.has(canonicalId)) {
           const key = `o:${entry.entry_id}:${line.id}`;
+          const fingerprint = factorPrint(entry.amount.factor);
           place(null, {
             key,
             name: line.text,
             recipe: entry.recipe_title,
             ...(entry.amount.factor !== 1 && { factor: entry.amount.factor }),
             amount: null,
-            fingerprint: "",
-            ...ticks(key, "", [], tickSet),
+            fingerprint,
+            ...ticks(key, fingerprint, readFactor, tickSet),
             breakdown: [row(entry, day, line.text)],
           });
           continue;
@@ -323,9 +341,9 @@ export function groceryList(
     place(categoryId, {
       key,
       name: canonical.name,
-      amount: toTasteText(amounts),
+      amount: amountText(amounts),
       fingerprint,
-      ...ticks(key, fingerprint, amounts, tickSet),
+      ...ticks(key, fingerprint, readAmounts(amounts), tickSet),
       breakdown: [...rows.values()],
     });
   }

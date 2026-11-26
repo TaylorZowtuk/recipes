@@ -3047,6 +3047,7 @@ html:has(.cooking[open]) {
 }
 
 .grocery-item-name {
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -3057,6 +3058,24 @@ html:has(.cooking[open]) {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Turns to point up while the item's breakdown is open. */
+.grocery-chevron {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  color: var(--text-secondary);
+  transition: transform var(--motion);
+}
+
+.grocery-chevron > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.grocery-item-main[aria-expanded="true"] .grocery-chevron {
+  transform: rotate(180deg);
 }
 
 .grocery-item-note {
