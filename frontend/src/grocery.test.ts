@@ -171,7 +171,12 @@ describe("same kind", () => {
 
   it("stays a volume when every line has a trusted density", () => {
     const dense = (id: string, amount: number, unit: string) =>
-      recipe(id, [{ ...milk(id, amount, unit), facts: { ...milk(id, amount, unit).facts, conversion: flourDensity } }]);
+      recipe(id, [
+        {
+          ...milk(id, amount, unit),
+          facts: { ...milk(id, amount, unit).facts, conversion: flourDensity },
+        },
+      ]);
     const got = only(dense("a", 1, "cup"), dense("b", 2, "tbsp"));
     expect(got.amount).toBe("1⅛ cups");
     expect(got.fingerprint).toBe("ml:266.16");
@@ -193,7 +198,18 @@ describe("different kinds", () => {
 
   it("scale each line's estimated weight by its entry's factor", () => {
     const a = recipe("a", [{ ...cup, facts: { ...cup.facts, conversion: flourDensity } }]);
-    const got = item(list(plan([[["a", 2], ["b", 2]]]), [a, recipe("b", [grams])]), "c:flour");
+    const got = item(
+      list(
+        plan([
+          [
+            ["a", 2],
+            ["b", 2],
+          ],
+        ]),
+        [a, recipe("b", [grams])],
+      ),
+      "c:flour",
+    );
     expect(got.amount).toBe("≈ 637 g");
     expect(got.fingerprint).toBe("g:636.59");
   });
@@ -272,9 +288,7 @@ describe("packages", () => {
   });
 
   it("show their size in each breakdown row", () => {
-    expect(only(can("a", "796 ml")).breakdown.map((row) => row.amount)).toEqual([
-      "1 can (796 ml)",
-    ]);
+    expect(only(can("a", "796 ml")).breakdown.map((row) => row.amount)).toEqual(["1 can (796 ml)"]);
   });
 
   it("are never converted to mass", () => {
@@ -522,25 +536,41 @@ describe("ticks", () => {
   });
 
   it("read back a count unit with brackets, and a package, from an earlier tick", () => {
-    const garlic = line("i1", "garlic", { amount: 3, unit: "clove(s)", kind: "count", canon: "garlic" });
+    const garlic = line("i1", "garlic", {
+      amount: 3,
+      unit: "clove(s)",
+      kind: "count",
+      canon: "garlic",
+    });
     const result = list(plan([[["a"]]], ["c:garlic|clove(s):2", "c:tomato|can(796 ml):1"]), [
       recipe("a", [
         garlic,
-        line("i2", "2 cans tomatoes", { amount: 2, unit: "can", kind: "count", comment: "796 ml", canon: "tomato" }),
+        line("i2", "2 cans tomatoes", {
+          amount: 2,
+          unit: "can",
+          kind: "count",
+          comment: "796 ml",
+          canon: "tomato",
+        }),
       ]),
     ]);
     expect(item(result, "c:garlic").tickedEarlier).toBe("2 clove(s)");
     expect(item(result, "c:tomato").tickedEarlier).toBe("1 can (796 ml)");
   });
 
-  it("keep \"≈\" on an earlier estimated weight", () => {
+  it('keep "≈" on an earlier estimated weight', () => {
     const cup = line("i1", "1 cup flour", {
       unit: "cup",
       kind: "volume",
       canon: "flour",
       conv: flourDensity,
     });
-    const grams = line("i1", "200 g flour", { amount: 200, unit: "g", kind: "mass", canon: "flour" });
+    const grams = line("i1", "200 g flour", {
+      amount: 200,
+      unit: "g",
+      kind: "mass",
+      canon: "flour",
+    });
     const result = list(plan([[["a"], ["b"]]], ["c:flour|g:200"]), [
       recipe("a", [cup]),
       recipe("b", [grams]),
