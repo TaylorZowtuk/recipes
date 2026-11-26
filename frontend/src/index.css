@@ -3069,7 +3069,7 @@ html:has(.cooking[open]) {
   transition: transform var(--motion);
 }
 
-.grocery-chevron .icon {
+.grocery-chevron > svg {
   width: 16px;
   height: 16px;
 }
