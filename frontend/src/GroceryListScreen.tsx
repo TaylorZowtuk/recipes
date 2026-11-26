@@ -1,12 +1,4 @@
-import {
-  type MouseEvent,
-  type ReactNode,
-  type RefObject,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router";
 import type { Card } from "./api/client";
 import { useCollection, useRecipes } from "./collection";
@@ -58,8 +50,6 @@ function GroceryListBody({ monday }: { monday: string }) {
   const status = useRef<HTMLParagraphElement>(null);
   const [pending, setPending] = useState<Map<string, boolean>>(new Map());
   const [announcement, setAnnouncement] = useState("");
-  // The item whose tick button had focus when ticked, so it gets it back once its row has moved.
-  const refocus = useRef<string | null>(null);
 
   const loaded = collection.state === "ready" ? collection.value : undefined;
   const planned = new Set(plan?.days.flat().map((entry) => entry.recipe_id));
@@ -77,10 +67,9 @@ function GroceryListBody({ monday }: { monday: string }) {
       : undefined;
   const subtitle = weekSubtitle(monday, today);
 
-  const toggle = async (item: GroceryItem, categoryName: string, event: MouseEvent) => {
+  const toggle = async (item: GroceryItem, categoryName: string) => {
     if (pending.has(item.key)) return;
     const on = !item.ticked;
-    refocus.current = event.currentTarget === document.activeElement ? item.key : null;
     setPending((held) => new Map(held).set(item.key, on));
     const outcome = await tick({ op: on ? "tick" : "untick", tick: item.tick });
     if (outcome.kind === "saved")
@@ -153,8 +142,7 @@ function GroceryListBody({ monday }: { monday: string }) {
               item={item}
               ticked={pending.get(item.key) ?? item.ticked}
               off={!!blocked}
-              refocus={refocus}
-              onTick={(event) => void toggle(item, category.name, event)}
+              onTick={() => void toggle(item, category.name)}
             />
           ))}
         </Category>
@@ -174,38 +162,25 @@ function Category({ name, children }: { name: string; children: ReactNode }) {
   );
 }
 
-// A Grocery Item: its tick, and a tap anywhere else opens each recipe's own amount and day. When
-// its tick moves the row and focus was on the tick, focus follows it.
+// A Grocery Item: its tick, and a tap anywhere else opens each recipe's own amount and day.
 function Item({
   monday,
   item,
   ticked,
   off,
-  refocus,
   onTick,
 }: {
   monday: string;
   item: GroceryItem;
   ticked: boolean;
   off: boolean;
-  refocus: RefObject<string | null>;
-  onTick: (event: MouseEvent) => void;
+  onTick: () => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
-  const tickButton = useRef<HTMLButtonElement>(null);
-  const placed = useRef(item.ticked);
-  useLayoutEffect(() => {
-    if (placed.current === item.ticked) return;
-    placed.current = item.ticked;
-    if (refocus.current !== item.key) return;
-    refocus.current = null;
-    if (document.activeElement !== tickButton.current) tickButton.current?.focus();
-  });
   return (
     <li className={ticked ? "grocery-item grocery-item-ticked" : "grocery-item"}>
       <button
-        ref={tickButton}
         type="button"
         className="step-tick grocery-tick"
         aria-pressed={ticked}
