@@ -104,6 +104,17 @@ function weekRefusal(
 const newer = (held: WeekPlan | undefined, plan: WeekPlan) =>
   held && held.version > plan.version ? held : plan;
 
+// Ticks don't move the version, so a write's answer can carry a tick set older than the one held:
+// only a full read replaces it. A plan write keeps the held set; a tick applies just its own change.
+const keepTicks = (held: WeekPlan | undefined, plan: WeekPlan) =>
+  held ? { ...plan, grocery_ticks: held.grocery_ticks } : plan;
+function applyTick(held: WeekPlan | undefined, answer: WeekPlan, change: GroceryTick) {
+  if (!held) return answer;
+  const ticks = held.grocery_ticks.filter((t) => t !== change.tick);
+  const plan = newer(held, answer);
+  return { ...plan, grocery_ticks: change.op === "tick" ? [...ticks, change.tick] : ticks };
+}
+
 // A week as this device knows it. `writing` also covers the reload after a conflict and the pause
 // after a save.
 export type WeekState = { plan?: WeekPlan; failed: boolean; writing: boolean };
@@ -169,7 +180,8 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
     }
     if (began !== session) return { kind: "skipped" };
     if (answer?.response.status === 200 && answer.data) {
-      update(monday, { plan: newer(week(monday).plan, answer.data) });
+      const held = week(monday).plan;
+      update(monday, { plan: keepTicks(held, newer(held, answer.data)) });
       setTimeout(() => {
         if (began === session) update(monday, { writing: false });
       }, SETTLE_MS);
@@ -202,7 +214,7 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
     }
     if (began !== session) return { kind: "skipped" };
     if (answer?.response.status === 200 && answer.data) {
-      update(monday, { plan: newer(week(monday).plan, answer.data) });
+      update(monday, { plan: applyTick(week(monday).plan, answer.data, change) });
       return { kind: "saved" };
     }
     const refusal: WriteRefusal = !answer

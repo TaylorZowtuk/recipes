@@ -444,6 +444,45 @@ describe("the week store", () => {
       expect(await store.tick(MONDAY, tick)).toEqual({ kind: "saved" });
     });
 
+    it("keeps both of two ticks whose answers arrive in reverse order", async () => {
+      const { store, POST } = await loaded(plan(4));
+      const other = { op: "tick", tick: "c:garlic|count:2" } as const;
+      const [first, second] = [later<Answer>(), later<Answer>()];
+      POST.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const ticking = [store.tick(MONDAY, tick), store.tick(MONDAY, other)];
+      second.settle(ok({ ...plan(4), grocery_ticks: [other.tick] }));
+      first.settle(ok({ ...plan(4), grocery_ticks: [tick.tick] }));
+      await Promise.all(ticking);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual([other.tick, tick.tick]);
+    });
+
+    it("removes an untick's tick from the held set", async () => {
+      const { store, POST } = await loaded({ ...plan(4), grocery_ticks: [tick.tick, "o:x|"] });
+      POST.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: [] }));
+      await store.tick(MONDAY, { op: "untick", tick: tick.tick });
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual(["o:x|"]);
+    });
+
+    it("keeps a tick when a plan write's answer, read before it, lands after", async () => {
+      const { store, PATCH, POST } = await loaded(plan(4));
+      const answer = later<Answer>();
+      PATCH.mockReturnValueOnce(answer.promise);
+      const writing = store.write(MONDAY, [place]);
+      POST.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: [tick.tick] }));
+      await store.tick(MONDAY, tick);
+      answer.settle(ok(plan(5)));
+      await writing;
+      expect(store.week(MONDAY).plan?.version).toBe(5);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual([tick.tick]);
+    });
+
+    it("takes another device's tick from a read", async () => {
+      const { store, GET } = await loaded(plan(4));
+      GET.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: ["c:garlic|count:2"] }));
+      await store.load(MONDAY);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual(["c:garlic|count:2"]);
+    });
+
     it("on a 404 reloads the week, and reports a lost network as failed", async () => {
       const { store, GET, POST } = await loaded(plan(4));
       POST.mockResolvedValueOnce(refused(404));
