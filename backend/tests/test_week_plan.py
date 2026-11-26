@@ -495,3 +495,178 @@ def test_visitors_are_refused_whatever_they_ask_for(
     assert read.headers["cache-control"] == "no-store"
     assert write.status_code == 403
     assert write.headers["cache-control"] == "no-store"
+
+
+# Grocery ticks
+
+TICK = "c:01K7AAAAAAAAAAAAAAAAAAAAAA|count:2"
+OTHER_TICK = "o:01K7BBBBBBBBBBBBBBBBBBBBBB:01K7CCCCCCCCCCCCCCCCCCCCCC|"
+
+
+def tick(
+    editor_client: TestClient,
+    value: object = TICK,
+    op: str = "tick",
+    monday: str = MONDAY,
+    headers: dict[str, str] = EDITOR,
+) -> Response:
+    body = {"op": op, "tick": value}
+    return editor_client.post(f"/api/weeks/{monday}/ticks", json=body, headers=headers)
+
+
+def ticked(editor_client: TestClient, value: str = TICK, op: str = "tick") -> dict[str, Any]:
+    response = tick(editor_client, value, op)
+    assert response.status_code == 200
+    return response.json()
+
+
+def read_week(editor_client: TestClient) -> dict[str, Any]:
+    return editor_client.get(f"/api/weeks/{MONDAY}", headers=EDITOR).json()
+
+
+def test_a_tick_is_added_to_the_plan_without_moving_its_version(
+    editor_client: TestClient, store: Store
+) -> None:
+    roast = store.add_recipe(ROAST)
+    plan = planned(editor_client, place(roast))
+
+    response = tick(editor_client)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {**plan, "grocery_ticks": [TICK]}
+    assert read_week(editor_client) == response.json()
+
+
+def test_an_untick_removes_it_and_the_last_one_leaves_no_attribute(
+    editor_client: TestClient, store: Store
+) -> None:
+    roast = store.add_recipe(ROAST)
+    planned(editor_client, place(roast))
+    ticked(editor_client, TICK)
+    ticked(editor_client, OTHER_TICK)
+
+    assert ticked(editor_client, TICK, "untick")["grocery_ticks"] == [OTHER_TICK]
+    last = ticked(editor_client, OTHER_TICK, "untick")
+
+    assert last["grocery_ticks"] == []
+    assert last["version"] == 1
+    assert read_week(editor_client)["grocery_ticks"] == []
+    item = stored_item(store)
+    assert item is not None
+    assert "grocery_ticks" not in item
+
+
+def test_ticking_twice_or_unticking_what_isnt_ticked_changes_nothing(
+    editor_client: TestClient, store: Store
+) -> None:
+    roast = store.add_recipe(ROAST)
+    plan = planned(editor_client, place(roast))
+
+    assert ticked(editor_client, TICK, "untick") == plan
+    ticked(editor_client, TICK)
+    assert ticked(editor_client, TICK)["grocery_ticks"] == [TICK]
+    assert ticked(editor_client, OTHER_TICK, "untick")["grocery_ticks"] == [TICK]
+
+
+def test_two_phones_ticking_from_the_same_read_both_keep_their_tick(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    roast = api_store.add_recipe(ROAST)
+    planned(editor_client, place(roast))
+    before = api_store.week_plan(MONDAY)
+    ticked(editor_client, TICK)
+    monkeypatch.setattr(api_store, "week_plan", read_as(before))
+
+    ticked(editor_client, OTHER_TICK)
+
+    monkeypatch.undo()
+    assert sorted(read_week(editor_client)["grocery_ticks"]) == sorted([TICK, OTHER_TICK])
+
+
+def test_a_tick_keeps_a_placement_made_since_the_phone_last_read(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    roast, noodles = api_store.add_recipe(ROAST), api_store.add_recipe(NOODLES)
+    planned(editor_client, place(roast))
+    before = api_store.week_plan(MONDAY)
+    placed = patch(editor_client, place(noodles), version=1).json()
+    monkeypatch.setattr(api_store, "week_plan", read_as(before))
+
+    response = tick(editor_client)
+
+    monkeypatch.undo()
+    assert response.json() == {**placed, "grocery_ticks": [TICK]}
+    assert read_week(editor_client) == response.json()
+
+
+def test_a_placement_from_a_read_before_a_tick_keeps_the_tick(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    roast = api_store.add_recipe(ROAST)
+    planned(editor_client, place(roast))
+    before = api_store.week_plan(MONDAY)
+    ticked(editor_client, TICK)
+    monkeypatch.setattr(api_store, "week_plan", read_as(before))
+
+    response = patch(editor_client, place(roast), version=1)
+
+    monkeypatch.undo()
+    assert response.status_code == 200
+    assert read_week(editor_client)["grocery_ticks"] == [TICK]
+    assert read_week(editor_client)["version"] == 2
+
+
+@pytest.mark.parametrize("op", ["tick", "untick"])
+def test_a_week_with_no_plan_cant_be_ticked(
+    editor_client: TestClient, store: Store, op: str
+) -> None:
+    response = tick(editor_client, op=op)
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert stored_item(store) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"op": "tick", "tick": ""},
+        {"op": "tick", "tick": "c:01K7AAAAAAAAAAAAAAAAAAAAAA"},  # no amount fingerprint
+        {"op": "tick", "tick": "z:01K7AAAAAAAAAAAAAAAAAAAAAA|count:2"},
+        {"op": "tick", "tick": " c:01K7AAAAAAAAAAAAAAAAAAAAAA|count:2"},
+        {"op": "tick", "tick": "c:|count:2"},
+        {"op": "tick", "tick": "c:x|" + "g:1+" * 100},
+        {"op": "tick", "tick": 1},
+        {"op": "tick", "tick": ["c:x|"]},
+        {"op": "tick"},
+        {"tick": TICK},
+        {"op": "toggle", "tick": TICK},
+    ],
+)
+def test_a_malformed_tick_is_refused(
+    editor_client: TestClient, store: Store, body: dict[str, Any]
+) -> None:
+    roast = store.add_recipe(ROAST)
+    planned(editor_client, place(roast))
+
+    response = editor_client.post(f"/api/weeks/{MONDAY}/ticks", json=body, headers=EDITOR)
+
+    assert response.status_code == 422
+    assert read_week(editor_client)["grocery_ticks"] == []
+
+
+def test_a_tick_on_a_path_that_isnt_a_real_monday_is_refused(editor_client: TestClient) -> None:
+    assert tick(editor_client, monday="2026-11-03").status_code == 422
+
+
+@pytest.mark.parametrize("op", ["tick", "untick"])
+def test_visitors_cant_tick(
+    editor_client: TestClient, api_store: Store, monkeypatch: pytest.MonkeyPatch, op: str
+) -> None:
+    monkeypatch.setattr(api_store.client, "update_item", fail)
+
+    response = tick(editor_client, op=op, headers={})
+
+    assert response.status_code == 403
+    assert response.headers["cache-control"] == "no-store"

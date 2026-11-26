@@ -350,6 +350,15 @@ class WeekPlanEdit(BaseModel):
     operations: Annotated[list[WeekOperation], Field(min_length=1, max_length=MAX_WEEK_OPERATIONS)]
 
 
+class GroceryTick(BaseModel):
+    """Tick a Grocery Item off the week's Grocery List, or untick it. The tick is opaque here: an
+    item key (`c:`, `o:` or `x:`), then `|` and the amount it was ticked at.
+    """
+
+    op: Literal["tick", "untick"]
+    tick: Annotated[str, Field(strict=True, max_length=256, pattern=r"^[cox]:[^|]+\|")]
+
+
 # Every fact path a recipe can hold: four per line, two per step and its Difficulty.
 MAX_FACT_IDS = 6 * MAX_LINES + 1
 
@@ -1336,6 +1345,27 @@ def patch_week_plan(
                 day, index = _entry_at(days, operation.entry_id)
                 day[index] = day[index].model_copy(update={"amount": operation.amount})
     return store.save_week_plan(plan.model_copy(update={"days": days}))
+
+
+@router.post(
+    "/weeks/{monday}/ticks",
+    dependencies=EDITORS_ONLY,
+    responses={
+        403: DUPLICATE[403],
+        404: {"description": "Nothing has been placed in the week, so it has no Grocery List"},
+        422: {"description": "Not a real Monday, or not a valid tick"},
+    },
+)
+def tick_grocery_item(
+    monday: Annotated[Monday, Path()], body: GroceryTick, store: StoreDep
+) -> WeekPlan:
+    """Add or remove one tick in place, at no version, so two phones ticking at once both keep
+    theirs. Ticking twice, or unticking what isn't ticked, changes nothing.
+    """
+    plan = store.set_grocery_tick(monday, body.tick, ticked=body.op == "tick")
+    if plan is None:
+        raise HTTPException(404, "The week has no plan")
+    return plan
 
 
 def _entry_at(days: list[list[WeekPlanEntry]], entry_id: str) -> tuple[list[WeekPlanEntry], int]:
