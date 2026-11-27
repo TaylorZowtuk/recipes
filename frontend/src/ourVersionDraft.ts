@@ -188,25 +188,23 @@ function anchored<P extends Lines | Steps>(items: { id: string }[], part: P): P 
   return { ...part, remove: part.remove.toSorted(), add };
 }
 
+type Substitution = NonNullable<IngredientFacts["substitutions"]>["items"][number];
+
+// A stored substitution as a draft holds it, its wording kept as stored.
+const draftOf = (sub: Substitution): SubstituteDraft => ({
+  canonical: { kind: "existing", id: sub.canonical_id },
+  wording: sub.wording,
+  ratio: sub.ratio,
+  note: sub.note,
+  fdc_id: sub.fdc_id,
+  portion_id: sub.portion_id,
+});
+
 // Our Version's household substitutions as stored, by line id, so a save keeps them as they are.
 function storedSubstitutions(ours: Ours | null | undefined): Lines["substitutions"] {
   return Object.fromEntries(
     Object.entries(ours?.facts.ingredients ?? {}).flatMap(([id, facts]) =>
-      facts.substitutions
-        ? [
-            [
-              id,
-              facts.substitutions.items.map(({ canonical_id, wording, ratio, note, ...food }) => ({
-                canonical: { kind: "existing" as const, id: canonical_id },
-                wording,
-                ratio,
-                note,
-                fdc_id: food.fdc_id,
-                portion_id: food.portion_id,
-              })),
-            ],
-          ]
-        : [],
+      facts.substitutions ? [[id, facts.substitutions.items.map(draftOf)]] : [],
     ),
   );
 }
@@ -216,16 +214,7 @@ function storedSubstitutions(ours: Ours | null | undefined): Lines["substitution
 function recipeSubstitutes(recipe: Recipe, draft: OurDraft, id: string): SubstituteDraft[] {
   const lines = draft.ingredients;
   if (id in lines.edit || lines.add.some((line) => line.id === id)) return [];
-  return (recipe.facts.ingredients[id]?.substitutions?.items ?? []).map(
-    ({ canonical_id, wording, ratio, note, fdc_id, portion_id }) => ({
-      canonical: { kind: "existing", id: canonical_id },
-      wording,
-      ratio,
-      note,
-      fdc_id,
-      portion_id,
-    }),
-  );
+  return (recipe.facts.ingredients[id]?.substitutions?.items ?? []).map(draftOf);
 }
 
 // The substitutions a line shows in the draft, which its form starts from: its household ones

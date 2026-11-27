@@ -993,7 +993,7 @@ function Substitute({
   ratio: number;
   note: string;
   food: NonNullable<FoodPick>;
-  line: { unit: string | null; unitKind: FoodLine["unit_kind"]; hasAmount: boolean };
+  line: Omit<SubstituteLine, "canonicalId">;
   disabled: boolean;
   noteId?: string;
   onSave: SaveEdit;
