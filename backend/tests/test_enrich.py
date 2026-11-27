@@ -1364,9 +1364,9 @@ def test_the_our_version_offer_reads_a_line_holding_only_substitutions_as_the_or
     ours = recipe.our_version
     assert ours is not None
     kept = {"provenance": "editor", "confidence": 1, "estimated": False, **CONFIRMED}
-    swaps = SubstitutionsFact.model_validate({**kept, "items": [SWAP]})
+    household = SubstitutionsFact.model_validate({**kept, "items": [SWAP]})
     facts = ours.facts.model_copy(
-        update={"ingredients": {"i1": IngredientFacts(substitutions=swaps)}}
+        update={"ingredients": {"i1": IngredientFacts(substitutions=household)}}
     )
     held = recipe.model_copy(update={"our_version": ours.model_copy(update={"facts": facts})})
     recipe = api_store.update_recipe(held)

@@ -914,8 +914,8 @@ def stated(store: Store) -> Recipe:
     """The stew Ready, its beef line with the substitute the recipe states, and nothing in Our
     Version.
     """
-    swaps = SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [STATED]})
-    beef = FACTS.ingredients["i1"].model_copy(update={"substitutions": swaps})
+    quoted = SubstitutionsFact.model_validate({**LLM, "estimated": True, "items": [STATED]})
+    beef = FACTS.ingredients["i1"].model_copy(update={"substitutions": quoted})
     facts = FACTS.model_copy(update={"ingredients": {**FACTS.ingredients, "i1": beef}})
     return awaiting(store, facts=facts, issues=[], status="ready", canonicals=(BEEF, PORK))
 
@@ -947,10 +947,10 @@ def test_household_substitutions_on_an_unchanged_line_replace_the_originals_ther
 
     entry = held(api_store, recipe.id)["i1"]
     assert (entry["parse"], entry["match"], entry["conversion"]) == (None, None, None)
-    swaps = entry["substitutions"]
-    assert editors(swaps)
-    assert swaps["estimated"] is False
-    first, second = swaps["items"]
+    household = entry["substitutions"]
+    assert editors(household)
+    assert household["estimated"] is False
+    first, second = household["items"]
     assert (first["wording"], first["canonical_id"], first["ratio"]) == (
         "pork shoulder",
         PORK.id,
@@ -985,8 +985,8 @@ def test_removing_every_household_substitute_shows_none_not_the_originals(
         editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": []})}
     )
 
-    swaps = held(api_store, recipe.id)["i1"]["substitutions"]
-    assert (swaps["items"], editors(swaps)) == ([], True)
+    household = held(api_store, recipe.id)["i1"]["substitutions"]
+    assert (household["items"], editors(household)) == ([], True)
     shown = effective(saved).facts.ingredients["i1"].substitutions
     assert shown is not None
     assert shown.items == []
@@ -1005,10 +1005,10 @@ def test_household_substitutions_change_and_go_with_each_save(
     changed = {"i1": [pork(note="sear it first")]}
     saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=changed)})
 
-    swaps = held(api_store, recipe.id)["i1"]["substitutions"]
-    assert swaps["items"][0]["note"] == "sear it first"
-    assert editors(swaps)
-    assert swaps["confirmed_at"] != first["confirmed_at"]
+    household = held(api_store, recipe.id)["i1"]["substitutions"]
+    assert household["items"][0]["note"] == "sear it first"
+    assert editors(household)
+    assert household["confirmed_at"] != first["confirmed_at"]
 
     saved = saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines()})
 
