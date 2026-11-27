@@ -1,5 +1,7 @@
 # An editor picks a substitute's FDC food and FDC portion
 
+Superseded in part by [A household substitute's food search starts from its own Canonical Ingredient](2026-11-26-household-substitutes-search-from-their-canonical-ingredient.md): a substitute an editor adds to a line's household substitutions in Our Version starts its search from its Canonical Ingredient's default food. Everything else here stands.
+
 This supersedes part of the [editing review facts ADR](2026-11-11-editing-review-facts.md): there, an editor sets a substitution's ratio and note, or removes it. Now the editor also sets each substitute's FDC food and FDC portion. Everything else about a substitution edit stands: it is one substitute at a time, by its index, Confirmed by the editor in no Confirm Batch, and removing the last leaves the line no substitutions.
 
 Enrichment picks a substitute's FDC food and FDC portion as it does a line's, and can pick wrong: "unsalted butter" given salted butter, or a cup of quinoa given the dry grain where the recipe means cooked. Until now an editor could see that on the review sheet but not fix it there.
