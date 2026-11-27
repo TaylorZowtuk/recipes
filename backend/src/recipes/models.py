@@ -683,8 +683,8 @@ def effective(recipe: Recipe) -> Effective:
             household = ours.facts.ingredients.get(item.id)
             if household is not None and household.substitutions is not None:
                 theirs = line_facts.get(item.id, IngredientFacts())
-                swaps = {"substitutions": household.substitutions}
-                line_facts[item.id] = theirs.model_copy(update=swaps)
+                with_household = {"substitutions": household.substitutions}
+                line_facts[item.id] = theirs.model_copy(update=with_household)
             return EffectiveLine(**item.model_dump())
         written = edit or item
         change = "added" if added else "edited"

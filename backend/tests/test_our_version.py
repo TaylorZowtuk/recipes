@@ -1063,6 +1063,22 @@ def test_a_save_keeps_a_lines_unchanged_substitutions_as_stored_and_their_issues
     }
 
 
+def test_changing_only_an_unchanged_lines_substitutions_settles_their_issue(
+    editor_client: TestClient, api_store: Store
+) -> None:
+    recipe = stated(api_store)
+    saved_ok(
+        editor_client, api_store, recipe.id, {"ingredients": lines(substitutions={"i1": [pork()]})}
+    )
+    asked = [issue(0, "our_version.i1.substitutions", status="open")]
+    api_store.update_recipe(stored(api_store, recipe.id).model_copy(update={"issues": asked}))
+
+    changed = {"i1": [pork(note="sear it first")]}
+    saved_ok(editor_client, api_store, recipe.id, {"ingredients": lines(substitutions=changed)})
+
+    assert [i.status for i in stored(api_store, recipe.id).issues] == ["resolved"]
+
+
 def test_undoing_a_lines_edit_drops_its_facts_and_settles_its_issues_but_keeps_its_substitutions(
     editor_client: TestClient, api_store: Store
 ) -> None:

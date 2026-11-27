@@ -33,6 +33,7 @@ from recipes.models import (
     DurationSegment,
     EnrichmentIssue,
     Fact,
+    FdcNumbers,
     IngredientFacts,
     IngredientSegment,
     Label,
@@ -189,12 +190,12 @@ def _editors(now: datetime) -> dict[str, object]:
     return {"provenance": "editor", "confidence": 1, "confirm_batch": None, **_confirmed(now)}
 
 
-def _by_editor[F: Fact](fact: F, now: datetime, **changes: object) -> F:
+def by_editor[F: Fact](fact: F, now: datetime, **changes: object) -> F:
     """The fact as the editor wrote it."""
     return fact.model_copy(update={**_editors(now), **changes})
 
 
-def _new_by_editor[F: Fact](kind: type[F], now: datetime, **fields: object) -> F:
+def new_by_editor[F: Fact](kind: type[F], now: datetime, **fields: object) -> F:
     """A fact the editor wrote where there was none."""
     return kind.model_validate({**_editors(now), "estimated": False, **fields})
 
@@ -254,14 +255,14 @@ class SharedMatch:
         """A line's match to the food and portion, and the conversion the portion gives."""
         numbers = fdc.numbers(self.snapshot, self.fdc_id, portion_id)
         return (
-            _new_by_editor(
+            new_by_editor(
                 MatchFact,
                 self.now,
                 canonical_id=self.canonical_id,
                 fdc_id=self.fdc_id,
                 portion_id=portion_id,
             ),
-            _new_by_editor(ConversionFact, self.now, fdc_id=self.fdc_id, **numbers.model_dump()),
+            new_by_editor(ConversionFact, self.now, fdc_id=self.fdc_id, **numbers.model_dump()),
         )
 
     def _takes_food(self, parse: ParseFact) -> bool:
@@ -491,7 +492,7 @@ def edited_line(
     if renamed and line.match and not edit.canonical:
         # Keeping the match would confirm the old Canonical Ingredient for the new wording.
         raise HTTPException(422, "Changing the wording needs a Canonical Ingredient choice")
-    line.parse = _new_by_editor(
+    line.parse = new_by_editor(
         ParseFact,
         now,
         quantity=edit.quantity,
@@ -515,7 +516,7 @@ def edited_line(
     elif edit.fdc_id is None:
         raise HTTPException(422, f"Line {edit.line_id} needs an FDC food: the closest if none fits")
     elif edit.canonical or current is None or (current.fdc_id, current.portion_id) != picked:
-        canonical = _canonical(store, choice, result)
+        canonical = chosen_canonical(store, choice, result)
         shared = _picked(snapshot(), canonical.id, edit.fdc_id, edit, now)
         line.match, line.conversion = shared.picked(edit.portion_id)
         if shared.wording:
@@ -569,7 +570,7 @@ def _unit_kind(old: ParseFact | None, unit: str | None) -> Literal["mass", "volu
     return unit_kind(unit)
 
 
-def _canonical(store: Store, choice: CanonicalChoice, result: Edited) -> CanonicalIngredient:
+def chosen_canonical(store: Store, choice: CanonicalChoice, result: Edited) -> CanonicalIngredient:
     """The Canonical Ingredient the editor chose: an existing one, Confirmed if it wasn't, or a
     new one, created Confirmed in one of the Kitchen settings' Store Categories.
     """
@@ -603,14 +604,14 @@ def _kept(
     if conversion is None:
         raise HTTPException(422, f"Line {line_id} has no weight to keep or convert")
     if keep:
-        return _by_editor(conversion, now, refused=EDITOR_KEPT)
+        return by_editor(conversion, now, refused=EDITOR_KEPT)
     if conversion.density_g_per_ml is None and conversion.grams_per_count is None:
         if conversion.refused == fdc.NO_PORTION:
             raise HTTPException(
                 422, f"Line {line_id} has no portion to convert it to a weight by: pick one"
             )
         raise HTTPException(422, f"Line {line_id}'s FDC portion gives nothing to convert it by")
-    return _by_editor(conversion, now, refused=None)
+    return by_editor(conversion, now, refused=None)
 
 
 def matched_food(recipes: list[Recipe], canonical_id: str, snapshot: fdc.Snapshot) -> int | None:
@@ -652,7 +653,7 @@ def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
             if isinstance(segment, IngredientSegment):
                 summed[segment.ref] = summed.get(segment.ref, 0) + segment.portion
         uses = [StepUse(ref=ref, portion=portion) for ref, portion in summed.items()]
-        step.segments = _by_editor(step.segments, now, segments=segments, estimated=False)
+        step.segments = by_editor(step.segments, now, segments=segments, estimated=False)
     elif step.uses and len(edit.portions) == len(step.uses.uses) and not edit.durations:
         uses = [
             use.model_copy(update={"portion": portion})
@@ -661,9 +662,9 @@ def _edit_step(recipe: Recipe, edit: EditStep, now: datetime) -> Recipe:
     else:
         raise HTTPException(422, f"Step {edit.step_id} has no such portions or timers")
     step.uses = (
-        _by_editor(step.uses, now, uses=uses, estimated=False)
+        by_editor(step.uses, now, uses=uses, estimated=False)
         if step.uses
-        else _new_by_editor(UsesFact, now, uses=uses)
+        else new_by_editor(UsesFact, now, uses=uses)
     )
     facts.steps[edit.step_id] = step
     if over := overused(facts.steps):
@@ -702,7 +703,7 @@ def _edit_substitution(
         items[edit.index] = _substitute(items[edit.index], edit, snapshot)
     else:
         del items[edit.index]
-    line.substitutions = _by_editor(swaps, now, items=items, estimated=False) if items else None
+    line.substitutions = by_editor(swaps, now, items=items, estimated=False) if items else None
     item = f"{edit.line_id}.substitutions"
     issues = resolve(recipe, lambda fact_id: fact_id == item)
     return settled(recipe.model_copy(update={"facts": facts, "issues": issues}))
@@ -717,20 +718,29 @@ def _substitute(
     """
     changes: dict[str, object] = {"ratio": edit.ratio, "note": edit.note}
     if (current.fdc_id, current.portion_id) != (edit.fdc_id, edit.portion_id):
-        try:
-            numbers = fdc.numbers(snapshot(), edit.fdc_id, edit.portion_id)
-        except fdc.NotInSnapshot as refused:
-            raise HTTPException(
-                422, f"Line {edit.line_id}'s substitute {current.wording}: {refused}"
-            ) from None
+        numbers = substitute_numbers(
+            snapshot(), edit.line_id, current.wording, edit.fdc_id, edit.portion_id
+        )
         changes |= {"fdc_id": edit.fdc_id, "portion_id": edit.portion_id, "fdc": numbers}
     return current.model_copy(update=changes)
+
+
+def substitute_numbers(
+    snapshot: fdc.Snapshot, line_id: str, wording: str, fdc_id: int, portion_id: int | None
+) -> FdcNumbers:
+    """A substitute's numbers for its FDC food and portion from the FDC Snapshot: a 422 naming
+    the line and the substitute for a food it doesn't have or a portion that isn't the food's.
+    """
+    try:
+        return fdc.numbers(snapshot, fdc_id, portion_id)
+    except fdc.NotInSnapshot as refused:
+        raise HTTPException(422, f"Line {line_id}'s substitute {wording}: {refused}") from None
 
 
 def _edit_difficulty(recipe: Recipe, edit: EditDifficulty, now: datetime) -> Recipe:
     difficulty = Difficulty(prep=edit.prep, cook=edit.cook, cleanup=edit.cleanup)
     facts = recipe.facts.model_copy(deep=True)
-    facts.difficulty = _new_by_editor(DifficultyFact, now, **difficulty.model_dump())
+    facts.difficulty = new_by_editor(DifficultyFact, now, **difficulty.model_dump())
     issues = resolve(recipe, lambda fact_id: fact_id == "difficulty")
     changes = {"facts": facts, "issues": issues, "difficulty": difficulty}
     return settled(recipe.model_copy(update=changes))
