@@ -372,6 +372,21 @@ describe("a line's household substitutions", () => {
     expect(saved(r, removed).ingredients.substitutions).toEqual({});
     const edited = editLine(r, ourDraftOf(r), "i2", edit("shallot"), form);
     expect(saved(r, edited).ingredients.substitutions).toEqual({ i2: [coconutDraft] });
+    // A removed Original line's come back with it once restored.
+    const restored = restoreItem(removed, "ingredients", "i2");
+    expect(ourOperation(r, restored)).toBeUndefined();
+  });
+
+  it("go with an added line the draft drops, not to the line added after it", () => {
+    const r = withOurs();
+    const place = { after: "i1", component: null };
+    const butter = addLine(ourDraftOf(r), place, edit("butter"), form);
+    const id = butter.ingredients.add.find((line) => line.name === "butter")?.id ?? "";
+    const held = setSubstitutions(r, butter, id, [coconutDraft]);
+    const eggs = addLine(removeItem(held, "ingredients", id), place, edit("eggs"), form);
+    const again = eggs.ingredients.add.find((line) => line.name === "eggs")?.id ?? "";
+    expect(substitutesFor(r, eggs, again)).toEqual([]);
+    expect(saved(r, eggs).ingredients.substitutions).toEqual({});
   });
 });
 

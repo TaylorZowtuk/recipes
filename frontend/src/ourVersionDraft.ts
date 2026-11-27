@@ -351,7 +351,8 @@ export function addStep(draft: OurDraft, place: Place, text: string): OurDraft {
 }
 
 // Removes an Original line or step from Our Version, or drops an added one, whose followers then
-// follow the one it followed.
+// follow the one it followed. A dropped line's substitutions go with it, so a line added later
+// under its draft id starts with none; a removed Original line keeps its for Restore.
 export function removeItem(draft: OurDraft, part: Part, id: string): OurDraft {
   const { [id]: _, ...forms } = draft.forms;
   const items: Lines | Steps = draft[part];
@@ -360,7 +361,9 @@ export function removeItem(draft: OurDraft, part: Part, id: string): OurDraft {
     const add = items.add
       .filter((item) => item.id !== id)
       .map((item) => (item.after === id ? { ...item, after: added.after } : item));
-    return { ...draft, forms, [part]: { ...items, add } };
+    const dropped = { ...draft, forms, [part]: { ...items, add } };
+    const { [id]: __, ...substitutions } = dropped.ingredients.substitutions;
+    return { ...dropped, ingredients: { ...dropped.ingredients, substitutions } };
   }
   const { [id]: __, ...edit } = items.edit;
   const remove = items.remove.includes(id) ? items.remove : [...items.remove, id];
