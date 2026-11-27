@@ -827,6 +827,28 @@ class Store:
             raise
         return saved
 
+    def set_grocery_tick(self, monday: str, tick: str, *, ticked: bool) -> WeekPlan | None:
+        """Add the tick to the week's set, or remove it, in place: no version check and no version
+        bump, so ticks from two phones and a plan write all survive. DynamoDB drops the attribute
+        when its last tick goes. None if the week has no plan.
+        """
+        action = "ADD" if ticked else "DELETE"
+        try:
+            response = self.client.update_item(
+                TableName=self.table,
+                Key=week_key(monday),
+                UpdateExpression=f"{action} #ticks :tick",
+                ConditionExpression="attribute_exists(PK)",
+                ExpressionAttributeNames={"#ticks": "grocery_ticks"},
+                ExpressionAttributeValues={":tick": {"SS": [tick]}},
+                ReturnValues="ALL_NEW",
+            )
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return None
+            raise
+        return _from_item(WeekPlan, response["Attributes"])
+
     # Building blocks
 
     def _save_versioned[M: Recipe | CanonicalIngredient | KitchenSettings | FavoriteSites](

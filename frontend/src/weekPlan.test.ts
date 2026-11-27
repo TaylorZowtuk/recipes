@@ -54,7 +54,13 @@ type Answer = { data?: WeekPlan; error?: unknown; response: Response };
 function fakeApi() {
   const GET = vi.fn<() => Promise<Answer>>();
   const PATCH = vi.fn<(path: string, init: { body: unknown }) => Promise<Answer>>();
-  return { GET, PATCH, api: { GET, PATCH } as unknown as ReturnType<typeof createApi> };
+  const POST = vi.fn<(path: string, init: { body: unknown }) => Promise<Answer>>();
+  return {
+    GET,
+    PATCH,
+    POST,
+    api: { GET, PATCH, POST } as unknown as ReturnType<typeof createApi>,
+  };
 }
 
 async function loaded(week: WeekPlan) {
@@ -417,6 +423,75 @@ describe("the week store", () => {
     answer.settle(ok(plan(5)));
     await first;
     expect(store.week(MONDAY).plan?.version).toBe(5);
+  });
+
+  describe("tick", () => {
+    const tick = { op: "tick", tick: "c:onion|count:3" } as const;
+
+    it("sends the tick at no version and adopts the plan the API returns", async () => {
+      const { store, POST } = await loaded(plan(4));
+      POST.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: [tick.tick] }));
+      expect(await store.tick(MONDAY, tick)).toEqual({ kind: "saved" });
+      expect(POST.mock.calls[0]?.[1].body).toEqual(tick);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual([tick.tick]);
+    });
+
+    it("goes out while a plan write is in flight", async () => {
+      const { store, PATCH, POST } = await loaded(plan(4));
+      PATCH.mockReturnValueOnce(later<Answer>().promise);
+      void store.write(MONDAY, [place]);
+      POST.mockResolvedValueOnce(ok(plan(4)));
+      expect(await store.tick(MONDAY, tick)).toEqual({ kind: "saved" });
+    });
+
+    it("keeps both of two ticks whose answers arrive in reverse order", async () => {
+      const { store, POST } = await loaded(plan(4));
+      const other = { op: "tick", tick: "c:garlic|count:2" } as const;
+      const [first, second] = [later<Answer>(), later<Answer>()];
+      POST.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const ticking = [store.tick(MONDAY, tick), store.tick(MONDAY, other)];
+      second.settle(ok({ ...plan(4), grocery_ticks: [other.tick] }));
+      first.settle(ok({ ...plan(4), grocery_ticks: [tick.tick] }));
+      await Promise.all(ticking);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual([other.tick, tick.tick]);
+    });
+
+    it("removes an untick's tick from the held set", async () => {
+      const { store, POST } = await loaded({ ...plan(4), grocery_ticks: [tick.tick, "o:x|"] });
+      POST.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: [] }));
+      await store.tick(MONDAY, { op: "untick", tick: tick.tick });
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual(["o:x|"]);
+    });
+
+    it("keeps a tick when a plan write's answer, read before it, lands after", async () => {
+      const { store, PATCH, POST } = await loaded(plan(4));
+      const answer = later<Answer>();
+      PATCH.mockReturnValueOnce(answer.promise);
+      const writing = store.write(MONDAY, [place]);
+      POST.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: [tick.tick] }));
+      await store.tick(MONDAY, tick);
+      answer.settle(ok(plan(5)));
+      await writing;
+      expect(store.week(MONDAY).plan?.version).toBe(5);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual([tick.tick]);
+    });
+
+    it("takes another device's tick from a read", async () => {
+      const { store, GET } = await loaded(plan(4));
+      GET.mockResolvedValueOnce(ok({ ...plan(4), grocery_ticks: ["c:garlic|count:2"] }));
+      await store.load(MONDAY);
+      expect(store.week(MONDAY).plan?.grocery_ticks).toEqual(["c:garlic|count:2"]);
+    });
+
+    it("on a 404 reloads the week, and reports a lost network as failed", async () => {
+      const { store, GET, POST } = await loaded(plan(4));
+      POST.mockResolvedValueOnce(refused(404));
+      GET.mockResolvedValueOnce(ok(plan(5)));
+      expect(await store.tick(MONDAY, tick)).toEqual({ kind: "conflict", refreshed: true });
+      expect(store.week(MONDAY).plan?.version).toBe(5);
+      POST.mockRejectedValueOnce(new TypeError("offline"));
+      expect(await store.tick(MONDAY, tick)).toEqual({ kind: "failed" });
+    });
   });
 
   describe("on clear, as at sign-out", () => {

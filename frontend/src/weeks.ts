@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { api, type Collection, type WeekOperation, type WeekPlan } from "./api/client";
+import {
+  api,
+  type Collection,
+  type GroceryTick,
+  type WeekOperation,
+  type WeekPlan,
+} from "./api/client";
 import { forgetCollection, type Loaded } from "./collection";
 import { applyDemoOperations, demoWeek } from "./demoWeek";
 import { session } from "./session";
@@ -43,15 +49,16 @@ export function useWeek(monday: string | null) {
   return { ...week, retry };
 }
 
-// Writes to a week, with the toast saying what went wrong, if anything. `busy` says so for a tap
-// that never got as far as a write.
+// Writes to a week, and its Grocery Item ticks, with the toast saying what went wrong, if anything.
+// `busy` says so for a tap that never got as far as a write.
 export function useWeekEdit(monday: string) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const edit = (operations: WeekOperation[]) =>
     noticedWrite(() => weeks.write(monday, operations), setToast);
+  const tick = (change: GroceryTick) => noticedWrite(() => weeks.tick(monday, change), setToast);
   const busy = useCallback(() => setToast(writeToast({ kind: "busy" })), []);
   const dismiss = useCallback(() => setToast(null), []);
-  return { edit, busy, toast, dismiss };
+  return { edit, tick, busy, toast, dismiss };
 }
 
 // A visitor's changes to the Demo, in memory only, so a reload brings back each week as generated.

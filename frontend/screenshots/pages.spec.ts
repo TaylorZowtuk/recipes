@@ -8,7 +8,8 @@ import { expect, test } from "@playwright/test";
 // the button with that name last (or each of a list, in order), such as Edit, without saving anything, and `shows` is text that
 // shows once it has. `stubConfirm` answers a review confirm as if it made the recipe Ready, writing
 // nothing, since every project shares the seeded recipe. `stubWeek` answers every week with a
-// fixed plan and stops the clock on a Wednesday, since every project shares the weeks too. `after`
+// fixed plan (WEEK_PLAN, or the one given) and stops the clock on a Wednesday, since every project
+// shares the weeks too. `after`
 // moves the page's clock on that far once everything else is done, such as to a Timer's alarm.
 // `offline` takes the page offline after the clicks, and `fill` types into a field of the open
 // sheet after them, before `shows`. `choose` then picks the open sheet's choice with that name and
@@ -25,7 +26,7 @@ type Shot = {
   click?: string | RegExp | (string | RegExp)[];
   shows?: string;
   stubConfirm?: boolean;
-  stubWeek?: boolean;
+  stubWeek?: boolean | typeof WEEK_PLAN;
   after?: string;
   offline?: boolean;
   fill?: { field: string; text: string };
@@ -42,7 +43,7 @@ const NOODLES = "Sesame Noodles with Crispy Tofu";
 const WEEK_PLAN = {
   schema_version: 1,
   week_start: "2026-11-02",
-  grocery_ticks: [],
+  grocery_ticks: [] as string[],
   version: 3,
   days: [
     [planned("E1", "01K7SEED000000000000000002", NOODLES)],
@@ -54,6 +55,21 @@ const WEEK_PLAN = {
     [],
     [planned("E4", "01K7SEED000000000000000002", NOODLES, 2)],
     [planned("E5", "01K7GONE000000000000000000", "A Recipe No Longer in the Collection")],
+    [],
+  ],
+};
+// Recipes Ready and not, an Other line at 2×, a tick, and a tick made before the onions grew.
+const CHICKEN = "01K7SEED000000000000000001";
+const GROCERY_WEEK = {
+  ...WEEK_PLAN,
+  grocery_ticks: ["c:01K7SEED0000000000000000C9|count:4", "c:01K7SEED0000000000000000C8|count:3"],
+  days: [
+    [planned("G1", CHICKEN, "Lemon Herb Roast Chicken", 2)],
+    [planned("G2", "01K7SEED000000000000000004", "Tomato Lentil Soup")],
+    [planned("G3", "01K7SEED000000000000000003", "Overnight Oats")],
+    [planned("G4", "01K7SEED000000000000000007", "Garlic Butter Green Beans")],
+    [],
+    [],
     [],
   ],
 };
@@ -80,6 +96,14 @@ const pages: Shot[] = [
     loaded: "Garlic Butter Green Beans",
     editor: true,
     stubWeek: true,
+  },
+  {
+    name: "grocery-list",
+    path: "/week/2026-11-02/grocery",
+    ready: "Grocery List",
+    loaded: "Produce",
+    editor: true,
+    stubWeek: GROCERY_WEEK,
   },
   {
     name: "week-empty-editor",
@@ -437,7 +461,8 @@ for (const shot of pages) {
     }
     if (shot.stubWeek) {
       await page.clock.setFixedTime(new Date(2026, 10, 4, 12));
-      await page.route("**/api/weeks/*", (route) => route.fulfill({ json: WEEK_PLAN }));
+      const week = shot.stubWeek === true ? WEEK_PLAN : shot.stubWeek;
+      await page.route("**/api/weeks/*", (route) => route.fulfill({ json: week }));
     }
     if (shot.after) await page.clock.install();
     if (editor) {
