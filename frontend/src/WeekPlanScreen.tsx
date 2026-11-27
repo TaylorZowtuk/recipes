@@ -18,13 +18,16 @@ import { SCALES, scaleLabel } from "./weekPlan";
 import { useDemoWeek, useToday, useWeek, useWeekEdit } from "./weeks";
 
 // The Week tab. A visitor gets a Demo instead of the household's Week Plans, and no week is
-// requested: Week Plans are the household's.
+// requested: Week Plans are the household's. The week shown outlives the swap, so a week moved to
+// in the Demo while an editor's session loads stays when the household's Week Plan replaces it.
 export function WeekPlanScreen() {
   const editor = useIsEditor();
+  const [offset, setOffset] = useState<number>(useLocation().state?.weekOffset ?? 0);
+  const week = { offset, onMove: (weeks: number) => setOffset(offset + weeks) };
   return (
     <Screen title="Week Plan">
       {editor ? (
-        <WeekPlanner key="household" demo={false} />
+        <WeekPlanner key="household" demo={false} {...week} />
       ) : (
         <>
           <div className="demo-banner">
@@ -38,7 +41,7 @@ export function WeekPlanScreen() {
               Sign in
             </Link>
           </div>
-          <WeekPlanner key="demo" demo />
+          <WeekPlanner key="demo" demo {...week} />
         </>
       )}
     </Screen>
@@ -49,10 +52,17 @@ export function WeekPlanScreen() {
 // household corrects its record of what it cooked. Writes are never queued, so edits are off while
 // offline or paused, except in a Demo, which lives on this device. Opening a week's Grocery List
 // keeps that week in the history entry, so Back returns to it.
-function WeekPlanner({ demo }: { demo: boolean }) {
+function WeekPlanner({
+  demo,
+  offset,
+  onMove,
+}: {
+  demo: boolean;
+  offset: number;
+  onMove: (weeks: number) => void;
+}) {
   const today = useToday();
   const navigate = useNavigate();
-  const [offset, setOffset] = useState<number>(useLocation().state?.weekOffset ?? 0);
   const monday = addDays(mondayOf(today), offset * 7);
   const collection = useCollection();
   const household = { ...useWeek(demo ? null : monday), ...useWeekEdit(monday) };
@@ -76,7 +86,7 @@ function WeekPlanner({ demo }: { demo: boolean }) {
 
   return (
     <div className="week-plan">
-      <WeekNav monday={monday} today={today} onMove={(weeks) => setOffset(offset + weeks)} />
+      <WeekNav monday={monday} today={today} onMove={onMove} />
       <p ref={status} role="status" tabIndex={-1} className="screen-note">
         {!plan && !failed && "Loading the week…"}
       </p>
