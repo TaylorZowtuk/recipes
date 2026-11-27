@@ -259,6 +259,26 @@ describe("the recipe editor", () => {
     });
   });
 
+  it("puts the substitutes sheet's Done in the draft, none once the only one is removed", async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+      this.open = true;
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.open = false;
+    };
+    HTMLElement.prototype.scrollTo ??= () => {};
+    vi.spyOn(api, "GET").mockResolvedValue({
+      data: { foods: [], default_fdc_id: null },
+      response: new Response(null, { status: 200 }),
+    } as never);
+    const dispatch = render();
+    act(() => button("Substitutes for 2 cups flour or rice flour")?.click());
+    await act(async () => button("Remove rice flour")?.click());
+    await act(async () => button("Done")?.click());
+    const change = dispatch.mock.calls.find(([action]) => action.type === "change")?.[0];
+    expect(change?.change.ours.ingredients.substitutions).toEqual({ i3: [] });
+  });
+
   it("says how a changed step shows only once a step is changed", () => {
     const hint =
       "Changed steps show as you wrote them, without timers or scaled amounts, until enrichment runs.";
