@@ -26,7 +26,7 @@ export const AS_WRITTEN: AdjustChoices = { scale: 1, units: "written" };
 type Line = IngredientFacts;
 type Segment = NonNullable<StepFacts["segments"]>["segments"][number];
 type TemperatureSegment = Extract<Segment, { t: "temperature" }>;
-type Range = [number, number];
+export type Range = [number, number];
 type Measure = { kind: "mass" | "volume"; base: number; metric: boolean };
 
 export const KEPT = "An editor kept this in the written unit";
@@ -61,10 +61,10 @@ add("volume", "pt|pint|pints", 2 * CUP, false);
 add("volume", "qt|quart|quarts", 4 * CUP, false);
 add("volume", "gal|gallon|gallons", 16 * CUP, false);
 
-const measure = (unit: string | null) => MEASURES.get((unit ?? "").trim().toLowerCase());
+export const measure = (unit: string | null) => MEASURES.get((unit ?? "").trim().toLowerCase());
 
 // The kitchen measures a tidied volume shows in, largest first.
-const SPOONS_AND_CUPS: [number, string][] = [
+export const SPOONS_AND_CUPS: [number, string][] = [
   [CUP, "cup"],
   [TBSP, "tbsp"],
   [TSP, "tsp"],
@@ -78,7 +78,7 @@ const METRIC = { mass: ["g", "kg"], volume: ["ml", "l"] } as const;
 // An amount in g or ml, as kg or l from 1000: whole from 10, else a decimal, as a kitchen scale or
 // jug reads, never a fraction. Under 10, one written in a metric unit (`exact`) keeps two places
 // and a converted one shows one.
-function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string {
+export function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string {
   const [small, large] = METRIC[kind];
   if (Math.round(values[1]) >= 1000)
     return decimals(
@@ -94,7 +94,7 @@ function inMetric(values: Range, kind: Measure["kind"], exact: boolean): string 
 
 // An amount in grams in US weights: oz, or lb from 16 oz. One that rounds below ⅛ oz at its high
 // end is "under ⅛ oz"; else neither end shows under ⅛.
-function us(grams: Range): string {
+export function us(grams: Range): string {
   if (Math.round((grams[1] / OZ) * 8) === 0) return "under ⅛ oz";
   const oz = grams.map((g) => eighths(g / OZ)) as Range;
   if (oz[1] >= 16) return fractions(grams.map((g) => eighths(g / LB)) as Range, "lb");
@@ -123,7 +123,7 @@ function toKitchen(value: number): number {
 // always) but carries at most 1 cup when `set` has cups; cups fit from ¼ with a low end of ⅛, or
 // past 1 cup. The largest fitting unit exact in kitchen fractions wins (unless `converted`), else
 // the largest fitting unit, to the nearest ⅛ (or an exact third).
-function tidy(ml: Range, set: [number, string][], converted = false): string {
+export function tidy(ml: Range, set: [number, string][], converted = false): string {
   const cups = set.some(([size]) => size === CUP);
   const fits = set.filter(([size]) => {
     if (size === CUP) return (ml[1] >= CUP / 4 && ml[0] >= CUP / 8) || ml[1] > CUP;
@@ -171,7 +171,7 @@ function countsIn(countUnit: string | null, unit: string | null): boolean {
 
 // Grams per one of the line's written unit that its conversion gives a volume or count, checked
 // or not.
-function gramsPerUnit(line: Line): number | undefined {
+export function gramsPerUnit(line: Line): number | undefined {
   const { parse, conversion: c } = line;
   if (!parse || !c) return undefined;
   const m = measure(parse.unit);
@@ -180,7 +180,7 @@ function gramsPerUnit(line: Line): number | undefined {
   return countsIn(c.count_unit, parse.unit) && c.grams_per_count ? c.grams_per_count : undefined;
 }
 
-const weighs = (line: Line) =>
+export const weighs = (line: Line) =>
   !!line.conversion && trusted(line.conversion) && !!gramsPerUnit(line);
 
 // Why a volume or count line offers no weight, or undefined when it does or is a weight already.
@@ -226,7 +226,7 @@ function render(line: Line, choice: UnitChoice, scale: number, portion: number):
 // loaf (also halves, leaves, shelves), berries and berry (a consonant before "ries"), else "s".
 // An adjective ("whole"), "dozen", a hyphenated unit or one with a parenthesis stays as written.
 const ADJECTIVES = new Set(["whole", "large", "medium", "small", "extra large", "jumbo", "dozen"]);
-function counted(unit: string | null, amount: number): string | null {
+export function counted(unit: string | null, amount: number): string | null {
   if (!unit || /[(-]/.test(unit) || ADJECTIVES.has(unit.toLowerCase())) return unit;
   const singular = unit
     .replace(/(lea|loa|hal|shel)ves$/i, "$1f")

@@ -80,6 +80,12 @@ export const CheckIcon = () => (
   </Icon>
 );
 
+export const ChevronIcon = () => (
+  <Icon>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);
+
 export const PauseIcon = () => (
   <Icon>
     <path d="M8.5 5v14M15.5 5v14" />

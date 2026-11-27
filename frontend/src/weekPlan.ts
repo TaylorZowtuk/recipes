@@ -1,4 +1,4 @@
-import type { createApi, Factor, WeekOperation, WeekPlan } from "./api/client";
+import type { createApi, Factor, GroceryTick, WeekOperation, WeekPlan } from "./api/client";
 import type { ToastMessage } from "./Toast";
 import { DAY_NAMES } from "./weekDates";
 import { type Answer, apiError, type WriteRefusal, writeRefusal } from "./writeOutcome";
@@ -80,15 +80,18 @@ export function writeToast(outcome: WeekWrite): ToastMessage | null {
   return text ? { text, brief: outcome.kind === "busy" } : null;
 }
 
-// Runs a write, showing what became of it. The last notice goes as the tap lands, not when the write
-// answers, so a write that succeeds leaves alone the notice of a tap refused meanwhile.
+// Runs a write, showing what became of it, and returns that. The last notice goes as the tap lands,
+// not when the write answers, so a write that succeeds leaves alone the notice of a tap refused
+// meanwhile.
 export async function noticedWrite(
   write: () => Promise<WeekWrite>,
   show: (toast: ToastMessage | null) => void,
-) {
+): Promise<WeekWrite> {
   show(null);
-  const toast = writeToast(await write());
+  const outcome = await write();
+  const toast = writeToast(outcome);
   if (toast) show(toast);
+  return outcome;
 }
 
 // A stale version is a 409, so a 404 from the API means the write named something that doesn't
@@ -103,6 +106,17 @@ function weekRefusal(
 
 const newer = (held: WeekPlan | undefined, plan: WeekPlan) =>
   held && held.version > plan.version ? held : plan;
+
+// Ticks don't move the version, so a write's answer can carry a tick set older than the one held:
+// only a full read replaces it. A plan write keeps the held set; a tick applies just its own change.
+const keepTicks = (held: WeekPlan | undefined, plan: WeekPlan) =>
+  held ? { ...plan, grocery_ticks: held.grocery_ticks } : plan;
+function applyTick(held: WeekPlan | undefined, answer: WeekPlan, change: GroceryTick) {
+  if (!held) return answer;
+  const ticks = held.grocery_ticks.filter((t) => t !== change.tick);
+  const plan = newer(held, answer);
+  return { ...plan, grocery_ticks: change.op === "tick" ? [...ticks, change.tick] : ticks };
+}
 
 // A week as this device knows it. `writing` also covers the reload after a conflict and the pause
 // after a save.
@@ -169,7 +183,8 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
     }
     if (began !== session) return { kind: "skipped" };
     if (answer?.response.status === 200 && answer.data) {
-      update(monday, { plan: newer(week(monday).plan, answer.data) });
+      const held = week(monday).plan;
+      update(monday, { plan: keepTicks(held, newer(held, answer.data)) });
       setTimeout(() => {
         if (began === session) update(monday, { writing: false });
       }, SETTLE_MS);
@@ -186,10 +201,40 @@ export function createWeekStore(api: ReturnType<typeof createApi>, onGone: () =>
     return outcome;
   }
 
+  // Adds or removes one Grocery Item's tick. It's atomic and at no version, so it neither waits for
+  // nor holds up a plan write. A 404 means the week has no plan there, so like a conflict it's
+  // read again.
+  async function tick(monday: string, change: GroceryTick): Promise<WeekWrite> {
+    const began = session;
+    let answer: Answer<WeekPlan> | undefined;
+    try {
+      answer = await api.POST("/api/weeks/{monday}/ticks", {
+        params: { path: { monday } },
+        body: change,
+      });
+    } catch {
+      // Offline: reported below as a failed write.
+    }
+    if (began !== session) return { kind: "skipped" };
+    if (answer?.response.status === 200 && answer.data) {
+      update(monday, { plan: applyTick(week(monday).plan, answer.data, change) });
+      return { kind: "saved" };
+    }
+    const refusal: WriteRefusal = !answer
+      ? { kind: "failed" }
+      : answer.response.status === 404 && apiError(answer.error)
+        ? { kind: "conflict" }
+        : writeRefusal(answer);
+    if (refusal.kind !== "conflict") return { kind: refusal.kind };
+    const refreshed = await read(monday);
+    return began === session ? { kind: "conflict", refreshed } : { kind: "skipped" };
+  }
+
   return {
     week,
     load,
     write,
+    tick,
     subscribe(listener: () => void) {
       listeners.add(listener);
       return () => void listeners.delete(listener);

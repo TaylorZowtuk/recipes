@@ -33,6 +33,7 @@ export type StoreCategoryOperation =
 export type WeekPlan = components["schemas"]["WeekPlan"];
 export type WeekPlanEntry = components["schemas"]["WeekPlanEntry"];
 export type WeekOperation = components["schemas"]["WeekPlanEdit"]["operations"][number];
+export type GroceryTick = components["schemas"]["GroceryTick"];
 export type FdcFood = components["schemas"]["FdcFood"];
 export type FdcPortion = components["schemas"]["FdcPortion"];
 export type Factor = components["schemas"]["ScaleAmount"]["factor"];
