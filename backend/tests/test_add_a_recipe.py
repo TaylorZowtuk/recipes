@@ -382,6 +382,17 @@ def test_saving_adds_the_recipe_pending_with_its_card_and_guard(
     assert store.collection_version() == before + 1
 
 
+def test_the_service_token_saves_a_recipe_as_the_bulk_import(
+    editor_client: TestClient, store: Store
+) -> None:
+    response = save(editor_client, ingest(editor_client).json(), ingest_channel="bulk_import")
+
+    assert response.status_code == 201
+    recipe = store.get_recipe(response.json()["id"])
+    assert recipe is not None
+    assert (recipe.ingest_channel, recipe.status) == ("bulk_import", "pending")
+
+
 def test_saving_keys_the_recipe_by_its_normalised_source(
     editor_client: TestClient, store: Store, web: FakeWeb
 ) -> None:

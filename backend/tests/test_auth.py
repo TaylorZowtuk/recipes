@@ -371,6 +371,24 @@ def test_no_service_token_matches_an_unset_hash(client: TestClient, settings: Se
     assert client.get("/api/session", headers=headers).json()["editor"] is False
 
 
+def test_only_the_service_token_saves_a_recipe_as_the_bulk_import(client: TestClient) -> None:
+    recipe = next(r for r in RECIPES if r.source.kind == "website")
+    body = {
+        "source": recipe.source.model_dump(mode="json"),
+        "original": recipe.original.model_dump(mode="json"),
+    }
+    by_cookie = with_cookie(cookie_value(sign_in(client)))
+
+    refused = client.post(
+        "/api/recipes", json={**body, "ingest_channel": "bulk_import"}, headers=by_cookie
+    )
+    saved = client.post("/api/recipes", json=body, headers=by_cookie)
+
+    assert refused.status_code == 403
+    assert saved.status_code == 201
+    assert saved.json()["ingest_channel"] == "add_a_recipe"
+
+
 # Backup download links
 
 

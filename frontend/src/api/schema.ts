@@ -319,6 +319,7 @@ export interface paths {
         /**
          * Post Recipe
          * @description Add the recipe an editor reviewed, Pending enrichment, with its card and Source guard.
+         *     Only the service token, which the bulk import CLI sends, may save it as the bulk import.
          */
         post: operations["post_recipe_api_recipes_post"];
         delete?: never;
@@ -1849,6 +1850,11 @@ export interface components {
             difficulty?: components["schemas"]["Difficulty"] | null;
             /** Images */
             images?: components["schemas"]["Image"][];
+            /**
+             * Ingest Channel
+             * @enum {string}
+             */
+            ingest_channel?: "add_a_recipe" | "bulk_import";
             original: components["schemas"]["Original-Input"];
             preview?: components["schemas"]["Preview"] | null;
             source: components["schemas"]["WebsiteSource-Input"];
@@ -3717,7 +3723,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not a valid recipe, not its Source, or an image isn't stored */
+            /** @description Not a valid recipe, not its Source, an image isn't stored, or it isn't Add a recipe's */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3748,7 +3754,7 @@ export interface operations {
                     "application/json": components["schemas"]["Recipe"];
                 };
             };
-            /** @description Only an editor can do that */
+            /** @description Not an editor, or the bulk import without the service token */
             403: {
                 headers: {
                     [name: string]: unknown;
