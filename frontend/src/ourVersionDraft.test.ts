@@ -15,8 +15,20 @@ import {
   ourRows,
   removeItem,
   restoreItem,
+  setSubstitutions,
+  substitutesFor,
 } from "./ourVersionDraft";
-import { conversion, GARLIC, KNOWN_CANONICAL, match, parse, recipe } from "./review.fixtures";
+import {
+  conversion,
+  GARLIC,
+  KNOWN_CANONICAL,
+  match,
+  NEW_CANONICAL,
+  parse,
+  per100g,
+  recipe,
+  stamp,
+} from "./review.fixtures";
 
 const edit = (name: string, low = 1): LineEdit => ({
   kind: "line",
@@ -215,7 +227,11 @@ describe("a stored Our Version changed in one thing alone", () => {
     const base = withOurs();
     const ours = base.our_version as NonNullable<Recipe["our_version"]>;
     const s1 = { text: "Brown the butter.", component: null };
-    const r = { ...base, our_version: { ...ours, steps: { ...ours.steps, edit: { s1 } } } };
+    const facts = { ...ours.facts, ingredients: { ...ours.facts.ingredients, i2: coconutOn } };
+    const r = {
+      ...base,
+      our_version: { ...ours, facts, steps: { ...ours.steps, edit: { s1 } } },
+    };
     const draft = structuredClone(ourDraftOf(r));
     expect(ourOperation(r, draft)).toBeUndefined();
     change(draft);
@@ -227,6 +243,14 @@ describe("a stored Our Version changed in one thing alone", () => {
     draft.ingredients.add[0] as NonNullable<OurDraft["ingredients"]["add"][0]>;
 
   it.each<[string, (draft: OurDraft) => void]>([
+    [
+      "a household substitute's ratio",
+      (d) => {
+        const [coconut] = d.ingredients.substitutions.i2 ?? [];
+        if (coconut) coconut.ratio = 2;
+      },
+    ],
+    ["a line's household substitutions", (d) => (d.ingredients.substitutions.i2 = [])],
     ["a line's food", (d) => (i1(d).fdc_id = 99999)],
     ["a line's portion", (d) => (i1(d).portion_id = 7)],
     ["a line's Canonical Ingredient", (d) => (i1(d).canonical = { kind: "existing", id: "c9" })],
@@ -248,6 +272,121 @@ describe("a stored Our Version changed in one thing alone", () => {
     expect(operation?.op === "set_our_version" && operation.our_version.ingredients.edit).toEqual(
       {},
     );
+  });
+});
+
+// A household substitute as stored: coconut oil for the garlic, Confirmed by an editor.
+const coconut = {
+  wording: "coconut oil",
+  canonical_id: NEW_CANONICAL,
+  ratio: 1,
+  note: "melt it first",
+  fdc_id: 171412,
+  portion_id: null,
+  fdc: {
+    dataset: "sr_legacy" as const,
+    release: "2018-04",
+    per_100g: per100g,
+    density_g_per_ml: 0.92,
+    count_unit: null,
+    grams_per_count: null,
+    refused: null,
+  },
+};
+const coconutOn = {
+  parse: null,
+  match: null,
+  conversion: null,
+  substitutions: { ...stamp(true), provenance: "editor" as const, items: [coconut] },
+};
+const coconutDraft = {
+  canonical: { kind: "existing" as const, id: NEW_CANONICAL },
+  wording: "coconut oil",
+  ratio: 1,
+  note: "melt it first",
+  fdc_id: 171412,
+  portion_id: null,
+};
+
+// The stored Our Version above, also holding coconut oil for i2, a line it leaves unchanged.
+const withSubstitutes = (): Recipe => {
+  const base = withOurs();
+  const ours = base.our_version as NonNullable<Recipe["our_version"]>;
+  const ingredients = { ...ours.facts.ingredients, i2: coconutOn };
+  return { ...base, our_version: { ...ours, facts: { ...ours.facts, ingredients } } };
+};
+
+describe("a line's household substitutions", () => {
+  it("are kept in the draft as stored, and an untouched draft changes nothing", () => {
+    const r = withSubstitutes();
+    expect(ourDraftOf(r).ingredients.substitutions).toEqual({ i2: [coconutDraft] });
+    expect(ourOperation(r, ourDraftOf(r))).toBeUndefined();
+  });
+
+  it("start from the Original's on an unchanged line, its wording quoted, else none", () => {
+    const r = withOurs();
+    const draft = ourDraftOf(r);
+    expect(substitutesFor(r, draft, "i3")).toEqual([
+      {
+        canonical: { kind: "existing", id: KNOWN_CANONICAL },
+        wording: "rice flour",
+        ratio: 0.75,
+        note: "use a little less",
+        fdc_id: 2,
+        portion_id: null,
+      },
+    ]);
+    // An edited or added line takes none of the Original's.
+    expect(substitutesFor(r, draft, "i1")).toEqual([]);
+    expect(substitutesFor(r, draft, "i5")).toEqual([]);
+    const held = withSubstitutes();
+    expect(substitutesFor(held, ourDraftOf(held), "i2")).toEqual([coconutDraft]);
+  });
+
+  it("save on an unchanged line without changing it, nor putting it in the edits", () => {
+    const r = withOurs();
+    const draft = setSubstitutions(r, ourDraftOf(r), "i2", [coconutDraft]);
+    const ours = saved(r, draft).ingredients;
+    expect(ours.substitutions).toEqual({ i2: [coconutDraft] });
+    expect(Object.keys(ours.edit)).toEqual(["i1"]);
+    expect(ourRows(r, draft).ingredients.find((row) => row.id === "i2")?.change).toBeUndefined();
+  });
+
+  it("save as none once every one is removed, even where the Original has some", () => {
+    const r = withOurs();
+    const draft = setSubstitutions(r, ourDraftOf(r), "i3", []);
+    expect(saved(r, draft).ingredients.substitutions).toEqual({ i3: [] });
+  });
+
+  it("are no change while they are the Original's, as they started", () => {
+    const r = withOurs();
+    const draft = ourDraftOf(r);
+    const same = setSubstitutions(r, draft, "i3", substitutesFor(r, draft, "i3"));
+    expect(ourOperation(r, same)).toBeUndefined();
+    expect(ourOperation(r, setSubstitutions(r, draft, "i1", []))).toBeUndefined();
+  });
+
+  it("go with a line the draft removes, and stay with one it edits", () => {
+    const r = withSubstitutes();
+    const removed = removeItem(ourDraftOf(r), "ingredients", "i2");
+    expect(saved(r, removed).ingredients.substitutions).toEqual({});
+    const edited = editLine(r, ourDraftOf(r), "i2", edit("shallot"), form);
+    expect(saved(r, edited).ingredients.substitutions).toEqual({ i2: [coconutDraft] });
+    // A removed Original line's come back with it once restored.
+    const restored = restoreItem(removed, "ingredients", "i2");
+    expect(ourOperation(r, restored)).toBeUndefined();
+  });
+
+  it("go with an added line the draft drops, not to the line added after it", () => {
+    const r = withOurs();
+    const place = { after: "i1", component: null };
+    const butter = addLine(ourDraftOf(r), place, edit("butter"), form);
+    const id = butter.ingredients.add.find((line) => line.name === "butter")?.id ?? "";
+    const held = setSubstitutions(r, butter, id, [coconutDraft]);
+    const eggs = addLine(removeItem(held, "ingredients", id), place, edit("eggs"), form);
+    const again = eggs.ingredients.add.find((line) => line.name === "eggs")?.id ?? "";
+    expect(substitutesFor(r, eggs, again)).toEqual([]);
+    expect(saved(r, eggs).ingredients.substitutions).toEqual({});
   });
 });
 

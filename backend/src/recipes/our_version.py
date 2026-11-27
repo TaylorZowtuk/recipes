@@ -18,16 +18,21 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from recipes.edits import (
     EDITOR_KEPT,
+    CanonicalChoice,
     Edited,
     EditLine,
     ExistingCanonical,
     LineFields,
-    _by_editor,  # pyright: ignore[reportPrivateUsage]
+    by_editor,
+    chosen_canonical,
     edited_line,
+    new_by_editor,
+    substitute_numbers,
 )
 from recipes.models import (
     MAX_LINES,
     MAX_RECIPE_BYTES,
+    MAX_SUBSTITUTES,
     OUR_VERSION,
     PORTION_TOLERANCE,
     AddedLine,
@@ -46,11 +51,14 @@ from recipes.models import (
     OurStep,
     OurSteps,
     OurVersion,
+    Ratio,
     Recipe,
     RecipeFacts,
     Segment,
     StepFacts,
     StepUse,
+    Substitution,
+    SubstitutionsFact,
     TextSegment,
     effective,
     item_of,
@@ -106,10 +114,33 @@ class AddedStepDraft(OurStepDraft):
     after: Label | None
 
 
+class SubstituteDraft(BaseModel):
+    """A household substitute for a line: its Canonical Ingredient, existing or new, its wording
+    (none for the Canonical Ingredient's name), how much of it to use, a note, and its FDC food
+    and FDC portion, whose numbers the API copies from the FDC Snapshot.
+    """
+
+    canonical: CanonicalChoice
+    wording: Label | None = None
+    ratio: Ratio
+    note: Label
+    fdc_id: int
+    portion_id: int | None
+
+
 class LinesDraft(BaseModel):
+    """The lines Our Version edits, removes and adds, and each line's household substitutions,
+    by the Original's line id or an added line's draft id: a line left out shows the Original's
+    substitutions, and an empty list shows none.
+    """
+
     edit: Annotated[dict[str, OurLineDraft], Field(max_length=MAX_LINES)] = {}
     remove: Annotated[list[Label], Field(max_length=MAX_LINES)] = []
     add: Annotated[list[AddedLineDraft], Field(max_length=MAX_LINES)] = []
+    substitutions: Annotated[
+        dict[str, Annotated[list[SubstituteDraft], Field(max_length=MAX_SUBSTITUTES)]],
+        Field(max_length=MAX_LINES),
+    ] = {}
 
 
 class StepsDraft(BaseModel):
@@ -145,9 +176,11 @@ def save(
 ) -> Saved:
     """The recipe with Our Version as drafted. A line left as it was keeps its facts; a changed
     one takes the editor's, and a Canonical Ingredient chosen for it also matches the recipe's own
-    Original lines with the wording. A new or changed step makes Our Version Pending, and one
-    Awaiting Review whose last open issue the save settles is Ready. A step the save leaves
-    with a Segment or use for a line it removed, or renamed or matched anew, is flagged.
+    Original lines with the wording. A line's household substitutions are the editor's, kept as
+    stored while they stay as they were, and never mark the line changed. A new or changed step
+    makes Our Version Pending, and one Awaiting Review whose last open issue the save settles is
+    Ready. A step the save leaves with a Segment or use for a line it removed, or renamed or
+    matched anew, is flagged.
     Raises a 422 for a draft it can't take.
     """
     if len(draft.model_dump_json().encode()) > MAX_RECIPE_BYTES:
@@ -192,7 +225,9 @@ def save(
         line_id: _line(
             named.get(line_id, line_id),
             line,
-            stored_facts.get(line_id),
+            # A line holding only household substitutions is built from the Original's, as a
+            # first edit is; its substitutions come from the draft.
+            stored_facts.get(line_id) if _writes(stored_lines, line_id) else None,
             original,
             store=store,
             saved=saved,
@@ -209,6 +244,23 @@ def save(
         line_id: line_text(cast("ParseFact", facts.parse))
         for line_id, facts in {**kept, **fresh}.items()
     }
+    effective_ids = {
+        **{i: i for i in line_ids if i not in lines_draft.remove},
+        **{name: line_id for line_id, name in named.items()},
+    }
+    household = _household(
+        lines_draft.substitutions,
+        effective_ids,
+        lines_draft.remove,
+        {**originals, **kept, **fresh},
+        stored_facts,
+        store=store,
+        saved=saved,
+        snapshot=snapshot,
+        now=now,
+    )
+    fresh = {i: f.model_copy(update={"substitutions": household.get(i)}) for i, f in fresh.items()}
+    kept = {i: f.model_copy(update={"substitutions": household.get(i)}) for i, f in kept.items()}
     edit = {
         line_id: OurLine(text=texts[line_id], component=line.component)
         for line_id, line in lines_draft.edit.items()
@@ -217,6 +269,13 @@ def save(
         AddedLine(id=line_id, after=after, text=texts[line_id], component=line.component)
         for line_id, after, line in added_lines
     ]
+    ingredients = OurLines(edit=edit, remove=lines_draft.remove, add=add)
+    # A line otherwise as the Original has it holds only its substitutions.
+    held = {
+        i: IngredientFacts(substitutions=f)
+        for i, f in household.items()
+        if not _writes(ingredients, i)
+    }
     steps = OurSteps(
         edit={
             step_id: OurStep(text=s.text, component=s.component)
@@ -237,9 +296,9 @@ def save(
         if step_id in after_steps and before_steps.get(step_id) == after_steps[step_id]
     }
     ours = OurVersion(
-        ingredients=OurLines(edit=edit, remove=lines_draft.remove, add=add),
+        ingredients=ingredients,
         steps=steps,
-        facts=RecipeFacts(ingredients=kept, steps=kept_steps),
+        facts=RecipeFacts(ingredients={**kept, **held}, steps=kept_steps),
         note=draft.note,
         edited_at=now,
     )
@@ -254,9 +313,17 @@ def save(
             "our_version_last_step": last_step,
         }
     )
+    stored_household = {
+        i: f.substitutions for i, f in stored_facts.items() if f.substitutions is not None
+    }
     touched = {
         *fresh,
-        *(set(stored_facts) - set(built)),
+        *(i for i in stored_facts if _writes(stored_lines, i) and not _writes(ingredients, i)),
+        *(
+            f"{i}.substitutions"
+            for i in {*stored_household, *household}
+            if stored_household.get(i) != household.get(i)
+        ),
         *(i for i, text in before_steps.items() if after_steps.get(i) != text),
         *(i for i, text in after_steps.items() if before_steps.get(i) != text),
     }
@@ -279,7 +346,7 @@ def edit_line(
     line_id = edit.line_id.removeprefix(OUR_VERSION)
     ours = recipe.our_version
     stored = ours.facts.ingredients.get(line_id) if ours else None
-    if ours is None or stored is None:
+    if ours is None or stored is None or not _writes(ours.ingredients, line_id):
         raise HTTPException(422, f"Our Version has no line {line_id}")
     result = Edited(recipe)
     facts = _built(
@@ -323,9 +390,10 @@ def _finished(
 ) -> Recipe:
     """The recipe an Our Version change leaves, with the lines it rebuilt (`fresh`): each line's
     pick spread over the recipe, apart from those lines, which are the editor's own picks; the
-    open issues of the lines and steps it `touched` settled, the rest kept; each step it affected
-    flagged, as is each that now uses a line past all of it, while a flag whose line is back
-    within all of it is settled; and its Our Version settled.
+    open issues of the lines and steps it `touched`, and of the facts it touched such as
+    `i3.substitutions`, settled, the rest kept; each step it affected flagged, as is each that
+    now uses a line past all of it, while a flag whose line is back within all of it is settled;
+    and its Our Version settled.
     """
     for edited in edits:
         if edited.shared:
@@ -336,7 +404,10 @@ def _finished(
         changed,
         lambda fact_id: (
             fact_id.startswith(OUR_VERSION)
-            and fact_id.removeprefix(OUR_VERSION).partition(".")[0] in touched
+            and (
+                (path := fact_id.removeprefix(OUR_VERSION)) in touched
+                or path.partition(".")[0] in touched
+            )
         ),
     )
     ours = ours.model_copy(update={"facts": ours.facts.model_copy(update={"ingredients": facts})})
@@ -601,6 +672,13 @@ def _check_order(
         waiting = [a for a in waiting if a not in ready]
 
 
+def _writes(lines: OurLines, line_id: str) -> bool:
+    """Whether Our Version writes the line, editing or adding it, rather than holding only its
+    household substitutions.
+    """
+    return line_id in lines.edit or any(a.id == line_id for a in lines.add)
+
+
 def _line(
     line_id: str,
     draft: OurLineDraft,
@@ -642,6 +720,99 @@ def _line(
     return facts
 
 
+def _household(
+    drafted: Mapping[str, list[SubstituteDraft]],
+    effective_ids: Mapping[str, str],
+    removed: list[str],
+    lines: Mapping[str, IngredientFacts],
+    stored: Mapping[str, IngredientFacts],
+    *,
+    store: Store,
+    saved: Saved,
+    snapshot: Callable[[], fdc.Snapshot],
+    now: datetime,
+) -> dict[str, SubstitutionsFact]:
+    """Each effective line's household substitutions as drafted, by its id (`effective_ids` maps
+    the draft's id to it), refusing one on a line not in Our Version or its own Canonical
+    Ingredient (its `lines` match). Ones as stored keep their facts; others are the editor's.
+    """
+    household: dict[str, SubstitutionsFact] = {}
+    for name, drafts in drafted.items():
+        if name in removed:
+            refuse("ingredients", name, f"Line {name} is removed, so it holds no substitutions")
+        line_id = effective_ids.get(name)
+        if line_id is None:
+            refuse("ingredients", name, f"The recipe has no line {name}")
+        match = lines[line_id].match if line_id in lines else None
+        own = match.canonical_id if match else None
+        if any(
+            isinstance(d.canonical, ExistingCanonical) and d.canonical.id == own for d in drafts
+        ):
+            refuse("ingredients", name, "A substitute isn't its line's own Canonical Ingredient")
+        before = stored[line_id].substitutions if line_id in stored else None
+        if before is not None and _same_substitutes(store, drafts, before.items):
+            household[line_id] = before
+            continue
+        items = [_substitute(store, name, d, saved=saved, snapshot=snapshot) for d in drafts]
+        household[line_id] = new_by_editor(SubstitutionsFact, now, items=items)
+    return household
+
+
+def _same_substitutes(
+    store: Store, drafts: list[SubstituteDraft], items: list[Substitution]
+) -> bool:
+    """Whether the drafted substitutes are the stored ones, in order, a draft with no wording
+    taking its Canonical Ingredient's name.
+    """
+
+    def same(draft: SubstituteDraft, item: Substitution) -> bool:
+        canonical = draft.canonical
+        if not isinstance(canonical, ExistingCanonical) or canonical.id != item.canonical_id:
+            return False
+        fields = (draft.ratio, draft.note, draft.fdc_id, draft.portion_id)
+        if fields != (item.ratio, item.note, item.fdc_id, item.portion_id):
+            return False
+        if draft.wording is not None:
+            return draft.wording == item.wording
+        found = store.canonical_ingredient(canonical.id)
+        return found is not None and found.name == item.wording
+
+    return len(drafts) == len(items) and all(map(same, drafts, items, strict=True))
+
+
+def _substitute(
+    store: Store,
+    name: str,
+    draft: SubstituteDraft,
+    *,
+    saved: Saved,
+    snapshot: Callable[[], fdc.Snapshot],
+) -> Substitution:
+    """A household substitute with its FDC food's numbers from the FDC Snapshot, and its
+    Canonical Ingredient, Confirmed or new, written with Our Version. A refusal names the line.
+    """
+    edited = Edited(saved.recipe)
+    try:
+        canonical = chosen_canonical(store, draft.canonical, edited)
+    except HTTPException as refusal:
+        refuse("ingredients", name, refusal.detail)
+    wording = draft.wording or canonical.name
+    try:
+        numbers = substitute_numbers(snapshot(), name, wording, draft.fdc_id, draft.portion_id)
+    except HTTPException as refusal:
+        refuse("ingredients", name, refusal.detail)
+    saved.edits.append(edited)
+    return Substitution(
+        wording=wording,
+        canonical_id=canonical.id,
+        ratio=draft.ratio,
+        note=draft.note,
+        fdc_id=draft.fdc_id,
+        portion_id=draft.portion_id,
+        fdc=numbers,
+    )
+
+
 def _built(
     line_id: str,
     line: LineFields,
@@ -679,7 +850,7 @@ def _built(
 
 def _as_editors[F: (MatchFact, ConversionFact)](fact: F | None, now: datetime) -> F | None:
     """The fact as the editor's: a match or conversion kept from the Original was enrichment's."""
-    return fact if fact is None or fact.provenance == "editor" else _by_editor(fact, now)
+    return fact if fact is None or fact.provenance == "editor" else by_editor(fact, now)
 
 
 def _unchanged(draft: OurLineDraft, stored: IngredientFacts) -> bool:

@@ -34,6 +34,7 @@ from recipes.edits import (
     matched_food,
     overused,
     share_all,
+    substitute_numbers,
 )
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
@@ -1071,10 +1072,7 @@ def _filled(body: Enrichment, snapshot: fdc.Snapshot) -> RecipeFacts:
 def _with_numbers(
     line_id: str, item: EnrichmentSubstitution, snapshot: fdc.Snapshot
 ) -> Substitution:
-    try:
-        numbers = fdc.numbers(snapshot, item.fdc_id, item.portion_id)
-    except fdc.NotInSnapshot as refused:
-        raise HTTPException(422, f"Line {line_id}'s substitute {item.wording}: {refused}") from None
+    numbers = substitute_numbers(snapshot, line_id, item.wording, item.fdc_id, item.portion_id)
     return Substitution(**item.model_dump(), fdc=numbers)
 
 
@@ -1184,7 +1182,9 @@ def _check_our_steps(body: OurVersionEnrichment, shown: Effective) -> None:
             "description": "Not a valid edit, the preview isn't one of the recipe's images, Our "
             "Version edits or removes a line or step the Original lacks, both edits and removes "
             "one, adds one after a line or step it doesn't have or with an id already used, or "
-            "has a line its Review line edit would refuse, naming it by the draft's id, or the "
+            "has a line its Review line edit would refuse, or substitutions for a line it "
+            "lacks or removes, of the line's own Canonical Ingredient or with a food the FDC "
+            "Snapshot lacks, naming it by the draft's id, or the "
             "edited recipe is too big to store, or its lines write more Canonical Ingredients "
             "and wordings than one write holds",
         },
@@ -1201,7 +1201,10 @@ def patch_recipe(
     provenance `editor`, built as a Review line edit builds them, with text built from them; a line
     saved as it was keeps its facts. A line's new Canonical Ingredient, FDC food or portion fixes
     its wording as a Review line edit does, for this recipe's other lines, in the Original and Our
-    Version, and, once the recipe is saved, every other recipe's. A new or changed step makes the
+    Version, and, once the recipe is saved, every other recipe's. A line's household
+    substitutions replace the Original's on that line, Confirmed with provenance `editor`, their
+    numbers from the FDC Snapshot; ones saved as they were keep their facts, and none marks the
+    line changed or moves the Our Version Status. A new or changed step makes the
     Our Version Status Pending; a new Our Version without one is Ready. Removing a line, or
     changing an edited line's name or Canonical Ingredient, gives each step with a Segment or use
     for it an Enrichment Issue that proposes no correction, and a Ready Our Version is Awaiting

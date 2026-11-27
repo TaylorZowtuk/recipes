@@ -173,6 +173,7 @@ export function RecipeEditor({
             <OurVersionFields
               recipe={recipe}
               draft={draft.ours}
+              collection={collection}
               problem={byLine ? problem : undefined}
               refusedAt={refusedAt}
               onChange={(ours) => change({ ours })}

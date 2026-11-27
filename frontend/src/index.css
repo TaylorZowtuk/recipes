@@ -920,8 +920,10 @@ h1:focus {
   margin-top: var(--space);
 }
 
-/* What Our Version changed on a line or step, quietly under it: "was ¾ cup", "added in Our Version". */
-.ingredients li:has(.our-version-note) {
+/* What Our Version changed on a line or step, quietly under it: "was ¾ cup", "added in Our Version".
+   A line's substitutes go under it the same way: "or coconut oil (×1)". */
+.ingredients li:has(.our-version-note),
+.ingredients li:has(.ingredient-substitute) {
   flex-wrap: wrap;
   row-gap: 0;
 }
@@ -932,6 +934,18 @@ h1:focus {
   color: var(--text-secondary);
   font-size: var(--text-small);
   font-style: italic;
+}
+
+.ingredient-substitute,
+.our-version-substitute {
+  display: block;
+  flex-basis: 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.our-version-substitutes {
+  margin: 0;
 }
 
 .our-version-about {

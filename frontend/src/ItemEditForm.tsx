@@ -11,7 +11,14 @@ import {
 } from "react";
 import type { DifficultyChoice } from "./addRecipe";
 import { kitchenNumber } from "./amount";
-import { api, type Collection, type FdcFood, type FdcPortion, type Recipe } from "./api/client";
+import {
+  api,
+  type Collection,
+  type FdcFood,
+  type FdcPortion,
+  type Recipe,
+  type SubstituteDraft,
+} from "./api/client";
 import {
   type Built,
   type CanonicalPick,
@@ -30,13 +37,20 @@ import {
   lineEdit,
   lineName,
   lineOf,
+  MAX_SUBSTITUTES,
   needsFood,
+  newSubstitute,
   pickKey,
   portionMisfit,
   renamed,
+  type SubstituteEntry,
+  type SubstituteLine,
   stepDraft,
   stepEdit,
   stepRows,
+  substituteDrafts,
+  substituteEntry,
+  substituteName,
   substitutionEdit,
   withWording,
 } from "./factEdits";
@@ -373,7 +387,7 @@ export function LineForm({
         />
       </fieldset>
       <CanonicalPicker
-        line={line}
+        currentId={line.facts?.match?.canonical_id}
         collection={collection}
         pick={saved.canonical}
         required={required}
@@ -425,12 +439,15 @@ export function LineForm({
 const CANONICAL_SEARCH = "Find or create one";
 const SHOWN_MATCHES = 6;
 
-// Keep the line's Canonical Ingredient, pick it again, pick another found by name, or create one
-// from the search, and under the choices, what the pick reaches. Picking it again shares it with
-// every line worded like this one, which retries the recipes an earlier save couldn't update. A
-// renamed line can't keep it, but may pick it again, and a `required` one has none to keep.
+// Keep the line's Canonical Ingredient (`currentId`), pick it again, pick another found by name, or
+// create one from the search, and under the choices, what the pick reaches. Picking it again shares
+// it with every line worded like this one, which retries the recipes an earlier save couldn't
+// update. A renamed line can't keep it, but may pick it again, and a `required` one, or a
+// substitute added, has none to keep.
 function CanonicalPicker({
-  line,
+  currentId,
+  of = "line",
+  searchName,
   collection,
   pick,
   reach,
@@ -438,7 +455,10 @@ function CanonicalPicker({
   required,
   onPick,
 }: {
-  line: LineOf;
+  currentId: string | undefined;
+  of?: "line" | "substitute";
+  // The search field's name, which a problem names it by, else its label.
+  searchName?: string;
   collection: Kitchen;
   pick: CanonicalPick;
   reach: string | null;
@@ -450,7 +470,6 @@ function CanonicalPicker({
   const categories = useId();
   const [query, setQuery] = useState("");
   const all = collection.canonical_ingredients;
-  const currentId = line.facts?.match?.canonical_id;
   const current = all.find((c) => c.id === currentId);
   const q = query.trim();
   const found = q
@@ -468,6 +487,7 @@ function CanonicalPicker({
       <legend>Canonical Ingredient</legend>
       <Field
         label={CANONICAL_SEARCH}
+        name={searchName}
         hint="Search the Canonical Ingredients by name."
         value={query}
         onChange={setQuery}
@@ -476,7 +496,7 @@ function CanonicalPicker({
         <p className="field-hint item-edit-found">
           {renamed
             ? "The name’s wording changed, so choose its Canonical Ingredient."
-            : "Choose the line’s Canonical Ingredient."}
+            : `Choose the ${of}’s Canonical Ingredient.`}
         </p>
       )}
       <div className="choices">
@@ -629,6 +649,7 @@ const converts = (p: FdcPortion) => p.density_g_per_ml !== null || p.grams_per_c
 // searched from `startQuery`, then `children`, the line's Weight choice the portion gives.
 function FoodPicker({
   of,
+  searchName,
   current,
   food,
   startQuery,
@@ -640,6 +661,8 @@ function FoodPicker({
   children,
 }: {
   of: "line" | "substitute";
+  // The search field's name, which a problem names it by, else its label.
+  searchName?: string;
   current: FoodPick;
   food: FoodPick;
   startQuery: string;
@@ -706,6 +729,7 @@ function FoodPicker({
       <legend>FDC food</legend>
       <Field
         label={FOOD_SEARCH}
+        name={searchName}
         hint="Search the FDC foods by name. Where none really fits, choose the closest."
         value={query}
         onChange={setQuery}
@@ -969,7 +993,7 @@ function Substitute({
   ratio: number;
   note: string;
   food: NonNullable<FoodPick>;
-  line: { unit: string | null; unitKind: FoodLine["unit_kind"]; hasAmount: boolean };
+  line: Omit<SubstituteLine, "canonicalId">;
   disabled: boolean;
   noteId?: string;
   onSave: SaveEdit;
@@ -1038,5 +1062,158 @@ function Substitute({
         </fieldset>
       </form>
     </ProblemOf>
+  );
+}
+
+// Which Canonical Ingredient a pick names, so a new pick starts a substitute's food afresh.
+const pickKeyOf = (pick: CanonicalPick) =>
+  pick.kind === "keep" ? "" : pick.kind === "existing" ? pick.id : "new";
+
+type OurSubstitutesProps = Pick<FormProps, "collection" | "disabled" | "note" | "onCancel"> & {
+  start: SubstituteDraft[];
+  line: SubstituteLine;
+  submit?: string;
+  onSave: (substitutes: SubstituteDraft[]) => Promise<string | null>;
+};
+
+// Our Version's substitutes for a line, saved together: each one's ratio, note, FDC food and
+// portion, and an added one's Canonical Ingredient, existing or new, too. With every one removed,
+// the line shows none.
+export function OurSubstitutesForm({
+  start,
+  line,
+  collection,
+  onSave,
+  ...props
+}: OurSubstitutesProps) {
+  const keys = useRef(0);
+  const keyed = (entry: SubstituteEntry) => ({ ...entry, key: keys.current++ });
+  const [entries, setEntries] = useState(() => start.map((from) => keyed(substituteEntry(from))));
+  const host = useRef<HTMLDivElement>(null);
+  // Add moves the focus into the substitute it adds; Remove to Add a substitute.
+  const moved = useRef<"added" | "removed">(undefined);
+  useEffect(() => {
+    const focus = moved.current;
+    moved.current = undefined;
+    const subs = host.current?.querySelectorAll(".item-edit-substitute");
+    if (focus === "added") subs?.[subs.length - 1]?.querySelector<HTMLElement>("input")?.focus();
+    if (focus === "removed")
+      host.current?.querySelector<HTMLElement>("[data-add-substitute]")?.focus();
+  });
+  return (
+    <EditForm build={() => substituteDrafts(entries, line.canonicalId)} onSave={onSave} {...props}>
+      <div ref={host}>
+        <p className="field-hint">
+          Your household’s substitutes for this line, in place of the recipe’s. With none, the line
+          shows none.
+        </p>
+        {entries.map((entry, n) => (
+          <OurSubstitute
+            key={entry.key}
+            n={n}
+            entry={entry}
+            line={line}
+            collection={collection}
+            onChange={(patch) =>
+              setEntries((was) =>
+                was.map((other) => (other.key === entry.key ? { ...other, ...patch } : other)),
+              )
+            }
+            onRemove={() => {
+              moved.current = "removed";
+              setEntries((was) => was.filter((other) => other.key !== entry.key));
+            }}
+          />
+        ))}
+        {entries.length < MAX_SUBSTITUTES && (
+          <button
+            type="button"
+            className="text-button"
+            data-add-substitute
+            onClick={() => {
+              moved.current = "added";
+              setEntries((was) => [...was, keyed(newSubstitute())]);
+            }}
+          >
+            Add a substitute
+          </button>
+        )}
+      </div>
+    </EditForm>
+  );
+}
+
+function OurSubstitute({
+  n,
+  entry,
+  line,
+  collection,
+  onChange,
+  onRemove,
+}: {
+  n: number;
+  entry: SubstituteEntry;
+  line: SubstituteLine;
+  collection: Kitchen;
+  onChange: (patch: Partial<SubstituteEntry>) => void;
+  onRemove: () => void;
+}) {
+  const { from, pick } = entry;
+  const picked =
+    pick.kind === "existing"
+      ? collection.canonical_ingredients.find((c) => c.id === pick.id)?.name
+      : pick.kind === "new"
+        ? pick.name
+        : undefined;
+  // An added one is named by the Canonical Ingredient picked, so two read apart, and its food
+  // search starts from it, afresh on each pick.
+  const name = from ? substituteName(from, collection) : picked || "New substitute";
+  const searchFrom = from ? name : picked;
+  return (
+    <fieldset className="sheet-section item-edit-substitute">
+      <legend>{name}</legend>
+      {!from && (
+        <CanonicalPicker
+          currentId={undefined}
+          of="substitute"
+          searchName={`canonical-${n}`}
+          collection={collection}
+          pick={pick}
+          reach={null}
+          renamed={false}
+          required
+          onPick={(next) =>
+            onChange({ pick: next, ...(pickKeyOf(next) !== pickKeyOf(pick) && { food: null }) })
+          }
+        />
+      )}
+      <Field
+        label="Ratio"
+        name={`ratio-${n}`}
+        hint="How much to use for each 1 of the line, such as 0.75."
+        decimal
+        value={entry.ratio}
+        onChange={(ratio) => onChange({ ratio })}
+      />
+      <Field label="Note" value={entry.note} onChange={(note) => onChange({ note })} />
+      {searchFrom !== undefined && (
+        <FoodPicker
+          key={from ? "kept" : pickKeyOf(pick)}
+          of="substitute"
+          searchName={`food-${n}`}
+          current={from ? substituteEntry(from).food : null}
+          food={entry.food}
+          startQuery={searchFrom}
+          defaultFrom={!from && pick.kind === "existing" ? pick.id : undefined}
+          unit={line.unit}
+          unitKind={line.unitKind}
+          hasAmount={line.hasAmount}
+          onPick={(food) => food && onChange({ food })}
+        />
+      )}
+      <button type="button" className="text-button text-button-danger" onClick={onRemove}>
+        Remove<span className="visually-hidden"> {name}</span>
+      </button>
+    </fieldset>
   );
 }

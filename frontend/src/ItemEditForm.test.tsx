@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type Collection, type FdcFood, type Recipe } from "./api/client";
 import { EDITOR_KEPT, lineDraft, lineOf, normalizeWording } from "./factEdits";
-import { ItemEditForm, LineForm, StepTextForm } from "./ItemEditForm";
+import { ItemEditForm, LineForm, OurSubstitutesForm, StepTextForm } from "./ItemEditForm";
 import { reviewOf } from "./review";
 import {
   BUTTER,
@@ -859,6 +859,146 @@ describe("an edit form, as an editor uses it", () => {
       const said = off.getAttribute("aria-describedby");
       expect(said && document.getElementById(said)?.textContent).toBe("You’re offline.");
     }
+  });
+
+  // The fixture's rice flour for flour by the cup, as an Our Version draft holds it.
+  const riceDraft = {
+    canonical: { kind: "existing" as const, id: KNOWN_CANONICAL },
+    wording: "rice flour",
+    ratio: 0.75,
+    note: "use a little less",
+    fdc_id: 2,
+    portion_id: null,
+  };
+  const substitutesForm = (start: (typeof riceDraft)[], canonicalId?: string) =>
+    act(() =>
+      root.render(
+        <OurSubstitutesForm
+          start={start}
+          line={{ unit: "cups", unitKind: null, hasAmount: true, canonicalId }}
+          collection={collection}
+          disabled={false}
+          submit="Done"
+          onSave={onSave}
+          onCancel={() => {}}
+        />,
+      ),
+    );
+  const legends = () => [...host.querySelectorAll("legend")].map((l) => l.textContent);
+
+  it("opens Our Version's substitutes with the line's own, and saves them as they were", async () => {
+    substitutesForm([riceDraft]);
+    expect(legends()).toContain("rice flour");
+    expect(field("Ratio").value).toBe("0.75");
+    expect(field("Note").value).toBe("use a little less");
+    expect(field("Find an FDC food").value).toBe("rice flour");
+    await settle();
+    expect(checked()).toEqual(["Rice flour, white · SR Legacy", "No portion"]);
+    await click(button("Done"));
+    expect(saved()).toEqual([[riceDraft]]);
+  });
+
+  it("changes a substitute's ratio and note, or removes every one", async () => {
+    substitutesForm([riceDraft]);
+    type("Ratio", "1½");
+    type("Note", " sift it ");
+    await click(button("Done"));
+    expect(saved()).toEqual([[{ ...riceDraft, ratio: 1.5, note: "sift it" }]]);
+    await click(button("Remove rice flour"));
+    expect(legends()).not.toContain("rice flour");
+    await click(button("Done"));
+    expect(saved()[1]).toEqual([]);
+  });
+
+  it("adds a substitute of a Canonical Ingredient, with the food the Collection gives it", async () => {
+    substitutesForm([]);
+    await click(button("Add a substitute"));
+    expect(legends()).toContain("New substitute");
+    type("Find or create one", "gar");
+    await click(choice("garlic") as HTMLInputElement);
+    await settle();
+    // Named by its Canonical Ingredient once picked, so two added ones read apart.
+    expect(legends()).toContain("garlic");
+    expect(legends()).not.toContain("New substitute");
+    expect(() => button("Remove garlic")).not.toThrow();
+    expect(queries()).toEqual([{ q: "garlic", canonical: KNOWN_CANONICAL, unit: "cups" }]);
+    expect(choice("Garlic, raw · SR Legacy")?.checked).toBe(true);
+    expect(field("Ratio").value).toBe("1");
+    await click(button("Done"));
+    // Its wording is the Canonical Ingredient's name, which the API gives it.
+    expect(saved()).toEqual([
+      [
+        {
+          canonical: { kind: "existing", id: KNOWN_CANONICAL },
+          wording: null,
+          ratio: 1,
+          note: "",
+          fdc_id: GARLIC.fdcId,
+          portion_id: null,
+        },
+      ],
+    ]);
+  });
+
+  it("adds a substitute of a new Canonical Ingredient, once its FDC food is chosen", async () => {
+    substitutesForm([riceDraft]);
+    await click(button("Add a substitute"));
+    type("Find or create one", "ghee");
+    await click(choice("New: ghee") as HTMLInputElement);
+    expect(legends()).toContain("ghee");
+    type("Family", "Dairy");
+    await click(choice("Dairy & Eggs") as HTMLInputElement);
+    await settle();
+    await click(button("Done"));
+    expect(saved()).toEqual([]);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Choose an FDC food for this substitute: the closest one if none fits.",
+    );
+    await click(choice("Butter, Clarified butter (ghee) · SR Legacy") as HTMLInputElement);
+    await click(button("Done"));
+    expect(saved()).toEqual([
+      [
+        riceDraft,
+        {
+          canonical: {
+            kind: "new",
+            name: "ghee",
+            family: "dairy",
+            store_category_id: "dairy-eggs",
+          },
+          wording: null,
+          ratio: 1,
+          note: "",
+          fdc_id: GHEE.fdc_id,
+          portion_id: null,
+        },
+      ],
+    ]);
+  });
+
+  it("asks for a Canonical Ingredient other than the line's own", async () => {
+    substitutesForm([], KNOWN_CANONICAL);
+    await click(button("Add a substitute"));
+    await click(button("Done"));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Choose the substitute’s Canonical Ingredient.",
+    );
+    type("Find or create one", "gar");
+    await click(choice("garlic") as HTMLInputElement);
+    await settle();
+    await click(button("Done"));
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      "A substitute can’t be the line’s own Canonical Ingredient.",
+    );
+    expect(saved()).toEqual([]);
+  });
+
+  it("offers adding a substitute only while the line has fewer than five", () => {
+    substitutesForm(Array(4).fill(riceDraft));
+    expect(() => button("Add a substitute")).not.toThrow();
+    act(() => root.render(null));
+    substitutesForm(Array(5).fill(riceDraft));
+    expect(() => button("Add a substitute")).toThrow();
   });
 
   it("saves the Difficulty", async () => {

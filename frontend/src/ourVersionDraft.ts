@@ -1,6 +1,18 @@
 import { formatAmount } from "./amount";
-import type { IngredientFacts, OurVersionDraft, Recipe, RecipeOperation } from "./api/client";
-import { type LineDraft, type LineEdit, type LineOf, lineOf } from "./factEdits";
+import type {
+  IngredientFacts,
+  OurVersionDraft,
+  Recipe,
+  RecipeOperation,
+  SubstituteDraft,
+} from "./api/client";
+import {
+  type LineDraft,
+  type LineEdit,
+  type LineOf,
+  lineOf,
+  type SubstituteLine,
+} from "./factEdits";
 import { effective, overlay } from "./ourVersion";
 
 type Ours = NonNullable<Recipe["our_version"]>;
@@ -80,6 +92,23 @@ function sameLine(a: OurLineFields, b: OurLineFields): boolean {
   );
 }
 
+const sameSubstitute = (a: SubstituteDraft, b: SubstituteDraft) =>
+  sameCanonical(a.canonical, b.canonical) &&
+  (a.wording ?? null) === (b.wording ?? null) &&
+  a.ratio === b.ratio &&
+  a.note === b.note &&
+  a.fdc_id === b.fdc_id &&
+  a.portion_id === b.portion_id;
+
+// Whether two drafts hold the same household substitutions for the same lines.
+function sameSubstitutions(a: Lines["substitutions"], b: Lines["substitutions"]): boolean {
+  const held = Object.entries(a);
+  return (
+    held.length === Object.keys(b).length &&
+    held.every(([id, x]) => id in b && sameList(x, b[id] ?? [], sameSubstitute))
+  );
+}
+
 const sameStep = (a: Steps["edit"][string], b: Steps["edit"][string]) =>
   a.text === b.text && (a.component ?? null) === (b.component ?? null);
 
@@ -123,6 +152,7 @@ export function ourDraftOf(recipe: Recipe): OurDraft {
         after: line.after,
         ...storedFields(ours?.facts.ingredients[line.id], line.component),
       })),
+      substitutions: storedSubstitutions(ours),
     },
     steps: {
       edit: mapValues(ours?.steps.edit ?? {}, ({ text, component }) => ({ text, component })),
@@ -158,9 +188,74 @@ function anchored<P extends Lines | Steps>(items: { id: string }[], part: P): P 
   return { ...part, remove: part.remove.toSorted(), add };
 }
 
+type Substitution = NonNullable<IngredientFacts["substitutions"]>["items"][number];
+
+// A stored substitution as a draft holds it, its wording kept as stored.
+const draftOf = (sub: Substitution): SubstituteDraft => ({
+  canonical: { kind: "existing", id: sub.canonical_id },
+  wording: sub.wording,
+  ratio: sub.ratio,
+  note: sub.note,
+  fdc_id: sub.fdc_id,
+  portion_id: sub.portion_id,
+});
+
+// Our Version's household substitutions as stored, by line id, so a save keeps them as they are.
+function storedSubstitutions(ours: Ours | null | undefined): Lines["substitutions"] {
+  return Object.fromEntries(
+    Object.entries(ours?.facts.ingredients ?? {}).flatMap(([id, facts]) =>
+      facts.substitutions ? [[id, facts.substitutions.items.map(draftOf)]] : [],
+    ),
+  );
+}
+
+// The substitutions a line shows without household ones of its own: none for a line the draft
+// edits or adds, else the Original's, each kept with the wording the recipe quotes.
+function recipeSubstitutes(recipe: Recipe, draft: OurDraft, id: string): SubstituteDraft[] {
+  const lines = draft.ingredients;
+  if (id in lines.edit || lines.add.some((line) => line.id === id)) return [];
+  return (recipe.facts.ingredients[id]?.substitutions?.items ?? []).map(draftOf);
+}
+
+// The substitutions a line shows in the draft, which its form starts from: its household ones
+// when the draft holds them, else the recipe's.
+export function substitutesFor(recipe: Recipe, draft: OurDraft, id: string): SubstituteDraft[] {
+  return draft.ingredients.substitutions[id] ?? recipeSubstitutes(recipe, draft, id);
+}
+
+// The line's household substitutions set to `substitutes`, an empty list for none. A line that
+// Our Version doesn't hold any for as stored holds none while they are what it shows without.
+export function setSubstitutions(
+  recipe: Recipe,
+  draft: OurDraft,
+  id: string,
+  substitutes: SubstituteDraft[],
+): OurDraft {
+  const lines = draft.ingredients;
+  const { [id]: _, ...others } = lines.substitutions;
+  const stored = id in storedSubstitutions(recipe.our_version);
+  const unheld =
+    !stored && sameList(substitutes, recipeSubstitutes(recipe, draft, id), sameSubstitute);
+  const substitutions = unheld ? others : { ...others, [id]: substitutes };
+  return { ...draft, ingredients: { ...lines, substitutions } };
+}
+
+// The household substitutions of the lines the draft still has: none for a line it removes.
+function heldSubstitutions(recipe: Recipe, lines: Lines): Lines["substitutions"] {
+  const removed = new Set(lines.remove);
+  const shown = new Set([
+    ...recipe.original.ingredients.map((line) => line.id).filter((id) => !removed.has(id)),
+    ...lines.add.flatMap((line) => (line.id ? [line.id] : [])),
+  ]);
+  return Object.fromEntries(Object.entries(lines.substitutions).filter(([id]) => shown.has(id)));
+}
+
 function asSaved(recipe: Recipe, draft: OurDraft): OurVersionDraft {
   return {
-    ingredients: anchored(recipe.original.ingredients, draft.ingredients),
+    ingredients: {
+      ...anchored(recipe.original.ingredients, draft.ingredients),
+      substitutions: heldSubstitutions(recipe, draft.ingredients),
+    },
     steps: anchored(recipe.original.steps, draft.steps),
     note: draft.note.trim() || null,
   };
@@ -173,6 +268,7 @@ export function ourOperation(recipe: Recipe, draft: OurDraft): RecipeOperation |
   const stored = asSaved(recipe, ourDraftOf(recipe));
   const same =
     samePart(ours.ingredients, stored.ingredients, sameLine) &&
+    sameSubstitutions(ours.ingredients.substitutions, stored.ingredients.substitutions) &&
     samePart(ours.steps, stored.steps, sameStep) &&
     ours.note === stored.note;
   return same ? undefined : { op: "set_our_version", our_version: ours };
@@ -244,7 +340,8 @@ export function addStep(draft: OurDraft, place: Place, text: string): OurDraft {
 }
 
 // Removes an Original line or step from Our Version, or drops an added one, whose followers then
-// follow the one it followed.
+// follow the one it followed. A dropped line's substitutions go with it, so a line added later
+// under its draft id starts with none; a removed Original line keeps its for Restore.
 export function removeItem(draft: OurDraft, part: Part, id: string): OurDraft {
   const { [id]: _, ...forms } = draft.forms;
   const items: Lines | Steps = draft[part];
@@ -253,7 +350,9 @@ export function removeItem(draft: OurDraft, part: Part, id: string): OurDraft {
     const add = items.add
       .filter((item) => item.id !== id)
       .map((item) => (item.after === id ? { ...item, after: added.after } : item));
-    return { ...draft, forms, [part]: { ...items, add } };
+    const dropped = { ...draft, forms, [part]: { ...items, add } };
+    const { [id]: __, ...substitutions } = dropped.ingredients.substitutions;
+    return { ...dropped, ingredients: { ...dropped.ingredients, substitutions } };
   }
   const { [id]: __, ...edit } = items.edit;
   const remove = items.remove.includes(id) ? items.remove : [...items.remove, id];
@@ -356,4 +455,24 @@ export function lineFor(recipe: Recipe, id: string): LineOf {
   if (view.original.ingredients.some((line) => line.id === id)) return lineOf(view, id);
   if (recipe.original.ingredients.some((line) => line.id === id)) return lineOf(recipe, id);
   return { id, text: "" };
+}
+
+// The line a substitute stands in for, as the draft has it: its unit and amount, and its Canonical
+// Ingredient, the one the draft picks or else the one it has.
+export function substituteLine(recipe: Recipe, draft: OurDraft, id: string): SubstituteLine {
+  const lines = draft.ingredients;
+  const drafted = lines.edit[id] ?? lines.add.find((line) => line.id === id);
+  const facts = lineFor(recipe, id).facts;
+  const picked = drafted?.canonical;
+  const canonicalId =
+    picked?.kind === "existing" ? picked.id : picked ? undefined : facts?.match?.canonical_id;
+  if (drafted)
+    return { unit: drafted.unit, unitKind: null, hasAmount: !!drafted.quantity, canonicalId };
+  const parse = facts?.parse;
+  return {
+    unit: parse?.unit ?? null,
+    unitKind: parse?.unit_kind ?? null,
+    hasAmount: !!parse?.quantity,
+    canonicalId,
+  };
 }

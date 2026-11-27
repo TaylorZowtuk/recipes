@@ -14,7 +14,7 @@ from conftest import SERVICE_TOKEN
 from requests.adapters import BaseAdapter
 from requests.models import PreparedRequest, Response
 from requests.structures import CaseInsensitiveDict
-from test_enrichment_review import FACTS, LLM
+from test_enrichment_review import FACTS, LLM, SWAP
 from test_our_version_enrichment import pending as our_version_pending
 
 from recipes import fdc
@@ -35,11 +35,13 @@ from recipes.models import (
     SCHEMA_VERSION,
     CanonicalIngredient,
     IngestChannel,
+    IngredientFacts,
     IngredientLine,
     Original,
     Recipe,
     Step,
     StepFacts,
+    SubstitutionsFact,
     UsesFact,
     WebsiteSource,
     Wording,
@@ -1353,6 +1355,30 @@ def test_packet_offers_our_versions_waiting_steps_against_the_effective_lines_un
         {"low": 1, "high": 1},
     )
     assert "our_versions" in offered["instructions"]
+
+
+def test_the_our_version_offer_reads_a_line_holding_only_substitutions_as_the_originals(
+    editor_client: TestClient, api_store: Store, capsys: pytest.CaptureFixture[str]
+) -> None:
+    recipe = our_version_pending(api_store)
+    ours = recipe.our_version
+    assert ours is not None
+    kept = {"provenance": "editor", "confidence": 1, "estimated": False, **CONFIRMED}
+    household = SubstitutionsFact.model_validate({**kept, "items": [SWAP]})
+    facts = ours.facts.model_copy(
+        update={"ingredients": {"i1": IngredientFacts(substitutions=household)}}
+    )
+    held = recipe.model_copy(update={"our_version": ours.model_copy(update={"facts": facts})})
+    recipe = api_store.update_recipe(held)
+
+    (offered,) = work_packet(through(api(editor_client)), capsys)["our_versions"]
+
+    beef = offered["lines"][0]
+    assert (beef["line_id"], beef["text"]) == ("i1", "900 g stewing beef, cubed")
+    assert (beef["parse"]["name"], beef["parse"]["quantity"]) == (
+        "stewing beef",
+        {"low": 1, "high": 1},
+    )
 
 
 def test_the_our_version_offer_shows_the_other_effective_steps_as_context(
