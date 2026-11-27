@@ -913,9 +913,14 @@ describe("an edit form, as an editor uses it", () => {
   it("adds a substitute of a Canonical Ingredient, with the food the Collection gives it", async () => {
     substitutesForm([]);
     await click(button("Add a substitute"));
+    expect(legends()).toContain("New substitute");
     type("Find or create one", "gar");
     await click(choice("garlic") as HTMLInputElement);
     await settle();
+    // Named by its Canonical Ingredient once picked, so two added ones read apart.
+    expect(legends()).toContain("garlic");
+    expect(legends()).not.toContain("New substitute");
+    expect(() => button("Remove garlic")).not.toThrow();
     expect(queries()).toEqual([{ q: "garlic", canonical: KNOWN_CANONICAL, unit: "cups" }]);
     expect(choice("Garlic, raw · SR Legacy")?.checked).toBe(true);
     expect(field("Ratio").value).toBe("1");
@@ -940,6 +945,7 @@ describe("an edit form, as an editor uses it", () => {
     await click(button("Add a substitute"));
     type("Find or create one", "ghee");
     await click(choice("New: ghee") as HTMLInputElement);
+    expect(legends()).toContain("ghee");
     type("Family", "Dairy");
     await click(choice("Dairy & Eggs") as HTMLInputElement);
     await settle();

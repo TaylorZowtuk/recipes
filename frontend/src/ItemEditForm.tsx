@@ -1159,14 +1159,15 @@ function OurSubstitute({
   onRemove: () => void;
 }) {
   const { from, pick } = entry;
-  const name = from ? substituteName(from, collection) : "New substitute";
-  // An added one's food search starts from the Canonical Ingredient picked, afresh on each pick.
   const picked =
     pick.kind === "existing"
       ? collection.canonical_ingredients.find((c) => c.id === pick.id)?.name
       : pick.kind === "new"
         ? pick.name
         : undefined;
+  // An added one is named by the Canonical Ingredient picked, so two read apart, and its food
+  // search starts from it, afresh on each pick.
+  const name = from ? substituteName(from, collection) : picked || "New substitute";
   const searchFrom = from ? name : picked;
   return (
     <fieldset className="sheet-section item-edit-substitute">
