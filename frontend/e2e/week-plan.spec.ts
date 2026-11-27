@@ -12,7 +12,7 @@ const NOODLES_ID = "01K7SEED000000000000000002";
 
 // Each test has a slot here, and each project, retry and repeat a block of them, so nothing shares
 // a week on the run's one API. A slot is four weeks wide, for ‹ and › to reach the weeks around it.
-const SLOTS = 17;
+const SLOTS = 18;
 const FIRST_MONDAY = Date.UTC(2030, 0, 7);
 const DAY = 86_400_000;
 
@@ -185,6 +185,8 @@ test("‹ and › move between weeks, marking today and the days past", async ({
   const next = page.getByRole("button", { name: "Next week" });
   const today = page.locator('[aria-current="date"]');
   const past = page.locator(".week-day-past");
+  // The household's week, not a visitor's Demo that the swap remounts while it's measured.
+  await expect(page.getByRole("link", { name: "Grocery List" })).toBeVisible();
   await expectTapTarget(previous);
   await expectTapTarget(next);
 
@@ -223,6 +225,31 @@ test("‹ and › move between weeks, marking today and the days past", async ({
   await expect(day(page, "Thu").getByRole("link", { name: NOODLES })).toBeVisible();
   await previous.click();
   await expect(day(page, "Thu")).toContainText("Free");
+});
+
+test("a week moved to while the session loads stays when the household's week replaces the Demo", async ({
+  page,
+}, testInfo) => {
+  const monday = await plan(page, testInfo, 17);
+  await placeElsewhere(page, isoDay(Date.parse(monday) + 7 * DAY), 3);
+  // Nothing remembers the editor yet, so the Demo shows until the session answers.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/session", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto("/week");
+  await expect(page.getByText("Demo — changes aren’t saved")).toBeVisible();
+  await page.getByRole("button", { name: "Next week" }).click();
+  await expect(page.getByText("Next week", { exact: true })).toBeVisible();
+
+  release();
+  await expect(page.getByRole("link", { name: "Grocery List" })).toBeVisible();
+  await expect(page.getByText("Next week", { exact: true })).toBeVisible();
+  await expect(day(page, "Thu").getByRole("link", { name: NOODLES })).toBeVisible();
 });
 
 test("+ Week on a card plans days from one sheet and the card shows them", async ({
