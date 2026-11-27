@@ -34,6 +34,7 @@ from recipes.edits import (
     matched_food,
     overused,
     share_all,
+    substitute_numbers,
 )
 from recipes.images import IMMUTABLE, ImageStore, NotAnImage, TooManyPixels
 from recipes.ingest import (
@@ -1048,10 +1049,7 @@ def _filled(body: Enrichment, snapshot: fdc.Snapshot) -> RecipeFacts:
 def _with_numbers(
     line_id: str, item: EnrichmentSubstitution, snapshot: fdc.Snapshot
 ) -> Substitution:
-    try:
-        numbers = fdc.numbers(snapshot, item.fdc_id, item.portion_id)
-    except fdc.NotInSnapshot as refused:
-        raise HTTPException(422, f"Line {line_id}'s substitute {item.wording}: {refused}") from None
+    numbers = substitute_numbers(snapshot, line_id, item.wording, item.fdc_id, item.portion_id)
     return Substitution(**item.model_dump(), fdc=numbers)
 
 

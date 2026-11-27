@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Annotated, Literal, NoReturn, cast
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, StringConstraints
 
-from recipes import fdc
 from recipes.edits import (
     EDITOR_KEPT,
     CanonicalChoice,
@@ -24,10 +23,11 @@ from recipes.edits import (
     EditLine,
     ExistingCanonical,
     LineFields,
-    _by_editor,  # pyright: ignore[reportPrivateUsage]
-    _canonical,  # pyright: ignore[reportPrivateUsage]
-    _new_by_editor,  # pyright: ignore[reportPrivateUsage]
+    by_editor,
+    chosen_canonical,
     edited_line,
+    new_by_editor,
+    substitute_numbers,
 )
 from recipes.models import (
     MAX_LINES,
@@ -79,6 +79,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from datetime import datetime
 
+    from recipes import fdc
     from recipes.models import ParseFact, Quantity
     from recipes.store import Store
 
@@ -747,7 +748,7 @@ def _household(
             swaps[line_id] = before
             continue
         items = [_substitute(store, name, d, saved=saved, snapshot=snapshot) for d in drafts]
-        swaps[line_id] = _new_by_editor(SubstitutionsFact, now, items=items)
+        swaps[line_id] = new_by_editor(SubstitutionsFact, now, items=items)
     return swaps
 
 
@@ -786,14 +787,14 @@ def _substitute(
     """
     edited = Edited(saved.recipe)
     try:
-        canonical = _canonical(store, draft.canonical, edited)
+        canonical = chosen_canonical(store, draft.canonical, edited)
     except HTTPException as refusal:
         refuse("ingredients", name, refusal.detail)
     wording = draft.wording or canonical.name
     try:
-        numbers = fdc.numbers(snapshot(), draft.fdc_id, draft.portion_id)
-    except fdc.NotInSnapshot as refused:
-        refuse("ingredients", name, f"Line {name}'s substitute {wording}: {refused}")
+        numbers = substitute_numbers(snapshot(), name, wording, draft.fdc_id, draft.portion_id)
+    except HTTPException as refusal:
+        refuse("ingredients", name, refusal.detail)
     saved.edits.append(edited)
     return Substitution(
         wording=wording,
@@ -843,7 +844,7 @@ def _built(
 
 def _as_editors[F: (MatchFact, ConversionFact)](fact: F | None, now: datetime) -> F | None:
     """The fact as the editor's: a match or conversion kept from the Original was enrichment's."""
-    return fact if fact is None or fact.provenance == "editor" else _by_editor(fact, now)
+    return fact if fact is None or fact.provenance == "editor" else by_editor(fact, now)
 
 
 def _unchanged(draft: OurLineDraft, stored: IngredientFacts) -> bool:
